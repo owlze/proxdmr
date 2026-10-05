@@ -1,0 +1,233 @@
+{
+  "active_hotspot_id": "default",
+  "loopback_mode": false,
+  "mute_on_ptt": true,
+  "volume_down_ptt": false,
+  "volume_up_ptt": false,
+  "sync_hotspot_volume": true,
+  "sync_system_volume": true,
+  "haptic_feedback": true,
+  "haptic_duration": 45,
+  "simultaneous_slots": true,
+  "theme": "dark",
+  "bg_type": "pattern",
+  "bg_color": "#050f1d",
+  "bg_type_dark": "pattern",
+  "bg_color_dark": "#050f1d",
+  "bg_type_light": "pattern",
+  "bg_color_light": "#f4f6f8",
+  "language": "ru",
+  "transcriber_enabled": false,
+  "transcriber_api_key": "",
+  "transcriber_api_keys": [],
+  "transcriber_model": "gemini-3.1-flash-lite",
+  "transcriber_target_lang": "ru",
+  "tts_enabled": false,
+  "tts_engine": "piper",
+  "tts_model": "gemini-3.1-flash-tts-preview",
+  "tts_voice": "ru_RU-terra5871-medium",
+  "tts_speed": 1.0,
+  "tts_ducking_level": 0.03,
+  "tts_pause_ducking_level": 0.13,
+  "tts_mute_others": true,
+  "tts_announce_callsign": true,
+  "tts_style": "radio",
+  "quick_mem": {},
+  "contacts": [],
+  "contacts_gateway": {
+    "hotspot_id": "default",
+    "slot": 2
+  },
+  "hamqth_username": "",
+  "hamqth_password": "",
+  "client_settings": {
+    "audio_rx": {
+      "pre_gain_db": -2,
+      "agc_enabled": true,
+      "agc_profile": "deep",
+      "agc_max_gain_db": 18,
+      "agc_min_gain_db": -18,
+      "agc_hang_time": 0.4,
+      "eq_low": -10,
+      "eq_mid": 0,
+      "eq_high": 8,
+      "deemphasis": false,
+      "active_preset": "1",
+      "presets": {
+        "1": {
+          "name": "Оптимум (Кастом)",
+          "preGain": 2,
+          "agcProfile": "custom",
+          "agcBoost": 24,
+          "agcAtten": -24,
+          "agcHang": 0.25,
+          "eqLow": -6,
+          "eqMid": 5,
+          "eqHigh": 12,
+          "deemphasis": false,
+          "jitterBuffer": 300
+        },
+        "2": {
+          "name": "Мягкий эфир",
+          "preGain": 2,
+          "agcProfile": "custom",
+          "agcBoost": 17,
+          "agcAtten": -16,
+          "agcHang": 0.3,
+          "eqLow": 2,
+          "eqMid": 0,
+          "eqHigh": -3,
+          "deemphasis": false
+        },
+        "3": {
+          "name": "Разборчивость (DX)",
+          "preGain": 4,
+          "agcProfile": "deep",
+          "agcBoost": 18,
+          "agcAtten": -18,
+          "agcHang": 0.4,
+          "eqLow": -4,
+          "eqMid": 4,
+          "eqHigh": 2,
+          "deemphasis": false
+        }
+      }
+    },
+    "ambe_rx": {
+      "uvquality": 4,
+      "spectral_enh": true,
+      "float_mode": true,
+      "max_repeats": 3,
+      "repeat_decay": 75,
+      "fec_tolerance": 0,
+      "audio_gain": 6.5,
+      "active_preset": "1",
+      "presets": {
+        "1": {
+          "name": "DSD-FME Стандарт",
+          "uvquality": 4,
+          "spectral_enh": true,
+          "float_mode": true,
+          "max_repeats": 3,
+          "repeat_decay": 75,
+          "fec_tolerance": 0,
+          "audio_gain": 6.5
+        },
+        "2": {
+          "name": "Сглаживание потерь",
+          "uvquality": 4,
+          "spectral_enh": true,
+          "float_mode": true,
+          "max_repeats": 4,
+          "repeat_decay": 70,
+          "fec_tolerance": 1,
+          "audio_gain": 6.5
+        },
+        "3": {
+          "name": "DX / Слабый сигнал",
+          "uvquality": 6,
+          "spectral_enh": true,
+          "float_mode": true,
+          "max_repeats": 5,
+          "repeat_decay": 85,
+          "fec_tolerance": 2,
+          "audio_gain": 8.0
+        }
+      }
+    },
+    "audio_tx": {
+      "mic_gain": -10,
+      "noise_suppression": true,
+      "browser_agc": false,
+      "dsp_agc": true,
+      "echo_cancellation": false,
+      "gate_enabled": true,
+      "gate_threshold": -53,
+      "hpf_enabled": true,
+      "presence_boost": 5,
+      "active_preset": "1",
+      "presets": {
+        "1": {
+          "name": "Оптимум (Кастом)",
+          "txMicGain": -10,
+          "txNoiseSuppression": true,
+          "txBrowserAgc": false,
+          "txDspAgc": true,
+          "txEchoCancellation": false,
+          "txGateEnabled": true,
+          "txGateThreshold": -53,
+          "txHpfEnabled": true,
+          "txPresenceBoost": 5
+        },
+        "2": {
+          "name": "Мягкий голос",
+          "txMicGain": 2,
+          "txNoiseSuppression": true,
+          "txBrowserAgc": false,
+          "txDspAgc": false,
+          "txEchoCancellation": true,
+          "txGateEnabled": false,
+          "txGateThreshold": -45,
+          "txHpfEnabled": false,
+          "txPresenceBoost": 0
+        },
+        "3": {
+          "name": "Пробивной / DX",
+          "txMicGain": 3,
+          "txNoiseSuppression": true,
+          "txBrowserAgc": false,
+          "txDspAgc": true,
+          "txEchoCancellation": true,
+          "txGateEnabled": true,
+          "txGateThreshold": -40,
+          "txHpfEnabled": true,
+          "txPresenceBoost": 6
+        }
+      }
+    },
+    "hotspots_ui": {},
+    "global_ui": {
+      "main_volume": 120,
+      "global_mute": false,
+      "active_slot": 1
+    }
+  },
+  "recordings_settings": {
+    "auto_record": true,
+    "auto_record_rx": true,
+    "auto_record_tx": true,
+    "seam_beep": true,
+    "seam_beep_pattern": "600 120, 877 80",
+    "min_duration_sec": 2.0,
+    "max_storage_mb": 5120,
+    "max_storage_gb": 5.0,
+    "auto_cleanup": true,
+    "gap_threshold_sec": 1.2
+  },
+  "hotspots": [
+    {
+      "id": "default",
+      "name": "Основной хотспот",
+      "callsign": "N0CALL",
+      "dmr_id": 1234567,
+      "bm_ssid": 1,
+      "bm_master_host": "2322.master.brandmeister.network",
+      "bm_master_port": 62031,
+      "bm_password": "",
+      "bm_api_key": "",
+      "duplex": true,
+      "rx_freq": 438800000,
+      "tx_freq": 431200000,
+      "color_code": 1,
+      "default_tg_ts1": 91,
+      "default_tg_ts2": 2501,
+      "autoconnect": false,
+      "rx_gain": 1.0,
+      "tx_gain": 1.0,
+      "talker_alias": "",
+      "collapsed": false,
+      "auto_tg_bm": true,
+      "auto_record": true
+    }
+  ]
+}

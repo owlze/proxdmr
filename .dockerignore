@@ -1,0 +1,47 @@
+# Version control
+.git
+.gitignore
+
+# Documentation and tests (not needed inside production runtime image)
+docs/
+tests/
+
+# Compiled objects from host (must be built inside container)
+src/c_vocoder/*.o
+src/c_vocoder/*.so
+src/c_vocoder/imbe_vocoder/*.o
+src/c_vocoder/mbe/*.o
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Config and user data (mounted via volumes)
+config/
+data/
+src/data/*.db*
+src/data/*.json
+!src/data/piper_voices.json
+!src/data/tg_names_cache.json
+
+# Logs
+*.log
+crash_log.txt
+docker_log.txt
+docker_tail.log
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.env
+
+# Scripts and archives
+*.zip
+*.tar.gz
+*.7z
+setup.sh
+setup.bat
+setup.ps1

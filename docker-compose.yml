@@ -1,0 +1,22 @@
+services:
+  proxdmr:
+    build: .
+    container_name: proxdmr
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8266}:8266"
+      - "${DMR_PORT:-62031}:62031/udp"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/src/data
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    environment:
+      - PORT=8266
+      - USE_SSL=${USE_SSL:-true}
+      - HOST_IP=${HOST_IP:-}
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-proxdmr123}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
