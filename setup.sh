@@ -2,26 +2,26 @@
 set -e
 
 echo "=========================================="
-echo "      ProxDMR — Развертывание сервиса     "
+echo "         ProxDMR — Setup & Deploy         "
 echo "=========================================="
 
-# 1. Проверка Docker
+# 1. Verify Docker
 if ! command -v docker &> /dev/null; then
-    echo "[ОШИБКА] Docker не установлен! Установите Docker и Docker Compose."
+    echo "[ERROR] Docker is not installed! Please install Docker and Docker Compose."
     exit 1
 fi
 
-# 2. Подготовка .env
+# 2. Prepare .env
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         cp .env.example .env
-        echo "[+] Создан файл .env из .env.example"
+        echo "[+] Created .env from template"
     else
         touch .env
     fi
 fi
 
-# Функция установки переменной в .env
+# Function to set key=value in .env
 set_env_val() {
     local key="$1"
     local val="$2"
@@ -32,7 +32,7 @@ set_env_val() {
     fi
 }
 
-# 3. Определение сетевого IP для SSL
+# 3. Detect Host IP for SSL
 AUTO_IP=""
 if command -v ip &> /dev/null; then
     AUTO_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
@@ -45,24 +45,24 @@ if [ -z "$AUTO_IP" ]; then
 fi
 
 echo ""
-echo "--- 1. Сетевые настройки ---"
-read -r -p "IP-адрес или домен хоста для SSL-сертификата [$AUTO_IP]: " INPUT_IP || true
+echo "--- 1. Network Settings ---"
+read -r -p "Host IP or domain for SSL certificate [$AUTO_IP]: " INPUT_IP || true
 CHOSEN_IP="${INPUT_IP:-$AUTO_IP}"
 
-read -r -p "Порт веб-интерфейса HTTP/HTTPS [8266]: " INPUT_PORT || true
+read -r -p "Web interface port HTTP/HTTPS [8266]: " INPUT_PORT || true
 CHOSEN_PORT="${INPUT_PORT:-8266}"
 
 echo ""
-echo "--- 2. Учетная запись администратора ---"
-read -r -p "Логин администратора (или ваш позывной) [admin]: " INPUT_USER || true
+echo "--- 2. Administrator Account ---"
+read -r -p "Admin username or callsign [admin]: " INPUT_USER || true
 ADMIN_USER="${INPUT_USER:-admin}"
 
-read -r -p "Пароль администратора [proxdmr123]: " INPUT_PASS || true
+read -r -p "Admin password [proxdmr123]: " INPUT_PASS || true
 ADMIN_PASSWORD="${INPUT_PASS:-proxdmr123}"
 
 echo ""
-echo "--- 3. Безопасность и открытая регистрация ---"
-read -r -p "Запретить регистрацию посторонних пользователей (рекомендуется для белых IP)? [Y/n]: " REG_CHOICE || true
+echo "--- 3. Security & Open Registration ---"
+read -r -p "Disable public user registration (recommended)? [Y/n]: " REG_CHOICE || true
 case "$REG_CHOICE" in
     [nN][oO]|[nN])
         ALLOW_REG="true"
@@ -72,7 +72,7 @@ case "$REG_CHOICE" in
         ;;
 esac
 
-# Сохранение в .env
+# Save to .env
 set_env_val "HOST_IP" "$CHOSEN_IP"
 set_env_val "PORT" "$CHOSEN_PORT"
 set_env_val "ADMIN_USER" "$ADMIN_USER"
@@ -80,11 +80,11 @@ set_env_val "ADMIN_PASSWORD" "$ADMIN_PASSWORD"
 set_env_val "ALLOW_REGISTRATION" "$ALLOW_REG"
 
 echo ""
-echo "[+] Настройки успешно сохранены в .env"
+echo "[+] Configuration saved to .env"
 
-# 4. Запуск сборки и контейнера
+# 4. Build and start container
 echo ""
-echo "[*] Сборка и запуск контейнера ProxDMR..."
+echo "[*] Building and starting ProxDMR container..."
 if docker compose version &> /dev/null; then
     docker compose up -d --build
 else
@@ -93,12 +93,12 @@ fi
 
 echo ""
 echo "=========================================="
-echo " ProxDMR успешно развернут и запущен!"
+echo " ProxDMR successfully deployed and running!"
 echo "------------------------------------------"
-echo " Веб-интерфейс:   https://${CHOSEN_IP}:${CHOSEN_PORT}"
-echo " Логин админа:    ${ADMIN_USER}"
-echo " Пароль админа:   ${ADMIN_PASSWORD}"
-echo " Регистрация:     $([ "$ALLOW_REG" = "true" ] && echo "Разрешена для всех" || echo "Отключена (закрытый доступ)")"
+echo " Web UI:          https://${CHOSEN_IP}:${CHOSEN_PORT}"
+echo " Admin Login:     ${ADMIN_USER}"
+echo " Admin Password:  ${ADMIN_PASSWORD}"
+echo " Registration:    $([ "$ALLOW_REG" = "true" ] && echo "Allowed (Open)" || echo "Disabled (Private access)")"
 echo "------------------------------------------"
-echo " (при первом открытии в браузере подтвердите самоподписанный SSL-сертификат)"
+echo " (accept the self-signed SSL certificate on first browser access)"
 echo "=========================================="

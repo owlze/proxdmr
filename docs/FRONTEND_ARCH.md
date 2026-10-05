@@ -1,44 +1,44 @@
-# Архитектура Фронтенда ProxDMR (ES6 Modules)
+# ProxDMR Frontend Architecture (ES6 Modules)
 
-Этот документ описывает план перехода монолитного файла `app.js` (23 000+ строк) на модульную архитектуру ES6.
+This document describes the architectural plan for refactoring the monolithic `app.js` file (23,000+ lines) into modular ES6 modules.
 
-## Текущая проблема
-Весь фронтенд-код завернут в единый обработчик `document.addEventListener("DOMContentLoaded", ...)` в `app.js`. 
-Это приводит к:
-1. Затруднению навигации по коду.
-2. Высокому риску регрессий.
-3. Сложности в использовании LLM (огромный расход контекста).
+## Current Problem
+All frontend code was historically wrapped in a single `document.addEventListener("DOMContentLoaded", ...)` handler inside `app.js`.
+This led to:
+1. Difficult code navigation.
+2. High regression risks during changes.
+3. High LLM context overhead.
 
-## Целевая структура (Дерево модулей)
+## Target Structure (Module Tree)
 
-Все новые модули будут размещаться в директории `src/static/js/modules/`.
+All modules reside in the `src/static/js/modules/` directory.
 
-### 1. `core/` (Ядро и утилиты)
-- **`auth.js`** — Проверка токенов, авторизация.
-- **`api.js`** — Обертки над `fetch`, перехват ошибок.
-- **`utils.js`** — Чистые функции (форматирование дат, флаги, задержки, дебаунс).
-- **`state.js`** — Глобальное состояние приложения (навигация, история экранов, `accountSettings`).
-- **`toast.js`** — Система уведомлений (HUD toasts).
+### 1. `core/` (Core & Utilities)
+- **`auth.js`** — Token validation, authentication state.
+- **`api.js`** — `fetch` wrappers, error handling.
+- **`utils.js`** — Pure helper functions (date formatting, flag helpers, delays, debounce).
+- **`state.js`** — Global application state (navigation, view history, `accountSettings`).
+- **`toast.js`** — HUD notification system (toasts).
 
-### 2. `audio/` (Аудио и Медиа)
-- **`volume.js`** — Управление громкостью (Master, Per-Hotspot).
-- **`stereo.js`** — Панорамирование (L/R/L+R) таймслотов.
-- **`player.js`** — Проигрыватель архивных записей (`RecordingsManager`).
-- **`webrtc.js`** — Обработка живого аудио-потока, PTT.
+### 2. `audio/` (Audio & Media)
+- **`volume.js`** — Volume control (Master, per-hotspot).
+- **`stereo.js`** — Audio panning (L/R/L+R) for timeslots.
+- **`player.js`** — Audio recording playback player (`RecordingsManager`).
+- **`webrtc.js`** — Live audio stream handling, PTT engine.
 
-### 3. `ui/` (Пользовательский интерфейс)
-- **`navigation.js`** — Управление панелями, полноэкранный режим.
-- **`long-press.js`** — Обработка длительных нажатий на карточки.
-- **`modals/quick-assign.js`** — Логика назначения TG/ID на хотспот.
-- **`modals/contacts.js`** — Управление адресной книгой.
-- **`modals/bm-info.js`** — Расширенная информация BrandMeister.
+### 3. `ui/` (User Interface)
+- **`navigation.js`** — Panel layout management, fullscreen mode.
+- **`long-press.js`** — Long-press gesture handling on cards.
+- **`modals/quick-assign.js`** — Quick TG/ID assignment modal logic.
+- **`modals/contacts.js`** — Address book management.
+- **`modals/bm-info.js`** — Detailed BrandMeister status and info.
 
-### 4. `dmr/` (Бизнес-логика)
-- **`bm-monitor.js`** — Монитор живой активности BrandMeister.
-- **`routing.js`** — Direct Call, логика маршрутизации.
+### 4. `dmr/` (Business Logic)
+- **`bm-monitor.js`** — Live BrandMeister activity monitor.
+- **`routing.js`** — Direct Call and timeslot routing logic.
 
-### 5. `app.js` (Точка входа)
-Станет тонким контроллером, связывающим модули:
+### 5. `app.js` (Entry Point)
+Functions as a lean controller orchestrating modules:
 ```javascript
 import { initUtils } from './modules/core/utils.js';
 import { initAudio } from './modules/audio/volume.js';
@@ -52,9 +52,9 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 ```
 
-## Стратегия миграции (Пошаговая)
-1. Изменяем `app.js` на `<script type="module" src="...app.js">` (или создаем новый энтри-пойнт `main.js`).
-2. Извлекаем **один изолированный фрагмент** (например, `utils.js`).
-3. Экспортируем его методы и импортируем в `app.js`.
-4. Тестируем в браузере.
-5. Повторяем процесс для следующих логических блоков.
+## Step-by-Step Migration Strategy
+1. Load `app.js` as `<script type="module" src="...app.js">`.
+2. Extract **one isolated fragment** (e.g. `utils.js`).
+3. Export its functions and import them in `app.js`.
+4. Test in the browser.
+5. Repeat iteratively for remaining components.

@@ -1,80 +1,78 @@
 # ProxDMR — START HERE
 
-Веб-платформа и шлюз для работы в радиосети **DMR (BrandMeister)**: приём и передача голоса (PTT) из браузера и из Android-приложения, несколько хотспотов, оба таймслота, Last Heard, запись эфира, оффлайн-синтез речи.
-
-> **Агент (LLM), который устанавливает пакет за пользователя:** читайте [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md).
+A web platform and gateway for the **DMR (BrandMeister)** amateur radio network: voice reception and transmission (PTT) directly from the browser or the official Android app, multi-hotspot support, dual timeslots (TS1 / TS2), Last Heard activity log, recording, and offline neural speech synthesis.
 
 ---
 
-## Содержание
+## Table of Contents
 
-1. [Что внутри архива](#1-что-внутри-архива)
-2. [Что понадобится](#2-что-понадобится)
-3. [Установка — выберите свой вариант](#3-установка--выберите-свой-вариант)
-   * [A. Linux / Raspberry Pi (терминал)](#a-linux--raspberry-pi-терминал)
+1. [Package Contents](#1-package-contents)
+2. [Prerequisites](#2-prerequisites)
+3. [Installation — Choose Your Method](#3-installation--choose-your-method)
+   * [A. Linux / Raspberry Pi (Terminal)](#a-linux--raspberry-pi-terminal)
    * [B. Windows (Docker Desktop)](#b-windows-docker-desktop)
-   * [C. Synology NAS — через SSH](#c-synology-nas--через-ssh)
-   * [D. Synology NAS — через графический интерфейс (Container Manager)](#d-synology-nas--через-графический-интерфейс-container-manager)
-   * [E. Ручной запуск через Docker Compose (любая система)](#e-ручной-запуск-через-docker-compose-любая-система)
-4. [Первый запуск и вход](#4-первый-запуск-и-вход)
-5. [Настройка хотспота BrandMeister](#5-настройка-хотспота-brandmeister)
-6. [Голоса синтезатора Piper](#6-голоса-синтезатора-piper)
-7. [Android-приложение](#7-android-приложение)
-8. [Где хранятся данные](#8-где-хранятся-данные)
-9. [Обновление на новую версию](#9-обновление-на-новую-версию)
-10. [Резервное копирование](#10-резервное-копирование)
-11. [Безопасность](#11-безопасность)
-12. [Полезные команды](#12-полезные-команды)
-13. [Если что-то пошло не так](#13-если-что-то-пошло-не-так)
-14. [Удаление](#14-удаление)
+   * [C. Synology NAS — via SSH](#c-synology-nas--via-ssh)
+   * [D. Synology NAS — via GUI (Container Manager)](#d-synology-nas--via-gui-container-manager)
+   * [E. Manual Start via Docker Compose (Any OS)](#e-manual-start-via-docker-compose-any-os)
+   * [F. Run via Pre-Built Docker Image](#f-run-via-pre-built-docker-image)
+4. [First Launch and Sign In](#4-first-launch-and-sign-in)
+5. [BrandMeister Hotspot Configuration](#5-brandmeister-hotspot-configuration)
+6. [Piper Speech Synthesis (TTS) Voices](#6-piper-speech-synthesis-tts-voices)
+7. [Android Application](#7-android-application)
+8. [Data Persistence & Storage](#8-data-persistence--storage)
+9. [Upgrading to a New Version](#9-upgrading-to-a-new-version)
+10. [Backup & Restore](#10-backup--restore)
+11. [Security Recommendations](#11-security-recommendations)
+12. [Useful Commands](#12-useful-commands)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Uninstallation](#14-uninstallation)
 
 ---
 
-## 1. Что внутри архива
+## 1. Package Contents
 
-Выпускаются два архива с **одинаковым содержимым**:
+Two release archives are provided with **identical contents**:
 
-| Архив | Для чего |
+| Archive | Intended For |
 |---|---|
 | `ProxDMR-Release.tar.gz` | Linux, Raspberry Pi, Synology NAS |
 | `ProxDMR-Release.zip` | Windows (Docker Desktop) |
 
-В архиве **нет** ничьих личных данных, паролей, ключей, записей эфира, баз данных и голосовых моделей. Всё это создаётся или скачивается при первом запуске у вас.
+The archive contains **no private data**, passwords, API keys, call recordings, databases, or voice models. Everything is automatically provisioned or downloaded upon your initial launch.
 
 ---
 
-## 2. Что понадобится
+## 2. Prerequisites
 
-* **Docker** 20.10+ и **Docker Compose v2** (в Docker Desktop и в Synology Container Manager они уже есть).
-* **Архитектура:** x86_64 или ARM64 (Raspberry Pi 4/5, современные Synology на ARM). Вокодер компилируется прямо в контейнере под вашу архитектуру.
-* **Интернет** при первой установке: загрузка образа Python, пакетов, базы RadioID, голосов Piper.
-* **Время и место:** первая сборка образа занимает заметное время (ориентировочно от 10 до 30 минут в зависимости от машины и канала) и несколько гигабайт на диске. Последующие запуски — секунды.
-* **Порты** (должны быть свободны на сервере):
+* **Docker** 20.10+ and **Docker Compose v2** (built into Docker Desktop and Synology Container Manager).
+* **Architecture:** x86_64 or ARM64 (Raspberry Pi 4/5, modern ARM Synology NAS). The AMBE+2 vocoder compiles directly inside the container for your hardware.
+* **Internet Connection** during initial launch: downloads the base Python image, packages, RadioID database, and required Piper voices.
+* **Available Ports** on your host:
 
-| Порт | Протокол | Назначение |
+| Port | Protocol | Purpose |
 |---|---|---|
-| `8266` | TCP | веб-интерфейс и Android-приложение (HTTPS/WSS) |
-| `62031` | UDP | обмен с мастер-сервером BrandMeister |
+| `8266` | TCP | Web interface and Android app (HTTPS/WSS) |
+| `62031` | UDP | HomeBrew protocol exchange with BrandMeister master server |
 
-* **Аккаунт BrandMeister** и ваши радиолюбительские данные: позывной, DMR ID, пароль хотспота (*Hotspot Security Password* из профиля на brandmeister.network).
+* **BrandMeister Account** and amateur radio credentials: Callsign, DMR ID, and Hotspot Security Password (from your profile on brandmeister.network).
 
 ---
 
-## 3. Установка — выберите свой вариант
+## 3. Installation — Choose Your Method
 
-Во всех вариантах установщик спросит пять вещей:
+During interactive setup, you will be prompted for:
 
-| Вопрос | Что ответить |
+| Prompt | What to Enter |
 |---|---|
-| IP-адрес или домен для SSL | IP сервера в вашей сети (по умолчанию предлагается автоматически найденный) |
-| Порт веб-интерфейса | `8266` (Enter) |
-| Логин администратора | `admin` или ваш позывной |
-| Пароль администратора | **придумайте свой** (по умолчанию `proxdmr123`) |
-| Запретить свободную регистрацию? | `Y` (рекомендуется) |
+| Host IP or domain for SSL | Local IP of your server (auto-detected default provided) |
+| Web interface port | `8266` (Press Enter) |
+| Admin username | `admin` or your callsign |
+| Admin password | **Enter your secure password** (default `proxdmr123`) |
+| Disable open registration? | `Y` (recommended) |
 
-> ⚠️ **Пароль администратора:** задаётся при первом запуске (по умолчанию `proxdmr123` или указанный вами). После авторизации вы всегда можете сменить пароль прямо в веб-интерфейсе: вкладка «Настройки» → «Мой аккаунт» → «Безопасность и пароль». Позднее изменение `ADMIN_PASSWORD` в `.env` не меняет пароль существующего пользователя в базе данных.
+> ⚠️ **Admin Password:** Configured upon first startup (default `proxdmr123` or your chosen password). Once logged in, you can change your password at any time directly in the web UI under **Settings → My Account → Security & Password**. Changing `ADMIN_PASSWORD` in `.env` later will not affect existing users in the database.
 
-### A. Linux / Raspberry Pi (терминал)
+### A. Linux / Raspberry Pi (Terminal)
 
 ```bash
 tar -xzf ProxDMR-Release.tar.gz
@@ -83,36 +81,35 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-Скрипт проверит Docker, создаст `.env`, задаст вопросы выше, соберёт и запустит контейнер. В конце он покажет адрес для входа.
+The script verifies Docker, generates `.env`, asks the prompts above, builds, and launches the container. Upon completion, it outputs your login URL.
 
-Если Docker не установлен (Debian/Ubuntu/Raspberry Pi OS):
-
+If Docker is not yet installed (Debian/Ubuntu/Raspberry Pi OS):
 ```bash
 curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # затем перелогиньтесь
+sudo usermod -aG docker $USER   # then log out and back in
 ```
 
 ### B. Windows (Docker Desktop)
 
-1. Установите **Docker Desktop** (<https://www.docker.com/products/docker-desktop/>) и **запустите** его. Дождитесь, пока в трее значок покажет, что Docker работает.
-2. Распакуйте `ProxDMR-Release.zip` (например, в `C:\ProxDMR`).
-3. Откройте папку `ProxDMR` и запустите **`setup.bat`** двойным щелчком.
-   Либо в PowerShell:
+1. Install **Docker Desktop** (<https://www.docker.com/products/docker-desktop/>) and start it. Ensure Docker is running in the system tray.
+2. Extract `ProxDMR-Release.zip` (for example to `C:\ProxDMR`).
+3. Open the `ProxDMR` folder and double-click **`setup.bat`**.  
+   Alternatively, in PowerShell:
    ```powershell
    cd C:\ProxDMR\ProxDMR
    powershell -ExecutionPolicy Bypass -File .\setup.ps1
    ```
-4. Ответьте на вопросы установщика. Дождитесь сообщения об успешном запуске.
+4. Follow the setup prompts and wait for the launch confirmation.
 
-Если Windows Defender Firewall запросит разрешение для Docker/`com.docker.backend` — разрешите для **частной сети**, иначе другие устройства не смогут подключиться.
+*If Windows Defender Firewall prompts for Docker/`com.docker.backend`, allow access on **Private networks** so other local devices can connect.*
 
-### C. Synology NAS — через SSH
+### C. Synology NAS — via SSH
 
-Подходит, если у вас DSM 7.x с установленным пакетом **Container Manager**.
+Suitable for DSM 7.x with **Container Manager** installed:
 
-1. Включите SSH: *Панель управления → Терминал и SNMP → Включить службу SSH*.
-2. Загрузите `ProxDMR-Release.tar.gz` в общую папку (например, `docker`) через File Station.
-3. Подключитесь по SSH и выполните:
+1. Enable SSH: *Control Panel → Terminal & SNMP → Enable SSH service*.
+2. Upload `ProxDMR-Release.tar.gz` to a shared folder (e.g. `docker`) via File Station.
+3. Connect via SSH and run:
    ```bash
    cd /volume1/docker
    sudo tar -xzf ProxDMR-Release.tar.gz
@@ -120,186 +117,200 @@ sudo usermod -aG docker $USER   # затем перелогиньтесь
    sudo chmod +x setup.sh
    sudo ./setup.sh
    ```
-4. Ответьте на вопросы установщика.
+4. Complete the configuration prompts.
 
-### D. Synology NAS — через графический интерфейс (Container Manager)
+### D. Synology NAS — via GUI (Container Manager)
 
-SSH не нужен.
+No SSH required:
 
-1. **Загрузите и распакуйте архив**
-   * Откройте **File Station**, создайте папку `docker/proxdmr`.
-   * Загрузите туда `ProxDMR-Release.tar.gz` (или `.zip`), затем правый клик → **Извлечь сюда**.
-   * Содержимое должно лежать так: `docker/proxdmr/ProxDMR/…` (внутри — `docker-compose.yml`, `Dockerfile`, `.env.example`).
-2. **Создайте файл настроек `.env`**
-   * В папке `ProxDMR` скопируйте `.env.example` и переименуйте копию в **`.env`**.
-   * Откройте `.env` в текстовом редакторе DSM (или скачайте, отредактируйте, загрузите обратно) и задайте:
+1. **Upload & Extract:**
+   * Open **File Station**, create a folder `docker/proxdmr`.
+   * Upload `ProxDMR-Release.tar.gz` (or `.zip`), right-click → **Extract Here**.
+   * Structure should be: `docker/proxdmr/ProxDMR/...` (containing `docker-compose.yml`, `Dockerfile`, `.env.example`).
+2. **Create `.env`:**
+   * In `ProxDMR`, duplicate `.env.example` and rename it to **`.env`**.
+   * Open `.env` in DSM Text Editor and specify:
      ```ini
-     HOST_IP=192.168.1.50        # IP вашего NAS в локальной сети
+     HOST_IP=192.168.1.50        # Local IP of your NAS
      PORT=8266
      ADMIN_USER=admin
-     ADMIN_PASSWORD=ВашНадёжныйПароль
+     ADMIN_PASSWORD=YourSecurePassword
      ALLOW_REGISTRATION=false
      ```
-3. **Создайте проект**
-   * Откройте **Container Manager → Проект → Создать**.
-   * Имя проекта: `proxdmr`. Путь: выберите папку `docker/proxdmr/ProxDMR`.
-   * Источник: **Использовать существующий docker-compose.yml**.
-   * Дальше → отключите «Веб-портал» (не нужен) → **Готово**.
-   * Container Manager сам соберёт образ и запустит контейнер (первая сборка идёт долго — следите за журналом проекта).
-4. **Брандмауэр DSM** (если включён): *Панель управления → Безопасность → Брандмауэр* — разрешите входящие `8266/TCP` и `62031/UDP`.
+3. **Create Project:**
+   * Open **Container Manager → Project → Create**.
+   * Project name: `proxdmr`. Path: select `docker/proxdmr/ProxDMR`.
+   * Source: **Use existing docker-compose.yml**.
+   * Next → uncheck "Web portal" → **Done**.
+   * Container Manager will build the image and start the container.
+4. **DSM Firewall** (if enabled): *Control Panel → Security → Firewall* — allow inbound `8266/TCP` and `62031/UDP`.
 
-### E. Ручной запуск через Docker Compose (любая система)
+### E. Manual Start via Docker Compose (Any OS)
 
 ```bash
 cp .env.example .env        # Windows: copy .env.example .env
 ```
 
-Откройте `.env` и обязательно задайте `HOST_IP` (IP или домен сервера), `ADMIN_USER`, `ADMIN_PASSWORD`. Затем:
+Edit `.env` to set `HOST_IP` (your server IP or domain), `ADMIN_USER`, and `ADMIN_PASSWORD`. Then:
 
 ```bash
 docker compose up -d --build
 ```
 
----
+### F. Run via Pre-Built Docker Image
 
-## 4. Первый запуск и вход
-
-1. Подождите 1–2 минуты после старта: при первом запуске создаются сертификат, ключ веб-сессий и база пользователей, скачивается база RadioID.
-   Следить за процессом: `docker compose logs -f` (выход — `Ctrl+C`).
-2. Откройте в браузере:
-   ```text
-   https://<IP_СЕРВЕРА>:8266
-   ```
-3. **Предупреждение браузера о сертификате — это нормально.** Сервис использует собственный (самоподписанный) сертификат: он нужен, чтобы работали микрофон и Web Audio. Нажмите *«Дополнительно» → «Перейти на сайт»*.
-4. Войдите под логином и паролем, которые вы задали при установке (по умолчанию `admin` / `proxdmr123`).
-
----
-
-## 5. Настройка хотспота BrandMeister
-
-В интерфейсе откройте настройки хотспота и укажите:
-
-| Поле | Что вводить |
-|---|---|
-| **Позывной (Callsign)** | ваш радиолюбительский позывной |
-| **DMR ID** | ваш DMR ID (его можно получить на radioid.net) |
-| **BM Password** | *Hotspot Security Password* из вашего профиля на brandmeister.network |
-| **BM Master Host** | ближайший мастер-сервер (по умолчанию `2322.master.brandmeister.network`) |
-
-Нажмите **«Сохранить»** — шлюз установит связь с BrandMeister. Хотспотов можно добавить несколько.
-
----
-
-## 6. Голоса синтезатора Piper
-
-Голосовые модели **не входят в архив** (каждая весит около 60–70 МБ). Каталог доступных голосов уже встроен — модели скачиваются по требованию:
-
-* откройте настройки синтеза речи (TTS) и выберите голос — он загрузится на сервер (нужен доступ в интернет);
-* скачанные модели сохраняются в `config/piper_voices/` и переживают перезапуски и обновления.
-
----
-
-## 7. Android-приложение
-
-Приложение — это защищённая оболочка для вашего сервера с PTT, фоновой работой и поддержкой Bluetooth-кнопок.
-
-1. **Скачайте APK** с вашего сервера: откройте в браузере телефона
-   ```text
-   https://<IP_СЕРВЕРА>:8266/download/apk
-   ```
-   (либо возьмите файл `src/static/ProxDMR.apk` из архива).
-2. Разрешите установку из неизвестных источников для вашего браузера/файлового менеджера и установите APK.
-3. **При первом запуске** приложение спросит:
-   * **IP-адрес или домен сервера**;
-   * **порт** (по умолчанию `8266`);
-   * нужно ли автоматически включать Tailscale VPN (если вы подключаетесь к серверу извне).
-4. После этого откроется страница входа — введите логин и пароль.
-5. **Дальше всё автоматически:** приложение запомнит адрес и вход и будет подключаться само. Если сервер не отвечает, оно попробует включить Tailscale и повторить попытку; если и это не помогло — покажет сообщение об ошибке и позволит изменить адрес.
-
-Сменить адрес сервера позже можно в окне «Настройки сервера» в приложении.
-
----
-
-## 8. Где хранятся данные
-
-Все пользовательские данные лежат **вне контейнера**, в папках рядом с `docker-compose.yml`, поэтому сохраняются при перезапуске и обновлении:
-
-| Папка / файл | Содержимое |
-|---|---|
-| `.env` | ваши настройки установки (адрес, порт, учётная запись администратора) |
-| `config/proxdmr.db` | база пользователей, настроек, истории |
-| `config/jwt_secret.key` | ключ безопасности веб-сессий |
-| `config/cert.pem`, `config/key.pem` | SSL-сертификат и ключ |
-| `config/recordings/` | записи радиоэфира |
-| `config/piper_voices/` | скачанные голоса Piper |
-| `data/` | каталог голосов, кэш TalkGroup, база RadioID |
-
----
-
-## 9. Обновление на новую версию
-
-1. Остановите сервис и **сделайте резервную копию** (см. раздел 10).
-   ```bash
-   docker compose down
-   ```
-2. Распакуйте новый архив **поверх** папки установки. Ваши `.env`, `config/` и `data/` в архиве не содержатся, поэтому не затрутся (заменятся только служебные шаблоны: `config/default_settings.json`, `data/piper_voices.json`).
-   * Если вы правили `config/default_settings.json` вручную — сохраните его копию заранее.
-3. Пересоберите и запустите:
-   ```bash
-   docker compose up -d --build
-   ```
-4. Структура базы данных при запуске приводится к актуальной автоматически; пользовательские данные сохраняются.
-5. **Android-приложение** обновляется отдельно: новая версия APK появится в веб-интерфейсе и по адресу `/download/apk`.
-
----
-
-## 10. Резервное копирование
-
-Достаточно скопировать (при остановленном сервисе) папки **`config/`** и **`data/`** и файл **`.env`**. Для восстановления положите их на место и запустите `docker compose up -d`.
-
----
-
-## 11. Безопасность
-
-* Оставляйте `ALLOW_REGISTRATION=false`, если сервер доступен из интернета: иначе любой желающий сможет зарегистрироваться и получить доступ к передаче.
-* Не публикуйте порт `8266` в интернет без необходимости. Для доступа извне надёжнее **VPN (Tailscale/WireGuard)**.
-* Не используйте пароль по умолчанию `proxdmr123` на машине, доступной извне.
-* Никому не передавайте файлы `.env` и `config/` — в них пароли и ключи.
-
----
-
-## 12. Полезные команды
+If you prefer not to build locally:
 
 ```bash
-docker compose logs -f              # журнал в реальном времени
-docker compose ps                   # состояние контейнера
-docker compose restart              # перезапуск
-docker compose down                 # остановка
-docker compose up -d --build        # пересборка и запуск
+docker run -d \
+  --name proxdmr \
+  --restart unless-stopped \
+  -p 8266:8266 \
+  -p 62031:62031/udp \
+  -v proxdmr_config:/app/config \
+  -v proxdmr_data:/app/data \
+  -e HOST_IP=192.168.1.50 \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASSWORD=YourSecurePassword \
+  ghcr.io/owlze/proxdmr:latest
 ```
 
 ---
 
-## 13. Если что-то пошло не так
+## 4. First Launch and Sign In
 
-| Симптом | Что делать |
-|---|---|
-| `docker: command not found` / Docker не найден | Установите Docker; на Windows запустите Docker Desktop и дождитесь готовности |
-| Порт `8266` или `62031` занят | Измените `PORT` (и `DMR_PORT`) в `.env`, затем `docker compose up -d` |
-| Браузер ругается на сертификат | Это ожидаемо (самоподписанный). Подтвердите исключение |
-| Сертификат выпущен не на тот IP (сменился адрес сервера) | Измените `HOST_IP` в `.env`, удалите `config/cert.pem` и `config/key.pem`, выполните `docker compose up -d --force-recreate` |
-| Забыли пароль администратора | Остановите сервис, удалите `config/proxdmr.db` (⚠ вместе с ним удалятся пользователи и их настройки), задайте новый `ADMIN_PASSWORD` в `.env`, запустите заново |
-| Нет связи с BrandMeister | Проверьте позывной, DMR ID, пароль хотспота и доступность UDP `62031` (брандмауэр, проброс портов) |
-| Нет звука/микрофона в браузере | Открывайте только по `https://` и подтвердите сертификат; разрешите доступ к микрофону |
-| Долгая первая сборка | Это нормально: компилируется вокодер и скачиваются библиотеки. Следите за `docker compose logs -f` |
-| Приложение не подключается | Проверьте адрес и порт в «Настройках сервера», доступность сервера из вашей сети и Tailscale |
+1. Allow 1–2 minutes after initial start: the container generates TLS certificates, session signing keys, initializes user database schemas, and downloads the RadioID database.  
+   Monitor logs with: `docker compose logs -f` (exit with `Ctrl+C`).
+2. Open your web browser:
+   ```text
+   https://<SERVER_IP>:8266
+   ```
+3. **Browser Certificate Warning:** The service generates a local self-signed TLS certificate required by browsers for Web Audio and microphone access. Click *Advanced → Proceed to site*.
+4. Sign in with the credentials specified during setup (default `admin` / `proxdmr123`).
 
 ---
 
-## 14. Удаление
+## 5. BrandMeister Hotspot Configuration
+
+In the web interface, open hotspot settings and configure:
+
+| Field | Description |
+|---|---|
+| **Callsign** | Your licensed amateur radio callsign |
+| **DMR ID** | Your DMR ID (registered via radioid.net) |
+| **BM Password** | *Hotspot Security Password* from your brandmeister.network profile |
+| **BM Master Host** | Closest master server (default `2322.master.brandmeister.network`) |
+
+Click **Save** — the gateway will connect to BrandMeister. Multiple virtual hotspots can be configured simultaneously.
+
+---
+
+## 6. Piper Speech Synthesis (TTS) Voices
+
+Voice models are downloaded on demand:
+
+* Open speech synthesis (TTS) settings and choose a voice model — it downloads automatically in the background.
+* Downloaded models are cached in `config/piper_voices/` and persist across container restarts and updates.
+
+---
+
+## 7. Android Application
+
+The mobile app provides a native Android client with low-latency PTT, background audio service, and Bluetooth PTT button support.
+
+1. **Download APK** from your server:
+   ```text
+   https://<SERVER_IP>:8266/download/apk
+   ```
+   *(or use `src/static/ProxDMR.apk` from the release archive).*
+2. Allow installation from unknown sources on your Android device and install the package.
+3. On first run, enter:
+   * **Server IP or domain**;
+   * **Port** (default `8266`);
+   * Tailscale VPN auto-connect preference (if accessing remotely).
+4. Enter your login credentials. The application persists session tokens for seamless reconnects.
+
+---
+
+## 8. Data Persistence & Storage
+
+All user configurations and persistent records reside **outside the container**, preserving data across updates:
+
+| Path | Contents |
+|---|---|
+| `.env` | Environment configuration (host IP, ports, admin credentials) |
+| `config/proxdmr.db` | SQLite database (users, settings, call logs) |
+| `config/jwt_secret.key` | JWT session encryption key |
+| `config/cert.pem`, `config/key.pem` | TLS certificates |
+| `config/recordings/` | Audio recordings (`.wav`) |
+| `config/piper_voices/` | Cached Piper TTS voice models |
+| `data/` | RadioID database and TalkGroup cache |
+
+---
+
+## 9. Upgrading to a New Version
+
+1. Stop the service and create a backup (see Section 10):
+   ```bash
+   docker compose down
+   ```
+2. Extract the new archive over your installation directory. Existing `.env`, `config/`, and `data/` directories will remain untouched.
+3. Rebuild and launch:
+   ```bash
+   docker compose up -d --build
+   ```
+4. Database migrations apply automatically upon startup.
+5. Update the Android app via `/download/apk` if a new APK version is available.
+
+---
+
+## 10. Backup & Restore
+
+To back up, stop the service and copy **`config/`**, **`data/`**, and **`.env`**.  
+To restore, copy these items back into the project root and run `docker compose up -d`.
+
+---
+
+## 11. Security Recommendations
+
+* Keep `ALLOW_REGISTRATION=false` if exposing the port externally to prevent unauthorized transmission access.
+* Prefer accessing your server remotely through a **VPN (Tailscale / WireGuard)** rather than opening public WAN ports.
+* Always replace the default `proxdmr123` password with a strong password.
+* Never share `.env` or `config/` files, as they contain passwords and session keys.
+
+---
+
+## 12. Useful Commands
+
+```bash
+docker compose logs -f              # Follow logs in real time
+docker compose ps                   # View container status
+docker compose restart              # Restart service
+docker compose down                 # Stop service
+docker compose up -d --build        # Rebuild and start in background
+```
+
+---
+
+## 13. Troubleshooting
+
+| Issue | Resolution |
+|---|---|
+| `docker: command not found` | Install Docker; on Windows, start Docker Desktop and wait for initialization |
+| Port `8266` or `62031` in use | Adjust `PORT` / `DMR_PORT` in `.env`, then run `docker compose up -d` |
+| Browser certificate warning | Expected with self-signed TLS. Accept the certificate exception |
+| TLS certificate host mismatch | Change `HOST_IP` in `.env`, delete `config/cert.pem` and `key.pem`, then recreate container |
+| Forgotten admin password | Reset password in the web UI. If locked out, stop container, delete `config/proxdmr.db`, set `ADMIN_PASSWORD` in `.env`, and start container |
+| No BrandMeister connection | Verify callsign, DMR ID, BM password, and UDP port `62031` firewall routing |
+| No microphone/audio in browser | Connect using `https://`, grant browser microphone permissions |
+| App cannot connect | Verify server IP, port, network reachability, and Tailscale connection |
+
+---
+
+## 14. Uninstallation
 
 ```bash
 docker compose down
 ```
 
-Затем удалите папку установки. ⚠ Вместе с ней удалятся ваши данные (`config/`, `data/`) — предварительно сделайте резервную копию, если они нужны.
+Remove the project folder. *Note: Deleting the directory will remove your databases and recordings in `config/` and `data/`.*

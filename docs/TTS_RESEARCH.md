@@ -1,105 +1,101 @@
-# Локальный синтез речи (TTS) для проекта ProxDMR
+# Local Speech Synthesis (TTS) for ProxDMR
 
-Исследование и практическое руководство по выбору легковесного локального движка Text-to-Speech (TTS) для интеграции в экосистему **ProxDMR** (Docker, FastAPI, лимит памяти 512 Мб).
-
----
-
-## 1. Контекст и системные требования в ProxDMR
-
-1. **Полный оффлайн и автономность:** Никаких облачных API (Google Cloud TTS, Yandex SpeechKit, Azure). Синтезатор обязан работать локально внутри контейнера или как соседний микросервис.
-2. **Лимит ресурсов:** Контейнер `proxdmr` имеет ограничение `memory: 512M`. Движок TTS не должен потреблять больше **60–120 Мб RAM** в пике.
-3. **Фонетика и специфика радиосвязи:**
-   - Четкое произношение русских и английских позывных (например: *«R3ABC»* -> *«Эр Три Анна Борис Константин»* или *«Ар три эй-би-си»*).
-   - Чтение цифр и идентификаторов TalkGroup (*«Таймслот один, группа двадцать пять ноль один»*).
-   - Служебные статусы соединения с BrandMeister (*«Сервер BM 2501 доступен, пинг 45 миллисекунд»*).
-4. **Формат вывода:** Аудиопоток `WAV / PCM 16-bit` (для передачи через WebSockets в браузер оператора либо в аудио-пакеты DMR).
+Research and practical guide on selecting a lightweight local Text-to-Speech (TTS) engine for integration into the **ProxDMR** ecosystem (Docker, FastAPI, 512 MB memory limit).
 
 ---
 
-## 2. Сравнительная таблица кандидатов
+## 1. Context and System Requirements in ProxDMR
 
-| Параметр | **Piper TTS** (Рекомендуемая нейронка) | **RHVoice** (Классический радио-стиль) |
+1. **Fully Offline & Self-Contained:** No external cloud APIs (Google Cloud TTS, Azure, etc.). The synthesis engine must run locally inside the container or as a companion microservice.
+2. **Resource Constraints:** The `proxdmr` container operates within a `memory: 512M` limit. The TTS engine should not exceed **60–120 MB RAM** at peak load.
+3. **Radio Phonetics & Terminology:**
+   - Accurate pronunciation of amateur radio callsigns (e.g. *"R3ABC"* -> *"Romeo Three Alfa Bravo Charlie"* or phonetic spelling).
+   - Reading digits and TalkGroup IDs (*"Timeslot one, TalkGroup twenty-five zero one"*).
+   - System service statuses for BrandMeister connections (*"BM Master 2501 connected, ping 45 ms"*).
+4. **Audio Output Format:** `WAV / Linear PCM 16-bit 8000 Hz / 16000 Hz / 22050 Hz` (streamed over WebSockets to operator browsers or fed into DMR audio frames).
+
+---
+
+## 2. Comparison of Candidate Engines
+
+| Parameter | **Piper TTS** (Recommended Neural Engine) | **RHVoice** (Classic Parametric Radio Style) |
 | :--- | :--- | :--- |
-| **Архитектура** | Нейросеть (VITS / ONNX) | Статистический параметрический (HTS) |
-| **Потребление RAM** | ~60 – 100 Мб | ~20 – 40 Мб |
-| **Размер на диске** | ~50 – 70 Мб (модель + ONNX) | ~15 – 30 Мб (голос + библиотека) |
-| **Нагрузка на CPU** | 0.05 – 0.15 сек на фразу (в 10 раз быстрее Real-Time) | Мгновенно (< 0.02 сек, околонулевая нагрузка) |
-| **Качество голоса** | Естественный, живой человеческий голос | Четкий, механический, «радийный/диспетчерский» |
-| **Русские голоса** | `ru_RU-dmitri-medium`, `ru_RU-irina-medium`, `denis` | Александр, Елена, Анна, Юрий |
-| **Установка в Python** | `pip install piper-tts` | `pip install rhvoice-wrapper` или C-библиотека |
+| **Architecture** | Neural network (VITS / ONNX) | Statistical parametric (HTS) |
+| **RAM Usage** | ~60 – 100 MB | ~20 – 40 MB |
+| **Disk Footprint** | ~50 – 70 MB (model + ONNX) | ~15 – 30 MB (voice + library) |
+| **CPU Load** | 0.05 – 0.15 s per phrase (~10x faster than real-time) | Instantaneous (< 0.02 s, near-zero CPU load) |
+| **Voice Quality** | Natural, pleasant human-like voice | Clear, robotic, "dispatch/repeater" voice |
+| **Sample Voices** | `en_GB-alan-medium`, `en_US-lessac-medium`, `ru_RU-dmitri-medium` | Alan, Elena, Aleksandr |
+| **Python Installation** | `pip install piper-tts` | `pip install rhvoice-wrapper` or native C bindings |
 
 ---
 
-## 3. Вариант №1: Piper TTS (Современная микро-нейронка)
+## 3. Option 1: Piper TTS (Modern Fast Neural Engine)
 
-Piper — современный стандарт открытого легковесного синтеза от разработчиков Home Assistant. Работает через легковесный движок `onnxruntime`.
+Piper is the modern open-source standard for fast, high-quality local text-to-speech created by the Home Assistant / Rhasspy team. It runs via `onnxruntime`.
 
-### 3.1. Быстрый тест через CLI
+### 3.1. CLI Quick Test
 ```bash
-# 1. Установка утилиты
+# 1. Install piper package
 pip install piper-tts
 
-# 2. Скачивание русской модели (голос Дмитрия)
-curl -L -o ru_dmitri.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx"
-curl -L -o ru_dmitri.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx.json"
+# 2. Download ONNX model and config (e.g., English Alan voice)
+curl -L -o en_alan.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx"
+curl -L -o en_alan.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json"
 
-# 3. Синтез фразы в test_piper.wav
-echo "ProxDMR подключен к серверу BrandMeister." | piper --model ru_dmitri.onnx --output_file test_piper.wav
+# 3. Synthesize phrase into test_piper.wav
+echo "ProxDMR connected to BrandMeister master server." | piper --model en_alan.onnx --output_file test_piper.wav
 ```
 
-### 3.2. Минимальный тестовый Python-скрипт (`test_piper.py`)
+### 3.2. Minimal Python Script (`test_piper.py`)
 ```python
 import wave
 from piper import PiperVoice
 
-# Загрузка легковесной ONNX модели
-model_path = "ru_dmitri.onnx"
-config_path = "ru_dmitri.onnx.json"
+# Load lightweight ONNX model
+model_path = "en_alan.onnx"
+config_path = "en_alan.onnx.json"
 voice = PiperVoice.load(model_path, config_path=config_path)
 
-text = "Внимание. Таймслот 2. Активен вызов от позывного R3ABC."
+text = "Attention. Timeslot 2. Incoming call from callsign K1ABC."
 output_wav = "output_piper.wav"
 
 with wave.open(output_wav, "wb") as wav_file:
     voice.synthesize(text, wav_file)
 
-print(f"Готово! Аудио сохранено в {output_wav}")
+print(f"Done! Audio saved to {output_wav}")
 ```
 
 ---
 
-## 4. Вариант №2: RHVoice (Классический параметрический движок)
+## 4. Option 2: RHVoice (Classic Parametric Engine)
 
-RHVoice идеально подходит для радиолюбительской связи: звук звучит разборчиво в шумном эфире и напоминает стандартный репитерный автоинформатор.
+RHVoice is an ultra-lightweight parametric engine suitable for high-noise radio channels.
 
-### 4.1. Быстрый тест через Python-библиотеку (`rhvoice-wrapper`)
+### 4.1. Quick Test via Python Library (`rhvoice-wrapper`)
 ```bash
 pip install rhvoice-wrapper-bin rhvoice-wrapper
 ```
 
-### 4.2. Минимальный тестовый Python-скрипт (`test_rhvoice.py`)
+### 4.2. Minimal Python Script (`test_rhvoice.py`)
 ```python
 from rhvoice_wrapper import TTS
 
-# Инициализация (голоса скачиваются автоматически или берутся локально)
 tts = TTS(threads=1)
+text = "Attention. Timeslot 1. Connected to TalkGroup 3100."
 
-text = "Внимание. Таймслот 1. Подключена разговорная группа двадцать пять ноль один."
-
-# Синтез в бинарный поток WAV
-audio_data = tts.to_wave(text, voice="aleksandr", format_="wav")
-
+audio_data = tts.to_wave(text, voice="alan", format_="wav")
 with open("output_rhvoice.wav", "wb") as f:
     f.write(audio_data)
 
-print("Готово! Аудио RHVoice сохранено в output_rhvoice.wav")
+print("Done! Audio saved to output_rhvoice.wav")
 ```
 
 ---
 
-## 5. Как это интегрируется в ProxDMR (FastAPI)
+## 5. Integration into ProxDMR (FastAPI Backend)
 
-Пример готового микро-сервиса внутри вашего бекенда для отдачи звука оператору:
+Example of an internal TTS router serving synthesized speech:
 
 ```python
 import io
@@ -108,13 +104,13 @@ from fastapi import APIRouter, Response
 from piper import PiperVoice
 
 tts_router = APIRouter(prefix="/api/tts", tags=["TTS"])
-voice = PiperVoice.load("config/tts/ru_dmitri.onnx", config_path="config/tts/ru_dmitri.onnx.json")
+voice = PiperVoice.load("config/tts/en_alan.onnx", config_path="config/tts/en_alan.onnx.json")
 
 @tts_router.get("/speak")
 async def speak(text: str):
     """
-    Генерирует аудио на лету и отдает клиенту (Web UI)
-    Использование в браузере: <audio src="/api/tts/speak?text=Привет" autoplay />
+    Synthesize speech on the fly and stream back to the web UI.
+    Usage in browser: <audio src="/api/tts/speak?text=Hello" autoplay />
     """
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
@@ -125,10 +121,10 @@ async def speak(text: str):
 
 ---
 
-## 6. Рекомендации по озвучке радио-специфики
+## 6. Best Practices for Amateur Radio Speech
 
-1. **Позывные:** Чтобы синтезатор не пытался прочитать английский позывной как единое слово (например, *UB3AAA* как «Уб три ааа»), перед передачей в TTS полезно разделять буквы точками или пробелами:  
-   `"U B 3 A A A"` или фонетически: `"Ульяна Борис три Анна Анна Анна"`.
-2. **Таймслоты и группы:** Числительные лучше передавать словами или разбивать пробелами, чтобы движок не читал *TG 2501* как год:  
-   Вместо `"TG 2501"` отправлять `"Группа двадцать пять ноль один"`.
-3. **Кэширование типовых фраз:** Фразы вроде *«Сервер подключен»*, *«Соединение разорвано»*, *«Таймслот 1 свободен»* генерируются ровно один раз и кэшируются в памяти, чтобы вообще не дергать процессор.
+1. **Callsign Pronunciation:** Prevent the engine from reading alphanumeric callsigns as a single English word (e.g. *W3ABC* as *"wabc"*). Prepend letters with spaces or phonetic expansions:  
+   `"W 3 A B C"` or phonetic: `"Whiskey Three Alfa Bravo Charlie"`.
+2. **TalkGroups & Timeslots:** Spell out numbers or insert spaces so *TG 3100* is not read as year thirty-one hundred:  
+   Send *"TalkGroup three one zero zero"* instead of *"TG 3100"*.
+3. **Phrase Caching:** Static system phrases (*"Server connected"*, *"Connection lost"*, *"Timeslot 1 idle"*) are synthesized once and cached in memory to eliminate repeated CPU consumption.
