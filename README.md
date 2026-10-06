@@ -1,6 +1,6 @@
 # ProxDMR — START HERE
 
-A web platform and gateway for the **DMR (BrandMeister)** amateur radio network: voice reception and transmission (PTT) directly from the browser or the official Android app, multi-hotspot support, dual timeslots (TS1 / TS2), Last Heard activity log, recording, and offline neural speech synthesis.
+A web platform and gateway for the **DMR (BrandMeister)** amateur radio network: voice reception and transmission (PTT) directly from the browser or the official Android app, multi-hotspot support, dual timeslots (TS1 / TS2), Last Heard activity log, and recording.
 
 ---
 
@@ -38,8 +38,6 @@ Two release archives are provided with **identical contents**:
 | `ProxDMR-Release.tar.gz` | Linux, Raspberry Pi, Synology NAS |
 | `ProxDMR-Release.zip` | Windows (Docker Desktop) |
 
-The archive contains **no private data**, passwords, API keys, call recordings, databases, or voice models. Everything is automatically provisioned or downloaded upon your initial launch.
-
 ---
 
 ## 2. Prerequisites
@@ -67,10 +65,9 @@ During interactive setup, you will be prompted for:
 | Host IP or domain for SSL | Local IP of your server (auto-detected default provided) |
 | Web interface port | `8266` (Press Enter) |
 | Admin username | `admin` or your callsign |
-| Admin password | **Enter your secure password** (default `proxdmr123`) |
-| Disable open registration? | `Y` (recommended) |
+| Admin password | **Enter your secure password** |
 
-> ⚠️ **Admin Password:** Configured upon first startup (default `proxdmr123` or your chosen password). Once logged in, you can change your password at any time directly in the web UI under **Settings → My Account → Security & Password**. Changing `ADMIN_PASSWORD` in `.env` later will not affect existing users in the database.
+> ⚠️ **Admin Password:** Configured upon first startup. Once logged in, you can change your password at any time directly in the web UI under **Settings → My Account → Security & Password**. Changing `ADMIN_PASSWORD` in `.env` later will not affect existing users in the database.
 
 ### A. Linux / Raspberry Pi (Terminal)
 
@@ -135,7 +132,6 @@ No SSH required:
      PORT=8266
      ADMIN_USER=admin
      ADMIN_PASSWORD=YourSecurePassword
-     ALLOW_REGISTRATION=false
      ```
 3. **Create Project:**
    * Open **Container Manager → Project → Create**.
@@ -186,7 +182,7 @@ docker run -d \
    https://<SERVER_IP>:8266
    ```
 3. **Browser Certificate Warning:** The service generates a local self-signed TLS certificate required by browsers for Web Audio and microphone access. Click *Advanced → Proceed to site*.
-4. Sign in with the credentials specified during setup (default `admin` / `proxdmr123`).
+4. Sign in with the credentials specified during setup.
 
 ---
 
@@ -273,9 +269,8 @@ To restore, copy these items back into the project root and run `docker compose 
 
 ## 11. Security Recommendations
 
-* Keep `ALLOW_REGISTRATION=false` if exposing the port externally to prevent unauthorized transmission access.
 * Prefer accessing your server remotely through a **VPN (Tailscale / WireGuard)** rather than opening public WAN ports.
-* Always replace the default `proxdmr123` password with a strong password.
+* Always use a strong, unique password for your administrator account.
 * Never share `.env` or `config/` files, as they contain passwords and session keys.
 
 ---
