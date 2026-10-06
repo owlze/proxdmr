@@ -44,14 +44,13 @@ window.transcriberSettings = {
   model: "gemini-3.5-flash",
   target_lang: "ru",
   tts_enabled: false,
-  tts_engine: "piper",
+  tts_engine: "gemini",
   tts_model: "gemini-3.1-flash-tts-preview",
-  tts_voice: "ru_RU-terra5871-medium",
-  tts_speed: 1.0,
-  tts_ducking_level: 0.03,
-  tts_pause_ducking_level: 0.13,
+  tts_voice: "auto",
+  tts_speed: 1.1,
+  tts_ducking_level: 0.80,
   tts_mute_others: true,
-  tts_announce_callsign: true
+  tts_announce_callsign: false
 };
 
 export const TTS_TEST_PHRASES = {
@@ -4586,29 +4585,32 @@ function initGeminiApiKeysFrame() {
   function loadAll() {
     let data;
     try { data = JSON.parse(localStorage.getItem(LS_KEYS) || 'null'); } catch (_) {}
+    if (!Array.isArray(data)) return;
     const rows = body.querySelectorAll('.apikey-row');
-    if (Array.isArray(data)) {
-      data.forEach((item, i) => {
-        if (i >= rows.length) return;
-        const row  = rows[i];
-        const cb   = row.querySelector('.apikey-cb');
-        const name = row.querySelector('.apikey-name');
-        const inp  = row.querySelector('.apikey-input');
-        if (cb   && item.enabled !== undefined) cb.checked  = Boolean(item.enabled);
-        if (name && item.name    !== undefined) name.value  = item.name;
-        if (inp  && item.key     !== undefined) inp.value   = item.key;
-      });
-    }
-    if (rows.length > 0) {
-      const firstRowName = rows[0].querySelector('.apikey-name');
-      if (firstRowName && !firstRowName.value.trim()) {
-        firstRowName.value = 'name';
-      }
-    }
+    data.forEach((item, i) => {
+      if (i >= rows.length) return;
+      const row  = rows[i];
+      const cb   = row.querySelector('.apikey-cb');
+      const name = row.querySelector('.apikey-name');
+      const inp  = row.querySelector('.apikey-input');
+      if (cb   && item.enabled !== undefined) cb.checked  = Boolean(item.enabled);
+      if (name && item.name    !== undefined) name.value  = item.name;
+      if (inp  && item.key     !== undefined) inp.value   = item.key;
+    });
   }
+
+  const paidRow = body.querySelector('.apikey-row-paid');
+  const paidCb  = paidRow ? paidRow.querySelector('.apikey-cb') : null;
+  const paidInp = paidRow ? paidRow.querySelector('.apikey-input') : null;
 
   // ── Restore saved data ─────────────────────────────────────────────────
   loadAll();
+  if (paidCb && paidCb.checked) {
+    body.querySelectorAll('.apikey-row:not(.apikey-row-paid)').forEach(r => {
+      const otherCb = r.querySelector('.apikey-cb');
+      if (otherCb) otherCb.checked = false;
+    });
+  }
 
   // ── Collapse toggle (always closed by default on entry) ─────────────────
   frame.classList.add('collapsed');
@@ -4639,7 +4641,41 @@ function initGeminiApiKeysFrame() {
     const inp = row ? row.querySelector('.apikey-input') : null;
     if (!inp) return;
     applyKeyStatus(inp, cb);
-    cb.addEventListener('change', () => { applyKeyStatus(inp, cb); saveAll(); });
+
+    cb.addEventListener('change', () => {
+      if (cb === paidCb) {
+        if (paidCb.checked) {
+          // Paid key turned ON: turn off all free keys
+          body.querySelectorAll('.apikey-row:not(.apikey-row-paid)').forEach(r => {
+            const otherCb = r.querySelector('.apikey-cb');
+            const otherInp = r.querySelector('.apikey-input');
+            if (otherCb) {
+              otherCb.checked = false;
+              if (otherInp) applyKeyStatus(otherInp, otherCb);
+            }
+          });
+        } else {
+          // Paid key turned OFF: turn on all free keys that have non-empty value
+          body.querySelectorAll('.apikey-row:not(.apikey-row-paid)').forEach(r => {
+            const otherCb = r.querySelector('.apikey-cb');
+            const otherInp = r.querySelector('.apikey-input');
+            if (otherCb && otherInp) {
+              const hasVal = Boolean(otherInp.value && otherInp.value.trim());
+              otherCb.checked = hasVal;
+              applyKeyStatus(otherInp, otherCb);
+            }
+          });
+        }
+      } else {
+        // Free key toggled: if turned ON while paid key was ON, turn off paid key
+        if (cb.checked && paidCb && paidCb.checked) {
+          paidCb.checked = false;
+          if (paidInp) applyKeyStatus(paidInp, paidCb);
+        }
+      }
+      applyKeyStatus(inp, cb);
+      saveAll();
+    });
   });
 
   // ── Auto-save on input change ──────────────────────────────────────────

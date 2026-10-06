@@ -1452,7 +1452,7 @@
                   <div style="font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px;" data-i18n="account.user_label">Текущий пользователь:</div>
                   <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <div style="font-size: 1.15rem; font-weight: 700; color: #58a6ff; letter-spacing: 0.5px;" id="accountCurrentUsername">—</div>
-                    <span id="accountUserRoleBadge" class="account-role-badge" style="display:none;"></span>
+                    <span id="accountUserRoleBadge" class="account-role-badge" style="display:none;" data-i18n="admin.role_superadmin">👑 Superadmin</span>
                     <span id="accountSwlBadge" class="account-swl-badge" style="display:none;" data-i18n="account.swl_badge">🎧 SWL (только приём)</span>
                   </div>
                 </div>
@@ -2205,6 +2205,16 @@
                 <div class="apikey-input-wrap">
                   <input type="password" class="form-input apikey-input" id="apiKeyInput4" data-key-index="4" placeholder="AIzaSy..." autocomplete="off">
                   <button type="button" class="apikey-eye-btn" data-target="apiKeyInput4" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
+                </div>
+              </div>
+              <!-- Key 6 (Paid Account) -->
+              <div class="apikey-row apikey-row-paid" data-key-index="5">
+                <input type="hidden" class="apikey-name" id="apiKeyNamePaid" value="paid">
+                <input type="checkbox" class="apikey-cb apikey-cb-paid" id="apiKeyCbPaid" title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
+                <label for="apiKeyCbPaid" class="apikey-paid-label" data-i18n="transcriber.paid_key_label">Это ключ для платного аккаунта Gemini API, он условно сделан отличным для удобства переключения</label>
+                <div class="apikey-input-wrap">
+                  <input type="password" class="form-input apikey-input" id="apiKeyInputPaid" data-key-index="5" placeholder="AIzaSy..." autocomplete="off">
+                  <button type="button" class="apikey-eye-btn" data-target="apiKeyInputPaid" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
                 </div>
               </div>
               <small class="form-hint" style="margin-top:4px;display:block;" data-i18n="transcriber.keys_hint">Бесплатный ключ от Google AI Studio (до 15 запросов/мин на ключ). Несколько ключей с разных Google-аккаунтов позволяют распределить бесплатные запросы. При необходимости и возможности можно использовать один платный API-ключ — это удобней, и доступны более совершенные и качественные модели.</small>
@@ -4111,7 +4121,7 @@
               <input type="checkbox" id="recOptSeamBeep" class="rec-toggle-checkbox">
               <span data-i18n="recordings.seam_beep">Звуковой маркер склейки</span>
             </label>
-            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600,80" title="До 7 пар частота, длительность (Гц, мс) через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 140px; text-align: right; padding: 4px 8px; border-radius: 6px; font-family: monospace;">
+            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 175px; text-align: right; padding: 4px 8px; border-radius: 6px; font-family: monospace;">
           </div>
           <div style="font-size: 0.75rem; color: var(--text-muted, #8b949e); line-height: 1.3;" data-i18n="recordings.seam_beep_hint">
             До 7 пар частота, длительность (Гц, мс) через запятую (напр. 600,80 или 1750,100, 1200,80)

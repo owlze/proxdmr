@@ -50,36 +50,53 @@ class BeepMarkerGenerator:
     _cache: Dict[str, bytes] = {}
 
     @classmethod
-    def parse_pattern(cls, pattern_str: str) -> List[Tuple[float, int]]:
-        tokens = [t.strip() for t in (pattern_str or "").replace(";", ",").split(",") if t.strip()]
-        pairs = []
-        for i in range(0, len(tokens) - 1, 2):
-            if len(pairs) >= 7:
-                break
-            try:
-                freq = float(tokens[i])
-                dur = int(float(tokens[i + 1]))
-                if dur > 0:
-                    pairs.append((freq, min(dur, 2000)))
-            except (ValueError, TypeError):
-                continue
-        if not pairs:
-            pairs = [(600.0, 80)]
-        return pairs
+    def parse_pattern(cls, pattern_str: str) -> List[Tuple[float, int, float]]:
+        if not pattern_str:
+            return [(600.0, 110, 0.33), (840.0, 50, 0.15)]
+        raw = re.sub(r"\s*-\s*", "-", str(pattern_str).strip())
+        tokens = [t for t in re.split(r"[,;\s]+", raw) if t]
+        tones: List[Tuple[float, int, float]] = []
+        i = 0
+        while i < len(tokens) and len(tones) < 7:
+            t = tokens[i]
+            if "-" in t:
+                parts = [p for p in t.split("-") if p]
+                try:
+                    freq = float(parts[0])
+                    dur = int(float(parts[1])) if len(parts) > 1 else 80
+                    vol_pct = float(parts[2]) if len(parts) > 2 else 30.0
+                    vol = max(0.01, min(1.0, vol_pct / 100.0))
+                    dur = max(5, min(2000, dur))
+                    tones.append((freq, dur, vol))
+                except (ValueError, TypeError):
+                    pass
+                i += 1
+            elif i + 1 < len(tokens) and "-" not in tokens[i + 1]:
+                # Legacy pair: freq dur (or freq, dur)
+                try:
+                    freq = float(tokens[i])
+                    dur = int(float(tokens[i + 1]))
+                    tones.append((freq, min(dur, 2000), 0.30))
+                    i += 2
+                except (ValueError, TypeError):
+                    i += 1
+            else:
+                i += 1
+        return tones or [(600.0, 110, 0.33), (840.0, 50, 0.15)]
 
     @classmethod
-    def get_marker_bytes(cls, pattern_str: str = "600,80") -> bytes:
-        key = (pattern_str or "600,80").strip()
+    def get_marker_bytes(cls, pattern_str: str = "600-110-33, 840-50-15") -> bytes:
+        key = (pattern_str or "600-110-33, 840-50-15").strip()
         if key in cls._cache:
             return cls._cache[key]
 
         pairs = cls.parse_pattern(key)
         all_samples = []
-        peak = 32767.0 * cls.AMPLITUDE
 
-        for freq, dur_ms in pairs:
+        for freq, dur_ms, vol in pairs:
             total_samples = int(cls.SAMPLE_RATE * dur_ms / 1000)
             fade_samples = min(int(cls.SAMPLE_RATE * 0.008), total_samples // 4)  # 8ms fade
+            peak = 32767.0 * max(0.01, min(1.0, vol))
 
             if freq <= 0:
                 all_samples.extend([0] * total_samples)
@@ -222,7 +239,7 @@ class SessionAudioRecorder:
         hotspot_id: str = "default",
         gap_threshold_sec: float = 1.2,
         seam_beep_enabled: bool = True,
-        seam_beep_pattern: str = "600,80",
+        seam_beep_pattern: str = "600-110-33, 840-50-15",
     ):
         self.session_id = session_id
         self.user_id = user_id
@@ -353,7 +370,7 @@ class ServerAudioRecorder:
         self.auto_rx_enabled: bool = True
         self.auto_tx_enabled: bool = True
         self.seam_beep_enabled: bool = True
-        self.seam_beep_pattern: str = "600,80"
+        self.seam_beep_pattern: str = "600-110-33, 840-50-15"
         self.min_duration_sec: float = 0.5
         self.max_storage_mb: int = 2048  # Default 2 GB quota
         self.auto_cleanup_enabled: bool = True
@@ -470,7 +487,7 @@ class ServerAudioRecorder:
         if "seam_beep" in rec_cfg:
             self.seam_beep_enabled = bool(rec_cfg["seam_beep"])
         if "seam_beep_pattern" in rec_cfg:
-            self.seam_beep_pattern = str(rec_cfg["seam_beep_pattern"]).strip() or "600,80"
+            self.seam_beep_pattern = str(rec_cfg["seam_beep_pattern"]).strip() or "600-110-33, 840-50-15"
         if "min_duration_sec" in rec_cfg:
             self.min_duration_sec = float(rec_cfg["min_duration_sec"])
         if "max_storage_gb" in rec_cfg:

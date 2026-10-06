@@ -24,7 +24,7 @@ try:
     from dmr.audio_agc import ServerAudioAgc
     from dmr.audio_equalizer import ServerAudioEqualizer
     from dmr.tx_dsp import ServerTxDsp
-    from dmr.recorder import ServerAudioRecorder
+    from dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings, CONFIG_DIR
     from src.dmr.homebrew import BMState, DMRFrame, HomeBrewClient
@@ -36,7 +36,7 @@ except ImportError:
     from src.dmr.audio_agc import ServerAudioAgc
     from src.dmr.audio_equalizer import ServerAudioEqualizer
     from src.dmr.tx_dsp import ServerTxDsp
-    from src.dmr.recorder import ServerAudioRecorder
+    from src.dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
 
 CALLS_HISTORY_FILE = CONFIG_DIR / "calls_history.json"
 CALL_HISTORY_RETENTION_SEC = 86400.0  # 24 hours
@@ -1870,7 +1870,7 @@ class HotspotManager:
             else:
                 logger.warning(f"[TX] Cannot send burst to BM: client={bool(rt.client)}, status={rt.status if rt else 'None'}")
 
-    def stop_tx(self, user_id: Optional[int] = None) -> bool:
+    def stop_tx(self, user_id: Optional[int] = None, roger_beep: bool = False, roger_beep_pattern: str = "") -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         tx_st = self._get_user_tx(uid)
         if not tx_st.active:
@@ -1896,6 +1896,52 @@ class HotspotManager:
         if rt and rt.client and rt.status == BMState.ONLINE:
             try:
                 src_id = rt.config.dmr_id
+
+                # If roger beep is requested, append beep PCM before flushing
+                if roger_beep and roger_beep_pattern:
+                    try:
+                        beep_pcm = BeepMarkerGenerator.get_marker_bytes(roger_beep_pattern)
+                        if beep_pcm:
+                            if hasattr(self, "recorder") and self.recorder:
+                                self.recorder.feed_tx(beep_pcm)
+                            tx_st.audio_buffer.extend(beep_pcm)
+                            logger.info(f"[TX] Appended Roger Beep ({len(beep_pcm)} bytes, '{roger_beep_pattern}')")
+                    except Exception as e:
+                        logger.error(f"[TX] Error generating Roger Beep: {e}")
+
+                # Process all complete 960-byte chunks in buffer (each is 60ms voice burst)
+                while len(tx_st.audio_buffer) >= 960:
+                    chunk = bytes(tx_st.audio_buffer[:960])
+                    del tx_st.audio_buffer[:960]
+                    ambes = rt.tx_encoder.encode_60ms_superframe(chunk)
+                    if ambes and len(ambes) == 3:
+                        burst_payload = self.tx_framer.create_burst(
+                            ambe_3_frames=ambes,
+                            burst_index=tx_st.burst_index,
+                            src_id=src_id,
+                            dst_id=tx_st.dst_id,
+                            slot=tx_st.slot,
+                            call_type=tx_st.call_type,
+                            color_code=rt.client.color_code,
+                            talker_alias=(rt.config.talker_alias or rt.config.callsign) if getattr(rt.config, "send_talker_alias", True) else None,
+                            superframe_index=tx_st.superframe_index,
+                        )
+                        rt.client.send_dmrd(
+                            slot=tx_st.slot,
+                            call_type=tx_st.call_type,
+                            frame_type=0,
+                            stream_id=tx_st.stream_id,
+                            seq_no=tx_st.seq_no,
+                            payload=burst_payload,
+                            src_id=src_id,
+                            dst_id=tx_st.dst_id,
+                            burst_index=tx_st.burst_index,
+                        )
+                        tx_st.seq_no = (tx_st.seq_no + 1) % 256
+                        tx_st.burst_index = (tx_st.burst_index + 1) % 6
+                        if tx_st.burst_index == 0:
+                            tx_st.superframe_index += 1
+
                 # If leftover audio >= 320 bytes (20 ms), pad to 960 bytes and send last burst
                 if len(tx_st.audio_buffer) >= 320:
                     pad_len = 960 - len(tx_st.audio_buffer)

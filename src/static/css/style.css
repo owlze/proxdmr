@@ -3585,6 +3585,65 @@ body.auth-locked > *:not(.auth-modal) {
   gap: 7px;
 }
 
+.apikey-row-paid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  background: rgba(114, 18, 48, 0.28);
+  border: 1px solid rgba(225, 29, 72, 0.45);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.apikey-row-paid:hover {
+  background: rgba(114, 18, 48, 0.36);
+  border-color: rgba(225, 29, 72, 0.6);
+}
+
+.apikey-row-paid .apikey-cb {
+  order: 1;
+}
+
+.apikey-row-paid .apikey-paid-label {
+  order: 2;
+  flex: 1 1 calc(100% - 30px);
+  font-size: 0.76rem;
+  color: #fda4af;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+  margin: 0;
+  user-select: none;
+}
+
+.apikey-row-paid .apikey-input-wrap {
+  order: 3;
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.apikey-cb-paid {
+  accent-color: #e11d48;
+}
+
+[data-theme="light"] .apikey-row-paid {
+  background: rgba(225, 29, 72, 0.08);
+  border-color: rgba(225, 29, 72, 0.35);
+}
+
+[data-theme="light"] .apikey-row-paid:hover {
+  background: rgba(225, 29, 72, 0.12);
+  border-color: rgba(225, 29, 72, 0.5);
+}
+
+[data-theme="light"] .apikey-row-paid .apikey-paid-label {
+  color: #9f1239;
+}
+
 .apikey-cb {
   flex-shrink: 0;
   width: 15px;

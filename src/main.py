@@ -4650,7 +4650,7 @@ async def api_get_recording_settings(request: Request):
             "auto_record_rx": rec.auto_rx_enabled if rec else True,
             "auto_record_tx": rec.auto_tx_enabled if rec else True,
             "seam_beep": rec.seam_beep_enabled if rec else True,
-            "seam_beep_pattern": getattr(rec, "seam_beep_pattern", "600,80") if rec else "600,80",
+            "seam_beep_pattern": getattr(rec, "seam_beep_pattern", "600-110-33, 840-50-15") if rec else "600-110-33, 840-50-15",
             "min_duration_sec": rec.min_duration_sec if rec else 0.5,
             "max_storage_mb": rec.max_storage_mb if rec else 2048,
             "max_storage_gb": round((rec.max_storage_mb if rec else 2048) / 1024.0, 1),
@@ -4675,7 +4675,7 @@ async def api_update_recording_settings(payload: dict, request: Request):
         "auto_record_rx": rec.auto_rx_enabled,
         "auto_record_tx": rec.auto_tx_enabled,
         "seam_beep": rec.seam_beep_enabled,
-        "seam_beep_pattern": getattr(rec, "seam_beep_pattern", "600,80"),
+        "seam_beep_pattern": getattr(rec, "seam_beep_pattern", "600-110-33, 840-50-15"),
         "min_duration_sec": rec.min_duration_sec,
         "max_storage_mb": rec.max_storage_mb,
         "max_storage_gb": round(rec.max_storage_mb / 1024.0, 1),
@@ -4922,7 +4922,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 elif msg_type == "ptt_release":
                     if u_radio_state.transmitting_client_id == client_id:
                         is_loop = getattr(u_radio_state, "is_loopback", False)
-                        hotspot_manager.stop_tx(user_id=ws_user_id)
+                        roger_beep = bool(data.get("roger_beep", False)) and not is_loop
+                        roger_beep_pattern = str(data.get("roger_beep_pattern", "")).strip()
+                        hotspot_manager.stop_tx(
+                            user_id=ws_user_id,
+                            roger_beep=roger_beep,
+                            roger_beep_pattern=roger_beep_pattern,
+                        )
                         u_radio_state.is_transmitting = False
                         u_radio_state.transmitting_client_id = None
                         u_radio_state.is_loopback = False

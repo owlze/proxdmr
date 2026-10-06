@@ -74,14 +74,17 @@
     const roleBadge = document.getElementById('accountUserRoleBadge');
     if (roleBadge) {
       if (role === 'superadmin') {
-        roleBadge.textContent = window.t ? window.t('admin.role_superadmin', {}, '👑 Суперадмин') : '👑 Суперадмин';
+        roleBadge.setAttribute('data-i18n', 'admin.role_superadmin');
+        roleBadge.textContent = window.t ? window.t('admin.role_superadmin', {}, '👑 Superadmin') : '👑 Superadmin';
         roleBadge.style.color = '#ffcc00';
         roleBadge.style.display = 'inline-block';
       } else if (role === 'admin') {
-        roleBadge.textContent = window.t ? window.t('admin.role_admin', {}, '🛡️ Админ') : '🛡️ Админ';
+        roleBadge.setAttribute('data-i18n', 'admin.role_admin');
+        roleBadge.textContent = window.t ? window.t('admin.role_admin', {}, '🛡️ Administrator') : '🛡️ Administrator';
         roleBadge.style.color = '#58a6ff';
         roleBadge.style.display = 'inline-block';
       } else {
+        roleBadge.removeAttribute('data-i18n');
         roleBadge.style.display = 'none';
       }
     }
@@ -98,9 +101,11 @@
         deleteBtn.style.opacity = '0.45';
         deleteBtn.style.cursor = 'not-allowed';
         deleteBtn.style.filter = 'grayscale(0.6)';
-        deleteBtn.title = window.t ? window.t('account.superadmin_delete_disabled', {}, '🛡️ Аккаунт суперадминистратора защищен от удаления') : '🛡️ Аккаунт суперадминистратора защищен от удаления';
+        deleteBtn.setAttribute('data-i18n-title', 'account.superadmin_delete_disabled');
+        deleteBtn.title = window.t ? window.t('account.superadmin_delete_disabled', {}, '🛡️ Superadmin account is protected from deletion') : '🛡️ Superadmin account is protected from deletion';
         if (deleteSpan) {
-          deleteSpan.textContent = window.t ? window.t('account.superadmin_delete_btn_disabled', {}, '🔒 Удаление аккаунта заблокировано') : '🔒 Удаление аккаунта заблокировано';
+          deleteSpan.setAttribute('data-i18n', 'account.superadmin_delete_btn_disabled');
+          deleteSpan.textContent = window.t ? window.t('account.superadmin_delete_btn_disabled', {}, '🔒 Account deletion locked') : '🔒 Account deletion locked';
         }
         if (deleteHint) deleteHint.style.display = 'block';
       } else {
@@ -108,9 +113,11 @@
         deleteBtn.style.opacity = '';
         deleteBtn.style.cursor = 'pointer';
         deleteBtn.style.filter = '';
+        deleteBtn.removeAttribute('data-i18n-title');
         deleteBtn.title = '';
         if (deleteSpan) {
-          deleteSpan.textContent = window.t ? window.t('account.delete_btn', {}, '🗑️ Удалить аккаунт') : '🗑️ Удалить аккаунт';
+          deleteSpan.setAttribute('data-i18n', 'account.delete_btn');
+          deleteSpan.textContent = window.t ? window.t('account.delete_btn', {}, '🗑️ Delete Account') : '🗑️ Delete Account';
         }
         if (deleteHint) deleteHint.style.display = 'none';
       }
@@ -213,6 +220,11 @@
         doLogout();
       }
     });
+
+    if (window.I18N && typeof window.I18N.onLanguageChange === 'function') {
+      window.I18N.onLanguageChange(() => updateAccountUI());
+    }
+    window.addEventListener('languageChanged', () => updateAccountUI());
   }
 
   function wirePasswordToggle(btnId, inputId) {

@@ -113,6 +113,203 @@ export function setHotspotPttMode(hid, mode) {
   return safeMode;
 }
 
+export const DEFAULT_ROGER_BEEP_PATTERN = "600-110-33, 840-50-15";
+
+/**
+ * Retrieve configured Roger Beep enabled flag for a hotspot
+ * @param {string|null} hid
+ * @returns {boolean}
+ */
+export function getHotspotRogerBeep(hid = null) {
+  let cid = "default";
+  if (typeof window !== "undefined" && typeof window.resolveHotspotId === "function") {
+    cid = window.resolveHotspotId(hid || window.activeHotspotId || "default");
+  } else if (hid) {
+    cid = String(hid);
+  }
+
+  const stored = localStorage.getItem("proxdmr_roger_beep_" + cid);
+  if (stored !== null) {
+    return stored === "true" || stored === "1";
+  }
+  const globalStored = localStorage.getItem("proxdmr_roger_beep");
+  if (globalStored !== null) {
+    return globalStored === "true" || globalStored === "1";
+  }
+  return false;
+}
+
+/**
+ * Save configured Roger Beep enabled flag for a hotspot
+ * @param {string|null} hid
+ * @param {boolean} enabled
+ * @returns {boolean}
+ */
+export function setHotspotRogerBeep(hid, enabled) {
+  let cid = "default";
+  if (typeof window !== "undefined" && typeof window.resolveHotspotId === "function") {
+    cid = window.resolveHotspotId(hid || window.activeHotspotId || "default");
+  } else if (hid) {
+    cid = String(hid);
+  }
+
+  const boolVal = Boolean(enabled);
+  localStorage.setItem("proxdmr_roger_beep_" + cid, String(boolVal));
+  localStorage.setItem("proxdmr_roger_beep", String(boolVal));
+  return boolVal;
+}
+
+/**
+ * Retrieve configured Roger Beep pattern for a hotspot
+ * @param {string|null} hid
+ * @returns {string}
+ */
+export function getHotspotRogerBeepPattern(hid = null) {
+  let cid = "default";
+  if (typeof window !== "undefined" && typeof window.resolveHotspotId === "function") {
+    cid = window.resolveHotspotId(hid || window.activeHotspotId || "default");
+  } else if (hid) {
+    cid = String(hid);
+  }
+
+  const stored = localStorage.getItem("proxdmr_roger_beep_pat_" + cid) || localStorage.getItem("proxdmr_roger_beep_pat");
+  if (stored && stored.trim().length > 0) {
+    return stored.trim();
+  }
+  return DEFAULT_ROGER_BEEP_PATTERN;
+}
+
+/**
+ * Save configured Roger Beep pattern for a hotspot
+ * @param {string|null} hid
+ * @param {string} pattern
+ * @returns {string}
+ */
+export function setHotspotRogerBeepPattern(hid, pattern) {
+  let cid = "default";
+  if (typeof window !== "undefined" && typeof window.resolveHotspotId === "function") {
+    cid = window.resolveHotspotId(hid || window.activeHotspotId || "default");
+  } else if (hid) {
+    cid = String(hid);
+  }
+
+  const pat = (typeof pattern === "string" && pattern.trim()) ? pattern.trim() : DEFAULT_ROGER_BEEP_PATTERN;
+  localStorage.setItem("proxdmr_roger_beep_pat_" + cid, pat);
+  localStorage.setItem("proxdmr_roger_beep_pat", pat);
+  return pat;
+}
+
+/**
+ * Parse tone pattern string into array of { freq, durationMs, volPct }
+ * Format: 600-110-33, 840-50-15 (freq-dur-vol separated by comma, semicolon or space)
+ * @param {string} patternStr
+ * @returns {Array<{freq: number, durationMs: number, volPct: number}>}
+ */
+export function parseTonePattern(patternStr) {
+  if (!patternStr || typeof patternStr !== "string" || !patternStr.trim()) {
+    return [
+      { freq: 600, durationMs: 110, volPct: 33 },
+      { freq: 840, durationMs: 50, volPct: 15 }
+    ];
+  }
+  const raw = patternStr.trim().replace(/\s*-\s*/g, "-");
+  const tokens = raw.split(/[,;\s]+/).filter(Boolean);
+  const tones = [];
+  let i = 0;
+  while (i < tokens.length && tones.length < 7) {
+    const t = tokens[i];
+    if (t.includes("-")) {
+      const parts = t.split("-").filter(Boolean);
+      try {
+        const freq = parseFloat(parts[0]);
+        const dur = parts.length > 1 ? parseInt(parts[1], 10) : 80;
+        const volPct = parts.length > 2 ? parseFloat(parts[2]) : 30.0;
+        if (!isNaN(freq) && freq > 0) {
+          tones.push({
+            freq,
+            durationMs: Math.max(5, Math.min(2000, isNaN(dur) ? 80 : dur)),
+            volPct: Math.max(1, Math.min(100, isNaN(volPct) ? 30 : volPct))
+          });
+        }
+      } catch (e) {}
+      i++;
+    } else if (i + 1 < tokens.length && !tokens[i + 1].includes("-")) {
+      // Legacy pair: freq dur
+      try {
+        const freq = parseFloat(tokens[i]);
+        const dur = parseInt(tokens[i + 1], 10);
+        if (!isNaN(freq) && freq > 0) {
+          tones.push({
+            freq,
+            durationMs: Math.max(5, Math.min(2000, isNaN(dur) ? 80 : dur)),
+            volPct: 30.0
+          });
+          i += 2;
+          continue;
+        }
+      } catch (e) {}
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return tones.length > 0 ? tones : [
+    { freq: 600, durationMs: 110, volPct: 33 },
+    { freq: 840, durationMs: 50, volPct: 15 }
+  ];
+}
+
+/**
+ * Play Roger Beep locally using Web Audio API
+ * @param {string} patternStr
+ */
+export function playLocalRogerBeep(patternStr) {
+  try {
+    const tones = parseTonePattern(patternStr);
+    if (!tones || tones.length === 0) return;
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass && !window.audioCtx) return;
+
+    let ctx = window.audioCtx;
+    if (!ctx || ctx.state === "closed") {
+      ctx = new AudioContextClass();
+    }
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+
+    let startTime = ctx.currentTime + 0.01;
+    tones.forEach((tone) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(tone.freq, startTime);
+
+      const durSec = tone.durationMs / 1000.0;
+      const targetVol = Math.max(0.01, Math.min(1.0, tone.volPct / 100.0)) * 0.4;
+      const attackSec = Math.min(0.005, durSec * 0.1);
+      const releaseSec = Math.min(0.005, durSec * 0.1);
+
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.linearRampToValueAtTime(targetVol, startTime + attackSec);
+      gain.gain.setValueAtTime(targetVol, startTime + durSec - releaseSec);
+      gain.gain.linearRampToValueAtTime(0.0001, startTime + durSec);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + durSec);
+
+      startTime += durSec;
+    });
+  } catch (err) {
+    console.warn("[PTT] Failed to play local roger beep:", err);
+  }
+}
+
 /**
  * Open the PTT Parameters mini panel / modal configuration dialog
  * @param {string|null} hid
@@ -222,6 +419,33 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
   body.appendChild(sliderContainer);
   body.appendChild(presetsRow);
 
+  const divider2 = document.createElement("div");
+  divider2.className = "ptt-config-divider";
+  divider2.style.margin = "12px 0 10px 0";
+
+  const currentRogerBeep = getHotspotRogerBeep(cid);
+  const currentRogerPattern = getHotspotRogerBeepPattern(cid);
+
+  const rogerContainer = document.createElement("div");
+  rogerContainer.className = "ptt-roger-container";
+  rogerContainer.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+      <label class="ptt-mode-opt" style="font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; margin: 0;">
+        <input type="checkbox" id="chkRogerBeep" class="ptt-mode-chk" ${currentRogerBeep ? "checked" : ""}>
+        <span>${window.t ? window.t("ptt.roger_beep", {}, "Роджер-бип (сигнал окончания передачи)") : "Роджер-бип (сигнал окончания передачи)"}</span>
+      </label>
+    </div>
+    <div style="margin-top: 8px;">
+      <input type="text" id="txtRogerBeepPattern" class="rec-text-input" value="${currentRogerPattern}" placeholder="600-110-33, 840-50-15" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; font-family: monospace; font-size: 0.85rem; transition: opacity 0.15s ease; ${currentRogerBeep ? '' : 'opacity: 0.55;'}">
+      <div class="tot-config-desc" style="margin-top: 5px; font-size: 0.72rem; color: var(--text-muted, #8b949e); line-height: 1.3;">
+        ${window.t ? window.t("ptt.roger_beep_hint", {}, "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)") : "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)"}
+      </div>
+    </div>
+  `;
+
+  body.appendChild(divider2);
+  body.appendChild(rogerContainer);
+
   // Footer
   const footer = document.createElement("div");
   footer.className = "tot-config-footer";
@@ -241,9 +465,15 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
   const valueDisplay = popup.querySelector("#totValueDisplay");
   const chkHold = popup.querySelector("#chkPttHold");
   const chkToggle = popup.querySelector("#chkPttToggle");
+  const chkRoger = popup.querySelector("#chkRogerBeep");
+  const txtRogerPattern = popup.querySelector("#txtRogerBeepPattern");
   const saveBtn = popup.querySelector(".btn-tot-save");
   const cancelBtn = popup.querySelector(".btn-tot-cancel");
   const closeBtn = popup.querySelector(".tot-config-close");
+
+  chkRoger.addEventListener("change", () => {
+    txtRogerPattern.style.opacity = chkRoger.checked ? "1" : "0.55";
+  });
 
   // Mutually exclusive checkboxes
   chkHold.addEventListener("change", () => {
@@ -293,6 +523,11 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
 
     const chosenMode = chkToggle.checked ? "toggle" : "hold";
     setHotspotPttMode(cid, chosenMode);
+
+    const rogerChecked = chkRoger.checked;
+    const rogerPatternVal = txtRogerPattern.value.trim() || DEFAULT_ROGER_BEEP_PATTERN;
+    setHotspotRogerBeep(cid, rogerChecked);
+    setHotspotRogerBeepPattern(cid, rogerPatternVal);
 
     closeTotConfigModal();
     if (typeof window.showToast === "function") {
@@ -363,6 +598,12 @@ if (typeof window !== "undefined") {
   window.setHotspotTot = setHotspotTot;
   window.getHotspotPttMode = getHotspotPttMode;
   window.setHotspotPttMode = setHotspotPttMode;
+  window.getHotspotRogerBeep = getHotspotRogerBeep;
+  window.setHotspotRogerBeep = setHotspotRogerBeep;
+  window.getHotspotRogerBeepPattern = getHotspotRogerBeepPattern;
+  window.setHotspotRogerBeepPattern = setHotspotRogerBeepPattern;
+  window.parseTonePattern = parseTonePattern;
+  window.playLocalRogerBeep = playLocalRogerBeep;
   window.formatTotDuration = formatTotDuration;
   window.openTotConfigModal = openTotConfigModal;
   window.closeTotConfigModal = closeTotConfigModal;

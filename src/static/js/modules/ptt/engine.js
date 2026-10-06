@@ -7,7 +7,7 @@ import { getCountryInfo, updateFlagElement } from '../core/formatters.js';
 import { updateAllHotspotRecUI } from '../audio/routing.js';
 import { initAudio, applyTxDspSettings, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js';
 import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js';
-import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js';
+import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js';
 import { triggerHaptic } from '../core/haptic.js';
 
 let txStartTime = 0;
@@ -538,8 +538,20 @@ function _isVolumeDownPttEnabled() {
 
     triggerTactileVibrate([25, 25, 25]);
 
+    const rogerBeep = getHotspotRogerBeep(hid);
+    const rogerBeepPattern = rogerBeep ? getHotspotRogerBeepPattern(hid) : "";
+
+    if (rogerBeep) {
+      playLocalRogerBeep(rogerBeepPattern);
+    }
+
     if (window.ws && window.ws.readyState === WebSocket.OPEN) {
-      window.ws.send(JSON.stringify({ type: "ptt_release", hotspot_id: hid }));
+      window.ws.send(JSON.stringify({
+        type: "ptt_release",
+        hotspot_id: hid,
+        roger_beep: rogerBeep,
+        roger_beep_pattern: rogerBeepPattern
+      }));
     }
   }
 
