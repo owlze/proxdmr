@@ -251,7 +251,7 @@ function getCardPttTarget(card) {
 
   const infoEl = cardEl ? cardEl.querySelector(".ptt-target-info") : null;
   if (infoEl && infoEl.textContent) {
-    const m = infoEl.textContent.trim().match(/^(ID|TG)\s*(\d+)/i);
+    const m = infoEl.textContent.trim().match(/(?:TS\d+[^a-zA-Z0-9]+)?(ID|TG)\s*(\d+)/i);
     if (m) {
       if (m[1].toUpperCase() === "ID") isCaller = true;
       const parsed = parseInt(m[2], 10);

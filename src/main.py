@@ -1238,6 +1238,7 @@ async def get_index(request: Request):
         bg_color_light = getattr(s, "bg_color_light", "#f4f6f8") or "#f4f6f8"
         language = s.language
         simultaneous_slots = getattr(s, "simultaneous_slots", True)
+        check_mic_on_tx = getattr(s, "check_mic_on_tx", True)
         hamqth_username = getattr(s, "hamqth_username", "") or ""
         hamqth_password = getattr(s, "hamqth_password", "") or ""
 
@@ -1291,6 +1292,7 @@ async def get_index(request: Request):
         bg_color_light = "#f4f6f8"
         language = "ru"
         simultaneous_slots = True
+        check_mic_on_tx = True
         hamqth_username = ""
         hamqth_password = ""
 
@@ -1330,6 +1332,7 @@ async def get_index(request: Request):
             "bg_color_light": bg_color_light,
             "language": language,
             "simultaneous_slots": simultaneous_slots,
+            "check_mic_on_tx": check_mic_on_tx,
             "hamqth_username": hamqth_username,
             "hamqth_password": hamqth_password,
             "app_version": APP_VERSION,
@@ -1495,6 +1498,7 @@ class GeneralSettingsUpdate(BaseModel):
     bg_color_light: Optional[str] = None
     language: Optional[str] = None
     simultaneous_slots: Optional[bool] = None
+    check_mic_on_tx: Optional[bool] = None
     mute_on_ptt: Optional[bool] = None
     volume_down_ptt: Optional[bool] = None
     volume_up_ptt: Optional[bool] = None
@@ -1526,6 +1530,7 @@ async def get_general_settings(request: Request):
             "bg_color_light": getattr(s, "bg_color_light", "#f4f6f8") or "#f4f6f8",
             "language": s.language,
             "simultaneous_slots": s.simultaneous_slots,
+            "check_mic_on_tx": getattr(s, "check_mic_on_tx", True),
             "mute_on_ptt": s.mute_on_ptt,
             "volume_down_ptt": v_ptt,
             "volume_up_ptt": v_ptt,
@@ -1602,6 +1607,10 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         s.simultaneous_slots = update.simultaneous_slots
         changed = True
         await broadcast_user_json(uid, {"type": "simultaneous_slots_change", "enabled": s.simultaneous_slots})
+    if update.check_mic_on_tx is not None and update.check_mic_on_tx != getattr(s, "check_mic_on_tx", True):
+        s.check_mic_on_tx = update.check_mic_on_tx
+        changed = True
+        await broadcast_user_json(uid, {"type": "check_mic_on_tx_change", "enabled": s.check_mic_on_tx})
     if update.mute_on_ptt is not None and update.mute_on_ptt != s.mute_on_ptt:
         s.mute_on_ptt = update.mute_on_ptt
         changed = True
@@ -2667,41 +2676,41 @@ async def set_radio_tg(payload: dict, request: Request = None):
             hotspot_manager.clear_dynamic_tgs(target_hs.config.id, slot=slot, user_id=uid)
         elif new_tg > 0 and new_tg not in (4000, 9990):
             hotspot_manager.register_dynamic_tg(target_hs.config.id, slot, new_tg, user_id=uid)
-        if slot == 1:
-            target_hs.config.default_tg_ts1 = new_tg
-        else:
-            target_hs.config.default_tg_ts2 = new_tg
+        target_hs.config.default_tg_ts1 = new_tg
+        target_hs.config.default_tg_ts2 = new_tg
+        if hasattr(target_hs.config, "default_tg"):
+            target_hs.config.default_tg = new_tg
         for hs in user_sett.hotspots:
             if hs.id == target_hs.config.id:
-                if slot == 1:
-                    hs.default_tg_ts1 = new_tg
-                else:
-                    hs.default_tg_ts2 = new_tg
+                hs.default_tg_ts1 = new_tg
+                hs.default_tg_ts2 = new_tg
+                if hasattr(hs, "default_tg"):
+                    hs.default_tg = new_tg
                 break
         await save_user_settings(uid, user_sett.model_dump())
         if uid == 1:
             save_app_settings(user_sett)
 
-    if target_hs and target_hs.config.id == getattr(user_sett, "active_hotspot_id", None) and slot == u_radio_state.tx_slot:
+    if target_hs and target_hs.config.id == getattr(user_sett, "active_hotspot_id", None):
         u_radio_state.active_tg = new_tg
 
-    logger.info(f"[TG] API (user {uid}) updated Hotspot {target_hs.config.id if target_hs else 'default'} Slot {slot} TG to {new_tg}")
+    logger.info(f"[TG] API (user {uid}) updated Hotspot {target_hs.config.id if target_hs else 'default'} TG to {new_tg}")
     await broadcast_json({
         "type": "tg_change",
         "user_id": uid,
         "hotspot_id": target_hs.config.id if target_hs else "",
         "active_tg": new_tg,
         "slot": slot,
-        "tg_ts1": target_hs.config.default_tg_ts1 if target_hs else 91,
-        "tg_ts2": target_hs.config.default_tg_ts2 if target_hs else 2501
+        "tg_ts1": new_tg,
+        "tg_ts2": new_tg
     }, user_id=uid)
     return {
         "status": "ok",
         "hotspot_id": target_hs.config.id if target_hs else "",
         "slot": slot,
         "tg": new_tg,
-        "tg_ts1": target_hs.config.default_tg_ts1 if target_hs else 91,
-        "tg_ts2": target_hs.config.default_tg_ts2 if target_hs else 2501
+        "tg_ts1": new_tg,
+        "tg_ts2": new_tg
     }
 
 def _get_bm_device_and_key(
@@ -4741,9 +4750,10 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     u_radio_state = get_user_radio_state(ws_user_id)
 
     active_hs = hotspot_manager.get_active_runtime(ws_user_id)
-    tg_ts1 = active_hs.config.default_tg_ts1 if active_hs else 91
-    tg_ts2 = active_hs.config.default_tg_ts2 if active_hs else 2501
-    active_tg = tg_ts1 if u_radio_state.tx_slot == 1 else tg_ts2
+    default_unified_tg = getattr(active_hs.config, "default_tg", getattr(active_hs.config, "default_tg_ts2", 2501)) if active_hs else 2501
+    tg_ts1 = default_unified_tg
+    tg_ts2 = default_unified_tg
+    active_tg = u_radio_state.active_tg or default_unified_tg
     apk_meta = get_current_apk_metadata()
 
     wp_dir = STATIC_DIR / "img" / "wallpapers"
@@ -4937,13 +4947,12 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     if new_slot in (1, 2):
                         if target_hs and target_hs.config.id == user_settings.active_hotspot_id:
                             u_radio_state.tx_slot = new_slot
-                            u_radio_state.active_tg = target_hs.config.default_tg_ts1 if new_slot == 1 else target_hs.config.default_tg_ts2
                         logger.info(f"[SLOT] Switched user {ws_login} Hotspot {target_hs.config.id if target_hs else ''} slot to {new_slot}")
                         await broadcast_user_json(ws_user_id, {
                             "type": "slot_change",
                             "hotspot_id": target_hs.config.id if target_hs else "",
                             "slot": new_slot,
-                            "active_tg": (target_hs.config.default_tg_ts1 if new_slot == 1 else target_hs.config.default_tg_ts2) if target_hs else u_radio_state.active_tg
+                            "active_tg": u_radio_state.active_tg
                         }, exclude=websocket)
 
                 elif msg_type == "set_tg":
@@ -4956,30 +4965,30 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                             hotspot_manager.clear_dynamic_tgs(target_hs.config.id, slot=slot, user_id=ws_user_id)
                         elif new_tg > 0 and new_tg not in (4000, 9990):
                             hotspot_manager.register_dynamic_tg(target_hs.config.id, slot, new_tg, user_id=ws_user_id)
-                        if slot == 1:
-                            target_hs.config.default_tg_ts1 = new_tg
-                        else:
-                            target_hs.config.default_tg_ts2 = new_tg
+                        target_hs.config.default_tg_ts1 = new_tg
+                        target_hs.config.default_tg_ts2 = new_tg
+                        if hasattr(target_hs.config, "default_tg"):
+                            target_hs.config.default_tg = new_tg
                         for hs in user_settings.hotspots:
                             if hs.id == target_hs.config.id:
-                                if slot == 1:
-                                    hs.default_tg_ts1 = new_tg
-                                else:
-                                    hs.default_tg_ts2 = new_tg
+                                hs.default_tg_ts1 = new_tg
+                                hs.default_tg_ts2 = new_tg
+                                if hasattr(hs, "default_tg"):
+                                    hs.default_tg = new_tg
                                 break
                         await save_user_settings(ws_user_id, user_settings.model_dump())
                         if ws_user_id == 1:
                             save_app_settings(user_settings)
-                    if target_hs and target_hs.config.id == user_settings.active_hotspot_id and slot == u_radio_state.tx_slot:
+                    if target_hs and target_hs.config.id == user_settings.active_hotspot_id:
                         u_radio_state.active_tg = new_tg
-                    logger.info(f"[TG] WS Switched user {ws_login} Hotspot {target_hs.config.id if target_hs else ''} Slot {slot} TG to {new_tg}")
+                    logger.info(f"[TG] WS Switched user {ws_login} Hotspot {target_hs.config.id if target_hs else ''} TG to {new_tg}")
                     await broadcast_user_json(ws_user_id, {
                         "type": "tg_change",
                         "hotspot_id": target_hs.config.id if target_hs else "",
                         "active_tg": new_tg,
                         "slot": slot,
-                        "tg_ts1": target_hs.config.default_tg_ts1 if target_hs else 91,
-                        "tg_ts2": target_hs.config.default_tg_ts2 if target_hs else 2501
+                        "tg_ts1": new_tg,
+                        "tg_ts2": new_tg
                     }, exclude=websocket)
 
                 elif msg_type == "set_loopback":
@@ -5189,14 +5198,26 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     }, exclude=websocket)
 
                 elif msg_type == "set_simultaneous_slots":
-                    enabled = True
-                    user_settings.simultaneous_slots = True
+                    enabled = bool(data.get("enabled", True))
+                    user_settings.simultaneous_slots = enabled
                     await save_user_settings(ws_user_id, user_settings.model_dump())
                     if ws_user_id == 1:
                         save_app_settings(user_settings)
                     logger.info(f"[SETTINGS] Simultaneous slots set to {enabled}")
                     await broadcast_user_json(ws_user_id, {
                         "type": "simultaneous_slots_change",
+                        "enabled": enabled
+                    }, exclude=websocket)
+
+                elif msg_type == "set_check_mic_on_tx":
+                    enabled = bool(data.get("enabled", True))
+                    user_settings.check_mic_on_tx = enabled
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    logger.info(f"[SETTINGS] Check mic on TX set to {enabled}")
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "check_mic_on_tx_change",
                         "enabled": enabled
                     }, exclude=websocket)
 

@@ -988,7 +988,14 @@ export function handleServerMessage(msg) {
         if (msg.app_settings.simultaneous_slots !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_simultaneous_slots`, msg.app_settings.simultaneous_slots ? "true" : "false");
           localStorage.setItem("proxdmr_simultaneous_slots", msg.app_settings.simultaneous_slots ? "true" : "false");
-          setSimultaneousSlotsEnabled(msg.app_settings.simultaneous_slots);
+          setSimultaneousSlotsEnabled(msg.app_settings.simultaneous_slots, false);
+        }
+        if (msg.app_settings.check_mic_on_tx !== undefined) {
+          if (uid) localStorage.setItem(`proxdmr_u${uid}_check_mic_on_tx`, msg.app_settings.check_mic_on_tx ? "true" : "false");
+          localStorage.setItem("proxdmr_check_mic_on_tx", msg.app_settings.check_mic_on_tx ? "true" : "false");
+          if (typeof window.setCheckMicOnTxEnabled === "function") {
+            window.setCheckMicOnTxEnabled(msg.app_settings.check_mic_on_tx, false);
+          }
         }
         if (msg.app_settings.mute_on_ptt !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_mute_on_ptt`, msg.app_settings.mute_on_ptt ? "true" : "false");
@@ -1055,33 +1062,25 @@ export function handleServerMessage(msg) {
 
       if (msg.state) {
         const uid = window.currentUserId;
+        const savedTg = parseInt((uid ? localStorage.getItem(`proxdmr_u${uid}_tg`) : null) || localStorage.getItem("proxdmr_tg"), 10);
         const savedTg1 = parseInt((uid ? localStorage.getItem(`proxdmr_u${uid}_tg_ts1`) : null) || localStorage.getItem("proxdmr_tg_ts1"), 10);
         const savedTg2 = parseInt((uid ? localStorage.getItem(`proxdmr_u${uid}_tg_ts2`) : null) || localStorage.getItem("proxdmr_tg_ts2"), 10);
+        const unifiedTg = (!isNaN(savedTg) && savedTg > 0) ? savedTg : ((!isNaN(savedTg2) && savedTg2 > 0) ? savedTg2 : ((!isNaN(savedTg1) && savedTg1 > 0) ? savedTg1 : (msg.state.active_tg || 2501)));
 
-        if (!isNaN(savedTg1) && savedTg1 > 0) {
-          tgTs1 = savedTg1;
-        } else if (msg.state.tg_ts1) {
-          tgTs1 = msg.state.tg_ts1;
-          if (uid) localStorage.setItem(`proxdmr_u${uid}_tg_ts1`, tgTs1.toString());
-          localStorage.setItem("proxdmr_tg_ts1", tgTs1.toString());
-        }
-
-        if (!isNaN(savedTg2) && savedTg2 > 0) {
-          tgTs2 = savedTg2;
-        } else if (msg.state.tg_ts2) {
-          tgTs2 = msg.state.tg_ts2;
-          if (uid) localStorage.setItem(`proxdmr_u${uid}_tg_ts2`, tgTs2.toString());
-          localStorage.setItem("proxdmr_tg_ts2", tgTs2.toString());
-        }
+        tgTs1 = unifiedTg;
+        tgTs2 = unifiedTg;
+        if (uid) localStorage.setItem(`proxdmr_u${uid}_tg`, unifiedTg.toString());
+        localStorage.setItem("proxdmr_tg", unifiedTg.toString());
+        localStorage.setItem("proxdmr_tg_ts1", unifiedTg.toString());
+        localStorage.setItem("proxdmr_tg_ts2", unifiedTg.toString());
 
         const initialSlot = (msg.state && msg.state.tx_slot) || parseInt((uid ? localStorage.getItem(`proxdmr_u${uid}_active_slot`) : null) || localStorage.getItem("proxdmr_active_slot"), 10) || 2;
         setActiveSlot(initialSlot, false);
         updateTgDisplay();
 
         if (ws && ws.readyState === WebSocket.OPEN) {
-          const curActiveTg = initialSlot === 1 ? tgTs1 : tgTs2;
-          if (curActiveTg !== msg.state.active_tg) {
-            ws.send(JSON.stringify({ type: "set_tg", tg: curActiveTg, slot: initialSlot }));
+          if (unifiedTg !== msg.state.active_tg) {
+            ws.send(JSON.stringify({ type: "set_tg", tg: unifiedTg, slot: initialSlot }));
           }
         }
 
@@ -1288,7 +1287,11 @@ export function handleServerMessage(msg) {
     } else if (msg.type === "haptic_duration_change") {
       setHapticDuration(Number(msg.duration), false);
     } else if (msg.type === "simultaneous_slots_change") {
-      setSimultaneousSlotsEnabled(Boolean(msg.enabled));
+      setSimultaneousSlotsEnabled(Boolean(msg.enabled), false);
+    } else if (msg.type === "check_mic_on_tx_change") {
+      if (typeof window.setCheckMicOnTxEnabled === "function") {
+        window.setCheckMicOnTxEnabled(Boolean(msg.enabled), false);
+      }
     } else if (msg.type === "vocoder_settings_change") {
       if (window.updateVocoderUI) {
         window.updateVocoderUI(msg.settings);
@@ -1687,52 +1690,29 @@ export function handleServerMessage(msg) {
       if (card) {
         setCardSlot(card, msg.slot, false);
       }
-      if (msg.active_tg) {
-        const hsObj = getCurrentHotspots().find(h => h.id === hid);
-        if (hsObj) {
-          if (msg.slot === 1) hsObj.default_tg_ts1 = msg.active_tg;
-          else hsObj.default_tg_ts2 = msg.active_tg;
-        }
-        if (hid === activeHotspotId) {
-          if (msg.slot === 1) {
-            tgTs1 = msg.active_tg;
-            localStorage.setItem("proxdmr_tg_ts1", tgTs1.toString());
-          } else {
-            tgTs2 = msg.active_tg;
-            localStorage.setItem("proxdmr_tg_ts2", tgTs2.toString());
-          }
-        }
-        if (card) updateCardTgDisplay(card);
-      }
     } else if (msg.type === "tg_change") {
       const hid = msg.hotspot_id || activeHotspotId;
       const hsObj = getCurrentHotspots().find(h => h.id === hid);
+      const newTg = msg.active_tg || msg.tg || 2501;
       if (hsObj) {
-        if (msg.tg_ts1) hsObj.default_tg_ts1 = msg.tg_ts1;
-        if (msg.tg_ts2) hsObj.default_tg_ts2 = msg.tg_ts2;
-        if (msg.slot === 1 && msg.active_tg) hsObj.default_tg_ts1 = msg.active_tg;
-        if (msg.slot === 2 && msg.active_tg) hsObj.default_tg_ts2 = msg.active_tg;
+        hsObj.default_tg = newTg;
+        hsObj.default_tg_ts1 = newTg;
+        hsObj.default_tg_ts2 = newTg;
       }
+      localStorage.setItem(`proxdmr_tg_${hid}`, newTg.toString());
+      localStorage.setItem(`proxdmr_tg_${hid}_ts1`, newTg.toString());
+      localStorage.setItem(`proxdmr_tg_${hid}_ts2`, newTg.toString());
       if (hid === activeHotspotId) {
-        if (msg.tg_ts1) {
-          tgTs1 = msg.tg_ts1;
-          localStorage.setItem("proxdmr_tg_ts1", tgTs1.toString());
-        }
-        if (msg.tg_ts2) {
-          tgTs2 = msg.tg_ts2;
-          localStorage.setItem("proxdmr_tg_ts2", tgTs2.toString());
-        }
-        if (msg.slot === 1 && msg.active_tg) {
-          tgTs1 = msg.active_tg;
-          localStorage.setItem("proxdmr_tg_ts1", tgTs1.toString());
-        } else if (msg.slot === 2 && msg.active_tg) {
-          tgTs2 = msg.active_tg;
-          localStorage.setItem("proxdmr_tg_ts2", tgTs2.toString());
-        }
+        tgTs1 = newTg;
+        tgTs2 = newTg;
+        localStorage.setItem("proxdmr_tg", newTg.toString());
+        localStorage.setItem("proxdmr_tg_ts1", newTg.toString());
+        localStorage.setItem("proxdmr_tg_ts2", newTg.toString());
       }
       const card = document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
       if (card) {
         updateCardTgDisplay(card);
+        updateCardPttHint(card);
       } else {
         updateAllHotspotsTgDisplay();
       }

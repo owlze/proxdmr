@@ -1042,17 +1042,22 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       }
 
       if (!window.micStream && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const ns = localStorage.getItem("proxdmr_tx_ns") !== "false";
-        const agc = localStorage.getItem("proxdmr_tx_agc") === "true";
-        const aec = localStorage.getItem("proxdmr_tx_aec") !== "false";
-        window.micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: aec,
-            noiseSuppression: ns,
-            autoGainControl: agc
-          },
-          video: false
-        });
+        try {
+          const ns = localStorage.getItem("proxdmr_tx_ns") !== "false";
+          const agc = localStorage.getItem("proxdmr_tx_agc") === "true";
+          const aec = localStorage.getItem("proxdmr_tx_aec") !== "false";
+          window.micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: aec,
+              noiseSuppression: ns,
+              autoGainControl: agc
+            },
+            video: false
+          });
+        } catch (micErr) {
+          console.warn("[AUDIO] getUserMedia error or device missing:", micErr);
+          window.micStream = null;
+        }
       }
 
       if (window.micStream && !window.micSourceNode) {
@@ -1100,15 +1105,26 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         window.micStream.getAudioTracks().forEach(t => {
           t.enabled = true;
           t.onended = () => {
-            console.warn("[AUDIO] Microphone track ended unexpectedly");
-            isAudioReady = false;
-            if (window.isPttPressed && typeof window.stopTransmission === "function") {
-              window.stopTransmission();
-              if (typeof window.showToast === "function") {
-                const msg = window.t
-                  ? window.t("ptt.mic_disconnected_toast", {}, "⚠️ Микрофон отключен во время передачи!")
-                  : "⚠️ Микрофон отключен во время передачи!";
-                window.showToast(msg, 3500);
+            const checkMic = (typeof window.isCheckMicOnTxEnabled === "function")
+              ? window.isCheckMicOnTxEnabled()
+              : (localStorage.getItem("proxdmr_check_mic_on_tx") !== "false");
+
+            if (checkMic) {
+              console.warn("[AUDIO] Microphone track ended unexpectedly");
+              isAudioReady = false;
+              if (window.isPttPressed && typeof window.stopTransmission === "function") {
+                window.stopTransmission();
+                if (typeof window.showToast === "function") {
+                  const msg = window.t
+                    ? window.t("ptt.mic_disconnected_toast", {}, "⚠️ Микрофон отключен во время передачи!")
+                    : "⚠️ Микрофон отключен во время передачи!";
+                  window.showToast(msg, 3500);
+                }
+              }
+            } else {
+              console.warn("[AUDIO] Microphone track ended, but mic check is disabled. Continuing transmission with silence fallback.");
+              if (window.isPttPressed && typeof window.ensureTxSilenceFallback === "function") {
+                window.ensureTxSilenceFallback();
               }
             }
           };

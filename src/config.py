@@ -37,6 +37,8 @@ class HotspotConfig(BaseModel):
     color_code: int = 1
     default_tg_ts1: int = 9990
     default_tg_ts2: int = 9990
+    default_tg: int = 2501
+    default_slot: int = 2
     autoconnect: bool = True
     rx_gain: float = 1.0
     tx_gain: float = 1.0
@@ -58,6 +60,7 @@ class AppSettings(BaseModel):
     haptic_feedback: bool = True
     haptic_duration: int = 45
     simultaneous_slots: bool = True
+    check_mic_on_tx: bool = True
     theme: str = "dark"
     bg_type: str = "pattern"
     bg_color: str = "#0f1115"

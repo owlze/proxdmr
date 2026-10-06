@@ -184,6 +184,7 @@ def get_default_settings(login: str = "") -> dict:
         "haptic_feedback": True,
         "haptic_duration": 45,
         "simultaneous_slots": True,
+        "check_mic_on_tx": True,
         "theme": "dark",
         "bg_type": "pattern",
         "bg_color": "#0f1115",

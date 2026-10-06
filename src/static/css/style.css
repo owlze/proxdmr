@@ -2948,7 +2948,22 @@ select option:focus {
   text-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
 }
 
+.ptt-button .ptt-slot-badge.slot-selected {
+  color: #58a6ff;
+  font-weight: 800;
+  opacity: 1;
+  text-shadow: 0 0 6px rgba(88, 166, 255, 0.7);
+}
+
+[data-theme="light"] .ptt-button .ptt-slot-badge.slot-selected {
+  color: #1f6feb;
+  font-weight: 800;
+  opacity: 1;
+  text-shadow: 0 0 6px rgba(31, 111, 235, 0.4);
+}
+
 .ptt-button .ptt-target-info {
+  display: block;
   font-size: 0.78rem;
   font-weight: 800;
   color: #ffffff;
@@ -2959,8 +2974,10 @@ select option:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
-  text-align: center;
+  text-align: right;
   width: 100%;
+  padding: 0 8px 0 36px;
+  box-sizing: border-box;
   margin: 0;
 }
 
@@ -14223,6 +14240,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 
   .ptt-target-info {
     font-size: 0.74rem !important;
+    padding-right: 4px !important;
   }
 
   .ptt-slots-subrow {

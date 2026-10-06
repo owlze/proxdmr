@@ -69,12 +69,15 @@
     "450": { name: "Южная Корея", name_en: "South Korea", flag: "🇰🇷" },
     "454": { name: "Гонконг", name_en: "Hong Kong", flag: "🇭🇰" },
     "460": { name: "Китай", name_en: "China", flag: "🇨🇳" },
+    "461": { name: "Китай", name_en: "China", flag: "🇨🇳" },
+    "467": { name: "Тайвань", name_en: "Taiwan", flag: "🇹🇼" },
     "502": { name: "Малайзия", name_en: "Malaysia", flag: "🇲🇾" },
     "505": { name: "Австралия", name_en: "Australia", flag: "🇦🇺" },
     "512": { name: "Новая Зеландия", name_en: "New Zealand", flag: "🇳🇿" },
     "515": { name: "Филиппины", name_en: "Philippines", flag: "🇵🇭" },
     "520": { name: "Таиланд", name_en: "Thailand", flag: "🇹🇭" },
     "525": { name: "Индонезия", name_en: "Indonesia", flag: "🇮🇩" },
+    "602": { name: "Египет", name_en: "Egypt", flag: "🇪🇬" },
     "655": { name: "ЮАР", name_en: "South Africa", flag: "🇿🇦" },
     "722": { name: "Аргентина", name_en: "Argentina", flag: "🇦🇷" },
     "724": { name: "Бразилия", name_en: "Brazil", flag: "🇧🇷" },
@@ -107,7 +110,9 @@
     { prefix: /^YO/i, name: "Румыния", name_en: "Romania", flag: "🇷🇴" },
     { prefix: /^LZ/i, name: "Болгария", name_en: "Bulgaria", flag: "🇧🇬" },
     { prefix: /^4X|^4Z/i, name: "Израиль", name_en: "Israel", flag: "🇮🇱" },
-    { prefix: /^BY/i, name: "Китай", name_en: "China", flag: "🇨🇳" },
+    { prefix: /^BV|^BW|^BX|^BM|^BN|^BO|^BQ/i, name: "Тайвань", name_en: "Taiwan", flag: "🇹🇼" },
+    { prefix: /^B[ADGHIJLRTYZ]|^BY|^B[0-9]|^XS/i, name: "Китай", name_en: "China", flag: "🇨🇳" },
+    { prefix: /^SU|^6[AB]/i, name: "Египет", name_en: "Egypt", flag: "🇪🇬" },
     { prefix: /^PY/i, name: "Бразилия", name_en: "Brazil", flag: "🇧🇷" },
     { prefix: /^LU/i, name: "Аргентина", name_en: "Argentina", flag: "🇦🇷" },
     { prefix: /^4L/i, name: "Грузия", name_en: "Georgia", flag: "🇬🇪" },
@@ -140,10 +145,14 @@
     { prefix: /^XE/i, name: "Мексика", name_en: "Mexico", flag: "🇲🇽" }
   ];
 
-  export function getCountryInfo(dmrId, callsign = "") {
-    if (callsign && callsign !== "---" && !callsign.startsWith("ID:")) {
+  export function getCountryInfo(dmrId, callsign = "", countryName = "") {
+    let cs = (callsign || "").trim();
+    if (!cs && dmrId && typeof window !== "undefined" && window.USER_CALLSIGNS && window.USER_CALLSIGNS[dmrId]?.callsign) {
+      cs = window.USER_CALLSIGNS[dmrId].callsign.trim();
+    }
+    if (cs && cs !== "---" && !cs.startsWith("ID:")) {
       for (const item of CALLSIGN_PREFIX_MAP) {
-        if (item.prefix.test(callsign)) {
+        if (item.prefix.test(cs)) {
           return item;
         }
       }
@@ -154,8 +163,18 @@
       if (DMR_MCC_MAP[mcc]) {
         return DMR_MCC_MAP[mcc];
       }
+      // Inspect country if available from user database / argument
+      const uCountry = countryName || (typeof window !== "undefined" && window.USER_CALLSIGNS && window.USER_CALLSIGNS[dmrId]?.country);
+      if (uCountry) {
+        const uLower = String(uCountry).toLowerCase().trim();
+        for (const info of Object.values(DMR_MCC_MAP)) {
+          if ((info.name && info.name.toLowerCase() === uLower) || (info.name_en && info.name_en.toLowerCase() === uLower)) {
+            return info;
+          }
+        }
+      }
       // Also inspect TG_NAMES in case talkgroup name contains country name (e.g. "Казахстан / TG 4011")
-      const tgName = (window.TG_NAMES || {})[dmrId];
+      const tgName = (typeof window !== "undefined" && window.TG_NAMES || {})[dmrId];
       if (tgName) {
         const lower = tgName.toLowerCase();
         for (const info of Object.values(DMR_MCC_MAP)) {

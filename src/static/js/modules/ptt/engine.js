@@ -19,6 +19,60 @@ function getTotRemainingSeconds() {
   return totRemainingSeconds;
 }
 
+let txSilenceInterval = null;
+const SILENCE_BURST_BYTES = 960; // 60ms @ 8000Hz 16-bit PCM = 480 samples = 960 bytes
+
+export function isCheckMicOnTxEnabled() {
+  return localStorage.getItem("proxdmr_check_mic_on_tx") !== "false";
+}
+
+export function setCheckMicOnTxEnabled(enabled, syncServer = true) {
+  const boolVal = Boolean(enabled);
+  localStorage.setItem("proxdmr_check_mic_on_tx", boolVal ? "true" : "false");
+  const optChk = document.getElementById("optCheckMicOnTx");
+  if (optChk && optChk.checked !== boolVal) {
+    optChk.checked = boolVal;
+  }
+  if (syncServer) {
+    try {
+      fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ check_mic_on_tx: boolVal })
+      }).catch(() => {});
+    } catch (_) {}
+    if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
+      try {
+        window.ws.send(JSON.stringify({ type: "set_check_mic_on_tx", enabled: boolVal }));
+      } catch (_) {}
+    }
+    if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
+      window.scheduleSyncClientSettings();
+    }
+  }
+}
+
+export function ensureTxSilenceFallback() {
+  const hasLiveMic = Boolean(window.micStream && window.micStream.getAudioTracks().some(t => t.readyState === "live"));
+  if (!hasLiveMic && !txSilenceInterval) {
+    const silenceChunk = new Uint8Array(SILENCE_BURST_BYTES);
+    txSilenceInterval = setInterval(() => {
+      if (window.isPttPressed && window.ws && window.ws.readyState === WebSocket.OPEN) {
+        window.ws.send(silenceChunk);
+      } else {
+        stopTxSilenceFallback();
+      }
+    }, 60);
+  }
+}
+
+export function stopTxSilenceFallback() {
+  if (txSilenceInterval) {
+    clearInterval(txSilenceInterval);
+    txSilenceInterval = null;
+  }
+}
+
 function _switchActiveHotspot(hid) {
   if (typeof window !== "undefined" && typeof window.switchActiveHotspot === "function") {
     window.switchActiveHotspot(hid);
@@ -32,14 +86,16 @@ function _getHotspotLoop(hid) {
   return false;
 }
 
-function _getHotspotTg(hid, slot) {
+function _getHotspotTg(hid, slot = null) {
   if (typeof window !== "undefined" && typeof window.getHotspotTg === "function") {
     return window.getHotspotTg(hid, slot);
   }
-  const s = parseInt(slot, 10) || 1;
   const id = hid || (typeof window !== "undefined" && window.activeHotspotId) || "default";
-  const saved = localStorage.getItem(`proxdmr_tg_${id}_ts${s}`);
-  return saved ? parseInt(saved, 10) : (s === 1 ? 91 : 2501);
+  const unified = localStorage.getItem(`proxdmr_tg_${id}`) || localStorage.getItem("proxdmr_tg");
+  if (unified) return parseInt(unified, 10);
+  const s = parseInt(slot, 10) || 2;
+  const saved = localStorage.getItem(`proxdmr_tg_${id}_ts${s}`) || localStorage.getItem(`proxdmr_tg_ts${s}`);
+  return saved ? parseInt(saved, 10) : 2501;
 }
 
 function _getHotspotPttTarget(hid, slot = null) {
@@ -57,9 +113,8 @@ function _getHotspotPttTarget(hid, slot = null) {
       if (!isNaN(val) && val > 999999) return { id: val, type: "CALLER" };
     }
   }
-  const s = (slot === 1 || slot === 2) ? slot : (_getHotspotSlot(id) || 2);
-  const saved = localStorage.getItem(`proxdmr_tg_${id}_ts${s}`);
-  return { id: saved ? parseInt(saved, 10) : (s === 1 ? 91 : 2501), type: "TG" };
+  const fallbackTg = _getHotspotTg(id, slot);
+  return { id: fallbackTg, type: "TG" };
 }
 
 function _isMuteOnPttEnabled() {
@@ -212,8 +267,9 @@ function _isVolumeDownPttEnabled() {
         return;
       }
 
+      const checkMic = isCheckMicOnTxEnabled();
       const hasLiveMicTrack = Boolean(window.micStream && window.micStream.getAudioTracks().some(t => t.readyState === "live"));
-      if (!audioReady || !window.workletNode || !hasLiveMicTrack) {
+      if (checkMic && (!audioReady || !window.workletNode || !hasLiveMicTrack)) {
         console.warn("[TX] Microphone unavailable or inactive. Aborting transmission.");
         if (typeof window.showToast === "function") {
           const msg = window.t
@@ -380,6 +436,9 @@ function _isVolumeDownPttEnabled() {
       }
       startVuMeter();
 
+      // Fallback silence stream if transmitting without live microphone
+      ensureTxSilenceFallback();
+
       if (window.ws && window.ws.readyState === WebSocket.OPEN) {
         window.ws.send(JSON.stringify({
           type: "ptt_press",
@@ -400,6 +459,7 @@ function _isVolumeDownPttEnabled() {
     if (isTransmissionStarting) {
       cancelTransmissionStart = true;
     }
+    stopTxSilenceFallback();
     if (!window.isPttPressed) return;
     window.isPttPressed = false;
     const hid = window.activeTxHotspotId || window.activeHotspotId;
@@ -596,11 +656,17 @@ if (typeof window !== "undefined") {
   window.closeTotConfigModal = closeTotConfigModal;
   window.startTransmission = startTransmission;
   window.stopTransmission = stopTransmission;
+  window.isCheckMicOnTxEnabled = isCheckMicOnTxEnabled;
+  window.setCheckMicOnTxEnabled = setCheckMicOnTxEnabled;
+  window.ensureTxSilenceFallback = ensureTxSilenceFallback;
+  window.stopTxSilenceFallback = stopTxSilenceFallback;
   window.initPttEngine = initPttEngine;
 
   window.__proxdmr = window.__proxdmr || {};
   window.__proxdmr.startTransmission = startTransmission;
   window.__proxdmr.stopTransmission = stopTransmission;
+  window.__proxdmr.isCheckMicOnTxEnabled = isCheckMicOnTxEnabled;
+  window.__proxdmr.setCheckMicOnTxEnabled = setCheckMicOnTxEnabled;
   window.__proxdmr.triggerHardwarePtt = window.triggerHardwarePtt;
   window.__proxdmr.getHotspotTot = getHotspotTot;
   window.__proxdmr.setHotspotTot = setHotspotTot;

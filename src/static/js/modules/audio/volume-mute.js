@@ -101,11 +101,38 @@ export function isPttAudioMuted() {
 }
 
 export function isSimultaneousSlotsEnabled() {
-  return true; // Always enabled: both timeslots can always work and play audio simultaneously
+  return localStorage.getItem("proxdmr_simultaneous_slots") !== "false";
 }
 
-export function setSimultaneousSlotsEnabled(enabled) {
-  localStorage.setItem("proxdmr_simultaneous_slots", "true");
+export function setSimultaneousSlotsEnabled(enabled, syncServer = true) {
+  const boolVal = Boolean(enabled);
+  localStorage.setItem("proxdmr_simultaneous_slots", boolVal ? "true" : "false");
+  if (!boolVal) {
+    if (typeof window.enforceSingleTsMute === "function") {
+      window.enforceSingleTsMute();
+    }
+  }
+  const optSim = document.getElementById("optSimultaneousSlots");
+  if (optSim && optSim.checked !== boolVal) {
+    optSim.checked = boolVal;
+  }
+  if (syncServer) {
+    try {
+      fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simultaneous_slots: boolVal })
+      }).catch(() => {});
+    } catch (_) {}
+    if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
+      try {
+        window.ws.send(JSON.stringify({ type: "set_simultaneous_slots", enabled: boolVal }));
+      } catch (_) {}
+    }
+    if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
+      window.scheduleSyncClientSettings();
+    }
+  }
 }
 
 export function isApkClient() {
@@ -1110,6 +1137,8 @@ if (typeof window !== "undefined") {
   window.isApkClient = isApkClient;
   window.isVolumeUpPttEnabled = isVolumeUpPttEnabled;
   window.setVolumeUpPttEnabled = setVolumeUpPttEnabled;
+  window.isSimultaneousSlotsEnabled = isSimultaneousSlotsEnabled;
+  window.setSimultaneousSlotsEnabled = setSimultaneousSlotsEnabled;
   window.isVolumeDownPttEnabled = isVolumeDownPttEnabled;
   window.setVolumeDownPttEnabled = setVolumeDownPttEnabled;
   window.toggleVolumeDownPttQuick = toggleVolumeDownPttQuick;

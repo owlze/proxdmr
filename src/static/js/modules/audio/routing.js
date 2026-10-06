@@ -140,7 +140,40 @@ export function setHotspotMute(hid, slot, muted) {
 export function toggleHotspotMute(hid, slot) {
   const s = parseInt(slot, 10) || 1;
   const cur = getHotspotMute(hid, s);
-  setHotspotMute(hid, s, !cur);
+  const newMute = !cur;
+  setHotspotMute(hid, s, newMute);
+
+  // If simultaneous listening of both slots is disabled:
+  // toggling/unmuting one TS automatically switches the second TS to opposite state
+  const isDual = (typeof window.isSimultaneousSlotsEnabled === "function")
+    ? window.isSimultaneousSlotsEnabled()
+    : (localStorage.getItem("proxdmr_simultaneous_slots") !== "false");
+
+  if (!isDual) {
+    const otherS = (s === 1) ? 2 : 1;
+    setHotspotMute(hid, otherS, !newMute);
+  }
+}
+
+export function enforceSingleTsMute(hid) {
+  const isDual = (typeof window.isSimultaneousSlotsEnabled === "function")
+    ? window.isSimultaneousSlotsEnabled()
+    : (localStorage.getItem("proxdmr_simultaneous_slots") !== "false");
+
+  if (isDual) return;
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const targets = hid ? [hid] : (hsList.length ? hsList.map(h => h.id) : ["default"]);
+  targets.forEach(h => {
+    const m1 = getHotspotMute(h, 1);
+    const m2 = getHotspotMute(h, 2);
+    // If both slots are unmuted, keep the active/selected slot unmuted and mute the other
+    if (!m1 && !m2) {
+      const activeSlot = (typeof window._getHotspotSlot === "function") ? window._getHotspotSlot(h) : 1;
+      const keepSlot = (activeSlot === 2) ? 2 : 1;
+      const muteSlot = (keepSlot === 1) ? 2 : 1;
+      setHotspotMute(h, muteSlot, true);
+    }
+  });
 }
 
 export function syncAllSlotMutesToServer() {
@@ -761,6 +794,7 @@ if (typeof window !== "undefined") {
   window.getHotspotMute = getHotspotMute;
   window.setHotspotMute = setHotspotMute;
   window.toggleHotspotMute = toggleHotspotMute;
+  window.enforceSingleTsMute = enforceSingleTsMute;
   window.syncAllSlotMutesToServer = syncAllSlotMutesToServer;
   window.renderMutePanBtnContent = renderMutePanBtnContent;
   window.setupMutePanButtonEvents = setupMutePanButtonEvents;
@@ -788,6 +822,7 @@ if (typeof window !== "undefined") {
     getSoloMutedSet,
     saveSoloMutedSet,
     toggleHotspotMute,
+    enforceSingleTsMute,
     syncAllSlotMutesToServer,
     renderMutePanBtnContent,
     setupMutePanButtonEvents,

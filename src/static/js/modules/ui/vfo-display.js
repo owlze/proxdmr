@@ -128,30 +128,47 @@ export function setActiveSlot(slot, notifyServer = true) {
 }
 
 /**
- * Get configured or saved TG for a hotspot and slot
+ * Get configured or saved TG for a hotspot (unified across timeslots)
  * @param {string} [hid]
- * @param {number} slot
+ * @param {number} [slot=null]
  * @returns {number}
  */
-export function getHotspotTg(hid, slot) {
+export function getHotspotTg(hid, slot = null) {
   const id = hid || getActiveHotspotId();
   const hs = getCurrentHotspots().find(h => h.id === id);
-  const key = `proxdmr_tg_${id}_ts${slot}`;
-  const saved = localStorage.getItem(key);
+  const unifiedKey = `proxdmr_tg_${id}`;
+  const saved = localStorage.getItem(unifiedKey);
   if (saved) {
     const val = parseInt(saved, 10);
     if (!isNaN(val) && val > 0) return val;
   }
-  if (hs) {
-    return slot === 1 ? (hs.default_tg_ts1 || 91) : (hs.default_tg_ts2 || 2501);
+  if (slot) {
+    const legacySaved = localStorage.getItem(`proxdmr_tg_${id}_ts${slot}`);
+    if (legacySaved) {
+      const val = parseInt(legacySaved, 10);
+      if (!isNaN(val) && val > 0) return val;
+    }
   }
-  return slot === 1 ? 91 : 2501;
+  const s2 = localStorage.getItem(`proxdmr_tg_${id}_ts2`) || localStorage.getItem("proxdmr_tg_ts2");
+  if (s2) {
+    const val = parseInt(s2, 10);
+    if (!isNaN(val) && val > 0) return val;
+  }
+  const s1 = localStorage.getItem(`proxdmr_tg_${id}_ts1`) || localStorage.getItem("proxdmr_tg_ts1");
+  if (s1) {
+    const val = parseInt(s1, 10);
+    if (!isNaN(val) && val > 0) return val;
+  }
+  if (hs) {
+    return hs.default_tg || hs.default_tg_ts2 || hs.default_tg_ts1 || 2501;
+  }
+  return 2501;
 }
 
 /**
  * Get unified PTT target for a hotspot (TG or Private ID).
  * If a private call (CALLER/ID) is explicitly selected, that target is used.
- * Otherwise, the target is the slot's configured TalkGroup.
+ * Otherwise, the target is the unified TalkGroup assigned to PTT.
  * Background incoming traffic never hijacks the PTT target.
  * @param {string} [hid]
  * @param {number|null} [targetSlot=null]
@@ -186,9 +203,8 @@ export function getHotspotPttTarget(hid, targetSlot = null) {
     }
   }
 
-  // 3. Fallback: slot 2 or slot 1 configured TG (per-slot, never overwritten by RX!)
-  const slot = (targetSlot === 1 || targetSlot === 2) ? targetSlot : ((card && card._activeSlot) || getHotspotSlot(id) || 2);
-  const fallbackTg = getHotspotTg(id, slot);
+  // 3. Fallback: single hotspot TG assigned to PTT (independent of slot)
+  const fallbackTg = getHotspotTg(id);
   const res = { id: fallbackTg, type: "TG" };
   if (card) card._pttTarget = res;
   return res;
@@ -264,12 +280,12 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
     descText = getCleanTgDesc(curTg, rawName);
   }
 
-  // TS1 and TS2 stay clean grey badges; remove legacy active/inactive state classes
+  // Highlight active slot badge on PTT button
   if (ts1El) {
-    ts1El.classList.remove("slot-active", "slot-inactive");
+    ts1El.classList.toggle("slot-selected", effectiveSlot === 1);
   }
   if (ts2El) {
-    ts2El.classList.remove("slot-active", "slot-inactive");
+    ts2El.classList.toggle("slot-selected", effectiveSlot === 2);
   }
   if (legacyBadge) {
     const slot = (targetSlot === 1 || targetSlot === 2) ? targetSlot : (card._activeSlot || getHotspotSlot(cid));
@@ -527,17 +543,15 @@ export function updateCardTgDisplay(card) {
         callerCountryEl.style.filter = "none";
       }
       if (tgFlagEl) {
-        updateFlagElement(tgFlagEl, defCountry, defTg === 9990);
+        updateFlagElement(tgFlagEl, null, false);
+        tgFlagEl.innerHTML = "";
         tgFlagEl.style.filter = "none";
       }
       if (tgTextEl) {
-        const tgTitle = (typeof window !== "undefined" && window.t)
-          ? window.t("vfo.set_tg_tx_title", { tg: defTg })
-          : `Задать TG ${defTg} для передачи на этом хотспоте`;
-        tgTextEl.innerHTML = renderTgTextHtml(defTg, "TG", defTgName, tgTitle);
-        tgTextEl.dataset.tgId = defTg;
+        tgTextEl.innerHTML = "";
+        tgTextEl.removeAttribute("title");
+        delete tgTextEl.dataset.tgId;
         tgTextEl.style.filter = "none";
-        tgTextEl.title = tgTitle;
       }
     }
   }
@@ -547,14 +561,10 @@ export function updateCardTgDisplay(card) {
   const vfo2 = card.querySelector(".vfo-ts2-row");
   if (vfo1) vfo1.classList.remove("active-ptt-vfo");
   if (vfo2) vfo2.classList.remove("active-ptt-vfo");
-  const slot = card._activeSlot || getHotspotSlot(cid);
 
-  const pttTarget = getHotspotPttTarget(cid, slot);
-  const curActiveTg = pttTarget.id;
   const quickInp = card.querySelector(".quick-tg-input");
-  if (quickInp && !quickInp.value) {
-    const userCalls = getUserCallsigns();
-    quickInp.placeholder = (curActiveTg > 999999 || pttTarget.type === "CALLER" || userCalls[curActiveTg]) ? `ID ${curActiveTg}` : `TG ${curActiveTg}`;
+  if (quickInp) {
+    quickInp.placeholder = "TG #";
   }
 
   updateCardPttHint(card);
@@ -578,7 +588,7 @@ export function updateTgDisplay() {
 }
 
 /**
- * Set TalkGroup for a specific hotspot and timeslot
+ * Set TalkGroup for a specific hotspot (unified across timeslots)
  * @param {string} hid
  * @param {number} slot
  * @param {number} tg
@@ -587,24 +597,32 @@ export function updateTgDisplay() {
 export function setHotspotTg(hid, slot, tg, notifyServer = true) {
   const activeHid = getActiveHotspotId();
   const id = hid || activeHid;
-  const s = slot === 1 ? 1 : 2;
+  const s = (slot === 1 || slot === 2) ? slot : (getHotspotSlot(id) || 2);
   const hs = getCurrentHotspots().find(h => h.id === id);
   if (hs) {
-    if (s === 1) hs.default_tg_ts1 = tg;
-    else hs.default_tg_ts2 = tg;
+    hs.default_tg = tg;
+    hs.default_tg_ts1 = tg;
+    hs.default_tg_ts2 = tg;
   }
-  localStorage.setItem(`proxdmr_tg_${id}_ts${s}`, tg.toString());
+  localStorage.setItem(`proxdmr_tg_${id}`, tg.toString());
+  localStorage.setItem(`proxdmr_tg_${id}_ts1`, tg.toString());
+  localStorage.setItem(`proxdmr_tg_${id}_ts2`, tg.toString());
 
   // Also update unified PTT target
   setHotspotPttTarget(id, tg, tg > 999999 ? "CALLER" : "TG");
 
   if (id === activeHid) {
-    updateActiveTgState(s, tg);
+    updateActiveTgState(1, tg);
+    updateActiveTgState(2, tg);
+    if (typeof window !== "undefined") {
+      window.activeTg = tg;
+    }
   }
 
   const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${id}"]`);
   if (targetCard) {
     updateCardTgDisplay(targetCard);
+    updateCardPttHint(targetCard);
   }
 
   const ws = getWs();

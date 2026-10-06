@@ -9,6 +9,7 @@
   "haptic_feedback": true,
   "haptic_duration": 45,
   "simultaneous_slots": true,
+  "check_mic_on_tx": true,
   "theme": "dark",
   "bg_type": "pattern",
   "bg_color": "#050f1d",

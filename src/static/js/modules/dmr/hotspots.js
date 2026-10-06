@@ -1507,7 +1507,7 @@ export function renderRadiosGrid() {
             switchActiveHotspot(cid);
             setHotspotTg(cid, slot, val, true);
             quickInput.value = "";
-            quickInput.placeholder = `TG ${val}`;
+            quickInput.placeholder = "TG #";
             const box = quickInput.closest(".quick-tg-box");
             if (box) {
               box.style.borderColor = "#2ea043";
@@ -1563,11 +1563,10 @@ export function renderRadiosGrid() {
       setCardSlot(card, curCardSlot, false);
       updateCardTgDisplay(card);
 
-      // Sync Quick TG placeholder
+      // Ensure static Quick TG placeholder
       const quickInp = card.querySelector(".quick-tg-input");
-      if (quickInp && !quickInp.value) {
-        const curTg = getHotspotTg(hs.id, curCardSlot);
-        quickInp.placeholder = `TG ${curTg}`;
+      if (quickInp) {
+        quickInp.placeholder = "TG #";
       }
 
       // Sync volume & mute UI on this card
@@ -1631,15 +1630,16 @@ export function applyActiveHotspotToUI() {
     const hs = currentHotspots.find(h => h.id === activeHotspotId) || currentHotspots[0];
     if (!hs) return;
 
-    // Respect saved talkgroups from localStorage, or fall back to hotspot config defaults
-    const savedTg1 = parseInt(localStorage.getItem("proxdmr_tg_ts1"), 10);
-    const savedTg2 = parseInt(localStorage.getItem("proxdmr_tg_ts2"), 10);
+    // Respect unified saved talkgroup from localStorage, or fall back to hotspot config defaults
+    const savedTg = parseInt(localStorage.getItem(`proxdmr_tg_${hs.id}`) || localStorage.getItem("proxdmr_tg") || localStorage.getItem("proxdmr_tg_ts2") || localStorage.getItem("proxdmr_tg_ts1"), 10);
+    const unifiedTg = (!isNaN(savedTg) && savedTg > 0) ? savedTg : (hs.default_tg || hs.default_tg_ts2 || hs.default_tg_ts1 || 2501);
 
-    tgTs1 = (!isNaN(savedTg1) && savedTg1 > 0) ? savedTg1 : (hs.default_tg_ts1 || 91);
-    tgTs2 = (!isNaN(savedTg2) && savedTg2 > 0) ? savedTg2 : (hs.default_tg_ts2 || 2501);
-
-    localStorage.setItem("proxdmr_tg_ts1", tgTs1.toString());
-    localStorage.setItem("proxdmr_tg_ts2", tgTs2.toString());
+    tgTs1 = unifiedTg;
+    tgTs2 = unifiedTg;
+    localStorage.setItem(`proxdmr_tg_${hs.id}`, unifiedTg.toString());
+    localStorage.setItem("proxdmr_tg", unifiedTg.toString());
+    localStorage.setItem("proxdmr_tg_ts1", unifiedTg.toString());
+    localStorage.setItem("proxdmr_tg_ts2", unifiedTg.toString());
 
     updateTgDisplay();
     updateBmStatus(hs.status, hs.detail, hs.id);

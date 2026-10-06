@@ -16,11 +16,34 @@ import {
   setVolumeUpPttEnabled,
   setVolumeDownPttEnabled,
   setHotspotVolumeSyncEnabled,
-  setSystemVolumeSyncEnabled
+  setSystemVolumeSyncEnabled,
+  isSimultaneousSlotsEnabled,
+  setSimultaneousSlotsEnabled
 } from "../audio/volume-mute.js";
+import {
+  isCheckMicOnTxEnabled,
+  setCheckMicOnTxEnabled
+} from "../ptt/engine.js";
 import { setHapticEnabled, setHapticDuration } from "../core/haptic.js";
 
 export function initGeneralSettings() {
+  const optSim = document.getElementById("optSimultaneousSlots");
+  if (optSim && !optSim._wired) {
+    optSim._wired = true;
+    optSim.checked = isSimultaneousSlotsEnabled();
+    optSim.addEventListener("change", () => {
+      setSimultaneousSlotsEnabled(optSim.checked, true);
+    });
+  }
+
+  const optCheckMic = document.getElementById("optCheckMicOnTx");
+  if (optCheckMic && !optCheckMic._wired) {
+    optCheckMic._wired = true;
+    optCheckMic.checked = isCheckMicOnTxEnabled();
+    optCheckMic.addEventListener("change", () => {
+      setCheckMicOnTxEnabled(optCheckMic.checked, true);
+    });
+  }
   const btnSave = document.getElementById("btnSaveGeneralSettings");
   if (!btnSave || btnSave._wired) return;
   btnSave._wired = true;
@@ -35,10 +58,15 @@ export function initGeneralSettings() {
     const optHamUser = document.getElementById("optHamQthUsername");
     const optHamPw = document.getElementById("optHamQthPassword");
 
+    const optSim = document.getElementById("optSimultaneousSlots");
+    const optCheckMic = document.getElementById("optCheckMicOnTx");
+
     const lang = optLang ? optLang.value : undefined;
     const muteOnPtt = optMute ? optMute.checked : undefined;
     const syncHs = optSyncHs ? optSyncHs.checked : undefined;
     const syncSys = optSyncSys ? optSyncSys.checked : undefined;
+    const simultaneousSlots = optSim ? optSim.checked : undefined;
+    const checkMicOnTx = optCheckMic ? optCheckMic.checked : undefined;
     const hapticFeedback = optHaptic ? optHaptic.checked : undefined;
     const hapticDuration = optHapticDur ? parseInt(optHapticDur.value, 10) : undefined;
     const hamUser = optHamUser ? optHamUser.value.trim() : undefined;
@@ -48,6 +76,8 @@ export function initGeneralSettings() {
     if (muteOnPtt !== undefined) setMuteOnPttEnabled(muteOnPtt, false);
     if (syncHs !== undefined) setHotspotVolumeSyncEnabled(syncHs, false);
     if (syncSys !== undefined) setSystemVolumeSyncEnabled(syncSys, false);
+    if (simultaneousSlots !== undefined) setSimultaneousSlotsEnabled(simultaneousSlots, false);
+    if (checkMicOnTx !== undefined) setCheckMicOnTxEnabled(checkMicOnTx, false);
     if (hapticFeedback !== undefined) setHapticEnabled(hapticFeedback, false);
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) setHapticDuration(hapticDuration, false);
 
@@ -56,6 +86,8 @@ export function initGeneralSettings() {
     if (muteOnPtt !== undefined) payload.mute_on_ptt = muteOnPtt;
     if (syncHs !== undefined) payload.sync_hotspot_volume = syncHs;
     if (syncSys !== undefined) payload.sync_system_volume = syncSys;
+    if (simultaneousSlots !== undefined) payload.simultaneous_slots = simultaneousSlots;
+    if (checkMicOnTx !== undefined) payload.check_mic_on_tx = checkMicOnTx;
     if (hapticFeedback !== undefined) payload.haptic_feedback = hapticFeedback;
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) payload.haptic_duration = hapticDuration;
     if (hamUser !== undefined) payload.hamqth_username = hamUser;
@@ -76,6 +108,12 @@ export function initGeneralSettings() {
       if (window.ws && window.ws.readyState === WebSocket.OPEN) {
         if (muteOnPtt !== undefined) {
           try { window.ws.send(JSON.stringify({ type: "set_mute_on_ptt", enabled: muteOnPtt })); } catch (_) {}
+        }
+        if (simultaneousSlots !== undefined) {
+          try { window.ws.send(JSON.stringify({ type: "set_simultaneous_slots", enabled: simultaneousSlots })); } catch (_) {}
+        }
+        if (checkMicOnTx !== undefined) {
+          try { window.ws.send(JSON.stringify({ type: "set_check_mic_on_tx", enabled: checkMicOnTx })); } catch (_) {}
         }
         if (lang !== undefined) {
           try { window.ws.send(JSON.stringify({ type: "set_language", language: lang })); } catch (_) {}
