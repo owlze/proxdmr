@@ -11,8 +11,8 @@ A web platform and gateway for the **DMR (BrandMeister)** amateur radio network:
 3. [Installation — Choose Your Method](#3-installation--choose-your-method)
    * [A. Linux / Raspberry Pi (Terminal)](#a-linux--raspberry-pi-terminal)
    * [B. Windows (Docker Desktop)](#b-windows-docker-desktop)
-   * [C. Synology NAS — via SSH](#c-synology-nas--via-ssh)
-   * [D. Synology NAS — via GUI (Container Manager)](#d-synology-nas--via-gui-container-manager)
+   * [C. Synology NAS — via GUI (Container Manager)](#c-synology-nas--via-gui-container-manager)
+   * [D. Synology NAS — via SSH](#d-synology-nas--via-ssh)
    * [E. Manual Start via Docker Compose (Any OS)](#e-manual-start-via-docker-compose-any-os)
    * [F. Run via Pre-Built Docker Image](#f-run-via-pre-built-docker-image)
 4. [First Launch and Sign In](#4-first-launch-and-sign-in)
@@ -100,46 +100,49 @@ sudo usermod -aG docker $USER   # then log out and back in
 
 *If Windows Defender Firewall prompts for Docker/`com.docker.backend`, allow access on **Private networks** so other local devices can connect.*
 
-### C. Synology NAS — via SSH
+### C. Synology NAS — via GUI (Container Manager)
 
-Suitable for DSM 7.x with **Container Manager** installed:
+No SSH or archive downloading required. Use the official pre-built image directly in Container Manager:
 
-1. Enable SSH: *Control Panel → Terminal & SNMP → Enable SSH service*.
-2. Upload `ProxDMR-Release.tar.gz` to a shared folder (e.g. `docker`) via File Station.
-3. Connect via SSH and run:
-   ```bash
-   cd /volume1/docker
-   sudo tar -xzf ProxDMR-Release.tar.gz
-   cd ProxDMR
-   sudo chmod +x setup.sh
-   sudo ./setup.sh
+1. In **File Station**, create a project folder (e.g. `docker/proxdmr`).
+2. Open **Container Manager → Project → Create**.
+   * **Project Name**: `proxdmr`
+   * **Path**: select `docker/proxdmr`
+   * **Source**: select **Create docker-compose.yml**
+3. Paste the following configuration directly into the editor:
+   ```yaml
+   version: '3.8'
+
+   services:
+     proxdmr:
+       image: ghcr.io/owlze/proxdmr:latest
+       container_name: proxdmr
+       restart: unless-stopped
+       ports:
+         - "8266:8266"
+         - "62031:62031/udp"
+       volumes:
+         - ./config:/app/config
+         - ./data:/app/data
+       environment:
+         - HOST_IP=192.168.1.50       # Your Synology local IP
+         - ADMIN_USER=admin
+         - ADMIN_PASSWORD=YourSecurePassword
    ```
-4. Complete the configuration prompts.
+4. Click **Next** → uncheck "Web portal" → **Done**.  
+   Container Manager will pull the pre-built image from GitHub Container Registry and start ProxDMR in seconds.
+5. If DSM Firewall is enabled (*Control Panel → Security → Firewall*), ensure incoming `8266/TCP` and `62031/UDP` are allowed.
 
-### D. Synology NAS — via GUI (Container Manager)
+### D. Synology NAS — via SSH
 
-No SSH required:
+Connect to your NAS via SSH and clone directly from GitHub:
 
-1. **Upload & Extract:**
-   * Open **File Station**, create a folder `docker/proxdmr`.
-   * Upload `ProxDMR-Release.tar.gz` (or `.zip`), right-click → **Extract Here**.
-   * Structure should be: `docker/proxdmr/ProxDMR/...` (containing `docker-compose.yml`, `Dockerfile`, `.env.example`).
-2. **Create `.env`:**
-   * In `ProxDMR`, duplicate `.env.example` and rename it to **`.env`**.
-   * Open `.env` in DSM Text Editor and specify:
-     ```ini
-     HOST_IP=192.168.1.50        # Local IP of your NAS
-     PORT=8266
-     ADMIN_USER=admin
-     ADMIN_PASSWORD=YourSecurePassword
-     ```
-3. **Create Project:**
-   * Open **Container Manager → Project → Create**.
-   * Project name: `proxdmr`. Path: select `docker/proxdmr/ProxDMR`.
-   * Source: **Use existing docker-compose.yml**.
-   * Next → uncheck "Web portal" → **Done**.
-   * Container Manager will build the image and start the container.
-4. **DSM Firewall** (if enabled): *Control Panel → Security → Firewall* — allow inbound `8266/TCP` and `62031/UDP`.
+```bash
+git clone https://github.com/owlze/proxdmr.git /volume1/docker/proxdmr
+cd /volume1/docker/proxdmr
+chmod +x setup.sh
+./setup.sh
+```
 
 ### E. Manual Start via Docker Compose (Any OS)
 
@@ -212,7 +215,7 @@ Voice models are downloaded on demand:
 
 ## 7. Android Application
 
-The mobile app provides a native Android client with low-latency PTT, background audio service, and Bluetooth PTT button support.
+The mobile app provides a native Android client with low-latency PTT and background audio service.
 
 1. **Download APK** from your server:
    ```text

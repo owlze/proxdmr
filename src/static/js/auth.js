@@ -1,13 +1,13 @@
 /**
- * ProxDMR Auth Module — Login, Register, Logout, Settings Export/Import
+ * ProxDMR Auth Module — Login, Logout, Settings Export/Import
  */
 (function () {
   'use strict';
 
   // --- DOM Elements ---
-  let authModal, loginForm, registerForm;
-  let loginError, registerError;
-  let loginBtn, registerBtn, showRegisterLink, showLoginLink, logoutBtn;
+  let authModal, loginForm;
+  let loginError;
+  let loginBtn, logoutBtn;
 
   // --- State ---
   let isAuthenticated = false;
@@ -123,19 +123,13 @@
 
   function clearErrors() {
     if (loginError) loginError.textContent = '';
-    if (registerError) registerError.textContent = '';
   }
 
   function initAuth() {
     authModal = document.getElementById('authModal');
     loginForm = document.getElementById('authLoginForm');
-    registerForm = document.getElementById('authRegisterForm');
     loginError = document.getElementById('authLoginError');
-    registerError = document.getElementById('authRegisterError');
     loginBtn = document.getElementById('authLoginBtn');
-    registerBtn = document.getElementById('authRegisterBtn');
-    showRegisterLink = document.getElementById('authShowRegister');
-    showLoginLink = document.getElementById('authShowLogin');
     logoutBtn = document.getElementById('btnLogout');
     const deleteBtn = document.getElementById('btnDeleteAccount');
     if (deleteBtn) {
@@ -166,24 +160,6 @@
       if (savedLogin) authLoginInput.value = savedLogin;
     }
 
-    // Tab switching
-    if (showRegisterLink) {
-      showRegisterLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        loginForm.style.display = 'none';
-        registerForm.style.display = 'block';
-        clearErrors();
-      });
-    }
-    if (showLoginLink) {
-      showLoginLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        registerForm.style.display = 'none';
-        loginForm.style.display = 'block';
-        clearErrors();
-      });
-    }
-
     // Login form submit
     if (loginBtn) {
       loginBtn.addEventListener('click', doLogin);
@@ -200,18 +176,6 @@
 
     // Password visibility toggles
     wirePasswordToggle('btnToggleAuthPassword', 'authPasswordInput');
-    wirePasswordToggle('btnToggleRegPassword', 'authRegPassword');
-    wirePasswordToggle('btnToggleRegConfirm', 'authRegConfirm');
-
-    // Register form submit
-    if (registerBtn) {
-      registerBtn.addEventListener('click', doRegister);
-    }
-    if (registerForm) {
-      registerForm.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); doRegister(); }
-      });
-    }
 
     // Logout
     if (logoutBtn) {
@@ -615,70 +579,6 @@
       if (loginError) loginError.textContent = (window.t ? window.t('auth.err_server_conn', {}, 'Ошибка подключения к серверу') : 'Ошибка подключения к серверу');
     } finally {
       if (loginBtn) loginBtn.disabled = false;
-    }
-  }
-
-  async function doRegister() {
-    clearErrors();
-    const login = document.getElementById('authRegLogin')?.value?.trim();
-    const password = document.getElementById('authRegPassword')?.value;
-    const confirm = document.getElementById('authRegConfirm')?.value;
-
-    if (!login || !password) {
-      if (registerError) registerError.textContent = (window.t ? window.t('auth.err_fill_all', {}, 'Заполните все поля') : 'Заполните все поля');
-      return;
-    }
-    if (password !== confirm) {
-      if (registerError) registerError.textContent = (window.t ? window.t('auth.err_pwd_mismatch', {}, 'Пароли не совпадают') : 'Пароли не совпадают');
-      return;
-    }
-    if (password.length < 6) {
-      if (registerError) registerError.textContent = (window.t ? window.t('auth.err_pwd_min_len', {}, 'Пароль должен быть не менее 6 символов') : 'Пароль должен быть не менее 6 символов');
-      return;
-    }
-
-    if (registerBtn) registerBtn.disabled = true;
-    try {
-      const resp = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ login, password }),
-      });
-      const data = await resp.json();
-      if (resp.ok) {
-        currentUser = data.user;
-        window.currentUserId = currentUser ? (currentUser.id || currentUser.user_id) : null;
-        isAuthenticated = true;
-        const token = data.token;
-        if (token) {
-          if (window.AndroidBridge && typeof window.AndroidBridge.saveAuthToken === 'function') {
-            window.AndroidBridge.saveAuthToken(token, currentUser?.login || login);
-          }
-          try {
-            localStorage.setItem('proxdmr_auth_token', token);
-            localStorage.setItem('proxdmr_auth_login', currentUser?.login || login);
-          } catch (e) {}
-        }
-        showModal(false);
-        if (logoutBtn) logoutBtn.style.display = '';
-        updateAccountUI();
-        // Clear local storage for new user isolation
-        clearLocalUserData();
-        if (token) {
-          try {
-            localStorage.setItem('proxdmr_auth_token', token);
-            localStorage.setItem('proxdmr_auth_login', currentUser?.login || login);
-          } catch (e) {}
-        }
-        location.reload();
-      } else {
-        if (registerError) registerError.textContent = data.detail || (window.t ? window.t('auth.err_reg_failed', {}, 'Ошибка регистрации') : 'Ошибка регистрации');
-      }
-    } catch (e) {
-      if (registerError) registerError.textContent = (window.t ? window.t('auth.err_server_conn', {}, 'Ошибка подключения к серверу') : 'Ошибка подключения к серверу');
-    } finally {
-      if (registerBtn) registerBtn.disabled = false;
     }
   }
 

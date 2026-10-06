@@ -544,7 +544,7 @@ async def api_auth_status():
     uc = await user_count()
     return {
         "is_first_run": (uc == 0),
-        "allow_registration": (os.getenv("ALLOW_REGISTRATION", "false").lower() in ("true", "1", "yes")) or (uc == 0)
+        "allow_registration": False,
     }
 
 
@@ -554,11 +554,9 @@ async def auth_register(body: AuthRegisterRequest, request: Request, response: R
     if _check_rate_limit(ip):
         raise HTTPException(status_code=429, detail="Слишком много попыток. Подождите минуту")
 
-    # Check if registration is allowed
-    allow_reg = os.getenv("ALLOW_REGISTRATION", "false").lower() in ("true", "1", "yes")
-    is_first = (await user_count() == 0)
-    if not allow_reg and not is_first:
-        raise HTTPException(status_code=403, detail="Регистрация новых пользователей отключена")
+    # Open registration is completely disabled; endpoint is only permitted for initial onboarding
+    if await user_count() > 0:
+        raise HTTPException(status_code=403, detail="Регистрация новых пользователей отключена. Новые аккаунты создаются администратором.")
 
     # Validate
     err = validate_login(body.login)
@@ -1346,7 +1344,7 @@ async def get_index(request: Request):
             "custom_bg_dark_url": custom_bg_dark_url,
             "custom_bg_light_url": custom_bg_light_url,
             "is_first_run": is_first_run,
-            "allow_registration": (os.getenv("ALLOW_REGISTRATION", "false").lower() in ("true", "1", "yes")) or is_first_run,
+            "allow_registration": False,
         }
     )
 
