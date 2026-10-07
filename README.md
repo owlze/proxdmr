@@ -1,4 +1,4 @@
-# ProxDMR 📻
+# ProxDMR
 
 ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to the **BrandMeister** amateur radio network via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
 
