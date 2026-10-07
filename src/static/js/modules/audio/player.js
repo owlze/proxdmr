@@ -4,6 +4,7 @@ import { showToast } from '../core/toast.js';
 export   class RecordingsManager {
     constructor() {
       this.audio = new Audio();
+      this.audio.crossOrigin = "anonymous";
       this.audio.preload = "auto";
       this.currentRecording = null;
       this.recordings = [];
@@ -1600,6 +1601,14 @@ export   class RecordingsManager {
         return;
       }
       if (this.audio.paused) {
+        const ap = window.audioPlayer || window.dmrAudioPlayer;
+        if (ap) {
+          if (typeof ap.ensureInitialized === "function") ap.ensureInitialized();
+          if (ap.audioCtx && ap.audioCtx.state === "suspended") {
+            ap.audioCtx.resume().catch(() => {});
+          }
+        }
+        this.syncVolumeWithHotspot();
         this.audio.play().catch(e => console.warn(e));
         this.updatePlayState(true);
         this.startSmoothProgress();
@@ -1767,24 +1776,53 @@ export   class RecordingsManager {
 
 
     syncVolumeWithHotspot() {
-      if (this.currentRecording && this.currentRecording.hotspot_id && this.audio) {
-        const hid = this.currentRecording.hotspot_id;
-        let isMuted = false;
-        let vol = 100;
-        
-        // Check global mute state (audio player bypasses Web Audio graph)
-        if (typeof window.isGlobalMuted === "function" && window.isGlobalMuted()) {
-          isMuted = true;
-        } else if (typeof window.isHotspotAudioMuted === "function") {
-          isMuted = window.isHotspotAudioMuted(hid);
+      if (!this.audio) return;
+      const rec = this.currentRecording;
+      const hid = (rec && rec.hotspot_id)
+        ? (window.resolveHotspotId ? window.resolveHotspotId(rec.hotspot_id) : rec.hotspot_id)
+        : (window.getActiveHotspotId ? window.getActiveHotspotId() : "default");
+
+      let isMuted = false;
+      let vol = 80;
+
+      // Check global mute state
+      if (typeof window.isGlobalAudioMuted === "function" && window.isGlobalAudioMuted()) {
+        isMuted = true;
+      } else if (typeof window.isGlobalMuted === "function" && window.isGlobalMuted()) {
+        isMuted = true;
+      } else if (typeof window.isHotspotAudioMuted === "function") {
+        isMuted = window.isHotspotAudioMuted(hid);
+      }
+      if (typeof window.getHotspotVolume === "function") {
+        vol = window.getHotspotVolume(hid);
+      }
+
+      const ap = window.audioPlayer || window.dmrAudioPlayer;
+      const attached = (ap && typeof ap.attachRecordingsAudio === "function")
+        ? ap.attachRecordingsAudio(this.audio)
+        : null;
+
+      if (attached && attached.gainNode) {
+        // Connected to Web Audio graph!
+        // HTMLMediaElement.volume stays at 1.0 (so volume is not squared).
+        // Gain is applied directly via Web Audio gainNode and routed to master limiter & master gain node.
+        if (this.audio.volume !== 1.0) {
+          try { this.audio.volume = 1.0; } catch (_) {}
         }
-        if (typeof window.getHotspotVolume === "function") {
-          vol = window.getHotspotVolume(hid);
+        const targetGain = isMuted ? 0.0 : Math.max(0, Math.min(2.5, vol / 100.0));
+        const now = (ap && ap.audioCtx) ? ap.audioCtx.currentTime : 0;
+        try {
+          attached.gainNode.gain.cancelScheduledValues(now);
+          attached.gainNode.gain.setTargetAtTime(targetGain, now, 0.015);
+        } catch (_) {
+          attached.gainNode.gain.value = targetGain;
         }
-        
-        let targetVolFloat = isMuted ? 0.0 : Math.max(0, Math.min(1.0, vol / 100.0));
+      } else {
+        // Fallback for standalone / non-WebAudio environment (aligned with -9 dB master attenuation)
+        const masterAtten = window.MASTER_GAIN_9DB_ATTENUATION || 0.354813;
+        const targetVolFloat = isMuted ? 0.0 : Math.max(0, Math.min(1.0, (vol / 100.0) * masterAtten));
         if (this.audio.volume !== targetVolFloat) {
-          this.audio.volume = targetVolFloat;
+          try { this.audio.volume = targetVolFloat; } catch (_) {}
         }
       }
     }
@@ -1866,6 +1904,13 @@ export   class RecordingsManager {
       }
 
       this.audio.src = audioUrl;
+      const ap = window.audioPlayer || window.dmrAudioPlayer;
+      if (ap) {
+        if (typeof ap.ensureInitialized === "function") ap.ensureInitialized();
+        if (ap.audioCtx && ap.audioCtx.state === "suspended") {
+          ap.audioCtx.resume().catch(() => {});
+        }
+      }
       this.syncVolumeWithHotspot();
       if (this.playbackRate && this.audio) {
         this.audio.playbackRate = this.playbackRate;
@@ -2093,6 +2138,14 @@ export   class RecordingsManager {
         this.updateActiveRowHighlight(strCallId);
         if (autoPlay) {
           if (this.audio.paused) {
+            const ap = window.audioPlayer || window.dmrAudioPlayer;
+            if (ap) {
+              if (typeof ap.ensureInitialized === "function") ap.ensureInitialized();
+              if (ap.audioCtx && ap.audioCtx.state === "suspended") {
+                ap.audioCtx.resume().catch(() => {});
+              }
+            }
+            this.syncVolumeWithHotspot();
             this.audio.play().catch(e => console.warn("[RECORDINGS] Play error:", e));
             this.updatePlayState(true);
             this.startSmoothProgress();

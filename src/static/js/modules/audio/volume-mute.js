@@ -101,37 +101,20 @@ export function isPttAudioMuted() {
 }
 
 export function isSimultaneousSlotsEnabled() {
+  if (typeof window !== "undefined" && typeof window.getHotspotTsAudioMode === "function") {
+    return window.getHotspotTsAudioMode("default") !== "solo";
+  }
   return localStorage.getItem("proxdmr_simultaneous_slots") !== "false";
 }
 
 export function setSimultaneousSlotsEnabled(enabled, syncServer = true) {
   const boolVal = Boolean(enabled);
   localStorage.setItem("proxdmr_simultaneous_slots", boolVal ? "true" : "false");
-  if (!boolVal) {
-    if (typeof window.enforceSingleTsMute === "function") {
-      window.enforceSingleTsMute();
-    }
+  if (typeof window !== "undefined" && typeof window.setHotspotTsAudioMode === "function") {
+    window.setHotspotTsAudioMode("default", boolVal ? "doubl" : "solo");
   }
-  const optSim = document.getElementById("optSimultaneousSlots");
-  if (optSim && optSim.checked !== boolVal) {
-    optSim.checked = boolVal;
-  }
-  if (syncServer) {
-    try {
-      fetch("/api/settings/general", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ simultaneous_slots: boolVal })
-      }).catch(() => {});
-    } catch (_) {}
-    if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
-      try {
-        window.ws.send(JSON.stringify({ type: "set_simultaneous_slots", enabled: boolVal }));
-      } catch (_) {}
-    }
-    if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
-      window.scheduleSyncClientSettings();
-    }
+  if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
+    window.scheduleSyncClientSettings();
   }
 }
 
@@ -176,6 +159,9 @@ export function setGlobalAudioMute(muted) {
   if (window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.syncCurrentVolume === "function") {
     window.ttsAudioQueueManager.syncCurrentVolume();
   }
+  if (window.recordingsManager && typeof window.recordingsManager.syncVolumeWithHotspot === "function") {
+    window.recordingsManager.syncVolumeWithHotspot();
+  }
   updateAllVolumeAndMuteUI();
 }
 
@@ -213,30 +199,43 @@ export function getHotspotDisplayName(hid) {
 
 export function isHotspotAudioMuted(hid) {
   const cid = resolveHotspotId(hid);
-  return localStorage.getItem(`proxdmr_mute_hs_${cid}`) === "true";
+  const v = localStorage.getItem(`proxdmr_mute_hs_${cid}`);
+  if (v !== null) return v === "true";
+  const currentHotspots = getCurrentHotspots();
+  const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
+  if (isPrimary) {
+    const vDef = localStorage.getItem("proxdmr_mute_hs_default");
+    if (vDef !== null) return vDef === "true";
+  }
+  return false;
 }
 
 export function setHotspotAudioMute(hid, muted) {
   const currentHotspots = getCurrentHotspots();
   const cid = resolveHotspotId(hid);
   localStorage.setItem(`proxdmr_mute_hs_${cid}`, muted ? "true" : "false");
+  const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
+  if (isPrimary) {
+    localStorage.setItem("proxdmr_mute_hs_default", muted ? "true" : "false");
+  }
   const ap = getAudioPlayer();
   if (ap && ap.setHotspotMute) {
     ap.setHotspotMute(cid, muted);
-    const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
     if (isPrimary) {
       ap.setHotspotMute("default", muted);
     }
   }
   if (muted && ap && ap.resetHotspot) {
     ap.resetHotspot(cid);
-    const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
     if (isPrimary) {
       ap.resetHotspot("default");
     }
   }
   if (window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.syncCurrentVolume === "function") {
     window.ttsAudioQueueManager.syncCurrentVolume();
+  }
+  if (window.recordingsManager && typeof window.recordingsManager.syncVolumeWithHotspot === "function") {
+    window.recordingsManager.syncVolumeWithHotspot();
   }
   updateHotspotVolumeAndMuteUI(cid);
 }
@@ -559,29 +558,11 @@ export function setHotspotAgc(hid, enabled) {
 }
 
 export function getHotspotLoop(hid) {
-  const cid = resolveHotspotId(hid);
-  const v = localStorage.getItem(`proxdmr_loop_${cid}`);
-  if (v !== null) return v === "true";
-  const legacy = localStorage.getItem("proxdmr_loopback");
-  return legacy !== null ? legacy === "true" : false;
+  return false;
 }
 
 export function setHotspotLoop(hid, enabled) {
-  const cid = resolveHotspotId(hid || getActiveHotspotId());
-  localStorage.setItem(`proxdmr_loop_${cid}`, enabled ? "true" : "false");
-  localStorage.setItem("proxdmr_loopback", enabled ? "true" : "false");
-  document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"] .loopback-toggle`).forEach(chk => {
-    if (chk.checked !== enabled) chk.checked = enabled;
-  });
-  const loopbackToggle = document.getElementById("loopbackToggle");
-  if (loopbackToggle && loopbackToggle.checked !== enabled) {
-    loopbackToggle.checked = enabled;
-  }
-  const ws = getWs();
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "set_loopback", enabled: enabled, hotspot_id: cid }));
-  }
-  scheduleSyncClientSettings();
+  // Loopback removed
 }
 
 export function isHotspotCollapsed(hid) {
@@ -873,11 +854,12 @@ export async function expandHotspot(hid) {
   setHotspotAudioMute(cid, wasMuted);
   updateHotspotVolumeAndMuteUI(cid);
 
-  const chkAgc = card.querySelector(".agc-toggle");
-  if (chkAgc) chkAgc.checked = getHotspotAgc(cid);
-
-  const chkLoop = card.querySelector(".loopback-toggle");
-  if (chkLoop) chkLoop.checked = getHotspotLoop(cid);
+  if (typeof window !== "undefined" && typeof window.updateCardTsAudioModeUI === "function") {
+    window.updateCardTsAudioModeUI(card, cid);
+  }
+  if (typeof window !== "undefined" && typeof window.updateHotspotCardMuteUI === "function") {
+    window.updateHotspotCardMuteUI(cid, card);
+  }
 
   if (hs && typeof window !== "undefined" && typeof window.updateCardBmBanner === "function") {
     window.updateCardBmBanner(card, hs);
@@ -1070,16 +1052,12 @@ export function initVolumeMute() {
     groupVolumeDownPtt.style.display = isApkClient() ? "block" : "none";
   }
 
-  // Loopback options
-  const loopbackToggle = document.getElementById("loopbackToggle");
-  if (loopbackToggle) {
-    loopbackToggle.addEventListener("click", (e) => {
-      e.stopPropagation();
-    });
-    loopbackToggle.addEventListener("change", () => {
-      const actId = resolveHotspotId(getActiveHotspotId());
-      setHotspotLoop(actId, loopbackToggle.checked);
-    });
+  // TS Audio Mode 3-state toggle button on Main Card
+  const tsAudioModeToggleBtn = document.getElementById("tsAudioModeToggleBtn");
+  if (tsAudioModeToggleBtn) {
+    if (typeof window.setupTsAudioModeButton === "function") {
+      window.setupTsAudioModeButton(tsAudioModeToggleBtn, document.getElementById("radioContainer"), "default");
+    }
   }
 
   // AGC (АРУ по НЧ) toggle on Main Card

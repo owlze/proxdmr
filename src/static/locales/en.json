@@ -1749,5 +1749,11 @@
   "voice.leda": "Leda — Female, youthful and light (Youthful)",
   "voice.orus": "Orus — Male, firm and solid (Firm)",
   "voice.puck": "Puck — Male, upbeat and distinct (Upbeat, default)",
-  "voice.zephyr": "Zephyr — Female, bright and open (Bright)"
+  "voice.zephyr": "Zephyr — Female, bright and open (Bright)",
+  "ts_mode.solo_title": "Mode: Solo — only one timeslot plays at a time (TS1 and TS2 mutually exclusive). Click to switch mode",
+  "ts_mode.doubl_title": "Mode: Doubl — simultaneous audio from both timeslots (manual mute control). Click to switch mode",
+  "ts_mode.auto_title": "Mode: Auto — automatic timeslot selection by first incoming signal (2s hold delay). Click to switch mode",
+  "ts_mode.solo_toast": "🔊 Solo mode: single active timeslot",
+  "ts_mode.doubl_toast": "🔊 Doubl mode: simultaneous audio from both timeslots",
+  "ts_mode.auto_toast": "🔊 Auto mode: automatic timeslot arbitration (2s delay)"
 }

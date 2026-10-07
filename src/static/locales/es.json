@@ -1737,5 +1737,11 @@
   "voice.leda": "Leda — Femenino, joven y ligera (Youthful)",
   "voice.orus": "Orus — Masculino, firme y sólido (Firm)",
   "voice.puck": "Puck — Masculino, animado y claro (Upbeat, por defecto)",
-  "voice.zephyr": "Zephyr — Femenino, brillante y abierta (Bright)"
+  "voice.zephyr": "Zephyr — Femenino, brillante y abierta (Bright)",
+  "ts_mode.solo_title": "Modo: Solo — solo se escucha una ranura a la vez (TS1 y TS2 se excluyen mutuamente). Clic para cambiar de modo",
+  "ts_mode.doubl_title": "Modo: Doubl — reproducción simultánea de ambas ranuras (control manual de Mute). Clic para cambiar de modo",
+  "ts_mode.auto_title": "Modo: Auto — selección automática de ranura por primera señal recibida (retardo de 2s). Clic para cambiar de modo",
+  "ts_mode.solo_toast": "🔊 Modo Solo: una ranura activa",
+  "ts_mode.doubl_toast": "🔊 Modo Doubl: audio simultáneo de ambas ranuras",
+  "ts_mode.auto_toast": "🔊 Modo Auto: selección automática de ranura (retardo de 2s)"
 }

@@ -596,12 +596,16 @@ class HotspotAudioChannel {
 
 }
 
-const MASTER_GAIN_14DB_ATTENUATION = Math.pow(10, -14.0 / 20.0); // 0.199526 (-14 dB)
+const MASTER_GAIN_9DB_ATTENUATION = Math.pow(10, -9.0 / 20.0); // 0.354813 (-9 dB)
+if (typeof window !== "undefined") {
+  window.MASTER_GAIN_9DB_ATTENUATION = MASTER_GAIN_9DB_ATTENUATION;
+}
 
 class DMRAudioPlayer {
   constructor() {
     this.audioCtx = null;
     this.rxInputBus = null;
+    this.recordingsInputBus = null;
     this.eqLowNode = null;
     this.eqMidNode = null;
     this.eqHighNode = null;
@@ -614,8 +618,8 @@ class DMRAudioPlayer {
     this.globalMuted = false;
     this.pttMuted = false;
     this.soloMuted = false;
-    // Overall coefficient attenuated by 14 dB relative to previous baseline of 1.20
-    this.masterVolume = 1.2 * MASTER_GAIN_14DB_ATTENUATION; // ~0.23943
+    // Overall coefficient attenuated by -9 dB relative to baseline of 1.20
+    this.masterVolume = 1.2 * MASTER_GAIN_9DB_ATTENUATION; // ~0.42578 (-9 dB)
     if (typeof window !== "undefined") {
       window.audioPlayer = this;
       window.dmrAudioPlayer = this;
@@ -667,13 +671,22 @@ class DMRAudioPlayer {
           } catch (_) {}
         }
 
-        // 0. RX Common Input Bus
+        // 0. RX Common Input Bus (for live DMR reception across all hotspots)
         this.rxInputBus = this.audioCtx.createGain();
-        this.rxInputBus.gain.value = 1.0;
+        this.rxInputBus.gain.value = this.soloMuted ? 0.0 : 1.0;
         try {
           this.rxInputBus.channelCount = 2;
           this.rxInputBus.channelCountMode = "explicit";
           this.rxInputBus.channelInterpretation = "speakers";
+        } catch (_) {}
+
+        // 0b. Dedicated Recordings / Log Player Input Bus (routes directly to limiter + master gain)
+        this.recordingsInputBus = this.audioCtx.createGain();
+        this.recordingsInputBus.gain.value = 1.0;
+        try {
+          this.recordingsInputBus.channelCount = 2;
+          this.recordingsInputBus.channelCountMode = "explicit";
+          this.recordingsInputBus.channelInterpretation = "speakers";
         } catch (_) {}
 
         // 1. Equalizer & De-emphasis: Handled server-side in Python (ServerAudioEqualizer)
@@ -706,7 +719,7 @@ class DMRAudioPlayer {
 
         // 4. Master Gain Node (Global Mute and Master Volume)
         this.masterGainNode = this.audioCtx.createGain();
-        const isMuted = this.globalMuted || this.pttMuted || this.soloMuted;
+        const isMuted = this.globalMuted || this.pttMuted;
         this.masterGainNode.gain.value = isMuted ? 0.0 : this.masterVolume;
         try {
           this.masterGainNode.channelCount = 2;
@@ -714,10 +727,12 @@ class DMRAudioPlayer {
           this.masterGainNode.channelInterpretation = "speakers";
         } catch (_) {}
 
-        // Connect simplified graph:
-        // rxInputBus -> preGainNode -> masterLimiter -> masterGainNode -> destination
+        // Connect graph:
+        // Live RX: rxInputBus -> preGainNode -> masterLimiter -> masterGainNode -> destination
+        // Log Player: recordingsInputBus -> masterLimiter -> masterGainNode -> destination
         this.rxInputBus.connect(this.preGainNode);
         this.preGainNode.connect(this.masterLimiter);
+        this.recordingsInputBus.connect(this.masterLimiter);
         this.masterLimiter.connect(this.masterGainNode);
         this.masterGainNode.connect(this.audioCtx.destination);
       } catch (e) {
@@ -1055,7 +1070,7 @@ class DMRAudioPlayer {
   }
 
   _updateMasterGain() {
-    const isMuted = this.globalMuted || this.pttMuted || this.soloMuted;
+    const isMuted = this.globalMuted || this.pttMuted;
     if (this.audioCtx && this.masterGainNode) {
       const now = this.audioCtx.currentTime;
       const target = isMuted ? 0.0 : this.masterVolume;
@@ -1078,7 +1093,12 @@ class DMRAudioPlayer {
 
   setSoloMuted(muted) {
     this.soloMuted = Boolean(muted);
-    this._updateMasterGain();
+    if (this.audioCtx && this.rxInputBus) {
+      const now = this.audioCtx.currentTime;
+      const targetRx = this.soloMuted ? 0.0 : 1.0;
+      this.rxInputBus.gain.cancelScheduledValues(now);
+      this.rxInputBus.gain.setTargetAtTime(targetRx, now, 0.015);
+    }
     if (this.soloMuted) {
       this.channels.forEach(ch => ch.reset());
     }
@@ -1103,12 +1123,33 @@ class DMRAudioPlayer {
   }
 
   setVolume(volume) {
-    // Master volume setter for compatibility (-14 dB relative to input)
+    // Master volume setter for compatibility (-9 dB relative to input)
     const parsed = typeof volume === "number" ? volume : parseFloat(volume);
     const raw = isNaN(parsed) ? 1.2 : parsed;
     const normalized = raw > 2.5 ? (raw / 100.0) : raw;
-    this.masterVolume = Math.max(0.0, Math.min(2.5, normalized * MASTER_GAIN_14DB_ATTENUATION));
+    this.masterVolume = Math.max(0.0, Math.min(2.5, normalized * MASTER_GAIN_9DB_ATTENUATION));
     this._updateMasterGain();
+  }
+
+  attachRecordingsAudio(audioElement) {
+    if (!audioElement) return null;
+    this.ensureInitialized();
+    if (!this.audioCtx || !this.recordingsInputBus) return null;
+    if (audioElement._webaudioAttachedNode) {
+      return audioElement._webaudioAttachedNode;
+    }
+    try {
+      const sourceNode = this.audioCtx.createMediaElementSource(audioElement);
+      const gainNode = this.audioCtx.createGain();
+      gainNode.gain.value = 1.0;
+      sourceNode.connect(gainNode);
+      gainNode.connect(this.recordingsInputBus);
+      audioElement._webaudioAttachedNode = { sourceNode, gainNode };
+      return audioElement._webaudioAttachedNode;
+    } catch (err) {
+      console.warn("[AUDIO] attachRecordingsAudio error:", err);
+      return null;
+    }
   }
 
   onTransmissionEnd(hotspotId, slot = null) {

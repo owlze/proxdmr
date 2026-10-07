@@ -1666,6 +1666,68 @@ select option:focus {
   margin: 0;
 }
 
+/* TS1/2 Audio Mode 3-state Toggle Badge Button */
+.status-badge-item.ts-audio-mode-btn {
+  width: auto;
+  min-width: 88px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  user-select: none;
+  height: 20px;
+}
+
+.ts-audio-mode-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.25;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  user-select: none;
+  height: 18px;
+  box-sizing: border-box;
+}
+
+/* Solo: Cyan / sky blue highlight */
+.ts-audio-mode-badge.ts-mode-solo {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 5px rgba(56, 189, 248, 0.25);
+}
+
+/* Doubl: Violet / purple highlight */
+.ts-audio-mode-badge.ts-mode-doubl {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 0 5px rgba(168, 85, 247, 0.25);
+}
+
+/* Auto: Green / emerald highlight */
+.ts-audio-mode-badge.ts-mode-auto {
+  background: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+  border-color: rgba(46, 204, 113, 0.5);
+  box-shadow: 0 0 5px rgba(46, 204, 113, 0.25);
+}
+
+.status-badge-item.ts-audio-mode-btn:hover .ts-audio-mode-badge {
+  filter: brightness(1.25);
+  transform: translateY(-1px);
+}
+
+.status-badge-item.ts-audio-mode-btn:active .ts-audio-mode-badge {
+  transform: scale(0.96);
+}
+
 /* Line 2: 3 Action Pairs (DSD-FME, Audio RX, Audio TX with Mini-Preset Dropdowns) */
 .status-actions-row {
   display: flex;

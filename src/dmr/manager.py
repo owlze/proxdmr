@@ -1648,7 +1648,6 @@ class HotspotManager:
         slot: int = 2,
         dst_id: int = 9990,
         call_type: str = "GROUP",
-        is_loopback: bool = False,
         user_id: Optional[int] = None,
     ) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
@@ -1656,7 +1655,7 @@ class HotspotManager:
         settings = self.user_settings.get(uid, self.settings)
         hid = hotspot_id or settings.active_hotspot_id
         rt = self.get_runtime(uid, hid) or self.get_active_runtime(uid)
-        if not rt and not is_loopback:
+        if not rt:
             logger.warning(f"[TX] Cannot start TX: runtime {hid} not found for user {uid}")
             return False
 
@@ -1665,7 +1664,7 @@ class HotspotManager:
         src_callsign = rt.config.callsign if rt else "ME"
         send_ta = getattr(rt.config, "send_talker_alias", True) if rt else True
         talker_alias = ((rt.config.talker_alias or rt.config.callsign) if send_ta else "") if rt else "ME"
-        src_name = "ME (ProxDMR)" if not is_loopback else "ME (MIC Loop)"
+        src_name = "ME (ProxDMR)"
 
         tx_st.active = True
         tx_st.hotspot_id = effective_hid
@@ -1774,7 +1773,7 @@ class HotspotManager:
             "user_id": uid,
         }, user_id=uid)
 
-        if not is_loopback and rt and rt.client and rt.status == BMState.ONLINE:
+        if rt and rt.client and rt.status == BMState.ONLINE:
             try:
                 header_payload = self.tx_framer.create_header(
                     src_id=src_id,
@@ -1803,7 +1802,7 @@ class HotspotManager:
             except Exception as e:
                 logger.error(f"[TX] Error sending voice header: {e}")
         else:
-            logger.info(f"[TX] Local TX started for user {uid} ({'MIC LOOP' if is_loopback else ('BM status is ' + (rt.status.value if rt else 'unknown'))})")
+            logger.info(f"[TX] Local TX started for user {uid} (BM status is {rt.status.value if rt else 'unknown'})")
 
         return True
 

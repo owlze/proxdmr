@@ -1737,5 +1737,11 @@
   "voice.leda": "Leda — Femminile, giovane e leggera (Youthful)",
   "voice.orus": "Orus — Maschile, fermo e solido (Firm)",
   "voice.puck": "Puck — Maschile, vivace e chiaro (Upbeat, predefinito)",
-  "voice.zephyr": "Zephyr — Femminile, brillante e aperta (Bright)"
+  "voice.zephyr": "Zephyr — Femminile, brillante e aperta (Bright)",
+  "ts_mode.solo_title": "Modalità: Solo — si ascolta solo uno slot alla volta (TS1 e TS2 si escludono a vicenda). Clic per cambiare modalità",
+  "ts_mode.doubl_title": "Modalità: Doubl — riproduzione simultanea di entrambi gli slot (controllo manuale Mute). Clic per cambiare modalità",
+  "ts_mode.auto_title": "Modalità: Auto — selezione automatica dello slot in base al primo segnale ricevuto (ritardo di 2s). Clic per cambiare modalità",
+  "ts_mode.solo_toast": "🔊 Modalità Solo: un solo slot attivo",
+  "ts_mode.doubl_toast": "🔊 Modalità Doubl: audio simultaneo di entrambi gli slot",
+  "ts_mode.auto_toast": "🔊 Modalità Auto: selezione automatica dello slot (ritardo 2s)"
 }

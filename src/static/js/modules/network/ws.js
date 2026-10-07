@@ -146,13 +146,10 @@ try {
 
 // DOM Element Accessors
 const getRttDisplay = () => document.getElementById("rttDisplay");
-const getLoopbackToggle = () => document.getElementById("loopbackToggle");
-const getOptLoopback = () => document.getElementById("optLoopback") || document.getElementById("loopbackToggle");
 const getOptLanguage = () => document.getElementById("optLanguage");
 
 // Accessors for app functions
 const resolveHotspotId = (id) => (window.resolveHotspotId ? window.resolveHotspotId(id) : id);
-const getHotspotLoop = (cid) => (window.getHotspotLoop ? window.getHotspotLoop(cid) : false);
 const getHotspotPingMode = (hid) => (window.getHotspotPingMode ? window.getHotspotPingMode(hid) : "bm");
 const isHotspotCollapsed = (hid) => (window.isHotspotCollapsed ? window.isHotspotCollapsed(hid) : false);
 const isHotspotLiveCollapsed = (hid) => (window.isHotspotLiveCollapsed ? window.isHotspotLiveCollapsed(hid) : (localStorage.getItem(`proxdmr_live_collapsed_${resolveHotspotId(hid)}`) === "true"));
@@ -434,12 +431,14 @@ export function connectWebSocket(force = false) {
           return;
         }
 
+        // Notify auto arbitration state machine of audio packet arrival
+        if (typeof window.handleAutoSlotActivity === "function") {
+          window.handleAutoSlotActivity(cid, slot, true);
+        }
 
         const isSlotMutedInStorage = getHotspotMute(cid, slot);
         const isSlotMutedInAudio = window.audioPlayer && audioPlayer.isSlotMuted && audioPlayer.isSlotMuted(cid, slot);
-        const loopbackToggle = document.getElementById("loopbackToggle");
-        const isLoopActive = Boolean(getHotspotLoop(cid) || (loopbackToggle && loopbackToggle.checked));
-        if (isSlotMutedInStorage || isSlotMutedInAudio || isHotspotAudioMuted(cid) || isGlobalAudioMuted() || (isPttAudioMuted() && !isLoopActive)) {
+        if (isSlotMutedInStorage || isSlotMutedInAudio || isHotspotAudioMuted(cid) || isGlobalAudioMuted() || isPttAudioMuted()) {
           return;
         }
 
@@ -1084,29 +1083,11 @@ export function handleServerMessage(msg) {
           }
         }
 
-        if (msg.state.loopback_mode !== undefined) {
-          const actId = resolveHotspotId(activeHotspotId);
-          const optLoopback = getOptLoopback();
-          if (optLoopback) optLoopback.checked = getHotspotLoop(actId);
-          document.querySelectorAll(".radio-container").forEach(card => {
-            const cid = resolveHotspotId(card.dataset.hotspotId);
-            const chk = card.querySelector(".loopback-toggle");
-            if (chk) chk.checked = getHotspotLoop(cid);
-          });
-        }
-
         if (msg.state.mute_on_ptt !== undefined) {
           const mop = (msg.app_settings && msg.app_settings.mute_on_ptt !== undefined)
             ? msg.app_settings.mute_on_ptt
             : msg.state.mute_on_ptt;
           setMuteOnPttEnabled(mop);
-        }
-
-        if (msg.state.simultaneous_slots !== undefined) {
-          const sim = (msg.app_settings && msg.app_settings.simultaneous_slots !== undefined)
-            ? msg.app_settings.simultaneous_slots
-            : msg.state.simultaneous_slots;
-          setSimultaneousSlotsEnabled(sim);
         }
 
         const vStatePtt = msg.state.volume_up_ptt !== undefined
@@ -1270,13 +1251,6 @@ export function handleServerMessage(msg) {
       if (typeof renderQuickMemButtons === "function") {
         renderQuickMemButtons(activeHotspotId);
       }
-    } else if (msg.type === "loopback_change") {
-      const enabled = Boolean(msg.enabled);
-      const loopbackToggle = document.getElementById("loopbackToggle");
-        if (loopbackToggle) loopbackToggle.checked = enabled;
-      document.querySelectorAll(".loopback-toggle").forEach(chk => {
-        chk.checked = enabled;
-      });
     } else if (msg.type === "mute_on_ptt_change") {
       setMuteOnPttEnabled(Boolean(msg.enabled));
     } else if (msg.type === "volume_up_ptt_change" || msg.type === "volume_down_ptt_change") {
@@ -1286,8 +1260,6 @@ export function handleServerMessage(msg) {
       setHapticEnabled(Boolean(msg.enabled), false);
     } else if (msg.type === "haptic_duration_change") {
       setHapticDuration(Number(msg.duration), false);
-    } else if (msg.type === "simultaneous_slots_change") {
-      setSimultaneousSlotsEnabled(Boolean(msg.enabled), false);
     } else if (msg.type === "check_mic_on_tx_change") {
       if (typeof window.setCheckMicOnTxEnabled === "function") {
         window.setCheckMicOnTxEnabled(Boolean(msg.enabled), false);
@@ -1455,6 +1427,9 @@ export function handleServerMessage(msg) {
         const modeBadgeEl = targetCard.querySelector(".mode-badge");
 
         if (msg.active) {
+          if (typeof window.handleAutoSlotActivity === "function") {
+            window.handleAutoSlotActivity(targetHid, slot, true);
+          }
           if (vfoRow) {
             vfoRow.classList.add("vfo-rx-active");
             const callerFlagEl = vfoRow.querySelector(".ts-caller-flag");
@@ -1560,6 +1535,9 @@ export function handleServerMessage(msg) {
             }
           }
         } else {
+          if (typeof window.handleAutoSlotActivity === "function") {
+            window.handleAutoSlotActivity(targetHid, slot, false);
+          }
           if (vfoRow) {
             vfoRow.classList.remove("vfo-rx-active");
             const callerCallEl = vfoRow.querySelector(".ts-caller-call");

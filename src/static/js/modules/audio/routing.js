@@ -137,42 +137,333 @@ export function setHotspotMute(hid, slot, muted) {
   _scheduleSyncClientSettings(1000);
 }
 
-export function toggleHotspotMute(hid, slot) {
-  const s = parseInt(slot, 10) || 1;
-  const cur = getHotspotMute(hid, s);
-  const newMute = !cur;
-  setHotspotMute(hid, s, newMute);
+// --- TS Audio Mode (Solo / Doubl / Auto) Subsystem ---
 
-  // If simultaneous listening of both slots is disabled:
-  // toggling/unmuting one TS automatically switches the second TS to opposite state
-  const isDual = (typeof window.isSimultaneousSlotsEnabled === "function")
-    ? window.isSimultaneousSlotsEnabled()
-    : (localStorage.getItem("proxdmr_simultaneous_slots") !== "false");
+export function getHotspotTsAudioMode(hid) {
+  const cid = _resolveHotspotId(hid);
+  const v = localStorage.getItem(`proxdmr_ts_mode_${cid}`);
+  if (v && ["solo", "doubl", "auto"].includes(v)) return v;
 
-  if (!isDual) {
-    const otherS = (s === 1) ? 2 : 1;
-    setHotspotMute(hid, otherS, !newMute);
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
+  if (isPrimary) {
+    const vDef = localStorage.getItem("proxdmr_ts_mode_default");
+    if (vDef && ["solo", "doubl", "auto"].includes(vDef)) return vDef;
+    const legacy = localStorage.getItem("proxdmr_simultaneous_slots");
+    if (legacy === "false") return "solo";
+  }
+  return "doubl";
+}
+
+export function setHotspotTsAudioMode(hid, mode) {
+  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
+  const cid = _resolveHotspotId(hid);
+  localStorage.setItem(`proxdmr_ts_mode_${cid}`, safeMode);
+
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
+  if (isPrimary) {
+    localStorage.setItem("proxdmr_ts_mode_default", safeMode);
+    localStorage.setItem("proxdmr_simultaneous_slots", safeMode === "solo" ? "false" : "true");
+  }
+
+  if (safeMode === "solo") {
+    enforceSoloTsMute(cid);
+  } else if (safeMode === "auto") {
+    resetAutoSlotState(cid);
+  }
+
+  updateHotspotTsAudioModeUI(cid);
+  _scheduleSyncClientSettings(1000);
+}
+
+export function cycleHotspotTsAudioMode(hid) {
+  const cid = _resolveHotspotId(hid);
+  const cur = getHotspotTsAudioMode(cid);
+  const order = ["solo", "doubl", "auto"];
+  const nextIdx = (order.indexOf(cur) + 1) % order.length;
+  const nextMode = order[nextIdx];
+  setHotspotTsAudioMode(cid, nextMode);
+
+  _triggerHaptic(35);
+
+  let toastKey = `ts_mode.${nextMode}_toast`;
+  let fallbackToast = nextMode === "solo"
+    ? "🔊 Режим Solo: активен один таймслот"
+    : (nextMode === "doubl" ? "🔊 Режим Doubl: одновременный звук обоих таймслотов" : "🔊 Режим Auto: автоматический выбор таймслота (задержка 2 сек)");
+  const msg = _getTranslation(toastKey, {}, fallbackToast);
+  showToast(msg, 1600);
+}
+
+export function enforceSoloTsMute(hid) {
+  const cid = _resolveHotspotId(hid);
+  const m1 = getHotspotMute(cid, 1);
+  const m2 = getHotspotMute(cid, 2);
+  // In solo mode, m1 and m2 must be strictly opposite: m1 !== m2
+  if (m1 === m2) {
+    const activeSlot = (typeof window._getHotspotSlot === "function") ? window._getHotspotSlot(cid) : 1;
+    const keepSlot = (activeSlot === 2) ? 2 : 1;
+    const muteSlot = (keepSlot === 1) ? 2 : 1;
+    setHotspotMute(cid, keepSlot, false);
+    setHotspotMute(cid, muteSlot, true);
   }
 }
 
 export function enforceSingleTsMute(hid) {
-  const isDual = (typeof window.isSimultaneousSlotsEnabled === "function")
-    ? window.isSimultaneousSlotsEnabled()
-    : (localStorage.getItem("proxdmr_simultaneous_slots") !== "false");
+  const cid = _resolveHotspotId(hid);
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode === "solo") {
+    enforceSoloTsMute(cid);
+  }
+}
 
-  if (isDual) return;
-  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
-  const targets = hid ? [hid] : (hsList.length ? hsList.map(h => h.id) : ["default"]);
-  targets.forEach(h => {
-    const m1 = getHotspotMute(h, 1);
-    const m2 = getHotspotMute(h, 2);
-    // If both slots are unmuted, keep the active/selected slot unmuted and mute the other
-    if (!m1 && !m2) {
-      const activeSlot = (typeof window._getHotspotSlot === "function") ? window._getHotspotSlot(h) : 1;
-      const keepSlot = (activeSlot === 2) ? 2 : 1;
-      const muteSlot = (keepSlot === 1) ? 2 : 1;
-      setHotspotMute(h, muteSlot, true);
+export function toggleHotspotMute(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+  const cur = getHotspotMute(cid, s);
+  const newMute = !cur;
+  const mode = getHotspotTsAudioMode(cid);
+
+  if (mode === "solo") {
+    // Solo rule: TS1 and TS2 always have different/opposite mute states
+    const otherS = (s === 1) ? 2 : 1;
+    setHotspotMute(cid, s, newMute);
+    setHotspotMute(cid, otherS, !newMute);
+  } else if (mode === "auto") {
+    // In Auto mode: user manual override sets chosen slot unmuted and other muted
+    const otherS = (s === 1) ? 2 : 1;
+    setHotspotMute(cid, s, newMute);
+    setHotspotMute(cid, otherS, !newMute);
+    const st = _getAutoState(cid);
+    st.flag = newMute ? otherS : s;
+    if (st.hangTimer) {
+      clearTimeout(st.hangTimer);
+      st.hangTimer = null;
     }
+  } else {
+    // Doubl mode: independent mute control
+    setHotspotMute(cid, s, newMute);
+  }
+}
+
+// --- Auto Mode Arbitration State Machine (Flag 0, 1, 2 with 2s hold delay) ---
+const _autoArbitrationState = {}; // cid -> { flag: 0, hangTimer: null }
+
+function _getAutoState(cid) {
+  if (!_autoArbitrationState[cid]) {
+    _autoArbitrationState[cid] = { flag: 0, hangTimer: null };
+  }
+  return _autoArbitrationState[cid];
+}
+
+export function getAutoArbitrationFlag(hid) {
+  const cid = _resolveHotspotId(hid);
+  return (_autoArbitrationState[cid] && _autoArbitrationState[cid].flag) || 0;
+}
+
+export function resetAutoSlotState(cid) {
+  const id = _resolveHotspotId(cid);
+  const st = _getAutoState(id);
+  if (st.hangTimer) {
+    clearTimeout(st.hangTimer);
+    st.hangTimer = null;
+  }
+  st.flag = 0;
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(id, 1, false);
+      ap.setSlotMute(id, 2, false);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(id, 1, false);
+      ap.updateSlotMute(id, 2, false);
+    }
+  }
+  _renderAutoCardMuteVisuals(id, 0, 0);
+}
+
+export function handleAutoSlotActivity(hid, slot, active) {
+  const cid = _resolveHotspotId(hid);
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode !== "auto") return;
+
+  const s = parseInt(slot, 10) || 1;
+  const st = _getAutoState(cid);
+
+  if (active) {
+    // Audio / RX signal appeared on slot s
+    if (st.flag === 0) {
+      // Sound appeared first in slot s!
+      st.flag = s;
+      if (st.hangTimer) {
+        clearTimeout(st.hangTimer);
+        st.hangTimer = null;
+      }
+      _applyAutoSlotAudio(cid, s);
+    } else if (st.flag === s) {
+      // Active slot is transmitting
+      if (st.hangTimer) {
+        clearTimeout(st.hangTimer);
+        st.hangTimer = null;
+      }
+    }
+    // If sound appeared on opposite slot while active slot is talking, opposite remains muted
+  } else {
+    // Transmission ended on slot s
+    if (st.flag === s) {
+      if (st.hangTimer) {
+        clearTimeout(st.hangTimer);
+      }
+      st.hangTimer = setTimeout(() => {
+        st.hangTimer = null;
+        const otherS = (s === 1) ? 2 : 1;
+        const otherReceiving = _isSlotReceivingNow(cid, otherS);
+        if (otherReceiving) {
+          // Hand over to the other slot
+          st.flag = otherS;
+          _applyAutoSlotAudio(cid, otherS);
+        } else {
+          // Both slots silent for > 2 seconds! Reset flag to 0
+          st.flag = 0;
+          _resetAutoSlotAudio(cid);
+        }
+      }, 2000); // 2 seconds hold delay
+    }
+  }
+}
+
+function _isSlotReceivingNow(cid, slot) {
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  for (let card of cards) {
+    if (card._lastRx && card._lastRx[slot] && card._lastRx[slot].active) {
+      return true;
+    }
+    const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+    if (row && row.classList.contains("vfo-rx-active")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function _applyAutoSlotAudio(cid, activeSlot) {
+  const otherSlot = (activeSlot === 1) ? 2 : 1;
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(cid, activeSlot, false);
+      ap.setSlotMute(cid, otherSlot, true);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(cid, activeSlot, false);
+      ap.updateSlotMute(cid, otherSlot, true);
+    }
+  }
+  _renderAutoCardMuteVisuals(cid, activeSlot, otherSlot);
+}
+
+function _resetAutoSlotAudio(cid) {
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(cid, 1, false);
+      ap.setSlotMute(cid, 2, false);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(cid, 1, false);
+      ap.updateSlotMute(cid, 2, false);
+    }
+  }
+  _renderAutoCardMuteVisuals(cid, 0, 0);
+}
+
+function _renderAutoCardMuteVisuals(cid, activeSlot, mutedSlot) {
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  cards.forEach(card => {
+    const btn1 = card.querySelector(".btn-mute-ts1");
+    const btn2 = card.querySelector(".btn-mute-ts2");
+    if (activeSlot === 0) {
+      if (btn1) renderMutePanBtnContent(btn1, false, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, false, getHotspotPan(cid, 2), 2);
+    } else {
+      if (btn1) renderMutePanBtnContent(btn1, activeSlot !== 1, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, activeSlot !== 2, getHotspotPan(cid, 2), 2);
+    }
+  });
+}
+
+// --- TS Audio Mode Button UI Wiring and Rendering ---
+export function renderTsAudioModeBtnContent(btn, mode) {
+  if (!btn) return;
+  const badge = btn.querySelector(".ts-audio-mode-badge");
+  if (!badge) return;
+
+  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
+  badge.classList.remove("ts-mode-solo", "ts-mode-doubl", "ts-mode-auto");
+  badge.classList.add(`ts-mode-${safeMode}`);
+
+  let label = "TS1/2 Doubl🔊";
+  let titleKey = "ts_mode.doubl_title";
+  let fallbackTitle = "Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима";
+
+  if (safeMode === "solo") {
+    label = "TS1/2 Solo🔊";
+    titleKey = "ts_mode.solo_title";
+    fallbackTitle = "Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима";
+  } else if (safeMode === "auto") {
+    label = "TS1/2 Auto🔊";
+    titleKey = "ts_mode.auto_title";
+    fallbackTitle = "Режим: Auto — автоматический выбор активного таймслота по первому появившемуся сигналу (задержка 2 сек). Клик для смены режима";
+  }
+
+  badge.textContent = label;
+  const titleText = _getTranslation(titleKey, {}, fallbackTitle);
+  btn.title = titleText;
+  btn.setAttribute("data-i18n-title", titleKey);
+}
+
+export function updateCardTsAudioModeUI(card, hid) {
+  if (!card) return;
+  const cid = _resolveHotspotId(hid || card.dataset.hotspotId);
+  const btn = card.querySelector(".ts-audio-mode-btn");
+  if (!btn) return;
+  setupTsAudioModeButton(btn, card, cid);
+  const mode = getHotspotTsAudioMode(cid);
+  renderTsAudioModeBtnContent(btn, mode);
+}
+
+export function updateHotspotTsAudioModeUI(hid) {
+  if (!hid) {
+    updateAllHotspotTsAudioModeUI();
+    return;
+  }
+  const cid = _resolveHotspotId(hid);
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  cards.forEach(card => updateCardTsAudioModeUI(card, cid));
+  if (cid === "default" || (window.currentHotspots && window.currentHotspots[0] && String(window.currentHotspots[0].id) === cid)) {
+    const mainCard = document.getElementById("radioContainer");
+    if (mainCard) updateCardTsAudioModeUI(mainCard, cid);
+  }
+}
+
+export function updateAllHotspotTsAudioModeUI() {
+  const cards = document.querySelectorAll(".radio-container");
+  cards.forEach(card => {
+    const cid = _resolveHotspotId(card.dataset.hotspotId);
+    updateCardTsAudioModeUI(card, cid);
+  });
+}
+
+export function setupTsAudioModeButton(btn, card, hid) {
+  if (!btn || btn._wiredTsAudioMode) return;
+  btn._wiredTsAudioMode = true;
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const targetCid = _resolveHotspotId(hid || (card ? card.dataset.hotspotId : null) || (window.activeHotspotId || "default"));
+    cycleHotspotTsAudioMode(targetCid);
   });
 }
 
@@ -787,6 +1078,13 @@ export function initAudioRouting() {
       toggleHotspotAutoRecord(cid);
     };
   }
+
+  const mainTsModeBtn = document.getElementById("tsAudioModeToggleBtn");
+  if (mainTsModeBtn) {
+    setupTsAudioModeButton(mainTsModeBtn, mainCard, "default");
+    updateCardTsAudioModeUI(mainCard, "default");
+  }
+  updateAllHotspotTsAudioModeUI();
 }
 
 // Global window registration for backward compatibility
@@ -795,6 +1093,18 @@ if (typeof window !== "undefined") {
   window.setHotspotMute = setHotspotMute;
   window.toggleHotspotMute = toggleHotspotMute;
   window.enforceSingleTsMute = enforceSingleTsMute;
+  window.enforceSoloTsMute = enforceSoloTsMute;
+  window.getHotspotTsAudioMode = getHotspotTsAudioMode;
+  window.setHotspotTsAudioMode = setHotspotTsAudioMode;
+  window.cycleHotspotTsAudioMode = cycleHotspotTsAudioMode;
+  window.renderTsAudioModeBtnContent = renderTsAudioModeBtnContent;
+  window.updateCardTsAudioModeUI = updateCardTsAudioModeUI;
+  window.updateHotspotTsAudioModeUI = updateHotspotTsAudioModeUI;
+  window.updateAllHotspotTsAudioModeUI = updateAllHotspotTsAudioModeUI;
+  window.setupTsAudioModeButton = setupTsAudioModeButton;
+  window.handleAutoSlotActivity = handleAutoSlotActivity;
+  window.resetAutoSlotState = resetAutoSlotState;
+  window.getAutoArbitrationFlag = getAutoArbitrationFlag;
   window.syncAllSlotMutesToServer = syncAllSlotMutesToServer;
   window.renderMutePanBtnContent = renderMutePanBtnContent;
   window.setupMutePanButtonEvents = setupMutePanButtonEvents;
@@ -823,6 +1133,18 @@ if (typeof window !== "undefined") {
     saveSoloMutedSet,
     toggleHotspotMute,
     enforceSingleTsMute,
+    enforceSoloTsMute,
+    getHotspotTsAudioMode,
+    setHotspotTsAudioMode,
+    cycleHotspotTsAudioMode,
+    renderTsAudioModeBtnContent,
+    updateCardTsAudioModeUI,
+    updateHotspotTsAudioModeUI,
+    updateAllHotspotTsAudioModeUI,
+    setupTsAudioModeButton,
+    handleAutoSlotActivity,
+    resetAutoSlotState,
+    getAutoArbitrationFlag,
     syncAllSlotMutesToServer,
     renderMutePanBtnContent,
     setupMutePanButtonEvents,

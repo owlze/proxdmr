@@ -305,10 +305,8 @@ function _isVolumeDownPttEnabled() {
       totActiveLimit = getHotspotTot(hid);
       totRemainingSeconds = totActiveLimit;
 
-      const isLoop = Boolean(_getHotspotLoop(hid) || (document.getElementById("loopbackToggle") && document.getElementById("loopbackToggle").checked));
-
-      // PTT Mute (+1s tail): Mute incoming audio immediately on PTT press if option is enabled (skip when Mic loop is active!)
-      if (_isMuteOnPttEnabled() && !isLoop) {
+      // PTT Mute (+1s tail): Mute incoming audio immediately on PTT press if option is enabled
+      if (_isMuteOnPttEnabled()) {
         if (window.pttMuteReleaseTimer) {
           clearTimeout(window.pttMuteReleaseTimer);
           window.pttMuteReleaseTimer = null;
@@ -445,8 +443,7 @@ function _isVolumeDownPttEnabled() {
           hotspot_id: hid,
           slot: targetSlot,
           tg: targetTg,
-          call_type: isPrivateCall ? "PRIVATE" : "GROUP",
-          loopback: isLoop
+          call_type: isPrivateCall ? "PRIVATE" : "GROUP"
         }));
       }
     } finally {

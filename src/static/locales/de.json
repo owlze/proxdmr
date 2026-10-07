@@ -1737,5 +1737,11 @@
   "voice.leda": "Leda — Weiblich, jugendlich und leicht (Youthful)",
   "voice.orus": "Orus — Männlich, streng und solide (Firm)",
   "voice.puck": "Puck — Männlich, lebhaft und deutlich (Upbeat, Standard)",
-  "voice.zephyr": "Zephyr — Weiblich, hell und offen (Bright)"
+  "voice.zephyr": "Zephyr — Weiblich, hell und offen (Bright)",
+  "ts_mode.solo_title": "Modus: Solo — nur ein Zeitschlitz ist aktiv (TS1 und TS2 schließen sich gegenseitig aus). Klicken zum Umschalten",
+  "ts_mode.doubl_title": "Modus: Doubl — gleichzeitiges Audio beider Zeitschlitze (manuelle Mute-Steuerung). Klicken zum Umschalten",
+  "ts_mode.auto_title": "Modus: Auto — automatische Zeitschlitz-Auswahl nach erstem Signal (2s Haltezeit). Klicken zum Umschalten",
+  "ts_mode.solo_toast": "🔊 Solo-Modus: ein aktiver Zeitschlitz",
+  "ts_mode.doubl_toast": "🔊 Doubl-Modus: gleichzeitiges Audio beider Zeitschlitze",
+  "ts_mode.auto_toast": "🔊 Auto-Modus: automatische Zeitschlitz-Auswahl (2s Verzögerung)"
 }

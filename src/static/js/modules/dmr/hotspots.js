@@ -295,9 +295,11 @@ export function switchActiveHotspot(newId) {
     if (typeof window.syncLogSortOrderForCurrentHotspot === "function") {
       window.syncLogSortOrderForCurrentHotspot();
     }
-    const optLoopback = document.getElementById("optLoopback") || document.getElementById("loopbackToggle");
-    if (optLoopback) {
-      optLoopback.checked = getHotspotLoop(newId);
+    if (typeof window.updateHotspotTsAudioModeUI === "function") {
+      window.updateHotspotTsAudioModeUI(newId);
+    }
+    if (typeof window.updateHotspotCardMuteUI === "function") {
+      window.updateHotspotCardMuteUI(newId);
     }
     document.querySelectorAll(".radio-container").forEach(c => {
       c.classList.toggle("active-hotspot", c.dataset.hotspotId === newId);
@@ -1476,16 +1478,12 @@ export function renderRadiosGrid() {
           };
         }
 
-        const cardLb = card.querySelector(".loopback-toggle");
-        if (cardLb) {
-          cardLb.checked = getHotspotLoop(cid);
-          cardLb.addEventListener("click", (e) => {
-            e.stopPropagation();
-          });
-          cardLb.addEventListener("change", () => {
-            const val = cardLb.checked;
-            setHotspotLoop(cid, val);
-          });
+        const cardTsModeBtn = card.querySelector(".ts-audio-mode-btn");
+        if (cardTsModeBtn && typeof window.setupTsAudioModeButton === "function") {
+          window.setupTsAudioModeButton(cardTsModeBtn, card, cid);
+          if (typeof window.updateCardTsAudioModeUI === "function") {
+            window.updateCardTsAudioModeUI(card, cid);
+          }
         }
 
         const collapseBtn = card.querySelector(".hotspot-collapse-btn");
@@ -1583,9 +1581,8 @@ export function renderRadiosGrid() {
       if (chkAgc) {
         chkAgc.checked = getHotspotAgc(hs.id);
       }
-      const chkLb = card.querySelector(".loopback-toggle");
-      if (chkLb) {
-        chkLb.checked = getHotspotLoop(hs.id);
+      if (typeof window.updateCardTsAudioModeUI === "function") {
+        window.updateCardTsAudioModeUI(card, hs.id);
       }
       const isCardCollapsed = isHotspotCollapsed(hs.id);
       const isCardLive = isHotspotLiveCollapsed(hs.id);

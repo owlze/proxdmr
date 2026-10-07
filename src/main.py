@@ -100,7 +100,6 @@ class RadioState:
         self.tx_slot: int = 2  # Default transmitting slot (2 for simplex/local, 1 for DX)
         self.active_tg: int = 2501
         self.is_rx: bool = False
-        self.is_loopback: bool = False
 
 radio_state = RadioState()
 user_radio_states: Dict[int, RadioState] = {}
@@ -4873,13 +4872,11 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         hotspot_manager.set_active_hotspot(hid, user_id=ws_user_id)
                     slot = int(data.get("slot", u_radio_state.tx_slot))
                     tg = int(data.get("tg", u_radio_state.active_tg))
-                    is_loop = bool(data.get("loopback", False)) or user_settings.loopback_mode
                     u_radio_state.is_transmitting = True
                     u_radio_state.transmitting_client_id = client_id
                     u_radio_state.tx_start_time = time.time()
                     u_radio_state.tx_slot = slot
                     u_radio_state.active_tg = tg
-                    u_radio_state.is_loopback = is_loop
 
                     active_hs = hotspot_manager.get_active_runtime(ws_user_id)
                     callsign = active_hs.config.callsign if active_hs else "N0CALL"
@@ -4892,10 +4889,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     else:
                         call_type = "PRIVATE" if (tg == 9990 or tg > 999999) else "GROUP"
 
-                    if is_loop:
-                        logger.info(f"[PTT] (MIC LOOP) Pressed by {client_id} (user {ws_login}) on Slot {slot} (Local loop, no BM TX)")
-                    else:
-                        logger.info(f"[PTT] Pressed by {client_id} (user {ws_login}) on Hotspot {active_hs.config.id if active_hs else ''}, Slot {slot}, TG {tg}")
+                    logger.info(f"[PTT] Pressed by {client_id} (user {ws_login}) on Hotspot {active_hs.config.id if active_hs else ''}, Slot {slot}, TG {tg}")
 
                     # Start DMR TX pipeline (Voice Header to BM if online, and log TX entry)
                     hotspot_manager.start_tx(
@@ -4903,14 +4897,12 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         slot=slot,
                         dst_id=tg,
                         call_type=call_type,
-                        is_loopback=is_loop,
                         user_id=ws_user_id,
                     )
 
                     await broadcast_user_json(ws_user_id, {
                         "type": "state_change",
                         "is_tx": True,
-                        "is_loopback": is_loop,
                         "client_id": client_id,
                         "hotspot_id": active_hs.config.id if active_hs else "",
                         "slot": slot,
@@ -4921,8 +4913,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
 
                 elif msg_type == "ptt_release":
                     if u_radio_state.transmitting_client_id == client_id:
-                        is_loop = getattr(u_radio_state, "is_loopback", False)
-                        roger_beep = bool(data.get("roger_beep", False)) and not is_loop
+                        roger_beep = bool(data.get("roger_beep", False))
                         roger_beep_pattern = str(data.get("roger_beep_pattern", "")).strip()
                         hotspot_manager.stop_tx(
                             user_id=ws_user_id,
@@ -4931,10 +4922,9 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         )
                         u_radio_state.is_transmitting = False
                         u_radio_state.transmitting_client_id = None
-                        u_radio_state.is_loopback = False
                         duration = time.time() - u_radio_state.tx_start_time
                         active_hs = hotspot_manager.get_active_runtime(ws_user_id)
-                        logger.info(f"[PTT] Released by {client_id} (user {ws_login}){' (MIC LOOP)' if is_loop else ''}, duration: {duration:.2f}s")
+                        logger.info(f"[PTT] Released by {client_id} (user {ws_login}), duration: {duration:.2f}s")
 
                         await broadcast_user_json(ws_user_id, {
                             "type": "state_change",
@@ -4997,18 +4987,6 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         "tg_ts2": new_tg
                     }, exclude=websocket)
 
-                elif msg_type == "set_loopback":
-                    enabled = bool(data.get("enabled", True))
-                    if user_settings.loopback_mode != enabled:
-                        user_settings.loopback_mode = enabled
-                        await save_user_settings(ws_user_id, user_settings.model_dump())
-                        if ws_user_id == 1:
-                            save_app_settings(user_settings)
-                        logger.info(f"[LOOPBACK] Set to {user_settings.loopback_mode} for user {ws_login}")
-                        await broadcast_user_json(ws_user_id, {
-                            "type": "loopback_change",
-                            "enabled": user_settings.loopback_mode
-                        }, exclude=websocket)
 
                 elif msg_type == "set_transcribe_slot":
                     hid = str(data.get("hotspot_id", "")).strip()
@@ -5430,21 +5408,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
 
             elif "bytes" in message:
                 audio_bytes = message["bytes"]
-                is_loop = getattr(u_radio_state, "is_loopback", False) or user_settings.loopback_mode
                 if u_radio_state.is_transmitting and (u_radio_state.transmitting_client_id == client_id or not u_radio_state.transmitting_client_id):
-                    if not is_loop:
-                        hotspot_manager.process_tx_audio(audio_bytes, user_id=ws_user_id)
-                    else:
-                        try:
-                            active_hs = hotspot_manager.get_active_runtime(ws_user_id)
-                            hid = active_hs.config.id if active_hs else "default"
-                            hid_bytes = hid.encode("utf-8")
-                            slot = u_radio_state.tx_slot if u_radio_state.tx_slot in (1, 2) else 1
-                            # ProxDMR tagged audio packet: [slot (1B), hid_len (1B), hid_bytes, pcm_bytes]
-                            tagged_audio = bytes([slot, len(hid_bytes)]) + hid_bytes + audio_bytes
-                            await websocket.send_bytes(tagged_audio)
-                        except Exception as e:
-                            logger.error(f"[MIC LOOP] Error echoing audio: {e}")
+                    hotspot_manager.process_tx_audio(audio_bytes, user_id=ws_user_id)
                 else:
                     last_drop = getattr(u_radio_state, "_last_drop_log", 0.0)
                     now_t = time.time()
@@ -5470,7 +5435,6 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             hotspot_manager.stop_tx(user_id=ws_user_id)
             u_radio_state.is_transmitting = False
             u_radio_state.transmitting_client_id = None
-            u_radio_state.is_loopback = False
             await broadcast_user_json(ws_user_id, {
                 "type": "state_change",
                 "is_tx": False,

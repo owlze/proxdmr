@@ -1737,5 +1737,11 @@
   "voice.leda": "Leda — Féminin, jeune et légère (Youthful)",
   "voice.orus": "Orus — Masculin, ferme et posé (Firm)",
   "voice.puck": "Puck — Masculin, dynamique et clair (Upbeat, par défaut)",
-  "voice.zephyr": "Zephyr — Féminin, claire et ouverte (Bright)"
+  "voice.zephyr": "Zephyr — Féminin, claire et ouverte (Bright)",
+  "ts_mode.solo_title": "Mode : Solo — un seul intervalle de temps est audible à la fois (TS1 et TS2 s'excluent mutuellement). Cliquer pour changer de mode",
+  "ts_mode.doubl_title": "Mode : Doubl — lecture simultanée des deux intervalles (contrôle Mute manuel). Cliquer pour changer de mode",
+  "ts_mode.auto_title": "Mode : Auto — sélection automatique selon le premier signal reçu (délai de maintien 2s). Cliquer pour changer de mode",
+  "ts_mode.solo_toast": "🔊 Mode Solo : un seul intervalle actif",
+  "ts_mode.doubl_toast": "🔊 Mode Doubl : son simultané des deux intervalles",
+  "ts_mode.auto_toast": "🔊 Mode Auto : sélection automatique d'intervalle (délai 2s)"
 }

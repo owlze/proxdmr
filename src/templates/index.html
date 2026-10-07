@@ -580,12 +580,11 @@
                     </div>
                   </div>
 
-                  <!-- Right side: Mic loop on left, AGC on right -->
+                  <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) on left, AGC on right -->
                   <div class="status-toggles-group">
-                    <label class="toggle-control toggle-loopback" title="Эхо-тест микрофона (Loopback) для проверки звука" data-i18n-title="toggles.loopback_title">
-                      <input type="checkbox" id="loopbackToggle" class="loopback-toggle" {% if loopback_mode %}checked{% endif %}>
-                      <span class="toggle-text">Loopback</span>
-                    </label>
+                    <div id="tsAudioModeToggleBtn" class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
+                      <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl🔊</span>
+                    </div>
                     <label class="toggle-control toggle-agc" title="Автоматическая регулировка усиления (АРУ) по НЧ с окном усреднения 1.5–2 сек" data-i18n-title="toggles.agc_title">
                       <input type="checkbox" id="agcToggle" class="agc-toggle" checked>
                       <span class="toggle-text">AGC</span>
@@ -1230,12 +1229,11 @@
                   </div>
                 </div>
 
-                <!-- Right side: Mic loop on left, AGC on right -->
+                <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) on left, AGC on right -->
                 <div class="status-toggles-group">
-                  <label class="toggle-control toggle-loopback" title="Эхо-тест микрофона (Loopback) для проверки звука" data-i18n-title="toggles.loopback_title">
-                    <input type="checkbox" class="loopback-toggle">
-                    <span class="toggle-text">Loopback</span>
-                  </label>
+                  <div class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
+                    <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl🔊</span>
+                  </div>
                   <label class="toggle-control toggle-agc" title="Автоматическая регулировка усиления (АРУ) по НЧ с окном усреднения 1.5–2 сек" data-i18n-title="toggles.agc_title">
                     <input type="checkbox" class="agc-toggle" checked>
                     <span class="toggle-text">AGC</span>
@@ -1818,15 +1816,6 @@
           </small>
         </div>
 
-        <!-- Simultaneous Slots (Dual TS Listen) Option -->
-        <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
-          <label style="cursor: pointer;">
-            <input type="checkbox" id="optSimultaneousSlots" {% if simultaneous_slots is not defined or simultaneous_slots %}checked{% endif %}> <strong data-i18n="general.simultaneous_slots">Одновременное воспроизведение двух таймслотов</strong>
-          </label>
-          <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="general.simultaneous_slots_hint">
-            Разрешает одновременный прием и воспроизведение звука с двух таймслотов TS1 и TS2. Если отключено — снятие/установка mute на одном TS автоматически переключает второй в противоположное состояние
-          </small>
-        </div>
 
         <!-- Check Mic on TX Option -->
         <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
