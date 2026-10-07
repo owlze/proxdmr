@@ -21,17 +21,16 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
 </p>
 
 ### Features:
-* **No physical radio, MMDVM modem, or hardware USB vocoder (DVStick) is required to operate on DMR** — Voice encoding and decoding are performed entirely by software on the server.
+* **No physical radio, MMDVM modem, or hardware USB vocoder (DVStick) is required to operate on DMR** — Voice encoding and decoding are performed entirely on the server via a software AMBE+2 vocoder..
 * **Access via any modern web browser** (PC, laptop, tablet) or through a dedicated Android application (APK).
 * **Multi-Hotspot Architecture** — Run multiple independent virtual hotspots simultaneously on one screen, listening to different timeslots (TS1 and TS2) and talkgroups.
 * **Ultra-low latency audio** — Voice streams are transmitted to the client in compressed form (Opus, WebRTC, WebSocket) with low latency of just tens of milliseconds.
 * **A single server database** for users, access permissions, and QSO audio recordings.
-* **Transmission on the air using Push-to-Talk** (PTT button on the screen or Space key on PC).
+* **Network PTT transmission using Push-to-Talk** (PTT button on the screen or Space key on PC).
 * **Support for two timeslots (TS1 and TS2)**, dynamic and static talkgroups.
 * **Automatic transmission time limit** (Time-Out Timer).
 * **BrandMeister API v2 integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, drop active/hung calls).
 * **Real-time network diagnostics** — Live monitoring of connection status and ping to the master server with an interactive latency chart.
-* **Software AMBE+2 vocoder**.
 * **Microphone Automatic Gain Control (AGC)**.
 * **Built-in RadioID callsign database** with automatic local synchronization (312,000+ radio amateurs).
 * **Audio recording player** with instant search and filtering by callsign, date, and group.
