@@ -31,7 +31,7 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
 * **Automatic transmission time limit** (Time-Out Timer).
 * **BrandMeister API v2 integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, clear stuck QSOs).
 * **Real-time network diagnostics** — Live monitoring of connection status and ping to the master server with an interactive latency chart.
-* **Software AMBE and IMBE vocoder**.
+* **Software AMBE+2 vocoder**.
 * **Microphone Automatic Gain Control (AGC)**.
 * **Built-in RadioID callsign database** with automatic local synchronization (312,000+ radio amateurs).
 * **Audio recording player** with instant search and filtering by callsign, date, and group.
