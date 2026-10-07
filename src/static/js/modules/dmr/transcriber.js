@@ -2205,7 +2205,12 @@ function toggleSlotTts(row, slot) {
   }
 
   if (newState) {
-    showToast(`✓ Голосовой синтез TS${slot} включен`, 2000);
+    showToast(
+      window.t
+        ? window.t("transcriber.tts_ts_on", { slot }, `✓ Голосовой синтез TS${slot} включен`)
+        : `✓ Голосовой синтез TS${slot} включен`,
+      2000
+    );
     if (window.ttsAudioQueueManager) {
       window.ttsAudioQueueManager.syncIdleDucking(0.15);
     }
@@ -2213,7 +2218,12 @@ function toggleSlotTts(row, slot) {
     if (window.ttsAudioQueueManager) {
       window.ttsAudioQueueManager.stopSlot(hid, slot);
     }
-    showToast(`✕ Голосовой синтез TS${slot} выключен`, 2000);
+    showToast(
+      window.t
+        ? window.t("transcriber.tts_ts_off", { slot }, `✕ Голосовой синтез TS${slot} выключен`)
+        : `✕ Голосовой синтез TS${slot} выключен`,
+      2000
+    );
   }
 }
 

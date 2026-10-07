@@ -1776,9 +1776,9 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
   const hs = window.currentHotspots.find(h => h.id === curHid) || window.currentHotspots[0] || {};
   const hsDevId = hs.bm_ssid ? `${hs.dmr_id}${String(hs.bm_ssid).padStart(2, '0')}` : (hs.dmr_id || "");
 
-  if (titleEl) titleEl.textContent = "BrandMeister & DMR INFO";
+  if (titleEl) titleEl.textContent = window.t ? window.t("bm_info.modal_title", {}, "BrandMeister & DMR INFO") : "BrandMeister & DMR INFO";
   if (iconEl) iconEl.textContent = isTg ? "🌐" : "👤";
-  if (subEl) subEl.textContent = "Автоопределение и подробные данные из BM API v2";
+  if (subEl) subEl.textContent = window.t ? window.t("bm_info.subtitle", {}, "Автоопределение и подробные данные из BM API v2") : "Автоопределение и подробные данные из BM API v2";
 
   if (badgeEl) {
     badgeEl.className = "bm-info-target-badge is-white";
@@ -1852,19 +1852,26 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
         errorBox.classList.remove("hidden");
         const errorTitle = document.getElementById("bmInfoErrorTitle");
         if (errorTitle) {
-          errorTitle.textContent = data.status === "not_found" ? "Данные не найдены (404)" :
-                                   data.status === "unauthorized" ? "Ошибка авторизации BM (401/403)" : "Ошибка запроса";
+          errorTitle.textContent = data.status === "not_found" ? (window.t ? window.t("bm_info.err_not_found", {}, "Данные не найдены (404)") : "Данные не найдены (404)") :
+                                   data.status === "unauthorized" ? (window.t ? window.t("bm_info.err_unauthorized", {}, "Ошибка авторизации BM (401/403)") : "Ошибка авторизации BM (401/403)") : (window.t ? window.t("bm_info.error_title", {}, "Ошибка запроса") : "Ошибка запроса");
         }
         if (errorMsg) {
-          errorMsg.textContent = data.detail || (data.data && data.data.message) || `Сервер BM вернул статус: ${data.status}`;
+          errorMsg.textContent = data.detail || (data.data && data.data.message) || (window.t ? window.t("bm_info.err_server_status", { status: data.status }, `Сервер BM вернул статус: ${data.status}`) : `Сервер BM вернул статус: ${data.status}`);
         }
       }
       return;
     }
 
     // Update modal header based on detected type
-    if (data.detected_type_label && titleEl) {
-      titleEl.textContent = data.detected_type_label;
+    const detectedTypeLabels = {
+      operator: window.t ? window.t("bm_info.type_operator", {}, "DMR ID радиолюбителя / оператора") : "DMR ID радиолюбителя / оператора",
+      repeater: window.t ? window.t("bm_info.type_repeater", {}, "Репитер DMR BrandMeister") : "Репитер DMR BrandMeister",
+      hotspot: window.t ? window.t("bm_info.type_hotspot", {}, "Персональный хотспот MMDVM") : "Персональный хотспот MMDVM",
+      talkgroup: window.t ? window.t("bm_info.type_talkgroup", {}, "Разговорная группа (TalkGroup)") : "Разговорная группа (TalkGroup)",
+      unknown: window.t ? window.t("bm_info.type_unknown", {}, "Пользовательская группа / ID") : "Пользовательская группа / ID"
+    };
+    if (titleEl) {
+      titleEl.textContent = (data.detected_type && detectedTypeLabels[data.detected_type]) || data.detected_type_label || (window.t ? window.t("bm_info.modal_title", {}, "BrandMeister & DMR INFO") : "BrandMeister & DMR INFO");
     }
     if (iconEl) {
       if (data.detected_type === "operator") iconEl.textContent = "👤";
@@ -1877,15 +1884,18 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
     if (badgeEl) {
       const detCall = data.callsign || callsign;
       const detName = data.user_name || (data.talkgroup && data.talkgroup.name) || tgOrIdInfo.name || "";
+      const lblOp = window.t ? window.t("bm_info.lbl_operator", {}, "Оператор") : "Оператор";
+      const lblRep = window.t ? window.t("bm_info.lbl_repeater", {}, "Репитер") : "Репитер";
+      const lblHs = window.t ? window.t("bm_info.lbl_hotspot", {}, "Хотспот") : "Хотспот";
       if (data.detected_type === "operator") {
         badgeEl.className = "bm-info-target-badge is-green";
-        badgeEl.innerHTML = `👤 Оператор: <span class="dmr-id-text" style="font-weight:700;">${targetId}</span>${detCall ? ` &bull; <strong style="color:#ff6700;">${safeEscapeHtml(detCall)}</strong>` : ''}${detName ? ` (${safeEscapeHtml(detName)})` : ''}`;
+        badgeEl.innerHTML = `👤 ${safeEscapeHtml(lblOp)}: <span class="dmr-id-text" style="font-weight:700;">${targetId}</span>${detCall ? ` &bull; <strong style="color:#ff6700;">${safeEscapeHtml(detCall)}</strong>` : ''}${detName ? ` (${safeEscapeHtml(detName)})` : ''}`;
       } else if (data.detected_type === "repeater") {
         badgeEl.className = "bm-info-target-badge is-white";
-        badgeEl.innerHTML = `📡 Репитер: <span class="dmr-id-text" style="font-weight:700;">${targetId}</span>${detCall ? ` &bull; <strong style="color:#ff6700;">${safeEscapeHtml(detCall)}</strong>` : ''}${detName ? ` (${safeEscapeHtml(detName)})` : ''}`;
+        badgeEl.innerHTML = `📡 ${safeEscapeHtml(lblRep)}: <span class="dmr-id-text" style="font-weight:700;">${targetId}</span>${detCall ? ` &bull; <strong style="color:#ff6700;">${safeEscapeHtml(detCall)}</strong>` : ''}${detName ? ` (${safeEscapeHtml(detName)})` : ''}`;
       } else if (data.detected_type === "hotspot") {
         badgeEl.className = "bm-info-target-badge is-white";
-        badgeEl.innerHTML = `📻 Хотспот: <span class="dmr-id-text" style="font-weight:700;">${targetId}</span>${detCall ? ` &bull; <strong style="color:#ff6700;">${safeEscapeHtml(detCall)}</strong>` : ''}`;
+        badgeEl.innerHTML = `📻 ${safeEscapeHtml(lblHs)}: <span class="dmr-id-text" style="font-weight:700;">${targetId}</span>${detCall ? ` &bull; <strong style="color:#ff6700;">${safeEscapeHtml(detCall)}</strong>` : ''}`;
       } else {
         badgeEl.className = "bm-info-target-badge is-white";
         badgeEl.innerHTML = `TG: <span class="dmr-tg-num" style="font-weight:800;">${targetId}</span>${detName ? ` (${safeEscapeHtml(detName)})` : ''}`;
@@ -1902,8 +1912,8 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
     if (errorBox) {
       errorBox.classList.remove("hidden");
       const errorTitle = document.getElementById("bmInfoErrorTitle");
-      if (errorTitle) errorTitle.textContent = "Сетевая ошибка";
-      if (errorMsg) errorMsg.textContent = `Не удалось связаться с сервером ProxDMR: ${err.message}`;
+      if (errorTitle) errorTitle.textContent = window.t ? window.t("bm_info.net_err_title", {}, "Сетевая ошибка") : "Сетевая ошибка";
+      if (errorMsg) errorMsg.textContent = window.t ? window.t("bm_info.net_err_msg", { error: err.message }, `Не удалось связаться с сервером ProxDMR: ${err.message}`) : `Не удалось связаться с сервером ProxDMR: ${err.message}`;
     }
   }
 }
@@ -1924,8 +1934,9 @@ function renderBmDeviceStatus(dev) {
 
   // Check if both slots linked
   if (lower.includes("both") || st === 3) {
+    const title = window.t ? window.t("bm_info.status_both_slots_linked", {}, "Оба слота в сети (Both Slots Linked)") : "Оба слота в сети (Both Slots Linked)";
     return `
-      <div class="bm-device-slots" title="Оба слота в сети (Both Slots Linked)">
+      <div class="bm-device-slots" title="${safeEscapeHtml(title)}">
         <span class="bm-device-slot-pill is-online">TS1</span>
         <span class="bm-device-slot-pill is-online">TS2</span>
       </div>`;
@@ -1933,8 +1944,9 @@ function renderBmDeviceStatus(dev) {
 
   // Check if slot 1 only linked
   if (lower.includes("slot 1") || lower.includes("ts1 linked")) {
+    const title = window.t ? window.t("bm_info.status_slot1_linked", {}, "TS1 в сети, TS2 отключен (Slot 1 Linked)") : "TS1 в сети, TS2 отключен (Slot 1 Linked)";
     return `
-      <div class="bm-device-slots" title="TS1 в сети, TS2 отключен (Slot 1 Linked)">
+      <div class="bm-device-slots" title="${safeEscapeHtml(title)}">
         <span class="bm-device-slot-pill is-online">TS1</span>
         <span class="bm-device-slot-pill is-offline">TS2</span>
       </div>`;
@@ -1942,8 +1954,9 @@ function renderBmDeviceStatus(dev) {
 
   // Check if slot 2 only linked
   if (lower.includes("slot 2") || lower.includes("ts2 linked")) {
+    const title = window.t ? window.t("bm_info.status_slot2_linked", {}, "TS2 в сети, TS1 отключен (Slot 2 Linked)") : "TS2 в сети, TS1 отключен (Slot 2 Linked)";
     return `
-      <div class="bm-device-slots" title="TS2 в сети, TS1 отключен (Slot 2 Linked)">
+      <div class="bm-device-slots" title="${safeEscapeHtml(title)}">
         <span class="bm-device-slot-pill is-offline">TS1</span>
         <span class="bm-device-slot-pill is-online">TS2</span>
       </div>`;
@@ -1961,16 +1974,18 @@ function renderBmDeviceStatus(dev) {
   const isDuplex = Boolean(dev.rx && dev.tx && dev.rx !== dev.tx && dev.rx !== "0.0000" && dev.tx !== "0.0000");
 
   if (isDuplex || lower.includes("slot") || String(dev.id).length === 6) {
+    const title = window.t ? window.t("bm_info.status_offline", {}, "Не в сети (Offline)") : "Не в сети (Offline)";
     return `
-      <div class="bm-device-slots" title="Не в сети (Offline)">
+      <div class="bm-device-slots" title="${safeEscapeHtml(title)}">
         <span class="bm-device-slot-pill is-offline">TS1</span>
         <span class="bm-device-slot-pill is-offline">TS2</span>
       </div>`;
   }
 
   // Default offline
+  const title = window.t ? window.t("bm_info.status_offline", {}, "Не в сети (Offline)") : "Не в сети (Offline)";
   return `
-    <div class="bm-device-slots" title="Не в сети (Offline)">
+    <div class="bm-device-slots" title="${safeEscapeHtml(title)}">
       <span class="bm-device-slot-pill is-offline">OFFLINE</span>
     </div>`;
 }
@@ -2010,10 +2025,21 @@ function renderBmRepeaterTechSection(devices) {
 
   if (techDevs.length === 0) return "";
 
+  const techTitle = window.t ? window.t("bm_info.tech_params_title", {}, "Технические параметры и характеристики оборудования") : "Технические параметры и характеристики оборудования";
+  const propPep = window.t ? window.t("bm_info.prop_pep", {}, "Мощность передатчика (PEP)") : "Мощность передатчика (PEP)";
+  const propAgl = window.t ? window.t("bm_info.prop_agl", {}, "Высота антенны (AGL)") : "Высота антенны (AGL)";
+  const propCoords = window.t ? window.t("bm_info.prop_coords", {}, "Координаты QTH") : "Координаты QTH";
+  const linkMap = window.t ? window.t("bm_info.link_map", {}, "🗺️ Карта") : "🗺️ Карта";
+  const titleMap = window.t ? window.t("bm_info.title_map_osm", {}, "Показать точку на карте OpenStreetMap") : "Показать точку на карте OpenStreetMap";
+  const propWeb = window.t ? window.t("hamqth.prop_website", {}, "Веб-сайт") : "Веб-сайт";
+  const propCreated = window.t ? window.t("bm_info.prop_bm_created", {}, "Добавлено в BM") : "Добавлено в BM";
+  const propUpdated = window.t ? window.t("bm_info.prop_bm_updated", {}, "Обновлено в BM") : "Обновлено в BM";
+  const propDesc = window.t ? window.t("bm_info.prop_desc_info", {}, "Описание / Инфо") : "Описание / Инфо";
+
   return `
     <div class="bm-repeater-tech-section">
       <div class="bm-tech-section-title">
-        <span>📡</span> Технические параметры и характеристики оборудования
+        <span>📡</span> ${safeEscapeHtml(techTitle)}
       </div>
       ${techDevs.map(dev => {
         const pep = Number(dev.pep) || 0;
@@ -2040,28 +2066,28 @@ function renderBmRepeaterTechSection(devices) {
             <div class="bm-tech-props-grid">
               ${pep > 0 ? `
                 <div class="bm-info-prop-item">
-                  <span class="bm-info-prop-label">Мощность передатчика (PEP)</span>
-                  <span class="bm-info-prop-val highlight">⚡ ${pep} Вт</span>
+                  <span class="bm-info-prop-label">${safeEscapeHtml(propPep)}</span>
+                  <span class="bm-info-prop-val highlight">${window.t ? window.t("bm_info.val_pep_watts", { watts: pep }, `⚡ ${pep} Вт`) : `⚡ ${pep} Вт`}</span>
                 </div>
               ` : ''}
               ${agl > 0 ? `
                 <div class="bm-info-prop-item">
-                  <span class="bm-info-prop-label">Высота антенны (AGL)</span>
-                  <span class="bm-info-prop-val">🗼 ${agl} м над землей</span>
+                  <span class="bm-info-prop-label">${safeEscapeHtml(propAgl)}</span>
+                  <span class="bm-info-prop-val">${window.t ? window.t("bm_info.val_agl_meters", { meters: agl }, `🗼 ${agl} м над землей`) : `🗼 ${agl} м над землей`}</span>
                 </div>
               ` : ''}
               ${hasCoords ? `
                 <div class="bm-info-prop-item">
-                  <span class="bm-info-prop-label">Координаты QTH</span>
+                  <span class="bm-info-prop-label">${safeEscapeHtml(propCoords)}</span>
                   <span class="bm-info-prop-val">
                     📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}
-                    <a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=14/${lat}/${lng}" target="_blank" rel="noopener" class="bm-map-link" title="Показать точку на карте OpenStreetMap">🗺️ Карта</a>
+                    <a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=14/${lat}/${lng}" target="_blank" rel="noopener" class="bm-map-link" title="${safeEscapeHtml(titleMap)}">${safeEscapeHtml(linkMap)}</a>
                   </span>
                 </div>
               ` : ''}
               ${web ? `
                 <div class="bm-info-prop-item">
-                  <span class="bm-info-prop-label">${window.t ? window.t("hamqth.prop_website", {}, "Веб-сайт") : "Веб-сайт"}</span>
+                  <span class="bm-info-prop-label">${safeEscapeHtml(propWeb)}</span>
                   <span class="bm-info-prop-val">
                     <a href="${safeEscapeHtml(webUrl)}" target="_blank" rel="noopener" class="bm-web-link">🌐 ${safeEscapeHtml(web)}</a>
                   </span>
@@ -2069,20 +2095,20 @@ function renderBmRepeaterTechSection(devices) {
               ` : ''}
               ${created ? `
                 <div class="bm-info-prop-item">
-                  <span class="bm-info-prop-label">Добавлено в BM</span>
+                  <span class="bm-info-prop-label">${safeEscapeHtml(propCreated)}</span>
                   <span class="bm-info-prop-val">${created}</span>
                 </div>
               ` : ''}
               ${updated ? `
                 <div class="bm-info-prop-item">
-                  <span class="bm-info-prop-label">Обновлено в BM</span>
+                  <span class="bm-info-prop-label">${safeEscapeHtml(propUpdated)}</span>
                   <span class="bm-info-prop-val">${updated}</span>
                 </div>
               ` : ''}
             </div>
             ${desc ? `
               <div class="bm-tech-desc-box">
-                <span class="bm-info-prop-label">Описание / Инфо</span>
+                <span class="bm-info-prop-label">${safeEscapeHtml(propDesc)}</span>
                 <div class="bm-tech-desc-text">${safeEscapeHtml(desc)}</div>
               </div>
             ` : ''}
@@ -2106,27 +2132,44 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
     const timedList = Array.isArray(d.timedSubscriptions) ? d.timedSubscriptions : [];
     const blockedList = Array.isArray(d.blockedGroups) ? d.blockedGroups : [];
 
+    const profTitle = window.t ? window.t("bm_info.profile_title", {}, "Профиль устройства и подписки") : "Профиль устройства и подписки";
+    const badgeReg = window.t ? window.t("bm_info.registered", {}, "Зарегистрирован") : "Зарегистрирован";
+    const badgeNoData = window.t ? window.t("bm_info.no_data", {}, "Нет данных") : "Нет данных";
+    const propDevId = window.t ? window.t("bm_info.device_id", {}, "ID устройства") : "ID устройства";
+    const propCall = window.t ? window.t("bm_info.th_callsign", {}, "Позывной") : "Позывной";
+    const propAutoStatic = window.t ? window.t("bm_info.autostatic", {}, "Авто-статика (AutoStatic)") : "Авто-статика (AutoStatic)";
+    const valEnabled = window.t ? window.t("bm_info.enabled", {}, "Включено") : "Включено";
+    const valDisabled = window.t ? window.t("bm_info.disabled", {}, "Выключено") : "Выключено";
+    const propTotalStatic = window.t ? window.t("bm_info.total_static_tg", {}, "Всего статических TG") : "Всего статических TG";
+    const dynTitle = window.t ? window.t("bm_info.dynamic_title", {}, "Динамические подписки и кластеры") : "Динамические подписки и кластеры";
+    const propDynTgs = window.t ? window.t("bm_info.dynamic_tgs", {}, "Динамические группы") : "Динамические группы";
+    const valNoActive = window.t ? window.t("bm_info.no_active", {}, "Нет активных") : "Нет активных";
+    const propClusters = window.t ? window.t("bm_info.clusters", {}, "Кластеры") : "Кластеры";
+    const valNone = window.t ? window.t("bm_info.none", {}, "Нет") : "Нет";
+    const propBlocked = window.t ? window.t("bm_info.blocked_tgs", {}, "Блокированные TG") : "Блокированные TG";
+    const propTimed = window.t ? window.t("bm_info.timed_subs", {}, "Подписки по расписанию") : "Подписки по расписанию";
+
     cardsBox.innerHTML = `
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📻</span> Профиль устройства и подписки</div>
-          <span class="bm-info-card-badge ${subList.length > 0 ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${subList.length > 0 ? 'Зарегистрирован' : 'Нет данных'}</span>
+          <div class="bm-info-card-title"><span>📻</span> ${safeEscapeHtml(profTitle)}</div>
+          <span class="bm-info-card-badge ${subList.length > 0 ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${subList.length > 0 ? safeEscapeHtml(badgeReg) : safeEscapeHtml(badgeNoData)}</span>
         </div>
         <div class="bm-info-props-grid">
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">ID устройства</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propDevId)}</span>
             <span class="bm-info-prop-val dmr-green">${targetId}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Позывной</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propCall)}</span>
             <span class="bm-info-prop-val highlight">${safeEscapeHtml(data.callsign || '—')}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Авто-статика (AutoStatic)</span>
-            <span class="bm-info-prop-val">${d.autoStatic ? 'Включено' : 'Выключено'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propAutoStatic)}</span>
+            <span class="bm-info-prop-val">${d.autoStatic ? safeEscapeHtml(valEnabled) : safeEscapeHtml(valDisabled)}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Всего статических TG</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propTotalStatic)}</span>
             <span class="bm-info-prop-val blue">${subList.length}</span>
           </div>
         </div>
@@ -2134,46 +2177,46 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
 
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📌</span> Статические TalkGroups TS1 (${ts1Subs.length})</div>
+          <div class="bm-info-card-title"><span>📌</span> ${window.t ? window.t("bm_info.static_ts1_title", { count: ts1Subs.length }, `Статические TalkGroups TS1 (${ts1Subs.length})`) : `Статические TalkGroups TS1 (${ts1Subs.length})`}</div>
         </div>
         ${ts1Subs.length > 0 ? `
           <div class="bm-info-tg-pills">
             ${ts1Subs.map(s => `<span class="bm-info-tg-pill">TG ${safeEscapeHtml(s.talkgroup)}</span>`).join("")}
           </div>
-        ` : `<div style="font-size: 0.76rem; color: #8b949e;">Нет статических групп на таймслоте TS1</div>`}
+        ` : `<div style="font-size: 0.76rem; color: #8b949e;">${window.t ? window.t("bm_info.no_static_ts1", {}, "Нет статических групп на таймслоте TS1") : "Нет статических групп на таймслоте TS1"}</div>`}
       </div>
 
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📌</span> Статические TalkGroups TS2 (${ts2Subs.length})</div>
+          <div class="bm-info-card-title"><span>📌</span> ${window.t ? window.t("bm_info.static_ts2_title", { count: ts2Subs.length }, `Статические TalkGroups TS2 (${ts2Subs.length})`) : `Статические TalkGroups TS2 (${ts2Subs.length})`}</div>
         </div>
         ${ts2Subs.length > 0 ? `
           <div class="bm-info-tg-pills">
             ${ts2Subs.map(s => `<span class="bm-info-tg-pill ts2-pill">TG ${safeEscapeHtml(s.talkgroup)}</span>`).join("")}
           </div>
-        ` : `<div style="font-size: 0.76rem; color: #8b949e;">Нет статических групп на таймслоте TS2</div>`}
+        ` : `<div style="font-size: 0.76rem; color: #8b949e;">${window.t ? window.t("bm_info.no_static_ts2", {}, "Нет статических групп на таймслоте TS2") : "Нет статических групп на таймслоте TS2"}</div>`}
       </div>
 
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>⚡</span> Динамические подписки и кластеры</div>
+          <div class="bm-info-card-title"><span>⚡</span> ${safeEscapeHtml(dynTitle)}</div>
         </div>
         <div class="bm-info-props-grid">
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Динамические группы</span>
-            <span class="bm-info-prop-val">${dynamicList.length > 0 ? dynamicList.map(g => `TG ${safeEscapeHtml(g.talkgroup || g)}`).join(", ") : 'Нет активных'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propDynTgs)}</span>
+            <span class="bm-info-prop-val">${dynamicList.length > 0 ? dynamicList.map(g => `TG ${safeEscapeHtml(g.talkgroup || g)}`).join(", ") : safeEscapeHtml(valNoActive)}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Кластеры</span>
-            <span class="bm-info-prop-val">${clustersList.length > 0 ? clustersList.map(c => safeEscapeHtml(c.cluster || c)).join(", ") : 'Нет'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propClusters)}</span>
+            <span class="bm-info-prop-val">${clustersList.length > 0 ? clustersList.map(c => safeEscapeHtml(c.cluster || c)).join(", ") : safeEscapeHtml(valNone)}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Блокированные TG</span>
-            <span class="bm-info-prop-val">${blockedList.length > 0 ? blockedList.join(", ") : 'Нет'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propBlocked)}</span>
+            <span class="bm-info-prop-val">${blockedList.length > 0 ? blockedList.join(", ") : safeEscapeHtml(valNone)}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Подписки по расписанию</span>
-            <span class="bm-info-prop-val">${timedList.length > 0 ? timedList.length : 'Нет'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propTimed)}</span>
+            <span class="bm-info-prop-val">${timedList.length > 0 ? timedList.length : safeEscapeHtml(valNone)}</span>
           </div>
         </div>
       </div>
@@ -2187,48 +2230,59 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
     const ts1Subs = subs.filter(s => String(s.slot) === "1").sort((a, b) => parseInt(a.talkgroup, 10) - parseInt(b.talkgroup, 10));
     const ts2Subs = subs.filter(s => String(s.slot) === "2").sort((a, b) => parseInt(a.talkgroup, 10) - parseInt(b.talkgroup, 10));
 
-    const hsName = data.hotspot_name || "Хотспот";
+    const hsName = data.hotspot_name || (window.t ? window.t("bm_info.hotspot", {}, "Хотспот") : "Хотспот");
     const hsDev = data.hotspot_device_id || "";
+
+    const cardTitle = window.t ? window.t("bm_info.tg_status_hs_title", { tg: targetTgNum }, `Статус группы TG ${targetTgNum} на хотспоте`) : `Статус группы TG ${targetTgNum} на хотспоте`;
+    const badgeStatic = window.t ? window.t("bm_info.static_slot", { slot: matchedSub ? matchedSub.slot : 1 }, `Статика TS${matchedSub ? matchedSub.slot : 1}`) : `Статика TS${matchedSub ? matchedSub.slot : 1}`;
+    const badgeDyn = window.t ? window.t("bm_info.dynamic_not_static", {}, "Динамическая (не в статике)") : "Динамическая (не в статике)";
 
     let statusDescHtml = "";
     if (isSubscribed) {
-      statusDescHtml = `Группа <strong style="color:#ffffff;">TG ${targetTgNum}</strong> статически привязана к <strong>Таймслоту TS${matchedSub.slot}</strong> хотспота <strong>${safeEscapeHtml(hsName)}</strong> (${hsDev}). Все вызовы в этой группе транслируются на хотспот непрерывно.`;
+      statusDescHtml = window.t ? window.t("bm_info.desc_subscribed", { tg: targetTgNum, slot: matchedSub.slot, hs: hsName, dev: hsDev }, `Группа <strong style="color:#ffffff;">TG ${targetTgNum}</strong> статически привязана к <strong>Таймслоту TS${matchedSub.slot}</strong> хотспота <strong>${safeEscapeHtml(hsName)}</strong> (${hsDev}). Все вызовы в этой группе транслируются на хотспот непрерывно.`) : `Группа <strong style="color:#ffffff;">TG ${targetTgNum}</strong> статически привязана к <strong>Таймслоту TS${matchedSub.slot}</strong> хотспота <strong>${safeEscapeHtml(hsName)}</strong> (${hsDev}). Все вызовы в этой группе транслируются на хотспот непрерывно.`;
     } else {
-      statusDescHtml = `Группа <strong style="color:#ffffff;">TG ${targetTgNum}</strong> <span style="color:#8b949e;">не добавлена в статику</span> на хотспоте <strong>${safeEscapeHtml(hsName)}</strong> (${hsDev}). Вы можете выходить в эфир динамически (по нажатию PTT группа активируется на 15 минут) либо добавить её в статику.`;
+      statusDescHtml = window.t ? window.t("bm_info.desc_not_subscribed", { tg: targetTgNum, hs: hsName, dev: hsDev }, `Группа <strong style="color:#ffffff;">TG ${targetTgNum}</strong> <span style="color:#8b949e;">не добавлена в статику</span> на хотспоте <strong>${safeEscapeHtml(hsName)}</strong> (${hsDev}). Вы можете выходить в эфир динамически (по нажатию PTT группа активируется на 15 минут) либо добавить её в статику.`) : `Группа <strong style="color:#ffffff;">TG ${targetTgNum}</strong> <span style="color:#8b949e;">не добавлена в статику</span> на хотспоте <strong>${safeEscapeHtml(hsName)}</strong> (${hsDev}). Вы можете выходить в эфир динамически (по нажатию PTT группа активируется на 15 минут) либо добавить её в статику.`;
     }
+
+    const propHs = window.t ? window.t("bm_info.hotspot", {}, "Хотспот") : "Хотспот";
+    const propRepId = window.t ? window.t("bm_info.repeater_id_ssid", {}, "Repeater ID (SSID)") : "Repeater ID (SSID)";
+    const propTotalStatic = window.t ? window.t("bm_info.total_static_tg", {}, "Всего статических TG") : "Всего статических TG";
+    const propTgStatus = window.t ? window.t("bm_info.tg_status", {}, "Статус группы") : "Статус группы";
+    const valActiveStatic = window.t ? window.t("bm_info.active_in_static", { slot: matchedSub ? matchedSub.slot : 1 }, `Активна в статике (TS${matchedSub ? matchedSub.slot : 1})`) : `Активна в статике (TS${matchedSub ? matchedSub.slot : 1})`;
+    const valDynPtt = window.t ? window.t("bm_info.dynamic_ptt_short", {}, "Динамический PTT") : "Динамический PTT";
 
     cardsBox.innerHTML = `
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📌</span> Статус группы TG ${targetTgNum} на хотспоте</div>
-          <span class="bm-info-card-badge ${isSubscribed ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${isSubscribed ? `Статика TS${matchedSub.slot}` : 'Динамическая (не в статике)'}</span>
+          <div class="bm-info-card-title"><span>📌</span> ${safeEscapeHtml(cardTitle)}</div>
+          <span class="bm-info-card-badge ${isSubscribed ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${isSubscribed ? safeEscapeHtml(badgeStatic) : safeEscapeHtml(badgeDyn)}</span>
         </div>
         <div style="font-size: 0.82rem; color: #c9d1d9; line-height: 1.5; margin-bottom: 10px;">
           ${statusDescHtml}
         </div>
         <div class="bm-info-props-grid">
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Хотспот</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propHs)}</span>
             <span class="bm-info-prop-val highlight">${safeEscapeHtml(hsName)}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Repeater ID (SSID)</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propRepId)}</span>
             <span class="bm-info-prop-val dmr-green">${hsDev || '—'}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Всего статических TG</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propTotalStatic)}</span>
             <span class="bm-info-prop-val blue">${subs.length} (TS1: ${ts1Subs.length}, TS2: ${ts2Subs.length})</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Статус группы</span>
-            <span class="bm-info-prop-val ${isSubscribed ? 'blue' : ''}">${isSubscribed ? `Активна в статике (TS${matchedSub.slot})` : 'Динамический PTT'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propTgStatus)}</span>
+            <span class="bm-info-prop-val ${isSubscribed ? 'blue' : ''}">${isSubscribed ? safeEscapeHtml(valActiveStatic) : safeEscapeHtml(valDynPtt)}</span>
           </div>
         </div>
       </div>
 
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📻</span> Статические подписки TS1 (${ts1Subs.length})</div>
+          <div class="bm-info-card-title"><span>📻</span> ${window.t ? window.t("bm_info.static_subs_ts1", { count: ts1Subs.length }, `Статические подписки TS1 (${ts1Subs.length})`) : `Статические подписки TS1 (${ts1Subs.length})`}</div>
         </div>
         ${ts1Subs.length > 0 ? `
           <div class="bm-info-tg-pills">
@@ -2238,12 +2292,12 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
               return `<span class="bm-info-tg-pill ${isTarget ? 'is-target-tg' : ''}" title="${tgName ? `TG ${s.talkgroup}: ${tgName}` : `TG ${s.talkgroup}`}">TG ${safeEscapeHtml(s.talkgroup)}${tgName ? ` <small style="opacity:0.75; font-size:0.68rem;">(${safeEscapeHtml(tgName)})</small>` : ''}</span>`;
             }).join("")}
           </div>
-        ` : `<div style="font-size: 0.76rem; color: #8b949e;">Нет статических групп на таймслоте TS1</div>`}
+        ` : `<div style="font-size: 0.76rem; color: #8b949e;">${window.t ? window.t("bm_info.no_static_ts1", {}, "Нет статических групп на таймслоте TS1") : "Нет статических групп на таймслоте TS1"}</div>`}
       </div>
 
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📻</span> Статические подписки TS2 (${ts2Subs.length})</div>
+          <div class="bm-info-card-title"><span>📻</span> ${window.t ? window.t("bm_info.static_subs_ts2", { count: ts2Subs.length }, `Статические подписки TS2 (${ts2Subs.length})`) : `Статические подписки TS2 (${ts2Subs.length})`}</div>
         </div>
         ${ts2Subs.length > 0 ? `
           <div class="bm-info-tg-pills">
@@ -2253,7 +2307,7 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
               return `<span class="bm-info-tg-pill ts2-pill ${isTarget ? 'is-target-tg' : ''}" title="${tgName ? `TG ${s.talkgroup}: ${tgName}` : `TG ${s.talkgroup}`}">TG ${safeEscapeHtml(s.talkgroup)}${tgName ? ` <small style="opacity:0.75; font-size:0.68rem;">(${safeEscapeHtml(tgName)})</small>` : ''}</span>`;
             }).join("")}
           </div>
-        ` : `<div style="font-size: 0.76rem; color: #8b949e;">Нет статических групп на таймслоте TS2</div>`}
+        ` : `<div style="font-size: 0.76rem; color: #8b949e;">${window.t ? window.t("bm_info.no_static_ts2", {}, "Нет статических групп на таймслоте TS2") : "Нет статических групп на таймслоте TS2"}</div>`}
       </div>
     `;
   } else if (queryType === "talkgroup_info") {
@@ -2262,49 +2316,62 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
     const tgName = d.Name || ((typeof (window.TG_NAMES || {}) !== "undefined" && (window.TG_NAMES || {})[targetId]) || "");
     const isFound = Boolean(d.ID && d.Name);
 
+    const tgRegTitle = window.t ? window.t("bm_info.tg_registry_title", {}, "Реестр разговорных групп BM") : "Реестр разговорных групп BM";
+    const badgeReg = window.t ? window.t("bm_info.registered_in_bm", {}, "Зарегистрирована в BM") : "Зарегистрирована в BM";
+    const badgeLocal = window.t ? window.t("bm_info.local_not_in_bm", {}, "Локальная / Не в реестре BM") : "Локальная / Не в реестре BM";
+    const propTgNum = window.t ? window.t("bm_info.prop_tg_num", {}, "Номер TalkGroup") : "Номер TalkGroup";
+    const propOffName = window.t ? window.t("bm_info.official_name", {}, "Официальное название") : "Официальное название";
+    const propRegStatus = window.t ? window.t("bm_info.reg_status", {}, "Статус регистрации") : "Статус регистрации";
+    const valRegBm = window.t ? window.t("bm_info.official_registry_bm_v2", {}, "Официальный реестр BM v2") : "Официальный реестр BM v2";
+    const valRegCustom = window.t ? window.t("bm_info.custom_regional_tg", {}, "Пользовательская или региональная TG") : "Пользовательская или региональная TG";
+    const propAvail = window.t ? window.t("bm_info.availability", {}, "Доступность") : "Доступность";
+    const valGlobalBm = window.t ? window.t("bm_info.global_bm_network", {}, "Глобальная сеть BM") : "Глобальная сеть BM";
+    const hintFooter = window.t ? window.t("bm_info.tg_hint_footer", {}, "💡 Разговорные группы BM маршрутизируются серверами сети по их числовому номеру. Любой абонент может нажать PTT для динамической активации группы на своем хотспоте.") : "💡 Разговорные группы BM маршрутизируются серверами сети по их числовому номеру. Любой абонент может нажать PTT для динамической активации группы на своем хотспоте.";
+
     cardsBox.innerHTML = `
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>🌐</span> Реестр разговорных групп BM</div>
-          <span class="bm-info-card-badge ${isFound ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${isFound ? 'Зарегистрирована в BM' : 'Локальная / Не в реестре BM'}</span>
+          <div class="bm-info-card-title"><span>🌐</span> ${safeEscapeHtml(tgRegTitle)}</div>
+          <span class="bm-info-card-badge ${isFound ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${isFound ? safeEscapeHtml(badgeReg) : safeEscapeHtml(badgeLocal)}</span>
         </div>
         <div class="bm-info-props-grid">
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Номер TalkGroup</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propTgNum)}</span>
             <span class="bm-info-prop-val highlight" style="font-size: 1.15rem; font-weight: 800;">TG ${tgId}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Официальное название</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propOffName)}</span>
             <span class="bm-info-prop-val blue" style="font-size: 1.05rem;">${safeEscapeHtml(tgName || '—')}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Статус регистрации</span>
-            <span class="bm-info-prop-val">${isFound ? 'Официальный реестр BM v2' : 'Пользовательская или региональная TG'}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propRegStatus)}</span>
+            <span class="bm-info-prop-val">${isFound ? safeEscapeHtml(valRegBm) : safeEscapeHtml(valRegCustom)}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Доступность</span>
-            <span class="bm-info-prop-val">Глобальная сеть BM</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propAvail)}</span>
+            <span class="bm-info-prop-val">${safeEscapeHtml(valGlobalBm)}</span>
           </div>
         </div>
         <div style="font-size: 0.74rem; color: #8b949e; margin-top: 10px; line-height: 1.4;">
-          💡 Разговорные группы BM маршрутизируются серверами сети по их числовому номеру. Любой абонент может нажать PTT для динамической активации группы на своем хотспоте.
+          ${safeEscapeHtml(hintFooter)}
         </div>
       </div>
     `;
   } else if (queryType === "devices_by_call") {
     const devices = Array.isArray(data.data) ? data.data : (data.data ? [data.data] : []);
+    const unitDev = devices.length === 1 ? (window.t ? window.t("bm_info.unit_device_one", {}, "устройство") : "устройство") : (window.t ? window.t("bm_info.unit_device_many", {}, "устройств") : "устройств");
     let html = `
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>🔎</span> Устройства позывного ${safeEscapeHtml(data.callsign || targetId)}</div>
-          <span class="bm-info-card-badge ${devices.length > 0 ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${devices.length} ${devices.length === 1 ? 'устройство' : 'устройств'}</span>
+          <div class="bm-info-card-title"><span>🔎</span> ${window.t ? window.t("bm_info.devices_by_call_title", { call: data.callsign || targetId }, `Устройства позывного ${data.callsign || targetId}`) : `Устройства позывного ${data.callsign || targetId}`}</div>
+          <span class="bm-info-card-badge ${devices.length > 0 ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${devices.length} ${safeEscapeHtml(unitDev)}</span>
         </div>
     `;
 
     if (devices.length === 0) {
       html += `
         <div style="font-size: 0.80rem; color: #8b949e; padding: 8px 0;">
-          В реестре BM не найдено зарегистрированных репитеров или хотспотов для данного позывного.
+          ${window.t ? window.t("bm_info.no_devices_found", {}, "В реестре BM не найдено зарегистрированных репитеров или хотспотов для данного позывного.") : "В реестре BM не найдено зарегистрированных репитеров или хотспотов для данного позывного."}
         </div>
       </div>`;
     } else {
@@ -2314,13 +2381,13 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Позывной</th>
-                <th>Статус</th>
-                <th>Мастер</th>
-                <th>Частоты / CC</th>
-                <th>Модем / Прошивка</th>
-                <th>Локация / Инфо</th>
-                <th>Последний контакт</th>
+                <th>${window.t ? window.t("bm_info.th_callsign", {}, "Позывной") : "Позывной"}</th>
+                <th>${window.t ? window.t("bm_info.th_status", {}, "Статус") : "Статус"}</th>
+                <th>${window.t ? window.t("bm_info.th_master", {}, "Мастер") : "Мастер"}</th>
+                <th>${window.t ? window.t("bm_info.th_freq_cc", {}, "Частоты / CC") : "Частоты / CC"}</th>
+                <th>${window.t ? window.t("bm_info.th_modem", {}, "Модем / Прошивка") : "Модем / Прошивка"}</th>
+                <th>${window.t ? window.t("bm_info.th_location", {}, "Локация / Инфо") : "Локация / Инфо"}</th>
+                <th>${window.t ? window.t("bm_info.th_last_contact", {}, "Последний контакт") : "Последний контакт"}</th>
               </tr>
             </thead>
             <tbody>
@@ -2348,27 +2415,36 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
   } else if (queryType === "registry") {
     const items = Array.isArray(data.data) ? data.data : (data.data ? [data.data] : []);
     const item = items[0] || {};
+    const regTitle = window.t ? window.t("bm_info.registry_title", {}, "Регистрация в сети BM / DMR") : "Регистрация в сети BM / DMR";
+    const badgeReg = window.t ? window.t("bm_info.registered", {}, "Зарегистрирован") : "Зарегистрирован";
+    const badgeNotFound = window.t ? window.t("bm_info.not_found", {}, "Не найдено") : "Не найдено";
+    const propDmrId = window.t ? window.t("bm_info.prop_dmr_id", {}, "DMR ID") : "DMR ID";
+    const propCall = window.t ? window.t("hamqth.prop_callsign", {}, "Позывной (Callsign)") : "Позывной (Callsign)";
+    const propName = window.t ? window.t("bm_info.prop_name", {}, "Имя (Name)") : "Имя (Name)";
+    const propSurname = window.t ? window.t("bm_info.surname_text", {}, "Фамилия / Текст (Text)") : "Фамилия / Текст (Text)";
+    const propSymbol = window.t ? window.t("bm_info.prop_aprs_symbol", {}, "Символ APRS/DMR") : "Символ APRS/DMR";
+
     cardsBox.innerHTML = `
       <div class="bm-info-card">
         <div class="bm-info-card-header">
-          <div class="bm-info-card-title"><span>📋</span> Регистрация в сети BM / DMR</div>
-          <span class="bm-info-card-badge ${item.Call ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${item.Call ? 'Зарегистрирован' : 'Не найдено'}</span>
+          <div class="bm-info-card-title"><span>📋</span> ${safeEscapeHtml(regTitle)}</div>
+          <span class="bm-info-card-badge ${item.Call ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">${item.Call ? safeEscapeHtml(badgeReg) : safeEscapeHtml(badgeNotFound)}</span>
         </div>
         <div class="bm-info-props-grid">
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">DMR ID</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propDmrId)}</span>
             <span class="bm-info-prop-val dmr-green" style="font-size: 1.05rem;">${item.ID || targetId}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">${window.t ? window.t("hamqth.prop_callsign", {}, "Позывной (Callsign)") : "Позывной (Callsign)"}</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propCall)}</span>
             <span class="bm-info-prop-val highlight" style="font-size: 1.15rem; font-weight: 800;">${safeEscapeHtml(item.Call || data.callsign || '—')}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Имя (Name)</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propName)}</span>
             <span class="bm-info-prop-val">${safeEscapeHtml(item.Name || '—')}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Фамилия / Текст (Text)</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propSurname)}</span>
             <span class="bm-info-prop-val">${safeEscapeHtml(item.Text || item.Surname || '—')}</span>
           </div>
           <div class="bm-info-prop-item">
@@ -2376,7 +2452,7 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
             <span class="bm-info-prop-val blue">${item.SSID !== undefined ? item.SSID : '0'}</span>
           </div>
           <div class="bm-info-prop-item">
-            <span class="bm-info-prop-label">Символ APRS/DMR</span>
+            <span class="bm-info-prop-label">${safeEscapeHtml(propSymbol)}</span>
             <span class="bm-info-prop-val">${safeEscapeHtml(item.Symbol || '—')}</span>
           </div>
         </div>
@@ -2417,70 +2493,88 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
     // 2. Operator Card (if radio amateur/operator)
     if (isOperator) {
       const isBmReg = Boolean(reg.Call || reg.ID || reg.Name || op.is_registered);
+      const lblOp = window.t ? window.t("bm_info.lbl_operator", {}, "Оператор") : "Оператор";
+      const badgeBmReg = window.t ? window.t("bm_info.badge_registered_bm", {}, "Зарегистрирован в BM") : "Зарегистрирован в BM";
+      const badgeNotBm = window.t ? window.t("bm_info.badge_not_in_bm", {}, "В BM не найден (RadioID)") : "В BM не найден (RadioID)";
+      const propCallsign = window.t ? window.t("hamqth.prop_callsign", {}, "Позывной (Callsign)") : "Позывной (Callsign)";
+      const propDmrId = window.t ? window.t("bm_info.prop_dmr_id", {}, "DMR ID (Radio ID)") : "DMR ID (Radio ID)";
+      const propName = window.t ? window.t("bm_info.prop_name", {}, "Имя (Name)") : "Имя (Name)";
+      const propQth = window.t ? window.t("bm_info.prop_qth", {}, "Город / Страна / QTH") : "Город / Страна / QTH";
+      const propRadioIdStatus = window.t ? window.t("bm_info.prop_radioid_status", {}, "Статус RadioID") : "Статус RadioID";
+      const propLastAct = window.t ? window.t("bm_info.prop_last_activity", {}, "Последняя активность") : "Последняя активность";
+      const propBmCreated = window.t ? window.t("bm_info.prop_bm_created", {}, "Дата регистрации в BM") : "Дата регистрации в BM";
+      const propBmUpdated = window.t ? window.t("bm_info.prop_bm_updated", {}, "Обновлено в BM") : "Обновлено в BM";
+      const propAprsSsid = window.t ? window.t("bm_info.prop_aprs_ssid", {}, "APRS SSID") : "APRS SSID";
+      const propAprsSymbol = window.t ? window.t("bm_info.prop_aprs_symbol", {}, "Символ APRS/DMR") : "Символ APRS/DMR";
+      const propBmText = window.t ? window.t("bm_info.prop_bm_text", {}, "Описание BM (Text)") : "Описание BM (Text)";
+      const propRegistry = window.t ? window.t("bm_info.prop_registry", {}, "Реестр сети") : "Реестр сети";
+      const valRegBm = window.t ? window.t("bm_info.val_registry_bm", {}, "BrandMeister DMR v2") : "BrandMeister DMR v2";
+      const valRegLocal = window.t ? window.t("bm_info.val_registry_radioid", {}, "Локальная база RadioID") : "Локальная база RadioID";
+
       cardsHtml += `
         <div class="bm-info-card">
           <div class="bm-info-card-header">
-            <div class="bm-info-card-title"><span>👤</span> Оператор: ${safeEscapeHtml(regCall || targetId)}</div>
+            <div class="bm-info-card-title"><span>👤</span> ${safeEscapeHtml(lblOp)}: ${safeEscapeHtml(regCall || targetId)}</div>
             <span class="bm-info-card-badge ${isBmReg ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">
-              ${isBmReg ? 'Зарегистрирован в BM' : 'В BM не найден (RadioID)'}
+              ${isBmReg ? safeEscapeHtml(badgeBmReg) : safeEscapeHtml(badgeNotBm)}
             </span>
           </div>
           <div class="bm-info-props-grid">
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">${window.t ? window.t("hamqth.prop_callsign", {}, "Позывной (Callsign)") : "Позывной (Callsign)"}</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propCallsign)}</span>
               <span class="bm-info-prop-val highlight" style="font-size: 1.20rem; font-weight: 800; color: #ff6700;">${safeEscapeHtml(regCall || '—')}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">DMR ID (Radio ID)</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propDmrId)}</span>
               <span class="bm-info-prop-val dmr-green" style="font-size: 1.15rem; font-weight: 700;">${targetId}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Имя (Name)</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propName)}</span>
               <span class="bm-info-prop-val" style="font-weight: 600;">${safeEscapeHtml(opName || '—')}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Город / Страна / QTH</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propQth)}</span>
               <span class="bm-info-prop-val">${safeEscapeHtml(opLoc)}</span>
             </div>
             ${radio.status ? `
               <div class="bm-info-prop-item">
-                <span class="bm-info-prop-label">Статус RadioID</span>
+                <span class="bm-info-prop-label">${safeEscapeHtml(propRadioIdStatus)}</span>
                 <span class="bm-info-prop-val" style="color: #3fb950; font-weight: 700;">✓ ${safeEscapeHtml(String(radio.status).toUpperCase())}</span>
               </div>
             ` : ''}
             ${radio.lastheard ? `
               <div class="bm-info-prop-item">
-                <span class="bm-info-prop-label">Последняя активность</span>
+                <span class="bm-info-prop-label">${safeEscapeHtml(propLastAct)}</span>
                 <span class="bm-info-prop-val" style="color: #7ee787;">🎙️ ${formatBmDate(radio.lastheard, true)}${radio.lasttg ? ` <small style="color:#8b949e;">(TG ${radio.lasttg}${radio.lastmaster ? `, BM ${radio.lastmaster}` : ''})</small>` : ''}</span>
               </div>
             ` : ''}
             ${data.bm_created || op.bm_created ? `
               <div class="bm-info-prop-item">
-                <span class="bm-info-prop-label">Дата регистрации в BM</span>
+                <span class="bm-info-prop-label">${safeEscapeHtml(propBmCreated)}</span>
                 <span class="bm-info-prop-val blue">📅 ${formatBmDate(data.bm_created || op.bm_created)}</span>
               </div>
             ` : ''}
             ${data.bm_updated || op.bm_updated ? `
               <div class="bm-info-prop-item">
-                <span class="bm-info-prop-label">Обновлено в BM</span>
+                <span class="bm-info-prop-label">${safeEscapeHtml(propBmUpdated)}</span>
                 <span class="bm-info-prop-val">${formatBmDate(data.bm_updated || op.bm_updated, true)}</span>
               </div>
             ` : ''}
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">APRS SSID</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propAprsSsid)}</span>
               <span class="bm-info-prop-val blue">${op.ssid !== undefined && op.ssid !== null ? op.ssid : (reg.SSID !== undefined ? reg.SSID : '—')}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Символ APRS/DMR</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propAprsSymbol)}</span>
               <span class="bm-info-prop-val">${safeEscapeHtml(op.symbol || reg.Symbol || '—')}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Описание BM (Text)</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propBmText)}</span>
               <span class="bm-info-prop-val">${safeEscapeHtml(op.text || reg.Text || '—')}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Реестр сети</span>
-              <span class="bm-info-prop-val">${isBmReg ? 'BrandMeister DMR v2' : 'Локальная база RadioID'}</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propRegistry)}</span>
+              <span class="bm-info-prop-val">${isBmReg ? safeEscapeHtml(valRegBm) : safeEscapeHtml(valRegLocal)}</span>
             </div>
           </div>
         </div>
@@ -2494,32 +2588,41 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
       const isSub = Boolean(data.subscription && data.subscription.is_subscribed);
       const subSlot = data.subscription ? data.subscription.slot : null;
 
+      const cardTgTitle = window.t ? window.t("bm_info.card_talkgroup", {}, "Разговорная группа (TalkGroup)") : "Разговорная группа (TalkGroup)";
+      const badgeRegBm = window.t ? window.t("bm_info.badge_registry_bm_v2", {}, "Реестр BM v2") : "Реестр BM v2";
+      const badgeCustReg = window.t ? window.t("bm_info.badge_custom_regional", {}, "Пользовательская / Региональная") : "Пользовательская / Региональная";
+      const propTgNum = window.t ? window.t("bm_info.prop_tg_num", {}, "Номер TalkGroup") : "Номер TalkGroup";
+      const propTgTitle = window.t ? window.t("bm_info.prop_tg_title", {}, "Название группы") : "Название группы";
+      const propHsStatus = window.t ? window.t("bm_info.prop_hs_status", {}, "Статус на вашем хотспоте") : "Статус на вашем хотспоте";
+      const routingLabel = window.t ? window.t("bm_info.routing_label", {}, "Маршрутизация") : "Маршрутизация";
+      const netName = window.t ? window.t("bm_info.network_name", {}, "Глобальная сеть BrandMeister") : "Глобальная сеть BrandMeister";
+
       cardsHtml += `
         <div class="bm-info-card">
           <div class="bm-info-card-header">
-            <div class="bm-info-card-title"><span>🌐</span> Разговорная группа (TalkGroup)</div>
+            <div class="bm-info-card-title"><span>🌐</span> ${safeEscapeHtml(cardTgTitle)}</div>
             <span class="bm-info-card-badge ${tg.is_registered ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">
-              ${tg.is_registered ? 'Реестр BM v2' : 'Пользовательская / Региональная'}
+              ${tg.is_registered ? safeEscapeHtml(badgeRegBm) : safeEscapeHtml(badgeCustReg)}
             </span>
           </div>
           <div class="bm-info-props-grid">
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Номер TalkGroup</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propTgNum)}</span>
               <span class="bm-info-prop-val highlight" style="font-size: 1.18rem; font-weight: 800;">TG ${tgNum}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Название группы</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propTgTitle)}</span>
               <span class="bm-info-prop-val blue" style="font-size: 1.05rem;">${safeEscapeHtml(tgTitle || '—')}</span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Статус на вашем хотспоте</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(propHsStatus)}</span>
               <span class="bm-info-prop-val ${isSub ? 'dmr-green' : ''}">
                 ${isSub ? (window.t ? window.t("bm_info.in_static", { slot: subSlot }, `📌 В статике (Слот TS${subSlot})`) : `📌 В статике (Слот TS${subSlot})`) : (window.t ? window.t("bm_info.dynamic_ptt", {}, "Динамический PTT (15 мин)") : "Динамический PTT (15 мин)")}
               </span>
             </div>
             <div class="bm-info-prop-item">
-              <span class="bm-info-prop-label">Маршрутизация</span>
-              <span class="bm-info-prop-val">Глобальная сеть BrandMeister</span>
+              <span class="bm-info-prop-label">${safeEscapeHtml(routingLabel)}</span>
+              <span class="bm-info-prop-val">${safeEscapeHtml(netName)}</span>
             </div>
           </div>
           ${tg.description ? `
@@ -2534,12 +2637,13 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
     // 4. Equipment & Repeaters Card
     if (hasDevices) {
       const repCount = devices.filter(d => d.is_repeater).length;
+      const unitDev = devices.length === 1 ? (window.t ? window.t("bm_info.unit_device_one", {}, "устройство") : "устройство") : (window.t ? window.t("bm_info.unit_device_many", {}, "устройств") : "устройств");
       cardsHtml += `
         <div class="bm-info-card">
           <div class="bm-info-card-header">
-            <div class="bm-info-card-title"><span>📡</span> Оборудование и репитеры (${devices.length})</div>
+            <div class="bm-info-card-title"><span>📡</span> ${window.t ? window.t("bm_info.devices_title", { count: devices.length }, `Оборудование и репитеры (${devices.length})`) : `Оборудование и репитеры (${devices.length})`}</div>
             <span class="bm-info-card-badge ${devices.length > 0 ? 'bm-info-badge-online' : 'bm-info-badge-offline'}">
-              ${devices.length} ${devices.length === 1 ? 'устройство' : 'устройств'}
+              ${devices.length} ${safeEscapeHtml(unitDev)}
             </span>
           </div>
           <div class="bm-info-devices-wrap">
@@ -2582,10 +2686,10 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
       cardsHtml += `
         <div class="bm-info-card">
           <div class="bm-info-card-header">
-            <div class="bm-info-card-title"><span>📌</span> Статические TalkGroups профиля (${ts1Subs.length + ts2Subs.length})</div>
+            <div class="bm-info-card-title"><span>📌</span> ${window.t ? window.t("bm_info.static_tgs_title", { count: ts1Subs.length + ts2Subs.length }, `Статические TalkGroups профиля (${ts1Subs.length + ts2Subs.length})`) : `Статические TalkGroups профиля (${ts1Subs.length + ts2Subs.length})`}</div>
           </div>
           ${ts1Subs.length > 0 ? `
-            <div style="font-size: 0.78rem; font-weight: 600; color: #58a6ff; margin-bottom: 4px;">Слот TS1 (${ts1Subs.length}):</div>
+            <div style="font-size: 0.78rem; font-weight: 600; color: #58a6ff; margin-bottom: 4px;">${window.t ? window.t("bm_info.slot_ts1", { count: ts1Subs.length }, `Слот TS1 (${ts1Subs.length}):`) : `Слот TS1 (${ts1Subs.length}):`}</div>
             <div class="bm-info-tg-pills" style="margin-bottom: 8px;">
               ${ts1Subs.map(tgNum => {
                 const tgName = (typeof (window.TG_NAMES || {}) !== "undefined" && (window.TG_NAMES || {})[tgNum]) || '';
@@ -2594,7 +2698,7 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
             </div>
           ` : ''}
           ${ts2Subs.length > 0 ? `
-            <div style="font-size: 0.78rem; font-weight: 600; color: #2ea043; margin-bottom: 4px;">Слот TS2 (${ts2Subs.length}):</div>
+            <div style="font-size: 0.78rem; font-weight: 600; color: #2ea043; margin-bottom: 4px;">${window.t ? window.t("bm_info.slot_ts2", { count: ts2Subs.length }, `Слот TS2 (${ts2Subs.length}):`) : `Слот TS2 (${ts2Subs.length}):`}</div>
             <div class="bm-info-tg-pills">
               ${ts2Subs.map(tgNum => {
                 const tgName = (typeof (window.TG_NAMES || {}) !== "undefined" && (window.TG_NAMES || {})[tgNum]) || '';
@@ -2630,7 +2734,7 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
           </button>
           ${isOperator && isTg ? `
             <button type="button" class="btn-bm-action-secondary" id="btnBmModalTgCall">
-              🌐 Вызов TG ${targetId}
+              ${window.t ? window.t("bm_info.btn_call_tg", { tg: targetId }, `🌐 Вызов TG ${targetId}`) : `🌐 Вызов TG ${targetId}`}
             </button>
           ` : ''}
         </div>
@@ -2906,9 +3010,9 @@ export function renderHamQthCards(container, d, targetId) {
   // QTH / City & Regional designations (RDA oblast, US state/county, district)
   const cityName = d.qth || d.adr_city || d.city || '—';
   const regionParts = [
-    d.oblast ? `обл. ${d.oblast}` : '',
-    d.us_state ? `штат ${d.us_state}${d.us_county ? ' (' + d.us_county + ')' : ''}` : '',
-    d.district ? `р-н ${d.district}` : '',
+    d.oblast ? (window.t ? window.t("hamqth.region_oblast", { val: d.oblast }, `обл. ${d.oblast}`) : `обл. ${d.oblast}`) : '',
+    d.us_state ? (window.t ? window.t("hamqth.region_state", { val: `${d.us_state}${d.us_county ? ' (' + d.us_county + ')' : ''}` }, `штат ${d.us_state}${d.us_county ? ' (' + d.us_county + ')' : ''}`) : `штат ${d.us_state}${d.us_county ? ' (' + d.us_county + ')' : ''}`) : '',
+    d.district ? (window.t ? window.t("hamqth.region_district", { val: d.district }, `р-н ${d.district}`) : `р-н ${d.district}`) : '',
     d.dok ? `DOK ${d.dok}` : ''
   ].filter(Boolean);
   const regionStr = regionParts.length ? ` (${regionParts.join(', ')})` : '';
@@ -2925,14 +3029,14 @@ export function renderHamQthCards(container, d, targetId) {
   const continent = d.continent || '—';
 
   // QSL details
-  const qslBureau = d.qsl === 'Y' ? '<span style="color:#3fb950; font-weight:700;">Бюро ✓</span>' : (d.qsl === 'N' ? '<span style="color:#8b949e;">Бюро ✕</span>' : '');
-  const qslDirect = d.qsldirect === 'Y' ? '<span style="color:#3fb950; font-weight:700;">Директ ✓</span>' : (d.qsldirect === 'N' ? '<span style="color:#8b949e;">Директ ✕</span>' : '');
+  const qslBureau = d.qsl === 'Y' ? `<span style="color:#3fb950; font-weight:700;">${window.t ? window.t("hamqth.bureau_ok", {}, "Бюро ✓") : "Бюро ✓"}</span>` : (d.qsl === 'N' ? `<span style="color:#8b949e;">${window.t ? window.t("hamqth.bureau_no", {}, "Бюро ✕") : "Бюро ✕"}</span>` : '');
+  const qslDirect = d.qsldirect === 'Y' ? `<span style="color:#3fb950; font-weight:700;">${window.t ? window.t("hamqth.direct_ok", {}, "Директ ✓") : "Директ ✓"}</span>` : (d.qsldirect === 'N' ? `<span style="color:#8b949e;">${window.t ? window.t("hamqth.direct_no", {}, "Директ ✕") : "Директ ✕"}</span>` : '');
   const qslVia = d.qsl_via ? `<span style="color:#58a6ff;">via ${safeEscapeHtml(d.qsl_via)}</span>` : '';
   const qslDetails = [qslBureau, qslDirect, qslVia].filter(Boolean).join(' &bull; ') || safeEscapeHtml(d.qsl || '—');
 
   // Electronic QSL
-  const lotwStatus = d.lotw === 'Y' ? '<span style="color:#3fb950; font-weight:700;">✓ Да</span>' : (d.lotw === 'N' ? 'Нет' : '—');
-  const eqslStatus = d.eqsl === 'Y' ? '<span style="color:#3fb950; font-weight:700;">✓ Да</span>' : (d.eqsl === 'N' ? 'Нет' : '—');
+  const lotwStatus = d.lotw === 'Y' ? `<span style="color:#3fb950; font-weight:700;">✓ ${window.t ? window.t("hamqth.yes", {}, "Да") : "Да"}</span>` : (d.lotw === 'N' ? (window.t ? window.t("hamqth.no", {}, "Нет") : "Нет") : '—');
+  const eqslStatus = d.eqsl === 'Y' ? `<span style="color:#3fb950; font-weight:700;">✓ ${window.t ? window.t("hamqth.yes", {}, "Да") : "Да"}</span>` : (d.eqsl === 'N' ? (window.t ? window.t("hamqth.no", {}, "Нет") : "Нет") : '—');
   const lotwEqsl = `LoTW: ${lotwStatus} &bull; eQSL: ${eqslStatus}`;
 
   const email = d.email ? safeEscapeHtml(d.email) : '—';
@@ -2941,8 +3045,8 @@ export function renderHamQthCards(container, d, targetId) {
 
   // Badges (License year, IOTA, birth year)
   const metaBadges = [];
-  if (d.lic_year) metaBadges.push(`📻 В эфире с ${safeEscapeHtml(d.lic_year)} г.`);
-  if (d.birth_year) metaBadges.push(`🎂 Год рожд.: ${safeEscapeHtml(d.birth_year)}`);
+  if (d.lic_year) metaBadges.push(window.t ? window.t("hamqth.badge_on_air", { year: d.lic_year }, `📻 В эфире с ${safeEscapeHtml(d.lic_year)} г.`) : `📻 В эфире с ${safeEscapeHtml(d.lic_year)} г.`);
+  if (d.birth_year) metaBadges.push(window.t ? window.t("hamqth.badge_birth", { year: d.birth_year }, `🎂 Год рожд.: ${safeEscapeHtml(d.birth_year)}`) : `🎂 Год рожд.: ${safeEscapeHtml(d.birth_year)}`);
   if (d.iota) metaBadges.push(`🏝️ IOTA: ${safeEscapeHtml(d.iota)}`);
 
   let html = `
@@ -3021,7 +3125,7 @@ export function renderHamQthCards(container, d, targetId) {
           <div class="bm-info-prop-item" style="grid-column: 1 / -1;">
             <span class="bm-info-prop-label">${window.t ? window.t("hamqth.prop_photo", {}, "Фото в HamQTH") : "Фото в HamQTH"}</span>
             <span class="bm-info-prop-val">
-              <a href="${safeEscapeHtml(d.picture)}" target="_blank" rel="noopener" style="color: #58a6ff; text-decoration: underline;">Открыть фото профиля ↗</a>
+              <a href="${safeEscapeHtml(d.picture)}" target="_blank" rel="noopener" style="color: #58a6ff; text-decoration: underline;">${window.t ? window.t("hamqth.open_photo", {}, "Открыть фото профиля ↗") : "Открыть фото профиля ↗"}</a>
             </span>
           </div>
         ` : ''}
@@ -3033,7 +3137,7 @@ export function renderHamQthCards(container, d, targetId) {
 
       ${d.bio ? `
         <div style="margin-top: 12px; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-size: 0.80rem; line-height: 1.4; color: #c9d1d9;">
-          <strong style="color: #8b949e; display: block; margin-bottom: 4px; font-size: 0.72rem; text-transform: uppercase;">Заметка / Bio:</strong>
+          <strong style="color: #8b949e; display: block; margin-bottom: 4px; font-size: 0.72rem; text-transform: uppercase;">${window.t ? window.t("hamqth.prop_bio", {}, "Заметка / Bio:") : "Заметка / Bio:"}</strong>
           ${safeEscapeHtml(d.bio)}
         </div>
       ` : ''}

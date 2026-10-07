@@ -1,6 +1,42 @@
-# ProxDMR — START HERE
+# ProxDMR 📻
 
-A web platform and gateway for the **DMR (BrandMeister)** amateur radio network: voice reception and transmission (PTT) directly from the browser or the official Android app, multi-hotspot support, dual timeslots (TS1 / TS2), Last Heard activity log, and recording.
+ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to the **BrandMeister** amateur radio network via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
+
+<p align="center">
+  <a href="docs/images/desktop_overview.jpg" target="_blank">
+    <img src="docs/images/desktop_overview.jpg" width="100%" alt="ProxDMR Desktop Multi-Hotspot Interface" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="docs/images/mobile_rx_dual.png" target="_blank">
+    <img src="docs/images/mobile_rx_dual.png" width="31%" alt="Dual TS1/TS2 Reception" />
+  </a>
+  <a href="docs/images/mobile_tx_active.png" target="_blank">
+    <img src="docs/images/mobile_tx_active.png" width="31%" alt="Active PTT Transmission" />
+  </a>
+  <a href="docs/images/mobile_ai_translate.png" target="_blank">
+    <img src="docs/images/mobile_ai_translate.png" width="31%" alt="Live AI Transcription & Translation" />
+  </a>
+</p>
+
+### Features:
+* **No physical radio, MMDVM modem, or hardware USB vocoder (DVStick) is required to operate on DMR** — Voice encoding and decoding are performed entirely by software on the server.
+* **Access via any modern web browser** (PC, laptop, tablet) or through a dedicated Android application (APK).
+* **Multi-Hotspot Architecture** — Run multiple independent virtual hotspots simultaneously on one screen, listening to different timeslots (TS1 and TS2) and talkgroups.
+* **Ultra-low latency audio** — Voice streams are transmitted to the client in compressed form (Opus, WebRTC, WebSocket) with low latency of just tens of milliseconds.
+* **A single server database** for users, access permissions, and QSO audio recordings.
+* **Transmission on the air using Push-to-Talk** (PTT button on the screen or Space key on PC).
+* **Support for two timeslots (TS1 and TS2)**, dynamic and static talkgroups.
+* **Automatic transmission time limit** (Time-Out Timer).
+* **BrandMeister API v2 integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, clear stuck QSOs).
+* **Real-time network diagnostics** — Live monitoring of connection status and ping to the master server with an interactive latency chart.
+* **Software AMBE and IMBE vocoder**.
+* **Microphone Automatic Gain Control (AGC)**.
+* **Built-in RadioID callsign database** with automatic local synchronization (312,000+ radio amateurs).
+* **Audio recording player** with instant search and filtering by callsign, date, and group.
+* **Speech recognition** and live transcription of conversations into text.
+* **Translation and voice readout** of transcribed dialogues into multiple languages.
 
 ---
 
