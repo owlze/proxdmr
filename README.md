@@ -29,7 +29,7 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
 * **Transmission on the air using Push-to-Talk** (PTT button on the screen or Space key on PC).
 * **Support for two timeslots (TS1 and TS2)**, dynamic and static talkgroups.
 * **Automatic transmission time limit** (Time-Out Timer).
-* **BrandMeister API v2 integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, clear stuck QSOs).
+* **BrandMeister API v2 integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, drop active/hung calls).
 * **Real-time network diagnostics** — Live monitoring of connection status and ping to the master server with an interactive latency chart.
 * **Software AMBE+2 vocoder**.
 * **Microphone Automatic Gain Control (AGC)**.
