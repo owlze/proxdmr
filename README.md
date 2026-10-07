@@ -59,8 +59,6 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
 10. [Backup & Restore](#10-backup--restore)
 11. [Security Recommendations](#11-security-recommendations)
 12. [Useful Commands](#12-useful-commands)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Uninstallation](#14-uninstallation)
 
 ---
 
@@ -322,28 +320,3 @@ docker compose restart              # Restart service
 docker compose down                 # Stop service
 docker compose up -d --build        # Rebuild and start in background
 ```
-
----
-
-## 13. Troubleshooting
-
-| Issue | Resolution |
-|---|---|
-| `docker: command not found` | Install Docker; on Windows, start Docker Desktop and wait for initialization |
-| Port `8266` or `62031` in use | Adjust `PORT` / `DMR_PORT` in `.env`, then run `docker compose up -d` |
-| Browser certificate warning | Expected with self-signed TLS. Accept the certificate exception |
-| TLS certificate host mismatch | Change `HOST_IP` in `.env`, delete `config/cert.pem` and `key.pem`, then recreate container |
-| Forgotten admin password | Reset password in the web UI. If locked out, stop container, delete `config/proxdmr.db`, set `ADMIN_PASSWORD` in `.env`, and start container |
-| No BrandMeister connection | Verify callsign, DMR ID, BM password, and UDP port `62031` firewall routing |
-| No microphone/audio in browser | Connect using `https://`, grant browser microphone permissions |
-| App cannot connect | Verify server IP, port, network reachability, and Tailscale connection |
-
----
-
-## 14. Uninstallation
-
-```bash
-docker compose down
-```
-
-Remove the project folder. *Note: Deleting the directory will remove your databases and recordings in `config/` and `data/`.*
