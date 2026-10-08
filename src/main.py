@@ -46,9 +46,9 @@ try:
         delete_all_recordings, get_recordings_stats,
         update_recording_transcription, get_untranscribed_recordings, RECORDINGS_DIR,
         get_user_role, set_user_role, set_user_blocked, is_user_blocked, update_user_password,
-        is_user_swl, set_user_swl
+        is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
     )
-    from settings_io import export_settings, import_settings, get_export_filename
+    from settings_io import export_settings, import_settings, get_export_filename, inspect_backup_archive
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings
     from src.dmr.homebrew import BMState
@@ -69,9 +69,9 @@ except ImportError:
         delete_all_recordings, get_recordings_stats,
         update_recording_transcription, get_untranscribed_recordings, RECORDINGS_DIR,
         get_user_role, set_user_role, set_user_blocked, is_user_blocked, update_user_password,
-        is_user_swl, set_user_swl
+        is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
     )
-    from src.settings_io import export_settings, import_settings, get_export_filename
+    from src.settings_io import export_settings, import_settings, get_export_filename, inspect_backup_archive
 
 logging.basicConfig(
     level=logging.INFO,
@@ -686,44 +686,95 @@ async def auth_import_config(
         raise HTTPException(status_code=400, detail="Файл архива пустой")
 
     try:
-        settings = import_settings(archive_bytes, password)
+        backup_data = import_settings(archive_bytes, password)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    clean_login = login.strip()
-    if not clean_login:
-        hotspots = settings.get("hotspots", [])
-        if isinstance(hotspots, list) and len(hotspots) > 0 and isinstance(hotspots[0], dict):
-            clean_login = (hotspots[0].get("callsign") or "").strip()
+    is_v2 = isinstance(backup_data, dict) and backup_data.get("format_version") == 2
+    client_storage_to_return = {}
+
+    if is_v2:
+        is_sa = bool(backup_data.get("is_superadmin_backup", False))
+        if is_sa:
+            sa_acc = (backup_data.get("superadmin") or {}).get("account") or {}
+            clean_login = login.strip() or sa_acc.get("login") or "admin"
+            clean_login = re.sub(r'[^a-zA-Z0-9_.\-]', '', clean_login)
+            existing_user = await get_user_by_login(clean_login)
+            if existing_user:
+                if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
+                    )
+                user_id = existing_user["id"]
+            else:
+                pw_hash = sa_acc.get("password_hash") or (await asyncio.to_thread(hash_password, password))
+                user_id = await create_user(clean_login, pw_hash)
+                await set_user_role(user_id, "superadmin")
+
+            res = await restore_backup_data(backup_data, user_id, mode="all_users")
+            client_storage_to_return = res.get("client_storage", {})
+        else:
+            u_acc = (backup_data.get("user") or {}).get("account") or {}
+            clean_login = login.strip() or u_acc.get("login") or "user"
+            clean_login = re.sub(r'[^a-zA-Z0-9_.\-]', '', clean_login)
+            existing_user = await get_user_by_login(clean_login)
+            if existing_user:
+                if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
+                    )
+                user_id = existing_user["id"]
+            else:
+                pw_hash = u_acc.get("password_hash") or (await asyncio.to_thread(hash_password, password))
+                user_id = await create_user(clean_login, pw_hash)
+                role = u_acc.get("role", "user")
+                if role in ("admin", "superadmin"):
+                    await set_user_role(user_id, role)
+                if u_acc.get("is_swl"):
+                    await set_user_swl(user_id, True)
+
+            res = await restore_backup_data(backup_data, user_id, mode="default")
+            client_storage_to_return = res.get("client_storage", {})
+    else:
+        # Legacy v1 single-user settings format
+        clean_login = login.strip()
         if not clean_login:
-            clean_login = "admin"
-        clean_login = re.sub(r'[^a-zA-Z0-9_.\-]', '', clean_login)
-        if len(clean_login) < LOGIN_MIN_LENGTH:
-            clean_login = "user"
-        if len(clean_login) > LOGIN_MAX_LENGTH:
-            clean_login = clean_login[:LOGIN_MAX_LENGTH]
-    else:
-        err = validate_login(clean_login)
-        if err:
-            raise HTTPException(status_code=400, detail=err)
+            hotspots = backup_data.get("hotspots", [])
+            if isinstance(hotspots, list) and len(hotspots) > 0 and isinstance(hotspots[0], dict):
+                clean_login = (hotspots[0].get("callsign") or "").strip()
+            if not clean_login:
+                clean_login = "admin"
+            clean_login = re.sub(r'[^a-zA-Z0-9_.\-]', '', clean_login)
+            if len(clean_login) < LOGIN_MIN_LENGTH:
+                clean_login = "user"
+            if len(clean_login) > LOGIN_MAX_LENGTH:
+                clean_login = clean_login[:LOGIN_MAX_LENGTH]
+        else:
+            err = validate_login(clean_login)
+            if err:
+                raise HTTPException(status_code=400, detail=err)
 
-    existing_user = await get_user_by_login(clean_login)
-    if existing_user:
-        if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
-            raise HTTPException(
-                status_code=401,
-                detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
-            )
-        user_id = existing_user["id"]
-    else:
-        err = validate_password(password)
-        if err:
-            raise HTTPException(status_code=400, detail=f"Пароль архива не подходит для создания аккаунта: {err}")
-        pw_hash = await asyncio.to_thread(hash_password, password)
-        user_id = await create_user(clean_login, pw_hash)
+        existing_user = await get_user_by_login(clean_login)
+        if existing_user:
+            if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
+                )
+            user_id = existing_user["id"]
+        else:
+            err = validate_password(password)
+            if err:
+                raise HTTPException(status_code=400, detail=f"Пароль архива не подходит для создания аккаунта: {err}")
+            pw_hash = await asyncio.to_thread(hash_password, password)
+            user_id = await create_user(clean_login, pw_hash)
 
-    await save_user_settings(user_id, settings)
-    await ensure_active_user(user_id, clean_login)
+        await save_user_settings(user_id, backup_data)
+        client_storage_to_return = backup_data.get("client_settings", {}).get("storage_dump", {})
+
+    await ensure_active_user(user_id, clean_login, force_reload=True)
 
     if await user_count() == 1:
         try:
@@ -755,6 +806,7 @@ async def auth_import_config(
         "message": "Конфигурация успешно загружена",
         "user": {"id": user_id, "login": clean_login},
         "token": token,
+        "client_storage": client_storage_to_return,
     }
 
 
@@ -1067,19 +1119,24 @@ async def save_user_settings_api(request: Request):
     return {"status": "ok"}
 
 
-@app.get("/api/user/settings/export")
-async def export_user_settings_api(request: Request, password: str = ""):
+class ExportSettingsPayload(BaseModel):
+    password: str = ""
+    client_storage: Optional[dict] = None
+
+
+@app.post("/api/user/settings/export")
+async def export_user_settings_post_api(request: Request, payload: ExportSettingsPayload):
     user = _get_user_from_request(request)
     if not user:
         raise HTTPException(status_code=401)
-    if not password:
+    if not payload.password:
         raise HTTPException(status_code=400, detail="Введите пароль от вашего аккаунта")
     db_user = await get_user_by_id(user["user_id"])
-    if not db_user or not await asyncio.to_thread(verify_password, password, db_user.get("password_hash", "")):
+    if not db_user or not await asyncio.to_thread(verify_password, payload.password, db_user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Неверный пароль аккаунта")
-    settings = await load_user_settings(user["user_id"])
     try:
-        archive_bytes = export_settings(settings, password)
+        backup_data = await get_full_backup_data(user["user_id"], current_storage=payload.client_storage)
+        archive_bytes = export_settings(backup_data, payload.password)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     filename = get_export_filename()
@@ -1090,8 +1147,31 @@ async def export_user_settings_api(request: Request, password: str = ""):
     )
 
 
-@app.post("/api/user/settings/import")
-async def import_user_settings_api(
+@app.get("/api/user/settings/export")
+async def export_user_settings_api(request: Request, password: str = ""):
+    user = _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    if not password:
+        raise HTTPException(status_code=400, detail="Введите пароль от вашего аккаунта")
+    db_user = await get_user_by_id(user["user_id"])
+    if not db_user or not await asyncio.to_thread(verify_password, password, db_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Неверный пароль аккаунта")
+    try:
+        backup_data = await get_full_backup_data(user["user_id"], current_storage=None)
+        archive_bytes = export_settings(backup_data, password)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    filename = get_export_filename()
+    return Response(
+        content=archive_bytes,
+        media_type="application/x-7z-compressed",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@app.post("/api/user/settings/inspect-backup")
+async def inspect_backup_api(
     request: Request,
     file: UploadFile = File(...),
     password: str = Form(""),
@@ -1099,14 +1179,59 @@ async def import_user_settings_api(
     user = _get_user_from_request(request)
     if not user:
         raise HTTPException(status_code=401)
+    if not password:
+        raise HTTPException(status_code=400, detail="Пароль архива обязателен")
     archive_bytes = await file.read()
+    if not archive_bytes:
+        raise HTTPException(status_code=400, detail="Файл архива пустой")
     try:
-        settings = import_settings(archive_bytes, password)
+        info = inspect_backup_archive(archive_bytes, password)
+        info["current_user_role"] = await get_user_role(user["user_id"])
+        return info
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
-    await save_user_settings(user["user_id"], settings)
-    await ensure_active_user(user["user_id"], user.get("login", ""))
-    return {"status": "ok", "message": "Настройки импортированы"}
+
+
+@app.post("/api/user/settings/import")
+async def import_user_settings_api(
+    request: Request,
+    file: UploadFile = File(...),
+    password: str = Form(""),
+    mode: str = Form("default"),
+    selected_users: str = Form(""),
+):
+    user = _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    archive_bytes = await file.read()
+    try:
+        backup_data = import_settings(archive_bytes, password)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    selected_logins_list = []
+    if selected_users:
+        try:
+            parsed = json.loads(selected_users)
+            if isinstance(parsed, list):
+                selected_logins_list = [str(x) for x in parsed]
+        except Exception:
+            pass
+
+    result = await restore_backup_data(
+        backup_data=backup_data,
+        current_user_id=user["user_id"],
+        mode=mode,
+        selected_logins=selected_logins_list
+    )
+    await ensure_active_user(user["user_id"], user.get("login", ""), force_reload=True)
+    return {
+        "status": "ok",
+        "message": "Настройки импортированы",
+        "client_storage": result.get("client_storage", {}),
+        "restored_users_count": result.get("restored_users_count", 1),
+        "mode": mode
+    }
 
 
 @app.get("/favicon.ico", include_in_schema=False)

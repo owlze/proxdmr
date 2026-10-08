@@ -714,12 +714,22 @@
       confirmText: t('auth.export_btn', {}, 'Экспортировать')
     });
     if (!password) return;
+
     try {
-      const resp = await fetch(`/api/user/settings/export?password=${encodeURIComponent(password)}`, {
+      const client_storage = getClientStorageFullSnapshot();
+      const resp = await fetch('/api/user/settings/export', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         credentials: 'same-origin',
+        body: JSON.stringify({
+          password: password,
+          client_storage: client_storage
+        })
       });
       if (!resp.ok) {
-        const data = await resp.json();
+        const data = await resp.json().catch(() => ({}));
         await showAppAlert(data.detail || t('account.export_error', {}, 'Ошибка экспорта'), { title: 'Ошибка экспорта', icon: '⚠️' });
         return;
       }
@@ -738,6 +748,165 @@
     }
   }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function getClientStorageFullSnapshot() {
+    const snapshot = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('proxdmr_') || k.startsWith('dmr_'))) {
+          if (k === 'proxdmr_auth_token') continue;
+          snapshot[k] = localStorage.getItem(k);
+        }
+      }
+    } catch (e) {
+      console.warn('[STORAGE] Failed to capture full client storage snapshot:', e);
+    }
+    return snapshot;
+  }
+
+  function restoreClientStorageSnapshot(storageObj) {
+    if (!storageObj || typeof storageObj !== 'object') return;
+    try {
+      for (const [k, v] of Object.entries(storageObj)) {
+        if (!k || (!k.startsWith('proxdmr_') && !k.startsWith('dmr_'))) continue;
+        if (k === 'proxdmr_auth_token') continue;
+        if (v === null || v === undefined) {
+          localStorage.removeItem(k);
+        } else {
+          localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+        }
+      }
+    } catch (e) {
+      console.warn('[STORAGE] Failed to restore client storage snapshot:', e);
+    }
+  }
+
+  function showSuperadminImportModal(meta) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('superadminImportModal');
+      if (!modal) {
+        resolve({ mode: 'superadmin_only', selected_users: [] });
+        return;
+      }
+
+      const usersListEl = document.getElementById('saImportUsersList');
+      const checklistBlock = document.getElementById('saImportUsersChecklistBlock');
+      const subtitleEl = document.getElementById('saImportArchiveSubtitle');
+      const radioOptions = modal.querySelectorAll('input[name="saImportMode"]');
+      const checkAllBtn = document.getElementById('saImportCheckAll');
+      const uncheckAllBtn = document.getElementById('saImportUncheckAll');
+      const cancelBtn = document.getElementById('btnCancelSaImportModal');
+      const confirmBtn = document.getElementById('btnConfirmSaImportModal');
+
+      const users = (meta && Array.isArray(meta.users)) ? meta.users : [];
+      if (subtitleEl && meta.superadmin_login) {
+        subtitleEl.textContent = `Архив суперадмина (${meta.superadmin_login}), пользователей в архиве: ${users.length}`;
+      }
+
+      // Reset radio to default option 1
+      radioOptions.forEach(r => {
+        r.checked = (r.value === 'superadmin_only');
+      });
+      if (checklistBlock) checklistBlock.style.display = 'none';
+
+      // Populate users list
+      if (usersListEl) {
+        usersListEl.innerHTML = '';
+        if (users.length === 0) {
+          usersListEl.innerHTML = '<div style="font-size:0.8rem;color:var(--text-muted);padding:4px;">В архиве нет других пользователей</div>';
+        } else {
+          users.forEach(u => {
+            const row = document.createElement('label');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '8px';
+            row.style.fontSize = '0.84rem';
+            row.style.cursor = 'pointer';
+            row.style.padding = '3px 4px';
+            row.style.borderRadius = '4px';
+
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.className = 'sa-user-checkbox';
+            chk.value = u.login;
+            chk.checked = true;
+
+            const text = document.createElement('span');
+            const roleStr = u.role === 'admin' ? 'админ' : (u.is_swl ? 'SWL' : 'пользователь');
+            text.innerHTML = `<strong>${escapeHtml(u.login)}</strong> <span style="color:var(--text-muted);font-size:0.78rem;">(${roleStr}${u.hotspots_count ? `, хотспотов: ${u.hotspots_count}` : ''})</span>`;
+
+            row.appendChild(chk);
+            row.appendChild(text);
+            usersListEl.appendChild(row);
+          });
+        }
+      }
+
+      function onRadioChange() {
+        const selected = modal.querySelector('input[name="saImportMode"]:checked')?.value;
+        if (checklistBlock) {
+          checklistBlock.style.display = (selected === 'selected_users') ? 'block' : 'none';
+        }
+      }
+
+      radioOptions.forEach(r => r.addEventListener('change', onRadioChange));
+
+      function onCheckAll(e) {
+        if (e) e.preventDefault();
+        modal.querySelectorAll('.sa-user-checkbox').forEach(c => { c.checked = true; });
+      }
+
+      function onUncheckAll(e) {
+        if (e) e.preventDefault();
+        modal.querySelectorAll('.sa-user-checkbox').forEach(c => { c.checked = false; });
+      }
+
+      if (checkAllBtn) checkAllBtn.onclick = onCheckAll;
+      if (uncheckAllBtn) uncheckAllBtn.onclick = onUncheckAll;
+
+      function cleanup() {
+        radioOptions.forEach(r => r.removeEventListener('change', onRadioChange));
+        if (cancelBtn) cancelBtn.onclick = null;
+        if (confirmBtn) confirmBtn.onclick = null;
+        if (checkAllBtn) checkAllBtn.onclick = null;
+        if (uncheckAllBtn) uncheckAllBtn.onclick = null;
+        modal.style.display = 'none';
+      }
+
+      if (cancelBtn) {
+        cancelBtn.onclick = () => {
+          cleanup();
+          resolve(null);
+        };
+      }
+
+      if (confirmBtn) {
+        confirmBtn.onclick = () => {
+          const mode = modal.querySelector('input[name="saImportMode"]:checked')?.value || 'superadmin_only';
+          let selected = [];
+          if (mode === 'selected_users') {
+            modal.querySelectorAll('.sa-user-checkbox:checked').forEach(c => {
+              if (c.value) selected.push(c.value);
+            });
+          }
+          cleanup();
+          resolve({ mode: mode, selected_users: selected });
+        };
+      }
+
+      modal.style.display = 'flex';
+    });
+  }
+
   async function importSettings() {
     const t = (k, p, d) => (window.i18n && typeof window.i18n.t === 'function') ? window.i18n.t(k, p, d) : (typeof p === 'string' ? p : d);
     const input = document.createElement('input');
@@ -754,11 +923,52 @@
         isPassword: true,
         confirmText: t('auth.import_btn', {}, 'Импортировать')
       });
-      if (password === null) return;
+      if (password === null || !password) return;
 
+      // 1. Inspect backup first
+      let inspectMeta = null;
+      try {
+        const inspectFormData = new FormData();
+        inspectFormData.append('file', file);
+        inspectFormData.append('password', password);
+
+        const inspResp = await fetch('/api/user/settings/inspect-backup', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: inspectFormData
+        });
+        const inspData = await inspResp.json();
+        if (!inspResp.ok) {
+          await showAppAlert(inspData.detail || t('account.import_error', {}, 'Ошибка чтения архива'), { title: 'Ошибка архива', icon: '⚠️' });
+          return;
+        }
+        inspectMeta = inspData;
+      } catch (e) {
+        await showAppAlert(t('account.import_conn_error', {}, 'Ошибка при проверке архива'), { title: 'Ошибка связи', icon: '⚠️' });
+        return;
+      }
+
+      let mode = 'default';
+      let selectedUsers = [];
+
+      // 2. Check if superadmin backup and current user is superadmin
+      if (inspectMeta && inspectMeta.is_superadmin_backup && inspectMeta.current_user_role === 'superadmin') {
+        const dialogRes = await showSuperadminImportModal(inspectMeta);
+        if (!dialogRes) {
+          return; // User cancelled modal
+        }
+        mode = dialogRes.mode;
+        selectedUsers = dialogRes.selected_users;
+      }
+
+      // 3. Apply import
       const formData = new FormData();
       formData.append('file', file);
       formData.append('password', password);
+      formData.append('mode', mode);
+      if (selectedUsers && selectedUsers.length > 0) {
+        formData.append('selected_users', JSON.stringify(selectedUsers));
+      }
 
       try {
         const resp = await fetch('/api/user/settings/import', {
@@ -768,8 +978,10 @@
         });
         const data = await resp.json();
         if (resp.ok) {
+          if (data.client_storage) {
+            restoreClientStorageSnapshot(data.client_storage);
+          }
           await showAppAlert(t('account.import_success', {}, 'Настройки успешно импортированы. Страница будет перезагружена.'), { title: 'Успешно', icon: '✅' });
-          clearLocalUserData();
           location.reload();
         } else {
           await showAppAlert(data.detail || t('account.import_error', {}, 'Ошибка импорта'), { title: 'Ошибка импорта', icon: '⚠️' });
@@ -849,8 +1061,10 @@
               localStorage.setItem('proxdmr_auth_login', data.user?.login || login);
             } catch (e) {}
           }
+          if (data.client_storage) {
+            restoreClientStorageSnapshot(data.client_storage);
+          }
           await showAppAlert(t('account.import_success', {}, 'Настройки успешно импортированы. Страница будет перезагружена.'), { title: 'Успешно', icon: '✅' });
-          clearLocalUserData();
           if (token) {
             try {
               localStorage.setItem('proxdmr_auth_token', token);

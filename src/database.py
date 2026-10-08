@@ -199,14 +199,13 @@ def get_default_settings(login: str = "") -> dict:
         "transcriber_model": "gemini-3.5-flash",
         "transcriber_target_lang": "ru",
         "tts_enabled": False,
-        "tts_engine": "piper",
+        "tts_engine": "gemini",
         "tts_model": "gemini-3.1-flash-tts-preview",
-        "tts_voice": "ru_RU-terra5871-medium",
-        "tts_speed": 1.0,
-        "tts_ducking_level": 0.03,
-        "tts_pause_ducking_level": 0.13,
+        "tts_voice": "auto",
+        "tts_speed": 1.1,
+        "tts_ducking_level": 0.80,
         "tts_mute_others": True,
-        "tts_announce_callsign": True,
+        "tts_announce_callsign": False,
         "tts_style": "radio",
         "quick_mem": {},
         "contacts": [],
@@ -820,3 +819,225 @@ async def get_untranscribed_recordings(user_id: Optional[int] = None, limit: int
         cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+
+async def get_full_backup_data(user_id: int, current_storage: Optional[dict] = None) -> dict:
+    """
+    Generate full backup data structure for export.
+    If user_id is superadmin, exports all users, accounts, settings, and client storage.
+    If regular user, exports only their own account, settings, and client storage.
+    """
+    if not aiosqlite:
+        raise RuntimeError("Database not available")
+
+    db_user = await get_user_by_id(user_id)
+    if not db_user:
+        raise ValueError("User not found")
+
+    user_role = db_user.get("role", "user")
+    is_superadmin = (user_role == "superadmin")
+
+    if is_superadmin:
+        async with aiosqlite.connect(str(DB_FILE)) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, login, password_hash, role, is_blocked, is_swl, created_at, last_login FROM users ORDER BY id ASC"
+            )
+            rows = await cursor.fetchall()
+            all_users = [dict(r) for r in rows]
+
+        superadmin_data = None
+        users_list = []
+
+        for u in all_users:
+            u_id = u["id"]
+            u_sett = await load_user_settings(u_id)
+            if u_id == user_id:
+                # Fresh client storage passed from browser during export
+                u_storage = current_storage if (current_storage is not None) else (u_sett.get("client_settings", {}).get("storage_dump", {}))
+                superadmin_data = {
+                    "account": {
+                        "login": u["login"],
+                        "password_hash": u["password_hash"],
+                        "role": u["role"],
+                        "is_blocked": bool(u.get("is_blocked", 0)),
+                        "is_swl": bool(u.get("is_swl", 0)),
+                        "created_at": u.get("created_at", 0)
+                    },
+                    "settings": u_sett,
+                    "client_storage": u_storage
+                }
+            else:
+                u_storage = u_sett.get("client_settings", {}).get("storage_dump", {})
+                users_list.append({
+                    "account": {
+                        "login": u["login"],
+                        "password_hash": u["password_hash"],
+                        "role": u["role"],
+                        "is_blocked": bool(u.get("is_blocked", 0)),
+                        "is_swl": bool(u.get("is_swl", 0)),
+                        "created_at": u.get("created_at", 0)
+                    },
+                    "settings": u_sett,
+                    "client_storage": u_storage
+                })
+
+        return {
+            "format_version": 2,
+            "is_superadmin_backup": True,
+            "exported_by": db_user["login"],
+            "timestamp": time.time(),
+            "superadmin": superadmin_data,
+            "users": users_list
+        }
+    else:
+        u_sett = await load_user_settings(user_id)
+        u_storage = current_storage if (current_storage is not None) else (u_sett.get("client_settings", {}).get("storage_dump", {}))
+        return {
+            "format_version": 2,
+            "is_superadmin_backup": False,
+            "exported_by": db_user["login"],
+            "timestamp": time.time(),
+            "user": {
+                "account": {
+                    "login": db_user["login"],
+                    "password_hash": db_user["password_hash"],
+                    "role": user_role,
+                    "is_blocked": bool(db_user.get("is_blocked", 0)),
+                    "is_swl": bool(db_user.get("is_swl", 0)),
+                    "created_at": db_user.get("created_at", 0)
+                },
+                "settings": u_sett,
+                "client_storage": u_storage
+            }
+        }
+
+
+async def restore_backup_data(
+    backup_data: dict,
+    current_user_id: int,
+    mode: str = "default",
+    selected_logins: Optional[list[str]] = None
+) -> dict:
+    """
+    Restore backup data into database.
+    Supports Format Version 2 (superadmin full DB backup or single user backup)
+    and Format Version 1 (legacy plain settings dict).
+    """
+    if not aiosqlite:
+        raise RuntimeError("Database not available")
+
+    is_v2 = isinstance(backup_data, dict) and backup_data.get("format_version") == 2
+    client_storage_to_return = {}
+    restored_users_count = 0
+
+    if is_v2:
+        is_sa_backup = bool(backup_data.get("is_superadmin_backup", False))
+        curr_role = await get_user_role(current_user_id)
+
+        if is_sa_backup and curr_role == "superadmin":
+            # 1. Restore superadmin
+            sa_data = backup_data.get("superadmin") or {}
+            sa_sett = sa_data.get("settings") or {}
+            sa_storage = sa_data.get("client_storage") or {}
+            client_storage_to_return = sa_storage
+
+            if sa_sett:
+                if "client_settings" not in sa_sett or not isinstance(sa_sett["client_settings"], dict):
+                    sa_sett["client_settings"] = {}
+                sa_sett["client_settings"]["storage_dump"] = sa_storage
+                await save_user_settings(current_user_id, sa_sett)
+                restored_users_count += 1
+
+            # 2. Process other users based on mode
+            users_in_backup = backup_data.get("users", [])
+            target_users = []
+            if mode == "all_users":
+                target_users = users_in_backup
+            elif mode == "selected_users":
+                sel_set = set(l.strip().lower() for l in (selected_logins or []))
+                target_users = [u for u in users_in_backup if (u.get("account", {}).get("login") or "").strip().lower() in sel_set]
+
+            for u_item in target_users:
+                acc = u_item.get("account") or {}
+                login = (acc.get("login") or "").strip().lower()
+                if not login:
+                    continue
+                pw_hash = acc.get("password_hash") or ""
+                role = acc.get("role", "user")
+                if role == "superadmin":
+                    role = "admin"  # Keep only primary superadmin
+                is_swl = 1 if acc.get("is_swl") else 0
+                is_blocked = 1 if acc.get("is_blocked") else 0
+                u_sett = u_item.get("settings") or {}
+                u_storage = u_item.get("client_storage") or {}
+                if "client_settings" not in u_sett or not isinstance(u_sett["client_settings"], dict):
+                    u_sett["client_settings"] = {}
+                u_sett["client_settings"]["storage_dump"] = u_storage
+
+                # Check existing user
+                existing = await get_user_by_login(login)
+                if existing:
+                    target_uid = existing["id"]
+                    if target_uid != current_user_id:
+                        async with aiosqlite.connect(str(DB_FILE)) as db:
+                            if pw_hash:
+                                await db.execute(
+                                    "UPDATE users SET password_hash = ?, role = ?, is_blocked = ?, is_swl = ? WHERE id = ?",
+                                    (pw_hash, role, is_blocked, is_swl, target_uid)
+                                )
+                            else:
+                                await db.execute(
+                                    "UPDATE users SET role = ?, is_blocked = ?, is_swl = ? WHERE id = ?",
+                                    (role, is_blocked, is_swl, target_uid)
+                                )
+                            await db.commit()
+                        await save_user_settings(target_uid, u_sett)
+                        restored_users_count += 1
+                else:
+                    if not pw_hash:
+                        from auth import hash_password
+                        pw_hash = hash_password("proxdmr123")
+                    created_uid = await create_user(login, pw_hash)
+                    async with aiosqlite.connect(str(DB_FILE)) as db:
+                        await db.execute(
+                            "UPDATE users SET role = ?, is_blocked = ?, is_swl = ? WHERE id = ?",
+                            (role, is_blocked, is_swl, created_uid)
+                        )
+                        await db.commit()
+                    await save_user_settings(created_uid, u_sett)
+                    restored_users_count += 1
+
+        else:
+            # Single-user backup or non-superadmin restoring
+            user_data = backup_data.get("user")
+            if not user_data and is_sa_backup:
+                curr_user = await get_user_by_id(current_user_id)
+                curr_login = (curr_user.get("login") or "").lower() if curr_user else ""
+                matching = [u for u in backup_data.get("users", []) if (u.get("account", {}).get("login") or "").lower() == curr_login]
+                if matching:
+                    user_data = matching[0]
+                else:
+                    user_data = backup_data.get("superadmin")
+
+            if user_data:
+                u_sett = user_data.get("settings") or {}
+                u_storage = user_data.get("client_storage") or {}
+                client_storage_to_return = u_storage
+                if "client_settings" not in u_sett or not isinstance(u_sett["client_settings"], dict):
+                    u_sett["client_settings"] = {}
+                u_sett["client_settings"]["storage_dump"] = u_storage
+                await save_user_settings(current_user_id, u_sett)
+                restored_users_count = 1
+    else:
+        # Legacy v1 format (plain settings dict)
+        client_storage_to_return = backup_data.get("client_settings", {}).get("storage_dump", {})
+        await save_user_settings(current_user_id, backup_data)
+        restored_users_count = 1
+
+    return {
+        "client_storage": client_storage_to_return,
+        "restored_users_count": restored_users_count,
+        "mode": mode
+    }
+

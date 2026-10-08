@@ -86,6 +86,56 @@ def import_settings(archive_bytes: bytes, password: str) -> dict:
     return settings
 
 
+def inspect_backup_archive(archive_bytes: bytes, password: str) -> dict:
+    """
+    Inspect the encrypted 7z archive without modifying database.
+    Returns metadata about what is inside the archive:
+    {
+        "format_version": 2,
+        "is_superadmin_backup": True,
+        "superadmin_login": "...",
+        "users": [ { "login": "...", "role": "...", "hotspots_count": 2, ... } ],
+        "created_at": ...,
+        "exported_by": ...
+    }
+    """
+    data = import_settings(archive_bytes, password)
+    is_v2 = isinstance(data, dict) and data.get("format_version") == 2
+    if is_v2:
+        is_sa = bool(data.get("is_superadmin_backup", False))
+        sa_info = data.get("superadmin") or {}
+        sa_acc = sa_info.get("account") or {}
+        users_list = []
+        for u in data.get("users", []):
+            acc = u.get("account") or {}
+            hs_list = u.get("hotspots") or (u.get("settings", {}) or {}).get("hotspots", [])
+            users_list.append({
+                "login": acc.get("login", ""),
+                "role": acc.get("role", "user"),
+                "is_swl": bool(acc.get("is_swl", False)),
+                "is_blocked": bool(acc.get("is_blocked", False)),
+                "hotspots_count": len(hs_list) if isinstance(hs_list, list) else 0
+            })
+        return {
+            "format_version": 2,
+            "is_superadmin_backup": is_sa,
+            "superadmin_login": sa_acc.get("login", "") or data.get("exported_by", ""),
+            "users": users_list,
+            "created_at": data.get("timestamp"),
+            "exported_by": data.get("exported_by", "")
+        }
+    else:
+        # Legacy v1 single-user settings dict
+        return {
+            "format_version": 1,
+            "is_superadmin_backup": False,
+            "superadmin_login": "",
+            "users": [],
+            "created_at": None,
+            "exported_by": ""
+        }
+
+
 def get_export_filename() -> str:
     """Generate a timestamped filename for the export archive."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")

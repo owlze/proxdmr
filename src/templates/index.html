@@ -344,6 +344,65 @@
     </div>
   </div>
 
+  <!-- Superadmin Import Confirmation & Mode Selection Modal -->
+  <div id="superadminImportModal" class="modal superadmin-import-modal" style="display: none; z-index: 10060;">
+    <div class="modal-content" style="max-width: 520px; box-sizing: border-box;">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom: 12px;">
+        <span style="font-size:1.8rem; line-height:1;">🛡️</span>
+        <div>
+          <div style="font-size:1.1rem; font-weight:700; color:var(--text-primary);" data-i18n="account.sa_import_title">Восстановление конфигурации Superadmin</div>
+          <div style="font-size:0.82rem; color:var(--text-muted);" id="saImportArchiveSubtitle" data-i18n="account.sa_import_subtitle">Архив содержит общую базу пользователей и хотспотов</div>
+        </div>
+      </div>
+      <div style="font-size:0.9rem; color:var(--text-primary); margin-bottom: 14px; line-height: 1.4;" data-i18n="account.sa_import_prompt">
+        Обнаружен архив суперадмина. Выберите режим восстановления:
+      </div>
+      <div class="sa-import-options" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:6px; border:1px solid var(--border-color, #30363d);">
+          <input type="radio" name="saImportMode" value="superadmin_only" checked style="margin-top:3px;">
+          <div>
+            <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt1_title">1. Восстановить только суперадмина</strong>
+            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt1_desc">Конфигурация, хотспоты и оперативные данные суперадмина. Другие пользователи в базе не изменяются.</div>
+          </div>
+        </label>
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:6px; border:1px solid var(--border-color, #30363d);">
+          <input type="radio" name="saImportMode" value="all_users" style="margin-top:3px;">
+          <div>
+            <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt2_title">2. Суперадмин + все пользователи</strong>
+            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt2_desc">Полное восстановление всей базы (учетные записи, пароли, хотспоты и настройки всех пользователей).</div>
+          </div>
+        </label>
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:6px; border:1px solid var(--border-color, #30363d);">
+          <input type="radio" name="saImportMode" value="selected_users" style="margin-top:3px;">
+          <div>
+            <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt3_title">3. Суперадмин + выбранные пользователи</strong>
+            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt3_desc">Восстановить суперадмина и только выбранных пользователей из списка ниже.</div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Users checklist block (visible when option 3 is selected) -->
+      <div id="saImportUsersChecklistBlock" style="display:none; margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color, #30363d); border-radius:6px; padding:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:0.8rem;">
+          <span style="font-weight:600; color:var(--text-muted);" data-i18n="account.sa_import_select_users">Пользователи для восстановления:</span>
+          <div style="display:flex; gap:10px;">
+            <button type="button" id="saImportCheckAll" class="btn-link" style="background:none;border:none;padding:0;color:var(--accent-color, #58a6ff);font-size:0.78rem;cursor:pointer;" data-i18n="account.sa_import_check_all">Выбрать всех</button>
+            <span style="color:var(--text-muted);">|</span>
+            <button type="button" id="saImportUncheckAll" class="btn-link" style="background:none;border:none;padding:0;color:var(--text-muted);font-size:0.78rem;cursor:pointer;" data-i18n="account.sa_import_uncheck_all">Снять выделение</button>
+          </div>
+        </div>
+        <div id="saImportUsersList" style="max-height: 160px; overflow-y: auto; display:flex; flex-direction:column; gap:6px; padding-right:4px;">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
+        <button type="button" id="btnCancelSaImportModal" class="btn-secondary" style="padding:7px 16px; border-radius:6px; cursor:pointer; font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
+        <button type="button" id="btnConfirmSaImportModal" class="btn-primary" style="padding:7px 18px; border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600;" data-i18n="account.sa_import_apply_btn">Восстановить</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app-dashboard">
     <!-- Android Client APK Download Banner (Web Version Only) -->
     <div id="androidApkBanner" class="android-apk-banner" style="display: none;" role="alert">
