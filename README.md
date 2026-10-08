@@ -3,20 +3,17 @@
 ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to the **BrandMeister** amateur radio network via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
 
 <p align="center">
-  <a href="docs/images/desktop_overview.jpg" target="_blank">
-    <img src="docs/images/desktop_overview.jpg" width="100%" alt="ProxDMR Desktop Multi-Hotspot Interface" />
+  <a href="docs/images/01.jpg" target="_blank">
+    <img src="docs/images/01.jpg" width="100%" alt="ProxDMR Desktop Interface" />
   </a>
 </p>
 
 <p align="center">
-  <a href="docs/images/mobile_rx_dual.png" target="_blank">
-    <img src="docs/images/mobile_rx_dual.png" width="31%" alt="Dual TS1/TS2 Reception" />
+  <a href="docs/images/02.png" target="_blank">
+    <img src="docs/images/02.png" width="48%" alt="ProxDMR Mobile Interface" />
   </a>
-  <a href="docs/images/mobile_tx_active.png" target="_blank">
-    <img src="docs/images/mobile_tx_active.png" width="31%" alt="Active PTT Transmission" />
-  </a>
-  <a href="docs/images/mobile_ai_translate.png" target="_blank">
-    <img src="docs/images/mobile_ai_translate.png" width="31%" alt="Live AI Transcription & Translation" />
+  <a href="docs/images/03.png" target="_blank">
+    <img src="docs/images/03.png" width="48%" alt="ProxDMR Mobile Interface" />
   </a>
 </p>
 
