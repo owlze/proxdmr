@@ -255,11 +255,14 @@ export const triggerHotspotGwAction = async (hid) => {
     setGwConnectAttempt(1);
     setGwIsFastReconnecting(false);
 
-    updateHotspotGwStatus(cid, false, window.t ? window.t("status.gw_connecting_manual", {}, "Подключение к шлюзу...") : "Подключение к шлюзу...");
-
-    // Force connect WebSocket immediately
-    if (typeof window.connectWebSocket === "function") {
-      window.connectWebSocket(true);
+    const isWsConnected = Boolean(ws && ws.readyState === WebSocket.OPEN);
+    if (isWsConnected) {
+      updateHotspotGwStatus(cid, true);
+    } else {
+      updateHotspotGwStatus(cid, false, window.t ? window.t("status.gw_connecting_manual", {}, "Подключение к шлюзу...") : "Подключение к шлюзу...");
+      if (typeof window.connectWebSocket === "function") {
+        window.connectWebSocket(true);
+      }
     }
 
     // Also reconnect BM for this hotspot if autoconnect was enabled

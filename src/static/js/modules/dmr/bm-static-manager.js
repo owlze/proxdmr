@@ -268,7 +268,12 @@ function openBmTgStaticModal(targetHid) {
   switchBmTgTab(savedTab);
   switchBmMobileSlot(currentBmMobileSlot || 1);
 
+  if (typeof window.closePrimaryModals === "function") {
+    window.closePrimaryModals("bmTgStaticModal");
+  }
+
   if (bmTgStaticModal) {
+    bmTgStaticModal.style.display = "flex";
     bmTgStaticModal.classList.add("active");
     pushNavState("modal", "bmTgStaticModal");
   }
@@ -295,8 +300,9 @@ async function loadBmTgStaticGroups(targetHid) {
   if (bmTgModalLoading) bmTgModalLoading.classList.remove("hidden");
   if (bmModalStatusText) bmModalStatusText.textContent = window.t ? window.t("bmtg_static.requesting") : "Запрос к BM API...";
 
-  const hid = targetHid || currentStaticModalHotspotId || window.activeHotspotId;
-  const hs = window.currentHotspots.find(h => h.id === hid) || window.currentHotspots[0];
+  const hid = targetHid || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : "default");
+  const curHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+  const hs = curHotspots.find(h => h.id === hid) || curHotspots[0];
 
   if (bmModalDeviceBadge && hs) {
     const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid > 0) ? String(hs.bm_ssid).padStart(2, "0") : "";
@@ -1501,6 +1507,7 @@ async function dropDynamicTGs(targetHid, btnElement) {
 function closeBmTgStaticModal() {
   if (bmTgStaticModal && bmTgStaticModal.classList.contains("active")) {
     bmTgStaticModal.classList.remove("active");
+    bmTgStaticModal.style.display = "";
     notifyNavClosed();
   }
 }

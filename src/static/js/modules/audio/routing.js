@@ -232,13 +232,36 @@ export function toggleHotspotMute(hid, slot) {
   } else if (mode === "auto") {
     // In Auto mode: user manual override sets chosen slot unmuted and other muted
     const otherS = (s === 1) ? 2 : 1;
-    setHotspotMute(cid, s, newMute);
-    setHotspotMute(cid, otherS, !newMute);
     const st = _getAutoState(cid);
-    st.flag = newMute ? otherS : s;
+    const targetActiveSlot = newMute ? otherS : s;
+    const targetMutedSlot = newMute ? s : otherS;
+
+    st.flag = targetActiveSlot;
     if (st.hangTimer) {
       clearTimeout(st.hangTimer);
       st.hangTimer = null;
+    }
+
+    const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+    if (ap) {
+      if (typeof ap.setSlotMute === "function") {
+        ap.setSlotMute(cid, targetActiveSlot, false);
+        ap.setSlotMute(cid, targetMutedSlot, true);
+      }
+      if (typeof ap.updateSlotMute === "function") {
+        ap.updateSlotMute(cid, targetActiveSlot, false);
+        ap.updateSlotMute(cid, targetMutedSlot, true);
+      }
+    }
+    _renderAutoCardMuteVisuals(cid, targetActiveSlot, targetMutedSlot);
+
+    // If the target slot is not actively receiving, auto-revert to idle (st.flag = 0) after 3s
+    if (!_isSlotReceivingNow(cid, targetActiveSlot)) {
+      st.hangTimer = setTimeout(() => {
+        st.hangTimer = null;
+        st.flag = 0;
+        _resetAutoSlotAudio(cid);
+      }, 3000);
     }
   } else {
     // Doubl mode: independent mute control
@@ -269,6 +292,11 @@ export function resetAutoSlotState(cid) {
     st.hangTimer = null;
   }
   st.flag = 0;
+
+  // Clear stored mutes in localStorage and backend for this hotspot
+  setHotspotMute(id, 1, false);
+  setHotspotMute(id, 2, false);
+
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
   if (ap) {
     if (typeof ap.setSlotMute === "function") {
@@ -306,6 +334,19 @@ export function handleAutoSlotActivity(hid, slot, active) {
       if (st.hangTimer) {
         clearTimeout(st.hangTimer);
         st.hangTimer = null;
+      }
+    } else {
+      // Sound appeared on opposite slot while st.flag was set to the other slot.
+      // Check if the current flag holder slot is actually transmitting right now.
+      const currentFlagSlot = st.flag;
+      if (!_isSlotReceivingNow(cid, currentFlagSlot)) {
+        // Flag holder is NOT receiving! Hand over immediately to slot s.
+        st.flag = s;
+        if (st.hangTimer) {
+          clearTimeout(st.hangTimer);
+          st.hangTimer = null;
+        }
+        _applyAutoSlotAudio(cid, s);
       }
     }
     // If sound appeared on opposite slot while active slot is talking, opposite remains muted
@@ -403,16 +444,16 @@ export function renderTsAudioModeBtnContent(btn, mode) {
   badge.classList.remove("ts-mode-solo", "ts-mode-doubl", "ts-mode-auto");
   badge.classList.add(`ts-mode-${safeMode}`);
 
-  let label = "TS1/2 Doubl🔊";
+  let label = "TS1/2 Doubl";
   let titleKey = "ts_mode.doubl_title";
   let fallbackTitle = "Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима";
 
   if (safeMode === "solo") {
-    label = "TS1/2 Solo🔊";
+    label = "TS1/2 Solo";
     titleKey = "ts_mode.solo_title";
     fallbackTitle = "Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима";
   } else if (safeMode === "auto") {
-    label = "TS1/2 Auto🔊";
+    label = "TS1/2 Auto";
     titleKey = "ts_mode.auto_title";
     fallbackTitle = "Режим: Auto — автоматический выбор активного таймслота по первому появившемуся сигналу (задержка 2 сек). Клик для смены режима";
   }
@@ -700,14 +741,29 @@ export function updateCardMuteUI(card, hid) {
   const btn1 = card.querySelector(".btn-mute-ts1");
   const btn2 = card.querySelector(".btn-mute-ts2");
 
+  if (btn1) setupMutePanButtonEvents(btn1, card, 1);
+  if (btn2) setupMutePanButtonEvents(btn2, card, 2);
+
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode === "auto") {
+    const st = _getAutoState(cid);
+    const activeSlot = st.flag || 0;
+    if (activeSlot === 0) {
+      if (btn1) renderMutePanBtnContent(btn1, false, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, false, getHotspotPan(cid, 2), 2);
+    } else {
+      if (btn1) renderMutePanBtnContent(btn1, activeSlot !== 1, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, activeSlot !== 2, getHotspotPan(cid, 2), 2);
+    }
+    return;
+  }
+
   if (btn1) {
-    setupMutePanButtonEvents(btn1, card, 1);
     const cur1 = getHotspotMute(cid, 1);
     const pan1 = getHotspotPan(cid, 1);
     renderMutePanBtnContent(btn1, cur1, pan1, 1);
   }
   if (btn2) {
-    setupMutePanButtonEvents(btn2, card, 2);
     const cur2 = getHotspotMute(cid, 2);
     const pan2 = getHotspotPan(cid, 2);
     renderMutePanBtnContent(btn2, cur2, pan2, 2);

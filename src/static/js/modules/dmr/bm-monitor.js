@@ -415,9 +415,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     }
 
     liveMonitorPanel.classList.toggle("hidden", !isLogVisible);
-    if (isLogVisible) {
+    if (visibilityChanged && isLogVisible) {
       pushNavState("drawer", "liveMonitorPanel");
-    } else {
+    } else if (!isLogVisible) {
       // 1. При закрытии истории воспроизведение останавливается
       if (window.recordingsManager) {
         if (typeof window.recordingsManager.closePlayer === "function") {
@@ -448,6 +448,11 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     if (isLogVisible && targetCard && liveMonitorPanel) {
       if (targetCard.nextElementSibling !== liveMonitorPanel) {
         targetCard.after(liveMonitorPanel);
+      }
+    } else if (!isLogVisible && liveMonitorPanel) {
+      const dashboard = document.querySelector(".app-dashboard");
+      if (dashboard && liveMonitorPanel.parentElement !== dashboard) {
+        dashboard.appendChild(liveMonitorPanel);
       }
     }
 
@@ -1320,5 +1325,16 @@ window.resolveCaller = resolveCaller;
 Object.defineProperty(window, 'isTranscriptionSummaryOpen', { get: () => isTranscriptionSummaryOpen, set: (v) => isTranscriptionSummaryOpen = v, configurable: true });
 window.handleCardLogClick = handleCardLogClick;
 
-
-
+// Delegated click handler for Log Drawer / History button across all cards and static elements
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-log-drawer");
+    if (!btn) return;
+    e.stopPropagation();
+    const card = btn.closest(".radio-container");
+    const cid = card ? (card.dataset.hotspotId || (typeof window !== "undefined" && window.activeHotspotId) || "default") : ((typeof window !== "undefined" && window.activeHotspotId) || "default");
+    if (typeof window !== "undefined" && typeof window.handleCardLogClick === "function") {
+      window.handleCardLogClick(cid);
+    }
+  });
+}

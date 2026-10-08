@@ -358,6 +358,91 @@ def is_latin(char: str) -> bool:
     return (0x0041 <= code <= 0x005A) or (0x0061 <= code <= 0x007A) or (0x00C0 <= code <= 0x024F)
 
 
+# Dictionary of amateur radio equipment, digital software, brands, and common tech terms
+HAM_AND_TECH_BRANDS_DICT: Dict[str, str] = {
+    # Ham radio brands & equipment
+    "anytone": "Энитон",
+    "baofeng": "Баофенг",
+    "yaesu": "Яесу",
+    "icom": "Айком",
+    "kenwood": "Кенвуд",
+    "motorola": "Моторола",
+    "moto": "Мото",
+    "retevis": "Ретевис",
+    "quansheng": "Куаньшенг",
+    "wouxun": "Воксун",
+    "tyt": "Ти-Вай-Ти",
+    "alinco": "Алинко",
+    "hytera": "Хайтера",
+    "radioddity": "Радиодити",
+    "xiegu": "Сегу",
+    "elecraft": "Элекрафт",
+    "flexradio": "Флекс-Радио",
+    "uniden": "Юниден",
+    "aor": "А-О-Эр",
+
+    # Hotspots, protocols & digital ham radio software
+    "pi-star": "Пай-Стар",
+    "pistar": "Пай-Стар",
+    "mmdvm": "Эм-Эм-Ди-Ви-Эм",
+    "opengd77": "Опен Джи Ди 77",
+    "openrtx": "Опен Эр-Ти-Икс",
+    "brandmeister": "Брэндмейстер",
+    "freedmr": "Фри Ди-Эм-Эр",
+    "tgif": "Ти-Джи-Ай-Эф",
+    "d-star": "Ди-Стар",
+    "dstar": "Ди-Стар",
+    "c4fm": "Си-Фор-Эф-Эм",
+    "echolink": "Эхолинк",
+    "allstar": "Оллстар",
+    "droidstar": "Дроид-Стар",
+    "peanut": "Пинат",
+    "zello": "Зелло",
+    "hotspot": "Хотспот",
+    "hot-spot": "хот-спот",
+    "nextion": "Некстион",
+    "oled": "Олед",
+    "simplex": "Симплекс",
+    "duplex": "Дуплекс",
+
+    # Mobile, Audio & IT apps
+    "dg voice": "Ди Джи Войс",
+    "dg-voice": "Ди Джи Войс",
+    "dg": "Ди Джи",
+    "voice": "Войс",
+    "iphone": "Айфон",
+    "ipad": "Айпад",
+    "ios": "Ай-О-Эс",
+    "android": "Андроид",
+    "apple": "Эппл",
+    "windows": "Виндовс",
+    "linux": "Линукс",
+    "bluetooth": "Блютуз",
+    "wi-fi": "Вай-фай",
+    "wifi": "Вай-фай",
+    "type-c": "Тайп-Си",
+    "micro-usb": "Микро Ю-Эс-Би",
+    "usb": "Ю-Эс-Би",
+    "raspberry pi": "Распберри Пай",
+    "raspberry": "Распберри",
+    "orange pi": "Орандж Пай",
+    "nanopi": "Нано Пай",
+    "telegram": "Телеграм",
+    "whatsapp": "Ватсап",
+    "youtube": "Ютуб",
+
+    # Radio suffixes & short abbreviations
+    "uv": "Ю-Ви",
+    "pro": "Про",
+    "plus": "Плюс",
+    "max": "Макс",
+    "mini": "Мини",
+    "lite": "Лайт",
+    "ultra": "Ультра",
+    "george": "Джордж",
+    "roger": "роджер",
+}
+
 LATIN_TO_RU_MULTI = [
     ("shch", "щ"), ("sch", "щ"),
     ("tion", "шн"),
@@ -388,38 +473,134 @@ LATIN_TO_RU_SINGLE = {
 }
 
 
+def transliterate_word_latin_to_cyrillic(word: str) -> str:
+    """Phonetically transliterates a single Latin word into natural Russian Cyrillic with soft forms."""
+    lw = word.lower()
+    if lw in HAM_AND_TECH_BRANDS_DICT:
+        repl = HAM_AND_TECH_BRANDS_DICT[lw]
+        if word.isupper() and "-" not in repl and " " not in repl and len(word) <= 3:
+            return repl.upper()
+        if word.islower():
+            return repl.lower()
+        return repl
+
+    s = lw
+
+    # Suffixes & endings
+    s = re.sub(r'ation\b', 'ейшн', s)
+    s = re.sub(r'ition\b', 'ишн', s)
+    s = re.sub(r'ution\b', 'юшн', s)
+    s = re.sub(r'tion\b', 'шн', s)
+    s = re.sub(r'sion\b', 'жн', s)
+    s = re.sub(r'ture\b', 'чер', s)
+    s = re.sub(r'ight\b', 'айт', s)
+    s = re.sub(r'ie\b', 'и', s)
+    s = re.sub(r'(?<=[bcdfghjklmnpqrstvwxz])y\b', 'и', s)
+
+    # Double consonants before soft vowels
+    s = re.sub(r'gg(?=[eiy])', 'дж', s)
+    s = re.sub(r'bb', 'б', s)
+    s = re.sub(r'dd', 'д', s)
+    s = re.sub(r'ff', 'ф', s)
+    s = re.sub(r'll', 'л', s)
+    s = re.sub(r'mm', 'м', s)
+    s = re.sub(r'nn', 'н', s)
+    s = re.sub(r'pp', 'п', s)
+    s = re.sub(r'rr', 'р', s)
+    s = re.sub(r'ss', 'с', s)
+    s = re.sub(r'tt', 'т', s)
+
+    # Split digraphs with silent e at word end
+    s = re.sub(r'ace\b', 'ейс', s)
+    s = re.sub(r'ice\b', 'айс', s)
+    s = re.sub(r'ake\b', 'ейк', s)
+    s = re.sub(r'ate\b', 'ейт', s)
+    s = re.sub(r'ame\b', 'ейм', s)
+    s = re.sub(r'ave\b', 'ейв', s)
+    s = re.sub(r'ike\b', 'айк', s)
+    s = re.sub(r'ite\b', 'айт', s)
+    s = re.sub(r'ide\b', 'айд', s)
+    s = re.sub(r'ime\b', 'айм', s)
+    s = re.sub(r'ine\b', 'айн', s)
+    s = re.sub(r'one\b', 'он', s)
+    s = re.sub(r'ole\b', 'оул', s)
+    s = re.sub(r'ge\b', 'дж', s)
+    s = re.sub(r'ce\b', 'с', s)
+
+    multi = [
+        ('shch', 'щ'), ('sch', 'щ'),
+        ('ch', 'ч'), ('tch', 'ч'),
+        ('sh', 'ш'), ('zh', 'ж'), ('kh', 'х'),
+        ('ts', 'тс'), ('tz', 'ц'),
+        ('ph', 'ф'), ('th', 'т'), ('ck', 'к'), ('qu', 'кв'),
+        ('wh', 'в'), ('kn', 'н'), ('wr', 'р'),
+        ('ee', 'и'), ('oo', 'у'), ('ea', 'и'),
+        ('ai', 'эй'), ('ay', 'ей'), ('ey', 'ей'), ('ei', 'ей'),
+        ('oi', 'ой'), ('oy', 'ой'),
+        ('ya', 'я'), ('ye', 'е'), ('yo', 'ё'), ('yu', 'ю'),
+    ]
+    for pat, rep in multi:
+        s = s.replace(pat, rep)
+
+    # Soft C / G (мягкая форма: g перед e, i, y -> дж; c перед e, i, y -> с)
+    s = re.sub(r'c(?=[eiyеи])', 'с', s)
+    s = re.sub(r'g(?=[eiyеи])', 'дж', s)
+    s = re.sub(r'c', 'к', s)
+    s = re.sub(r'g', 'г', s)
+    s = re.sub(r'j', 'дж', s)
+
+    single = {
+        'a': 'а', 'b': 'б', 'd': 'д', 'e': 'е', 'f': 'ф',
+        'h': 'х', 'i': 'и', 'k': 'к', 'l': 'л', 'm': 'м', 'n': 'н',
+        'o': 'о', 'p': 'п', 'q': 'к', 'r': 'р', 's': 'с', 't': 'т', 'u': 'у',
+        'v': 'в', 'w': 'в', 'x': 'кс', 'y': 'й', 'z': 'з',
+        'ä': 'э', 'ö': 'ё', 'ü': 'ю', 'ß': 'сс',
+        'é': 'е', 'è': 'е', 'ê': 'е', 'ë': 'е',
+        'à': 'а', 'á': 'а', 'â': 'а', 'ã': 'а',
+        'ó': 'о', 'ò': 'о', 'ô': 'о', 'õ': 'о',
+        'ú': 'у', 'ù': 'у', 'û': 'у',
+        'í': 'и', 'ì': 'и', 'î': 'и',
+        'ñ': 'нь', 'ç': 'с'
+    }
+    out = []
+    for char in s:
+        out.append(single.get(char, char))
+    res = ''.join(out)
+
+    if word.isupper() and len(word) <= 3:
+        return res.upper()
+    if word.isupper() and len(word) > 3:
+        return res.capitalize()
+    if word and word[0].isupper():
+        return res.capitalize()
+    return res
+
+
 def transliterate_latin_to_cyrillic(text: str) -> str:
     """Transliterates Latin script text into Russian Cyrillic phonetics."""
-    res = []
-    i = 0
-    n = len(text)
-    while i < n:
-        matched = False
-        lower_sub = text[i:].lower()
-        for pattern, repl in LATIN_TO_RU_MULTI:
-            if lower_sub.startswith(pattern):
-                src_piece = text[i:i + len(pattern)]
-                if src_piece.isupper() and len(src_piece) > 1:
-                    res.append(repl.upper())
-                elif src_piece[0].isupper():
-                    res.append(repl.capitalize())
-                else:
-                    res.append(repl)
-                i += len(pattern)
-                matched = True
-                break
-        if not matched:
-            ch = text[i]
-            lower_ch = ch.lower()
-            if lower_ch in LATIN_TO_RU_SINGLE:
-                repl = LATIN_TO_RU_SINGLE[lower_ch]
-                if ch.isupper():
-                    repl = repl.upper()
-                res.append(repl)
-            else:
-                res.append(ch)
-            i += 1
-    return "".join(res)
+    if not text:
+        return ""
+
+    text_work = text
+    # 1. Match multi-word / hyphenated phrases from dictionary first
+    for phrase in sorted(HAM_AND_TECH_BRANDS_DICT.keys(), key=len, reverse=True):
+        if " " in phrase or "-" in phrase:
+            def _sub_phrase(m):
+                rep = HAM_AND_TECH_BRANDS_DICT[phrase]
+                src = m.group(0)
+                if src.isupper():
+                    return rep.upper()
+                if src.islower():
+                    return rep.lower()
+                return rep
+            text_work = re.sub(rf"\b{re.escape(phrase)}\b", _sub_phrase, text_work, flags=re.IGNORECASE)
+
+    # 2. Transliterate remaining individual Latin words
+    def _repl_word(m):
+        tok = m.group(0)
+        return transliterate_word_latin_to_cyrillic(tok)
+
+    return re.sub(r"[a-zA-Z\u00C0-\u024F]+", _repl_word, text_work)
 
 
 RU_TO_LATIN_MULTI = [
@@ -475,8 +656,8 @@ def filter_piper_text_by_language(text: str, target_lang: str = "ru") -> str:
     """
     Filters text before feeding to Piper TTS:
     - Identifies all fragments not matching the target voice language script.
-    - If fragment length <= 16 characters: transliterates it to the target language alphabet.
-    - If fragment length > 16 characters: cuts it out (removes it).
+    - If fragment length <= 18 characters: transliterates it to the target language alphabet.
+    - If fragment length > 18 characters: cuts it out (removes it).
     - Cleans up duplicate or dangling punctuation and extra spaces.
     """
     if not text or not text.strip():
@@ -543,14 +724,14 @@ def filter_piper_text_by_language(text: str, target_lang: str = "ru") -> str:
         else:
             stripped = s_text.strip(" \t\r\n.,;:!?-–—\"'()[]{}")
             frag_len = len(stripped)
-            if frag_len <= 16:
+            if frag_len <= 18:
                 if is_cyr_target:
                     trans = transliterate_latin_to_cyrillic(s_text)
                 else:
                     trans = transliterate_cyrillic_to_latin(s_text)
                 out_parts.append(trans + s_trailing)
             else:
-                # Cut out foreign fragment > 16 characters
+                # Cut out foreign fragment > 18 characters
                 has_next_native = any(s[0] == "native" and s[1].strip() for s in segments[seg_idx + 1:])
                 if has_next_native:
                     prev = "".join(out_parts).rstrip()

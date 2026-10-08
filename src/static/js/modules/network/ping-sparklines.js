@@ -237,21 +237,15 @@ export function cyclePingScale() {
 }
 
 export function getPingColor(ping) {
-  if (ping === null || ping === undefined || isNaN(ping) || ping < 0) return "#ef4444";
-  if (ping < 70) return "#22c55e";   // Green (healthy BM ping is typically 45-65ms)
-  if (ping < 110) return "#84cc16";  // Lime
-  if (ping < 160) return "#eab308";  // Yellow
-  if (ping < 220) return "#f97316";  // Orange
-  return "#ef4444";                  // Red
+  if (ping === null || ping === undefined || isNaN(ping) || ping < 0) return "#ff1744";
+  if (ping < 100) return "#22c55e";   // Green (< 100ms)
+  if (ping < 170) return "#eab308";   // Yellow (100 - 170ms)
+  if (ping < 250) return "#ef4444";   // Medium saturated red (170 - 250ms)
+  return "#ff1744";                  // Bright red, scarlet (>= 250ms)
 }
 
 export function getClientPingColor(ping) {
-  if (ping === null || ping === undefined || isNaN(ping) || ping < 0) return "#ef4444";
-  if (ping < 15) return "#22c55e";   // Fast LAN / WiFi
-  if (ping < 40) return "#84cc16";   // Normal WiFi / Good 4G
-  if (ping < 80) return "#eab308";   // Mobile 3G/4G moderate
-  if (ping < 150) return "#f97316";  // High latency
-  return "#ef4444";                  // Bad
+  return getPingColor(ping);
 }
 
 export function generateSparklineGradientStops(coords, W, forArea = false, isClientMode = false) {
@@ -1059,19 +1053,24 @@ export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm") {
     pingRow.className = "ping-val-row";
     if (isOffline) {
       msEl.textContent = (typeof window !== "undefined" && window.t) ? window.t("ping.offline") : "OFFLINE";
+      msEl.style.color = "";
       pingRow.classList.add("ping-offline");
     } else if (ms !== null) {
       msEl.textContent = `${ms} ${((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms") : "ms")}`;
       const col = (mode === "client") ? getClientPingColor(ms) : getPingColor(ms);
-      if (col === "#22c55e" || col === "#84cc16") {
+      if (col === "#22c55e") {
         pingRow.classList.add("ping-good");
       } else if (col === "#eab308") {
         pingRow.classList.add("ping-warn");
-      } else {
+      } else if (col === "#ef4444") {
         pingRow.classList.add("ping-poor");
+      } else {
+        pingRow.classList.add("ping-bad");
       }
+      msEl.style.color = col;
     } else {
       msEl.textContent = "-- ms";
+      msEl.style.color = "";
     }
   }
 

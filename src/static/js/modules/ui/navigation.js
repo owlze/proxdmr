@@ -28,6 +28,111 @@
     }
   }
 
+  // --- Mutual Primary Modals Exclusivity Helper ---
+  export function closePrimaryModals(exceptId = null) {
+    const primaryModals = [
+      {
+        id: "settingsModal",
+        close: () => {
+          const m = document.getElementById("settingsModal");
+          if (m) {
+            m.classList.remove("active");
+            m.style.display = "";
+          }
+        }
+      },
+      {
+        id: "searchTgIdModal",
+        close: () => {
+          if (typeof window.closeSearchTgIdModal === "function") {
+            window.closeSearchTgIdModal();
+          } else {
+            const m = document.getElementById("searchTgIdModal");
+            if (m) {
+              m.classList.remove("active");
+              m.style.display = "";
+            }
+          }
+        }
+      },
+      {
+        id: "myContactsModal",
+        close: () => {
+          if (typeof window.closeMyContactsModal === "function") {
+            window.closeMyContactsModal();
+          } else {
+            const m = document.getElementById("myContactsModal");
+            if (m) {
+              m.classList.remove("active");
+              m.style.display = "";
+            }
+          }
+        }
+      },
+      {
+        id: "bmTgStaticModal",
+        close: () => {
+          if (typeof window.closeBmTgStaticModal === "function") {
+            window.closeBmTgStaticModal();
+          } else {
+            const m = document.getElementById("bmTgStaticModal");
+            if (m) {
+              m.classList.remove("active");
+              m.style.display = "";
+            }
+          }
+        }
+      },
+      {
+        id: "dsdfmeModal",
+        close: () => {
+          const m = document.getElementById("dsdfmeModal");
+          if (m) {
+            m.classList.remove("active");
+            m.style.display = "";
+          }
+        }
+      },
+      {
+        id: "audioRxModal",
+        close: () => {
+          const m = document.getElementById("audioRxModal");
+          if (m) {
+            m.classList.remove("active");
+            m.style.display = "";
+          }
+        }
+      },
+      {
+        id: "audioTxModal",
+        close: () => {
+          const m = document.getElementById("audioTxModal");
+          if (m) {
+            m.classList.remove("active");
+            m.style.display = "";
+          }
+        }
+      }
+    ];
+
+    primaryModals.forEach(item => {
+      if (item.id === exceptId) return;
+      const el = document.getElementById(item.id);
+      if (el && (el.classList.contains("active") || el.style.display === "flex")) {
+        try {
+          item.close();
+        } catch (_) {
+          el.classList.remove("active");
+          el.style.display = "";
+        }
+      }
+    });
+  }
+  if (typeof window !== "undefined") {
+    window.closePrimaryModals = closePrimaryModals;
+  }
+
+
 
   // --- Global Unified Back Navigation Handler (Browser + Android APK + PC Escape Key) ---
   export function handleAppBack(fromPopstate = false) {

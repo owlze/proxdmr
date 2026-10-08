@@ -33,8 +33,10 @@ import {
   togglePttLock,
   updatePttLockUI,
   openTotConfigModal,
-  getHotspotPttMode
-} from '../ptt/engine.js';
+  getHotspotPttMode,
+  checkPttConnectionStatus,
+  notifyPttConnectionBlocked
+} from '../ptt/engine.js?v=2.9.260';
 import { wireCardStatusInteractions, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js';
 import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js';
 import { showLongPressEffect } from '../ui/long-press.js';
@@ -394,6 +396,9 @@ export function saveCurrentSettingsState() {
 }
 
 export function openHotspotSettings(hs, tabToActivate = null) {
+    if (typeof window.closePrimaryModals === "function") {
+      window.closePrimaryModals("settingsModal");
+    }
     const curHotspots = window.currentHotspots || currentHotspots || [];
     const curActiveId = window.activeHotspotId || activeHotspotId || "default";
     if (!hs) hs = curHotspots.find(h => h.id === curActiveId) || curHotspots[0];
@@ -670,9 +675,26 @@ export function renderRadiosGrid() {
       }
       if (!card) return;
 
+      // Ensure DOM position in radiosGrid matches displayHotspots order!
+      if (card.parentElement === radiosGrid) {
+        radiosGrid.appendChild(card);
+      }
+
       // Logo ProxDMR must be present ONLY on the first main hotspot card (idx === 0)
       if (idx > 0) {
         card.querySelectorAll(".brand-logo-wrap").forEach(el => el.remove());
+      } else {
+        const brandTitle = card.querySelector(".brand-title");
+        if (brandTitle && !brandTitle.querySelector(".brand-logo-wrap")) {
+          const logoWrap = document.createElement("div");
+          logoWrap.className = "brand-logo-wrap";
+          logoWrap.tabIndex = 0;
+          logoWrap.innerHTML = `
+            <img src="/static/img/Logo_light.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
+            <img src="/static/img/Logo_dark.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-light">
+          `;
+          brandTitle.insertBefore(logoWrap, brandTitle.firstChild);
+        }
       }
 
       // In Android APK mode: remove fullscreen button from all hotspot cards
@@ -1274,6 +1296,21 @@ export function renderRadiosGrid() {
               return;
             }
 
+            // 2b. Branch: Connection protection - GW and BM must both be connected!
+            const conn = (typeof window.checkPttConnectionStatus === "function")
+              ? window.checkPttConnectionStatus(cid)
+              : checkPttConnectionStatus(cid);
+            if (!conn.ok) {
+              e.preventDefault();
+              e.stopPropagation();
+              if (typeof window.notifyPttConnectionBlocked === "function") {
+                window.notifyPttConnectionBlocked(conn, cardPttBtn);
+              } else {
+                notifyPttConnectionBlocked(conn, cardPttBtn);
+              }
+              return;
+            }
+
             // Determine targetSlot based on left (TS1) vs right (TS2) click coordinate
             const targetSlot = (relX < (rect.width / 2)) ? 1 : 2;
             setCardSlot(card, targetSlot, true);
@@ -1617,10 +1654,37 @@ export function renderRadiosGrid() {
         }
       }
     });
+
+    // Ensure live activity monitor / history panel stays correctly positioned after card reordering in radiosGrid
+    const liveMonitorPanel = document.getElementById("liveMonitorPanel");
+    const isLogVis = Boolean(typeof window.isLogVisible !== "undefined" ? window.isLogVisible : (liveMonitorPanel && !liveMonitorPanel.classList.contains("hidden")));
+    if (isLogVis && liveMonitorPanel) {
+      const isMobile = window.innerWidth <= 768;
+      const effectiveHid = (isMobile && (!window.currentLogHotspotId || window.currentLogHotspotId === "all"))
+        ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
+        : window.currentLogHotspotId;
+
+      const targetCard = (effectiveHid && effectiveHid !== "all")
+        ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
+        : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
+
+      if (targetCard && targetCard.nextElementSibling !== liveMonitorPanel) {
+        targetCard.after(liveMonitorPanel);
+      }
+    } else if (!isLogVis && liveMonitorPanel) {
+      const dashboard = document.querySelector(".app-dashboard");
+      if (dashboard && liveMonitorPanel.parentElement !== dashboard) {
+        dashboard.appendChild(liveMonitorPanel);
+      }
+    }
+
     renderLogHotspotTabs();
     initQuickAssign();
     if (typeof updatePttLockUI === "function") {
       updatePttLockUI();
+    }
+    if (typeof window.updateLogVisibility === "function") {
+      window.updateLogVisibility(false);
     }
   }
 export function applyActiveHotspotToUI() {
@@ -1997,6 +2061,34 @@ export function updateEditHsToolbarUI(hs) {
       }
     }
   }
+
+  // 4. Quick move up / down buttons in tab header
+  const btnMoveHsUp = document.getElementById("btnMoveHsUp");
+  const btnMoveHsDown = document.getElementById("btnMoveHsDown");
+  const btnOpenHsOrderModal = document.getElementById("btnOpenHsOrderModal");
+
+  const curIdx = currentHotspots.findIndex(h => h.id === curId);
+  if (btnOpenHsOrderModal) {
+    btnOpenHsOrderModal.disabled = currentHotspots.length <= 1;
+    btnOpenHsOrderModal.style.opacity = currentHotspots.length <= 1 ? "0.4" : "1";
+    btnOpenHsOrderModal.style.cursor = currentHotspots.length <= 1 ? "not-allowed" : "pointer";
+  }
+
+  if (btnMoveHsUp) {
+    // Cannot move up if: not found, new hotspot, is index 0 (primary is fixed), or index 1 (cannot jump over primary)
+    const canMoveUp = curIdx > 1;
+    btnMoveHsUp.disabled = !canMoveUp;
+    btnMoveHsUp.style.opacity = canMoveUp ? "1" : "0.35";
+    btnMoveHsUp.style.cursor = canMoveUp ? "pointer" : "not-allowed";
+  }
+
+  if (btnMoveHsDown) {
+    // Cannot move down if: not found, new hotspot, is index 0 (primary is fixed), or is already last
+    const canMoveDown = curIdx > 0 && curIdx < currentHotspots.length - 1;
+    btnMoveHsDown.disabled = !canMoveDown;
+    btnMoveHsDown.style.opacity = canMoveDown ? "1" : "0.35";
+    btnMoveHsDown.style.cursor = canMoveDown ? "pointer" : "not-allowed";
+  }
 }
 
 if (typeof window !== "undefined") {
@@ -2020,7 +2112,148 @@ export function openEditHotspotForm(hs) {
     } catch (_) {}
   }
 
+export async function reorderHotspots(orderIds) {
+  if (!Array.isArray(orderIds) || !orderIds.length) return false;
+  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+  if (currentHotspots.length > 0 && currentHotspots[0]) {
+    const primaryId = currentHotspots[0].id;
+    orderIds = [primaryId, ...orderIds.filter(id => id !== primaryId)];
+  }
+  try {
+    const resp = await fetch("/api/hotspots/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: orderIds })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || resp.statusText);
+    }
+    const data = await resp.json();
+    if (data.hotspots && Array.isArray(data.hotspots)) {
+      window.currentHotspots = data.hotspots;
+    }
+    renderRadiosGrid();
+    renderHotspotSelect();
+    renderHotspotsList();
+    renderHotspotOrderList();
+    const editHsSelect = document.getElementById("editHsSelect");
+    const curHs = (window.currentHotspots || []).find(h => h.id === (editHsSelect ? editHsSelect.value : ""));
+    if (curHs) updateEditHsToolbarUI(curHs);
+    showToast(window.t ? window.t("hotspots.reorder_success", {}, "✅ Порядок хотспотов сохранен") : "✅ Порядок хотспотов сохранен", 2000);
+    return true;
+  } catch (e) {
+    console.error("[HOTSPOTS] Failed to reorder hotspots:", e);
+    showToast(window.t ? window.t("hotspots.reorder_error", {}, "Ошибка изменения порядка") : "Ошибка изменения порядка", 3000);
+    return false;
+  }
+}
 
+export async function moveHotspotInOrder(hotspotId, direction) {
+  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+  if (currentHotspots.length <= 2) return;
+  const ids = currentHotspots.map(h => h.id);
+  const idx = ids.indexOf(hotspotId);
+  if (idx <= 0) return; // Cannot move primary hotspot (idx === 0 is fixed)
+  const targetIdx = idx + direction;
+  if (targetIdx <= 0 || targetIdx >= ids.length) return; // Cannot move into or above index 0
+
+  const temp = ids[idx];
+  ids[idx] = ids[targetIdx];
+  ids[targetIdx] = temp;
+
+  const ok = await reorderHotspots(ids);
+  if (ok) {
+    const curHs = (window.currentHotspots || []).find(h => h.id === hotspotId);
+    if (curHs) {
+      populateEditHotspotFormFields(curHs);
+    }
+  }
+}
+
+export function renderHotspotOrderList() {
+  const listEl = document.getElementById("hsOrderList");
+  if (!listEl) return;
+  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+  listEl.innerHTML = "";
+  if (!currentHotspots.length) {
+    const emptyMsg = window.t ? window.t("hotspots.empty_configured", {}, "Нет настроенных хотспотов") : "Нет настроенных хотспотов";
+    listEl.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem;">${emptyMsg}</div>`;
+    return;
+  }
+
+  currentHotspots.forEach((hs, idx) => {
+    const item = document.createElement("div");
+    item.className = "hs-order-item";
+    item.style.display = "flex";
+    item.style.alignItems = "center";
+    item.style.justifyContent = "space-between";
+    item.style.gap = "10px";
+    item.style.padding = "8px 12px";
+    item.style.background = "rgba(255, 255, 255, 0.04)";
+    item.style.borderRadius = "8px";
+    item.style.border = "1px solid rgba(255, 255, 255, 0.08)";
+
+    const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid !== null) ? ` · SSID ${hs.bm_ssid}` : "";
+    const isPrimary = idx === 0;
+    const isFirstMovable = idx === 1;
+    const isLast = idx === currentHotspots.length - 1;
+
+    const rightControls = isPrimary
+      ? `<span style="font-size: 0.76rem; color: #58a6ff; font-weight: 600; background: rgba(88, 166, 255, 0.12); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(88, 166, 255, 0.25);" title="Первый хотспот всегда остается первым">🔒 ${window.t ? window.t("hotspots.order_fixed_primary", {}, "Основной (№1)") : "Основной (№1)"}</span>`
+      : `
+        <button type="button" class="btn-secondary btn-order-up" style="padding: 4px 10px; font-size: 0.82rem; cursor: ${isFirstMovable ? 'not-allowed' : 'pointer'}; opacity: ${isFirstMovable ? '0.35' : '1'}; border-radius: 6px;" ${isFirstMovable ? 'disabled' : ''} title="Выше">▲</button>
+        <button type="button" class="btn-secondary btn-order-down" style="padding: 4px 10px; font-size: 0.82rem; cursor: ${isLast ? 'not-allowed' : 'pointer'}; opacity: ${isLast ? '0.35' : '1'}; border-radius: 6px;" ${isLast ? 'disabled' : ''} title="Ниже">▼</button>
+      `;
+
+    item.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+        <span style="font-weight: 700; font-size: 0.95rem; color: #58a6ff; width: 28px; text-align: center; flex-shrink: 0; background: rgba(88, 166, 255, 0.12); padding: 2px 6px; border-radius: 4px;">#${idx + 1}</span>
+        <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary, #ffffff);">${safeEscapeHtml(hs.name || "Хотспот")}</div>
+          <div style="font-size: 0.78rem; color: var(--text-muted);">${safeEscapeHtml(hs.callsign || "")}${ssidStr} · ID: ${hs.effective_id || hs.dmr_id || "-"}</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+        ${rightControls}
+      </div>
+    `;
+
+    if (!isPrimary) {
+      const upBtn = item.querySelector(".btn-order-up");
+      if (upBtn && !isFirstMovable) {
+        upBtn.onclick = () => moveHotspotInOrder(hs.id, -1);
+      }
+      const downBtn = item.querySelector(".btn-order-down");
+      if (downBtn && !isLast) {
+        downBtn.onclick = () => moveHotspotInOrder(hs.id, 1);
+      }
+    }
+
+    listEl.appendChild(item);
+  });
+}
+
+export function openHotspotOrderModal() {
+  const modal = document.getElementById("hotspotOrderModal");
+  if (!modal) return;
+  renderHotspotOrderList();
+  modal.style.display = "flex";
+  modal.classList.add("active");
+  if (typeof pushNavState === "function") {
+    pushNavState("modal", "hotspotOrderModal");
+  }
+}
+
+export function closeHotspotOrderModal() {
+  const modal = document.getElementById("hotspotOrderModal");
+  if (!modal) return;
+  modal.style.display = "none";
+  modal.classList.remove("active");
+  if (typeof notifyNavClosed === "function") {
+    notifyNavClosed("modal", "hotspotOrderModal");
+  }
+}
 
 export function initHotspotsManager() {
   const headerHotspotSelect = document.getElementById("headerHotspotSelect");
@@ -2210,6 +2443,50 @@ export function initHotspotsManager() {
           populateEditHotspotFormFields(found);
         }
       }
+    });
+  }
+
+  const btnMoveHsUp = document.getElementById("btnMoveHsUp");
+  if (btnMoveHsUp && !btnMoveHsUp._wired) {
+    btnMoveHsUp._wired = true;
+    btnMoveHsUp.addEventListener("click", () => {
+      const selectedId = editHsSelect ? editHsSelect.value : "";
+      if (!selectedId || selectedId === "__new__") return;
+      moveHotspotInOrder(selectedId, -1);
+    });
+  }
+
+  const btnMoveHsDown = document.getElementById("btnMoveHsDown");
+  if (btnMoveHsDown && !btnMoveHsDown._wired) {
+    btnMoveHsDown._wired = true;
+    btnMoveHsDown.addEventListener("click", () => {
+      const selectedId = editHsSelect ? editHsSelect.value : "";
+      if (!selectedId || selectedId === "__new__") return;
+      moveHotspotInOrder(selectedId, 1);
+    });
+  }
+
+  const btnOpenHsOrderModal = document.getElementById("btnOpenHsOrderModal");
+  if (btnOpenHsOrderModal && !btnOpenHsOrderModal._wired) {
+    btnOpenHsOrderModal._wired = true;
+    btnOpenHsOrderModal.addEventListener("click", () => {
+      openHotspotOrderModal();
+    });
+  }
+
+  const closeHsOrderModalBtn = document.getElementById("closeHsOrderModalBtn");
+  if (closeHsOrderModalBtn && !closeHsOrderModalBtn._wired) {
+    closeHsOrderModalBtn._wired = true;
+    closeHsOrderModalBtn.addEventListener("click", () => {
+      closeHotspotOrderModal();
+    });
+  }
+
+  const btnDoneHsOrder = document.getElementById("btnDoneHsOrder");
+  if (btnDoneHsOrder && !btnDoneHsOrder._wired) {
+    btnDoneHsOrder._wired = true;
+    btnDoneHsOrder.addEventListener("click", () => {
+      closeHotspotOrderModal();
     });
   }
 
@@ -2608,6 +2885,11 @@ window.populateEditHotspotFormFields = populateEditHotspotFormFields;
 window.openEditHotspotForm = openEditHotspotForm;
 window.initHotspotsManager = initHotspotsManager;
 window.saveCurrentSettingsState = saveCurrentSettingsState;
+window.reorderHotspots = reorderHotspots;
+window.moveHotspotInOrder = moveHotspotInOrder;
+window.renderHotspotOrderList = renderHotspotOrderList;
+window.openHotspotOrderModal = openHotspotOrderModal;
+window.closeHotspotOrderModal = closeHotspotOrderModal;
 
 window.__proxdmr = window.__proxdmr || {};
 window.__proxdmr.loadHotspots = loadHotspots;
@@ -2624,6 +2906,11 @@ window.__proxdmr.populateEditHotspotFormFields = populateEditHotspotFormFields;
 window.__proxdmr.openEditHotspotForm = openEditHotspotForm;
 window.__proxdmr.initHotspotsManager = initHotspotsManager;
 window.__proxdmr.saveCurrentSettingsState = saveCurrentSettingsState;
+window.__proxdmr.reorderHotspots = reorderHotspots;
+window.__proxdmr.moveHotspotInOrder = moveHotspotInOrder;
+window.__proxdmr.renderHotspotOrderList = renderHotspotOrderList;
+window.__proxdmr.openHotspotOrderModal = openHotspotOrderModal;
+window.__proxdmr.closeHotspotOrderModal = closeHotspotOrderModal;
 
 window.addEventListener("languageChanged", () => {
   renderBmMastersDropdown();

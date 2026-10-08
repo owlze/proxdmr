@@ -437,12 +437,16 @@ export function saveContactsGatewayFromUI() {
 
 export function openMyContactsModal() {
     ensureElements();
+    if (typeof window.closePrimaryModals === "function") {
+      window.closePrimaryModals("myContactsModal");
+    }
     if (contactsGatewayPanel) contactsGatewayPanel.style.display = "none";
     if (contactsSearchInput) contactsSearchInput.value = "";
     if (clearContactsSearchBtn) clearContactsSearchBtn.classList.add("hidden");
     updateContactsGatewaySummary();
     renderContactsTree("");
     if (myContactsModal) {
+      myContactsModal.style.display = "flex";
       myContactsModal.classList.add("active");
       pushNavState("modal", "myContactsModal");
       setTimeout(() => contactsSearchInput && contactsSearchInput.focus(), 60);
@@ -452,6 +456,7 @@ export function openMyContactsModal() {
 export function closeMyContactsModal() {
     if (myContactsModal && myContactsModal.classList.contains("active")) {
       myContactsModal.classList.remove("active");
+      myContactsModal.style.display = "";
       notifyNavClosed();
     }
   }
@@ -1512,6 +1517,21 @@ if (typeof window !== "undefined") {
   window.__proxdmr.saveContactsToServer = saveContactsToServer;
   window.__proxdmr.deleteContactNode = deleteContactNode;
   window.__proxdmr.initContactsManager = initContactsManager;
+}
+
+// Delegated click handler for Contacts button across all cards and static elements
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-my-contacts");
+    if (!btn) return;
+    e.stopPropagation();
+    const card = btn.closest(".radio-container");
+    const cid = card ? (card.dataset.hotspotId || (typeof window !== "undefined" && window.activeHotspotId) || "default") : ((typeof window !== "undefined" && window.activeHotspotId) || "default");
+    if (typeof window !== "undefined" && typeof window.switchActiveHotspot === "function") {
+      window.switchActiveHotspot(cid);
+    }
+    openMyContactsModal();
+  });
 }
 
 // Auto-initialize when DOM is ready

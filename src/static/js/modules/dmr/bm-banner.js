@@ -14,7 +14,7 @@ import {
   calculateClientPacketLoss,
   calculateCardPacketLoss,
   updatePingElement
-} from "../network/ping-sparklines.js";
+} from "../network/ping-sparklines.js?v=2.9.257";
 import { openBmBenchmarkModal } from "./bm-benchmark.js";
 import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js";
 import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js";

@@ -4,7 +4,7 @@
  * and dispatching 46+ server messages (audio, transcription, status, recordings, etc.).
  */
 
-import { getCountryInfo, renderTgTextHtml, updateFlagElement } from '../core/formatters.js';
+import { getCountryInfo, renderTgTextHtml, updateFlagElement, formatCallerLocation } from '../core/formatters.js';
 import { showToast } from '../core/toast.js';
 import {
   updateGwStatus,
@@ -17,7 +17,7 @@ import {
   clearWsReconnectTimer
 } from './watchdog.js';
 import { getVuState, ensureVuMeterLoop, updateHotspotVuMeter } from '../audio/dsp.js';
-import { getHotspotMute, syncAllSlotMutesToServer, updateCardRecUI, updateAllHotspotRecUI } from '../audio/routing.js';
+import { getHotspotMute, getHotspotTsAudioMode, syncAllSlotMutesToServer, updateCardRecUI, updateAllHotspotRecUI } from '../audio/routing.js';
 import {
   handleCallTranscription,
   handleTranscriptionError,
@@ -436,7 +436,8 @@ export function connectWebSocket(force = false) {
           window.handleAutoSlotActivity(cid, slot, true);
         }
 
-        const isSlotMutedInStorage = getHotspotMute(cid, slot);
+        const mode = typeof getHotspotTsAudioMode === "function" ? getHotspotTsAudioMode(cid) : "doubl";
+        const isSlotMutedInStorage = (mode !== "auto") ? getHotspotMute(cid, slot) : false;
         const isSlotMutedInAudio = window.audioPlayer && audioPlayer.isSlotMuted && audioPlayer.isSlotMuted(cid, slot);
         if (isSlotMutedInStorage || isSlotMutedInAudio || isHotspotAudioMuted(cid) || isGlobalAudioMuted() || isPttAudioMuted()) {
           return;
@@ -903,6 +904,16 @@ export function handleServerMessage(msg) {
         window.heardCalls = cleanCalls;
         if (window.__proxdmr && typeof window.__proxdmr.setHeardCalls === "function") {
           window.__proxdmr.setHeardCalls(cleanCalls);
+        }
+        if (typeof window.getStoredLastRx === "function" && typeof window.saveStoredLastRx === "function") {
+          cleanCalls.forEach(c => {
+            if (!c.is_tx && (c.slot === 1 || c.slot === 2)) {
+              const hid = c.hotspot_id || "default";
+              if (!window.getStoredLastRx(hid, c.slot)) {
+                window.saveStoredLastRx(hid, c.slot, c);
+              }
+            }
+          });
         }
         renderLogList();
         if (typeof renderTranscriptionSummary === "function" && typeof window !== "undefined" && window.isTranscriptionSummaryOpen) {
@@ -1439,13 +1450,23 @@ export function handleServerMessage(msg) {
             const tgFlagEl = vfoRow.querySelector(".ts-tg-flag");
             const tgTextEl = vfoRow.querySelector(".ts-tg-text");
 
-            const callerCountry = getCountryInfo(msg.src_id, msg.src_callsign);
+            const callerCountry = getCountryInfo(msg.src_id, msg.src_callsign, msg.country);
+            const userCached = (typeof window !== "undefined" && window.USER_CALLSIGNS && window.USER_CALLSIGNS[msg.src_id]) || {};
+            const callerCity = msg.city || userCached.city || "";
             const tgCountry = getCountryInfo(msg.dst_id);
-            const tgName = (window.TG_NAMES || {})[msg.dst_id] || (msg.dst_id === 9990 ? "Parrot / Echo" : "");
+            const tgName = msg.dst_name || (window.TG_NAMES || {})[msg.dst_id] || (msg.dst_id === 9990 ? "Parrot / Echo" : "");
+            if (msg.dst_name && msg.dst_id) {
+              if (!window.TG_NAMES) window.TG_NAMES = {};
+              window.TG_NAMES[msg.dst_id] = msg.dst_name;
+            }
 
             const cCall = msg.src_callsign || (msg.src_id ? `ID: ${msg.src_id}` : "Unknown");
             const cName = msg.src_name || "";
             const displayName = `${cCall} ${cName}`.trim();
+
+            if (vfoRow) {
+              vfoRow.classList.remove("vfo-last-caller-dimmed");
+            }
 
             if (callerFlagEl) {
               updateFlagElement(callerFlagEl, callerCountry);
@@ -1474,11 +1495,13 @@ export function handleServerMessage(msg) {
                 callerIdEl.dataset.callsign = msg.src_callsign || "";
                 callerIdEl.dataset.name = msg.src_name || "";
                 callerIdEl.dataset.country = callerCountry?.name_en || "";
+                if (callerCity) callerIdEl.dataset.city = callerCity;
                 callerIdEl.title = window.t ? window.t("vfo.set_caller_tx_title", { id: msg.src_id }) : `Задать ID ${msg.src_id} для передачи (Private Call)`;
               }
             }
             if (callerCountryEl) {
-              callerCountryEl.textContent = callerCountry?.name_en || "";
+              callerCountryEl.textContent = formatCallerLocation(callerCountry, callerCity);
+              callerCountryEl.dataset.city = callerCity;
               callerCountryEl.style.filter = "none";
             }
 
@@ -1501,12 +1524,18 @@ export function handleServerMessage(msg) {
               src_id: msg.src_id,
               src_callsign: msg.src_callsign,
               src_name: msg.src_name,
+              city: callerCity,
+              country: callerCountry?.name_en || (callerCountry && callerCountry.name) || msg.country || "",
               dst_id: msg.dst_id,
+              dst_name: tgName,
               call_type: msg.call_type,
               active: true,
               timestamp: Date.now() / 1000,
               lastAudioTime: Date.now() / 1000
             };
+            if (typeof window.saveStoredLastRx === "function") {
+              window.saveStoredLastRx(targetHid, slot, targetCard._lastRx[slot]);
+            }
 
           }
           if (rxTag) rxTag.classList.add("active");
@@ -1587,6 +1616,7 @@ export function handleServerMessage(msg) {
             if (msg.src_name) c.src_name = msg.src_name;
             if (msg.talker_alias) c.talker_alias = msg.talker_alias;
             if (msg.city) c.city = msg.city;
+            if (msg.country) c.country = msg.country;
             c.caller_display = msg.caller_display;
             updated = true;
           }
@@ -1643,6 +1673,7 @@ export function handleServerMessage(msg) {
               callerCallEl.title = window.t ? window.t("vfo.set_caller_tx_title", { id: msg.src_id }) : `Задать ID ${msg.src_id} для передачи (Private Call)`;
             }
           }
+          const city = msg.city || "";
           if (callerIdEl && msg.src_id) {
             callerIdEl.innerHTML = `(<span class="dmr-id-text">${msg.src_id}</span>)`;
             callerIdEl.style.filter = "none";
@@ -1650,16 +1681,35 @@ export function handleServerMessage(msg) {
             if (msg.src_callsign) callerIdEl.dataset.callsign = msg.src_callsign;
             if (msg.src_name) callerIdEl.dataset.name = msg.src_name;
             if (country?.name_en) callerIdEl.dataset.country = country.name_en;
+            if (city) callerIdEl.dataset.city = city;
             callerIdEl.title = window.t ? window.t("vfo.set_caller_tx_title", { id: msg.src_id }) : `Задать ID ${msg.src_id} для передачи (Private Call)`;
           }
           if (callerCountryEl) {
-            callerCountryEl.textContent = country?.name_en || "";
+            callerCountryEl.textContent = formatCallerLocation(country, city);
+            callerCountryEl.dataset.city = city;
             callerCountryEl.style.filter = "none";
           }
         }
         if (targetCard._lastRx && targetCard._lastRx[slot]) {
           if (msg.src_callsign) targetCard._lastRx[slot].src_callsign = msg.src_callsign;
           if (msg.src_name) targetCard._lastRx[slot].src_name = msg.src_name;
+          if (city) targetCard._lastRx[slot].city = city;
+          if (country?.name_en || (country && country.name)) targetCard._lastRx[slot].country = country?.name_en || country?.name;
+          if (typeof window.saveStoredLastRx === "function") {
+            window.saveStoredLastRx(targetHid, slot, targetCard._lastRx[slot]);
+          }
+        }
+        if (msg.src_id) {
+          if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
+          window.USER_CALLSIGNS[msg.src_id] = {
+            callsign: msg.src_callsign || "",
+            name: msg.src_name || "",
+            country: country?.name_en || (country && country.name) || msg.country || "",
+            city: city
+          };
+          try {
+            localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS));
+          } catch (_) {}
         }
       }
     } else if (msg.type === "slot_change") {
@@ -1759,6 +1809,18 @@ export function handleServerMessage(msg) {
           }
         } else {
           loadHotspots();
+        }
+      }
+    } else if (msg.type === "hotspots_reordered") {
+      if (Array.isArray(msg.hotspots) && msg.hotspots.length > 0) {
+        window.currentHotspots = msg.hotspots;
+        if (typeof renderRadiosGrid === "function") renderRadiosGrid();
+        if (typeof renderHotspotSelect === "function") renderHotspotSelect();
+        if (typeof renderHotspotsList === "function") renderHotspotsList();
+        if (typeof window.renderHotspotOrderList === "function") window.renderHotspotOrderList();
+        if (typeof populateEditHotspotFormFields === "function") {
+          const curHs = window.currentHotspots.find(h => h.id === window.activeHotspotId) || window.currentHotspots[0];
+          populateEditHotspotFormFields(curHs);
         }
       } else {
         loadHotspots();

@@ -1513,6 +1513,29 @@ async def create_hotspot(cfg: HotspotConfig, request: Request):
         save_app_settings(user_sett)
     return {"status": "ok", "hotspot": rt.to_dict()}
 
+class HotspotsReorderRequest(BaseModel):
+    order: List[str]
+
+@app.post("/api/hotspots/reorder")
+async def reorder_hotspots_api(body: HotspotsReorderRequest, request: Request):
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    success = hotspot_manager.reorder_hotspots(body.order, user_id=uid)
+    if not success:
+        raise HTTPException(status_code=400, detail="Ошибка изменения порядка хотспотов")
+    user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    await save_user_settings(uid, user_sett.model_dump())
+    if uid == 1:
+        save_app_settings(user_sett)
+    rts = hotspot_manager.get_user_runtimes(uid)
+    return {
+        "status": "ok",
+        "active_hotspot_id": getattr(user_sett, "active_hotspot_id", "default"),
+        "hotspots": [rt.to_dict() for rt in rts.values()]
+    }
+
 @app.put("/api/hotspots/{hotspot_id}")
 async def update_hotspot(hotspot_id: str, cfg: HotspotConfig, request: Request, reconnect: bool = False):
     user = _get_user_from_request(request)
@@ -4995,6 +5018,28 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     hid = data.get("hotspot_id")
                     if hid:
                         hotspot_manager.set_active_hotspot(hid, user_id=ws_user_id)
+
+                    active_hs = hotspot_manager.get_active_runtime(ws_user_id)
+                    if not active_hs:
+                        logger.warning(f"[PTT] Denied for user {ws_login}: active hotspot not found")
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Передача заблокирована: хотспот не найден",
+                            "code": "HOTSPOT_NOT_FOUND"
+                        }))
+                        continue
+
+                    if getattr(active_hs, "status", None) != BMState.ONLINE:
+                        hs_id = active_hs.config.id if active_hs.config else "default"
+                        st_val = getattr(active_hs.status, "value", str(getattr(active_hs, "status", "UNKNOWN")))
+                        logger.warning(f"[PTT] Denied for user {ws_login}: Hotspot {hs_id} is not connected to BM (status={st_val})")
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Передача заблокирована: нет соединения с BrandMeister (BM:OFFLINE)",
+                            "code": "BM_OFFLINE"
+                        }))
+                        continue
+
                     slot = int(data.get("slot", u_radio_state.tx_slot))
                     tg = int(data.get("tg", u_radio_state.active_tg))
                     u_radio_state.is_transmitting = True
@@ -5003,7 +5048,6 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     u_radio_state.tx_slot = slot
                     u_radio_state.active_tg = tg
 
-                    active_hs = hotspot_manager.get_active_runtime(ws_user_id)
                     callsign = active_hs.config.callsign if active_hs else "N0CALL"
                     dmr_id = active_hs.config.dmr_id if active_hs else 0
 

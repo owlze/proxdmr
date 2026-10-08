@@ -105,6 +105,7 @@ export function getClientSettingsSnapshot() {
           !k.startsWith("proxdmr_tg_names_") &&
           !k.startsWith("proxdmr_user_callsigns_") &&
           !k.startsWith("proxdmr_collapsed_") &&
+          !k.startsWith("proxdmr_gw_disconnected_") &&
           k !== "proxdmr_log_visible" &&
           k !== "proxdmr_log_hotspot") {
         storageDump[k] = localStorage.getItem(k);
@@ -155,6 +156,7 @@ export function applyServerClientSettings(cs) {
       for (const [k, v] of Object.entries(cs.storage_dump)) {
         if (k && k.startsWith("proxdmr_") && v !== null && v !== undefined &&
             !k.startsWith("proxdmr_collapsed_") &&
+            !k.startsWith("proxdmr_gw_disconnected_") &&
             k !== "proxdmr_log_visible" &&
             k !== "proxdmr_log_hotspot") {
           localStorage.setItem(k, String(v));

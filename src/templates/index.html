@@ -30,7 +30,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.252">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.270">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -639,15 +639,11 @@
                     </div>
                   </div>
 
-                  <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) on left, AGC on right -->
+                  <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) -->
                   <div class="status-toggles-group">
                     <div id="tsAudioModeToggleBtn" class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
-                      <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl🔊</span>
+                      <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl</span>
                     </div>
-                    <label class="toggle-control toggle-agc" title="Автоматическая регулировка усиления (АРУ) по НЧ с окном усреднения 1.5–2 сек" data-i18n-title="toggles.agc_title">
-                      <input type="checkbox" id="agcToggle" class="agc-toggle" checked>
-                      <span class="toggle-text">AGC</span>
-                    </label>
                   </div>
                 </div>
 
@@ -1288,15 +1284,11 @@
                   </div>
                 </div>
 
-                <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) on left, AGC on right -->
+                <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) -->
                 <div class="status-toggles-group">
                   <div class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
-                    <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl🔊</span>
+                    <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl</span>
                   </div>
-                  <label class="toggle-control toggle-agc" title="Автоматическая регулировка усиления (АРУ) по НЧ с окном усреднения 1.5–2 сек" data-i18n-title="toggles.agc_title">
-                    <input type="checkbox" class="agc-toggle" checked>
-                    <span class="toggle-text">AGC</span>
-                  </label>
                 </div>
               </div>
 
@@ -1469,7 +1461,6 @@
           </button>
         </div>
       </div>
-    </div>
   </template>
 
   <!-- Settings & Hotspots Modal -->
@@ -1702,10 +1693,15 @@
                 Connect
               </button>
             </div>
-            <div style="flex: 1; min-width: 160px;">
-              <select id="editHsSelect" class="form-input" style="width: 100%; box-sizing: border-box; font-size: 0.85rem; padding: 6px 8px; cursor: pointer; font-weight: 600;">
+            <div style="flex: 1; min-width: 220px; display: flex; align-items: center; gap: 6px;">
+              <select id="editHsSelect" class="form-input" style="flex: 1; min-width: 130px; box-sizing: border-box; font-size: 0.85rem; padding: 6px 8px; cursor: pointer; font-weight: 600;">
                 <!-- Populated dynamically -->
               </select>
+              <div class="hs-order-quick-btns" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                <button type="button" id="btnMoveHsUp" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 6px;" title="Переместить выбранный хотспот выше" data-i18n-title="hotspots.move_up_title">▲</button>
+                <button type="button" id="btnMoveHsDown" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 6px;" title="Переместить выбранный хотспот ниже" data-i18n-title="hotspots.move_down_title">▼</button>
+                <button type="button" id="btnOpenHsOrderModal" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 11px; cursor: pointer; border-radius: 6px; white-space: nowrap;" title="Менеджер последовательности хотспотов" data-i18n-title="hotspots.order_manager_title">⇅ Порядок</button>
+              </div>
             </div>
           </div>
         </div>
@@ -2456,11 +2452,32 @@
           </div>
         </form>
       </div>
-
-
-
-         </div>
+    </div>
   </div>
+</div>
+
+  <!-- Hotspots Sequence / Order Manager Modal -->
+  <div id="hotspotOrderModal" class="modal" style="display: none; z-index: 10050;">
+    <div class="modal-content hs-order-modal-content" style="max-width: 520px; width: 92%;">
+      <div class="modal-header">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <span>⇅</span>
+          <span data-i18n="hotspots.order_modal_title">Последовательность хотспотов</span>
+        </div>
+        <button type="button" id="closeHsOrderModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 14px 16px;">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0; margin-bottom: 12px;" data-i18n="hotspots.order_modal_hint">
+          Используйте стрелки ▲ и ▼ для изменения порядка хотспотов в меню и на главном экране:
+        </p>
+        <div id="hsOrderList" class="hs-order-list" style="display: flex; flex-direction: column; gap: 8px;">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px;">
+        <button type="button" id="btnDoneHsOrder" class="btn-primary" style="padding: 6px 18px;" data-i18n="buttons.done">Готово</button>
+      </div>
+    </div>
   </div>
 
   <!-- BM Static TalkGroups Manager Modal -->
@@ -3640,7 +3657,7 @@
         <!-- 1. Pre-amplification (Pre-Gain) -->
         <div class="audio-section">
           <div class="audio-section-header">
-            <span class="audio-section-title" data-i18n="audio.sec_preamp">1. Предварительное усиление (Pre-Gain)</span>
+            <span class="audio-section-title" data-i18n="audio.sec_preamp">1. Общее усиление по выходу НЧ</span>
             <span id="optPreGainVal" class="audio-val-badge">0 dB</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
@@ -3657,7 +3674,13 @@
         <div class="audio-section" style="margin-top: 14px;">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.sec_agc">2. Автоматическая регулировка усиления (АРУ / AGC)</span>
-            <span id="badgeAgcProfile" class="audio-val-badge" data-i18n="audio.agc_standard">Стандартная (±12 dB)</span>
+            <div class="audio-header-actions" style="display: flex; align-items: center; gap: 8px;">
+              <label class="toggle-control toggle-agc" title="Автоматическая регулировка усиления (АРУ) по НЧ с окном усреднения 1.5–2 сек" data-i18n-title="toggles.agc_title">
+                <input type="checkbox" id="agcToggle" class="agc-toggle" checked>
+                <span class="toggle-text">AGC</span>
+              </label>
+              <span id="badgeAgcProfile" class="audio-val-badge" data-i18n="audio.agc_standard">Стандартная (±12 dB)</span>
+            </div>
           </div>
           <div class="agc-profiles-bar agc-profiles-grid" style="margin-top: 10px;">
             <button type="button" class="btn-agc-profile" data-profile="soft" data-i18n="audio.agc_soft">Мягкая (±8 dB)</button>
@@ -4269,7 +4292,7 @@
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.193"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.255"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.271"></script>
 </body>
 </html>
 

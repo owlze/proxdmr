@@ -9,7 +9,8 @@ import {
   updateFlagElement,
   getCleanTgDesc,
   adjustPttDescFontSize,
-  renderTgTextHtml
+  renderTgTextHtml,
+  formatCallerLocation
 } from "../core/formatters.js";
 
 function getActiveHotspotId() {
@@ -55,6 +56,62 @@ function updateActiveTgState(slot, tg) {
     if (slot === 1) window.tgTs1 = tg;
     else window.tgTs2 = tg;
   }
+}
+
+/**
+ * Load last correspondent information for a hotspot and slot from localStorage
+ * @param {string} [hid]
+ * @param {number} slot
+ * @returns {object|null}
+ */
+export function getStoredLastRx(hid, slot) {
+  if (!slot) return null;
+  try {
+    const target = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+      ? window.resolveHotspotId(hid)
+      : (hid || "default");
+    let raw = localStorage.getItem(`proxdmr_last_rx_${target}_ts${slot}`);
+    if (!raw && target !== "default") {
+      raw = localStorage.getItem(`proxdmr_last_rx_default_ts${slot}`);
+    }
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return null;
+}
+
+/**
+ * Persist last correspondent information for a hotspot and slot to localStorage
+ * @param {string} [hid]
+ * @param {number} slot
+ * @param {object} data
+ */
+export function saveStoredLastRx(hid, slot, data) {
+  if (!slot || !data || (!data.src_id && !data.src_callsign)) return;
+  try {
+    const target = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+      ? window.resolveHotspotId(hid)
+      : (hid || "default");
+    const item = {
+      src_id: data.src_id,
+      src_callsign: data.src_callsign || "",
+      src_name: data.src_name || "",
+      city: data.city || "",
+      country: data.country || "",
+      dst_id: data.dst_id,
+      dst_name: data.dst_name || "",
+      call_type: data.call_type || "GROUP",
+      timestamp: data.timestamp || (Date.now() / 1000)
+    };
+    const key = `proxdmr_last_rx_${target}_ts${slot}`;
+    const serialized = JSON.stringify(item);
+    if (localStorage.getItem(key) !== serialized) {
+      localStorage.setItem(key, serialized);
+      const firstHs = (typeof window !== "undefined" && window.currentHotspots && window.currentHotspots[0]) ? window.currentHotspots[0].id : "default";
+      if (target === firstHs && target !== "default") {
+        localStorage.setItem(`proxdmr_last_rx_default_ts${slot}`, serialized);
+      }
+    }
+  } catch (_) {}
 }
 
 /**
@@ -368,7 +425,10 @@ export function updateCardModeBadge(card) {
 export function updateCardTgDisplay(card) {
   if (!card) return;
   const activeHid = getActiveHotspotId();
-  const cid = card.dataset.hotspotId || activeHid;
+  const rawCid = card.dataset.hotspotId || activeHid;
+  const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(rawCid)
+    : (rawCid || "default");
   const tg1 = getHotspotTg(cid, 1);
   const tg2 = getHotspotTg(cid, 2);
   const now = Date.now() / 1000;
@@ -391,11 +451,33 @@ export function updateCardTgDisplay(card) {
       : null;
     const isAudioActive = Boolean(vuSt && vuSt.mode === "RX" && (perfNow - vuSt.lastRxTime < 1800));
 
-    // Authoritative slot call: card._lastRx[s] first, or most recent from heardCalls (RX only)
-    const curHeardCalls = (window.__proxdmr && typeof window.__proxdmr.getHeardCalls === "function")
-      ? window.__proxdmr.getHeardCalls()
-      : ((typeof window !== "undefined" && window.heardCalls) || []);
-    let rxData = (card._lastRx && card._lastRx[s]) || curHeardCalls.find(c => !c.is_tx && (c.hotspot_id || "default") === cid && c.slot === s);
+    // Authoritative slot call: card._lastRx[s] first, or persistent storage, or most recent from heardCalls (RX only)
+    let rxData = card._lastRx && card._lastRx[s];
+    if (!rxData) {
+      const stored = getStoredLastRx(cid, s);
+      if (stored) {
+        rxData = { ...stored, active: false };
+        if (!card._lastRx) card._lastRx = {};
+        card._lastRx[s] = rxData;
+      }
+    }
+    if (!rxData) {
+      const curHeardCalls = (window.__proxdmr && typeof window.__proxdmr.getHeardCalls === "function")
+        ? window.__proxdmr.getHeardCalls()
+        : ((typeof window !== "undefined" && window.heardCalls) || []);
+      const matched = curHeardCalls.find(c => {
+        if (c.is_tx || c.slot !== s) return false;
+        const cHid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+          ? window.resolveHotspotId(c.hotspot_id)
+          : (c.hotspot_id || "default");
+        return cHid === cid || (!c.hotspot_id && cid === "default");
+      });
+      if (matched) {
+        rxData = { ...matched, active: Boolean(matched.active) };
+        if (!card._lastRx) card._lastRx = {};
+        card._lastRx[s] = rxData;
+      }
+    }
 
     const isRxActive = isAudioActive || Boolean(rxData && rxData.active);
 
@@ -411,7 +493,7 @@ export function updateCardTgDisplay(card) {
       }
     }
 
-    // Check if call is active OR within hold time (40s after audio/call end)
+    // Check if call is active OR within hold time (30s after audio/call end)
     const lastActivity = Math.max(
       (card._lastRx && card._lastRx[s]?.lastAudioTime) || 0,
       (card._lastRx && card._lastRx[s]?.lastSeenTime) || 0,
@@ -420,15 +502,16 @@ export function updateCardTgDisplay(card) {
       (rxData && rxData.timestamp) || 0
     );
     const elapsedSinceActivity = lastActivity ? (now - lastActivity) : 999;
-    const isWithinHoldTime = isRxActive || (elapsedSinceActivity <= 40.0);
+    const isWithinHoldTime = isRxActive || (elapsedSinceActivity <= 30.0);
 
-    if (rxData && isWithinHoldTime) {
+    if (rxData) {
       // Keep card._lastRx fresh
       if (!card._lastRx) card._lastRx = {};
       if (!card._lastRx[s]) card._lastRx[s] = { ...rxData };
       if (isRxActive) {
         card._lastRx[s].lastSeenTime = now;
       }
+      saveStoredLastRx(cid, s, card._lastRx[s]);
 
       // Top row: caller info - ALWAYS CLEAN & NEVER GREY DURING RECENT/ACTIVE RX
       const cCall = rxData.src_callsign || (rxData.src_id ? `ID: ${rxData.src_id}` : "———");
@@ -442,6 +525,7 @@ export function updateCardTgDisplay(card) {
           callerCallEl.textContent = `${cCall} ${cName}`.trim();
         }
         callerCallEl.style.filter = "none";
+        callerCallEl.classList.add("caller-active");
         if (rxData.src_id) {
           callerCallEl.dataset.radioId = rxData.src_id;
           callerCallEl.dataset.callsign = rxData.src_callsign || "";
@@ -463,11 +547,14 @@ export function updateCardTgDisplay(card) {
       if (callerIdEl) {
         callerIdEl.innerHTML = rxData.src_id ? `(<span class="dmr-id-text">${rxData.src_id}</span>)` : "";
         callerIdEl.style.filter = "none";
+        const userObj = getUserCallsigns()[rxData.src_id] || {};
+        const callerCity = rxData.city || (card._lastRx && card._lastRx[s] && card._lastRx[s].city) || userObj.city || "";
         if (rxData.src_id) {
           callerIdEl.dataset.radioId = rxData.src_id;
           callerIdEl.dataset.callsign = rxData.src_callsign || "";
           callerIdEl.dataset.name = rxData.src_name || "";
           callerIdEl.dataset.country = callerCountry?.name_en || "";
+          if (callerCity) callerIdEl.dataset.city = callerCity;
           callerIdEl.title = (typeof window !== "undefined" && window.t)
             ? window.t("vfo.set_caller_tx_title", { id: rxData.src_id })
             : `Задать ID ${rxData.src_id} для передачи (Private Call)`;
@@ -476,17 +563,20 @@ export function updateCardTgDisplay(card) {
           delete callerIdEl.dataset.callsign;
           delete callerIdEl.dataset.name;
           delete callerIdEl.dataset.country;
+          delete callerIdEl.dataset.city;
           callerIdEl.removeAttribute("title");
         }
       }
       if (callerCountryEl) {
-        callerCountryEl.textContent = callerCountry?.name_en || "";
+        const callerCity = rxData.city || (card._lastRx && card._lastRx[s] && card._lastRx[s].city) || (getUserCallsigns()[rxData.src_id]?.city) || "";
+        callerCountryEl.textContent = formatCallerLocation(callerCountry, callerCity);
+        callerCountryEl.dataset.city = callerCity;
         callerCountryEl.style.filter = "none";
       }
 
       // Bottom row: destination TG of the RECEIVED call
       const tgNamesMap = getTgNamesMap();
-      const rawTgName = tgNamesMap[rxData.dst_id] || (rxData.dst_id === 9990 ? "Parrot / Echo" : "");
+      const rawTgName = tgNamesMap[rxData.dst_id] || rxData.dst_name || (rxData.dst_id === 9990 ? "Parrot / Echo" : "");
       if (tgFlagEl) {
         updateFlagElement(tgFlagEl, getCountryInfo(rxData.dst_id), rxData.dst_id === 9990);
         tgFlagEl.style.filter = "none";
@@ -501,11 +591,20 @@ export function updateCardTgDisplay(card) {
         tgTextEl.style.filter = "none";
         tgTextEl.title = tgTitle;
       }
-    } else {
-      // Specified hold time (40s) has passed or no call: Clean reset to Standby & Default slot TG!
-      if (card._lastRx && card._lastRx[s]) {
-        delete card._lastRx[s];
+
+      // Toggle dimmed state: recent/active vs idle last correspondent
+      if (isWithinHoldTime) {
+        vfo.classList.remove("vfo-last-caller-dimmed");
+      } else {
+        vfo.classList.add("vfo-last-caller-dimmed");
+        if (vfo.classList.contains("vfo-rx-active")) {
+          vfo.classList.remove("vfo-rx-active");
+          updateCardModeBadge(card);
+        }
       }
+    } else {
+      // No call received yet on this slot: Clean reset to Standby & Default slot TG!
+      vfo.classList.remove("vfo-last-caller-dimmed");
       if (vfo.classList.contains("vfo-rx-active")) {
         vfo.classList.remove("vfo-rx-active");
         updateCardModeBadge(card);
@@ -536,10 +635,12 @@ export function updateCardTgDisplay(card) {
         delete callerIdEl.dataset.callsign;
         delete callerIdEl.dataset.name;
         delete callerIdEl.dataset.country;
+        delete callerIdEl.dataset.city;
         callerIdEl.removeAttribute("title");
       }
       if (callerCountryEl) {
         callerCountryEl.textContent = "";
+        delete callerCountryEl.dataset.city;
         callerCountryEl.style.filter = "none";
       }
       if (tgFlagEl) {
@@ -706,12 +807,14 @@ export function selectHotspotTargetId(card, cid, slot, targetId, type, triggerEl
     const callsign = (idEl?.dataset.callsign || callEl?.dataset.callsign || "").trim();
     const name = (idEl?.dataset.name || callEl?.dataset.name || "").trim();
     const country = (idEl?.dataset.country || countryEl?.textContent || "").trim();
+    const city = (idEl?.dataset.city || countryEl?.dataset.city || "").trim();
 
     const users = getUserCallsigns();
     users[tid] = {
       callsign: callsign || (callEl ? callEl.textContent.trim() : `ID ${tid}`),
       name: name,
-      country: country
+      country: country,
+      city: city
     };
     try {
       localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(users));
@@ -771,6 +874,8 @@ if (typeof window !== "undefined") {
   window.setHotspotSlot = setHotspotSlot;
   window.setTg = setTg;
   window.selectHotspotTargetId = selectHotspotTargetId;
+  window.getStoredLastRx = getStoredLastRx;
+  window.saveStoredLastRx = saveStoredLastRx;
 
   window.__proxdmr = window.__proxdmr || {};
   Object.assign(window.__proxdmr, {
@@ -789,6 +894,8 @@ if (typeof window !== "undefined") {
     setHotspotTg,
     setHotspotSlot,
     setTg,
-    selectHotspotTargetId
+    selectHotspotTargetId,
+    getStoredLastRx,
+    saveStoredLastRx
   });
 }

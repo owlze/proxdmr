@@ -229,10 +229,11 @@ export function switchSearchTgIdTab(tab) {
 
 export function openSearchTgIdModal(slot, targetHid = null, initialTab = "tg") {
     ensureElements();
-    currentModalHotspotId = targetHid || window.activeHotspotId;
+    currentModalHotspotId = targetHid || (typeof window !== "undefined" ? window.activeHotspotId : "default");
     const s = slot === 1 ? 1 : 2;
     currentModalSlot = s;
-    const hs = window.currentHotspots.find(h => h.id === currentModalHotspotId);
+    const curHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+    const hs = curHotspots.find(h => h.id === currentModalHotspotId) || curHotspots[0];
     const hsName = hs ? hs.name : "";
     const txSlotStr = window.t ? window.t("tgtx.active_slot", { slot: s }) : `TX: TS${s}`;
     const slotText = `${hsName ? hsName + ' | ' : ''}${txSlotStr}`;
@@ -256,7 +257,12 @@ export function openSearchTgIdModal(slot, targetHid = null, initialTab = "tg") {
       if (callIdSearchResultsList) callIdSearchResultsList.innerHTML = "";
     }
 
+    if (typeof window.closePrimaryModals === "function") {
+      window.closePrimaryModals("searchTgIdModal");
+    }
+
     if (searchTgIdModal) {
+      searchTgIdModal.style.display = "flex";
       searchTgIdModal.classList.add("active");
       pushNavState("modal", "searchTgIdModal");
     }
@@ -265,6 +271,7 @@ export function openSearchTgIdModal(slot, targetHid = null, initialTab = "tg") {
 export function closeSearchTgIdModal() {
     if (searchTgIdModal && searchTgIdModal.classList.contains("active")) {
       searchTgIdModal.classList.remove("active");
+      searchTgIdModal.style.display = "";
       notifyNavClosed();
     }
   }
@@ -523,6 +530,43 @@ export function initSearchManager() {
   if (searchTgIdModal) {
     searchTgIdModal.addEventListener("click", (e) => {
       if (e.target === searchTgIdModal) closeSearchTgIdModal();
+    });
+  }
+
+  // Delegated click handler for 3-segment buttons (TG -- Manage -- ID) across all cards
+  if (typeof document !== "undefined") {
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn-srch-tg-id");
+      if (!btn) return;
+      e.stopPropagation();
+
+      const card = btn.closest(".radio-container") || document.getElementById("radioContainer");
+      const cid = (card && card.dataset.hotspotId) || (typeof window !== "undefined" && window.activeHotspotId) || "default";
+      if (typeof window !== "undefined" && typeof window.switchActiveHotspot === "function") {
+        window.switchActiveHotspot(cid);
+      }
+      const slot = (card && card._activeSlot) || (typeof window !== "undefined" && typeof window.getHotspotSlot === "function" ? window.getHotspotSlot(cid) : 2);
+
+      const actionTarget = e.target.closest("[data-action]");
+      let action = actionTarget ? actionTarget.dataset.action : null;
+
+      if (!action) {
+        const rect = btn.getBoundingClientRect();
+        const ratio = (e.clientX - rect.left) / (rect.width || 1);
+        if (ratio < 0.33) action = "tg";
+        else if (ratio < 0.67) action = "manage";
+        else action = "id";
+      }
+
+      if (action === "manage") {
+        if (typeof window.openBmTgStaticModal === "function") {
+          window.openBmTgStaticModal(cid);
+        }
+      } else if (action === "id") {
+        openSearchTgIdModal(slot, cid, "id");
+      } else {
+        openSearchTgIdModal(slot, cid, "tg");
+      }
     });
   }
 

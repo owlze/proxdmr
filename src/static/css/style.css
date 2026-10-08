@@ -1193,21 +1193,29 @@ select option:focus {
   font-size: 0.80rem;
   font-weight: 700;
   letter-spacing: -0.2px;
-  color: #3fb950;
+  color: #22c55e;
   line-height: 1.1;
   transition: color 0.2s ease;
 }
 
 .bm-banner-ping .ping-val-row.ping-good {
-  color: #3fb950;
+  color: #22c55e;
 }
 
 .bm-banner-ping .ping-val-row.ping-warn {
-  color: #d29922;
+  color: #eab308;
 }
 
 .bm-banner-ping .ping-val-row.ping-poor {
-  color: #f85149;
+  color: #ef4444;
+}
+
+.bm-banner-ping .ping-val-row.ping-bad {
+  color: #ff1744;
+}
+
+.bm-banner-ping .ping-val-row.ping-offline {
+  color: #8b949e;
 }
 
 .bm-banner-ping .loss-val-row {
@@ -1475,6 +1483,20 @@ select option:focus {
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.7) !important;
 }
 
+.card-bm-disconnected .ptt-button {
+  cursor: not-allowed !important;
+  opacity: 0.65;
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.card-bm-disconnected .ptt-button:hover {
+  border-color: rgba(239, 68, 68, 0.5) !important;
+}
+
+.card-bm-disconnected .ptt-button:active {
+  transform: none !important;
+}
+
 .card-bm-disconnected .radio-screen::before,
 .radio-container.card-bm-disconnected .radio-screen::before {
   background: linear-gradient(90deg, transparent, rgba(140, 150, 160, 0.4), transparent) !important;
@@ -1695,28 +1717,31 @@ select option:focus {
   box-sizing: border-box;
 }
 
-/* Solo: Cyan / sky blue highlight */
+/* Solo: Inverted for dark theme (Sky blue solid fill, dark text) */
 .ts-audio-mode-badge.ts-mode-solo {
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.5);
-  box-shadow: 0 0 5px rgba(56, 189, 248, 0.25);
+  background: #38bdf8;
+  color: #0d1117;
+  border-color: #38bdf8;
+  font-weight: 800;
+  box-shadow: 0 1px 4px rgba(56, 189, 248, 0.4);
 }
 
-/* Doubl: Violet / purple highlight */
+/* Doubl: Inverted for dark theme (Yellow solid fill, dark text) */
 .ts-audio-mode-badge.ts-mode-doubl {
-  background: rgba(168, 85, 247, 0.12);
-  color: #c084fc;
-  border-color: rgba(168, 85, 247, 0.5);
-  box-shadow: 0 0 5px rgba(168, 85, 247, 0.25);
+  background: #ffe154;
+  color: #0d1117;
+  border-color: #ffe154;
+  font-weight: 800;
+  box-shadow: 0 1px 4px rgba(255, 225, 84, 0.4);
 }
 
-/* Auto: Green / emerald highlight */
+/* Auto: Inverted for dark theme (Green solid fill, dark text) */
 .ts-audio-mode-badge.ts-mode-auto {
-  background: rgba(46, 204, 113, 0.12);
-  color: #2ecc71;
-  border-color: rgba(46, 204, 113, 0.5);
-  box-shadow: 0 0 5px rgba(46, 204, 113, 0.25);
+  background: #2ecc71;
+  color: #0d1117;
+  border-color: #2ecc71;
+  font-weight: 800;
+  box-shadow: 0 1px 4px rgba(46, 204, 113, 0.4);
 }
 
 .status-badge-item.ts-audio-mode-btn:hover .ts-audio-mode-badge {
@@ -3144,7 +3169,7 @@ select option:focus {
 }
 
 .modal.active {
-  display: flex;
+  display: flex !important;
 }
 
 #contactEditModal.active {
@@ -4563,7 +4588,7 @@ textarea::placeholder {
   }
 
   .vfo-tg-row {
-    padding-left: 32px; /* Aligned with caller flag */
+    padding-left: 0;
     height: 22px;
     line-height: 22px;
   }
@@ -4665,7 +4690,7 @@ textarea::placeholder {
     align-items: center;
     gap: 8px;
     height: 20px;
-    padding-left: 64px; /* Indent past the 32px offset + 24px flag + 8px gap */
+    padding-left: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4916,6 +4941,74 @@ textarea::placeholder {
   .vfo-row.vfo-tx-active .vfo-flag {
     filter: none !important;
     opacity: 1 !important;
+  }
+
+  /* ==========================================================================
+     Last Correspondent Idle Dimmed State (After ~30s timeout)
+     ========================================================================== */
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-call,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-call {
+    color: #6c7c74 !important;
+    text-shadow: none !important;
+    opacity: 0.65 !important;
+    transition: color 0.3s ease, opacity 0.3s ease;
+  }
+
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-id,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-id,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-id .dmr-id-text,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-id .dmr-id-text {
+    color: #5c6c64 !important;
+    text-shadow: none !important;
+    opacity: 0.65 !important;
+    border-color: rgba(92, 108, 100, 0.3) !important;
+    background: none !important;
+    transition: color 0.3s ease, opacity 0.3s ease;
+  }
+
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-country,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-country {
+    color: #5c6c64 !important;
+    text-shadow: none !important;
+    opacity: 0.65 !important;
+    transition: color 0.3s ease, opacity 0.3s ease;
+  }
+
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-text,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-text,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-desc,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-desc {
+    color: #52625a !important;
+    text-shadow: none !important;
+    opacity: 0.65 !important;
+    transition: color 0.3s ease, opacity 0.3s ease;
+  }
+
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-pill,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-pill {
+    color: #5c6c64 !important;
+    border-color: rgba(92, 108, 100, 0.35) !important;
+    background: rgba(92, 108, 100, 0.12) !important;
+    text-shadow: none !important;
+    opacity: 0.65 !important;
+    transition: color 0.3s ease, opacity 0.3s ease;
+  }
+
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-flag,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-flag,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-flag {
+    filter: grayscale(1) opacity(0.35) !important;
+    transition: filter 0.3s ease, opacity 0.3s ease;
+  }
+
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-id:hover,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-id:hover,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-call[data-radio-id]:hover,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-call[data-radio-id]:hover,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-pill:hover,
+  .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-pill:hover {
+    opacity: 0.9 !important;
+    color: #9cb0a6 !important;
   }
   
   .vfo-vu-bar {
@@ -12618,6 +12711,37 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   text-align: center;
 }
 
+.audio-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-section-header .toggle-control {
+  margin: 0;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text-primary, #e6edf3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  height: 20px;
+  box-sizing: border-box;
+}
+
+.audio-section-header .toggle-control:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(88, 166, 255, 0.4);
+}
+
+.audio-section-header .toggle-control input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #58a6ff;
+  transform: scale(1.05);
+  margin: 0;
+}
+
 .badge-agc-active {
   background: rgba(0, 229, 255, 0.2);
   color: #00e5ff;
@@ -13901,11 +14025,11 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     font-weight: 700 !important;
   }
 
-  /* Subrow (ID + Country): middle line - shifted 20px left and 12px up */
+  /* Subrow (ID + Country): middle line - shifted flush left and 12px up */
   .vfo-caller-subrow {
     position: relative !important;
     top: -12px !important;
-    padding-left: 44px !important;
+    padding-left: 0 !important;
     height: 24px !important;
     line-height: 24px !important;
     display: flex !important;
@@ -13922,11 +14046,11 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     font-weight: 600 !important;
   }
 
-  /* TalkGroup row: bottom line - shifted 20px left and 12px up */
+  /* TalkGroup row: bottom line - shifted flush left and 12px up */
   .vfo-tg-row {
     position: relative !important;
     top: -12px !important;
-    padding-left: 14px !important;
+    padding-left: 0 !important;
     height: 26px !important;
     line-height: 26px !important;
     display: flex !important;
@@ -18423,6 +18547,39 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   text-shadow: none !important;
 }
 
+/* Last Correspondent Idle Dimmed State in Light Mode */
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-call,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-call,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-id,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-id,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-id .dmr-id-text,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-id .dmr-id-text,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-caller-country,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-country,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-text,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-text,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-desc,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-desc {
+  color: #88938e !important;
+  text-shadow: none !important;
+  opacity: 0.65 !important;
+}
+
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-tg-pill,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-pill {
+  color: #88938e !important;
+  border-color: rgba(136, 147, 142, 0.4) !important;
+  background: rgba(136, 147, 142, 0.12) !important;
+  text-shadow: none !important;
+  opacity: 0.65 !important;
+}
+
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .vfo-flag,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-caller-flag,
+[data-theme="light"] .vfo-row.vfo-last-caller-dimmed:not(.vfo-rx-active):not(.vfo-tx-active) .ts-tg-flag {
+  filter: grayscale(1) opacity(0.35) !important;
+}
+
 /* VU Bar in Light Mode */
 [data-theme="light"] .vfo-vu-bar {
   background-color: #e2e8f0 !important;
@@ -19027,6 +19184,33 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .theme-light .btn-srch-tg-id .srch-seg-id:hover {
   background: #fffbeb !important;
 }
+
+/* Light theme for TS1/2 Audio Mode Badge (preserve original semi-transparent look) */
+[data-theme="light"] .ts-audio-mode-badge.ts-mode-solo,
+.theme-light .ts-audio-mode-badge.ts-mode-solo {
+  background: rgba(56, 189, 248, 0.12) !important;
+  color: #0284c7 !important;
+  border-color: rgba(56, 189, 248, 0.5) !important;
+  box-shadow: 0 0 5px rgba(56, 189, 248, 0.25) !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .ts-audio-mode-badge.ts-mode-doubl,
+.theme-light .ts-audio-mode-badge.ts-mode-doubl {
+  background: rgba(168, 85, 247, 0.12) !important;
+  color: #9333ea !important;
+  border-color: rgba(168, 85, 247, 0.5) !important;
+  box-shadow: 0 0 5px rgba(168, 85, 247, 0.25) !important;
+  font-weight: 700 !important;
+}
+[data-theme="light"] .ts-audio-mode-badge.ts-mode-auto,
+.theme-light .ts-audio-mode-badge.ts-mode-auto {
+  background: rgba(46, 204, 113, 0.12) !important;
+  color: #16a34a !important;
+  border-color: rgba(46, 204, 113, 0.5) !important;
+  box-shadow: 0 0 5px rgba(46, 204, 113, 0.25) !important;
+  font-weight: 700 !important;
+}
+
 [data-theme="light"] .ptt-side-top-row .btn-settings {
   background: #4b99fd !important;
   border-color: #3884e8 !important;
@@ -20450,6 +20634,21 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   color: #ffe066 !important;
 }
 
+#btnOpenHsOrderModal {
+  color: #0d1117 !important;
+  background: #58a6ff !important;
+  border: 1px solid #58a6ff !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease;
+}
+
+#btnOpenHsOrderModal:hover:not(:disabled) {
+  background: #79b8ff !important;
+  border-color: #79b8ff !important;
+  color: #0d1117 !important;
+  box-shadow: 0 0 10px rgba(88, 166, 255, 0.4) !important;
+}
+
 [data-theme="light"] #btnAddNewHotspot {
   color: #1a64f0 !important;
   border-color: rgba(26, 100, 240, 0.45) !important;
@@ -20472,6 +20671,19 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(255, 210, 49, 0.25) !important;
   border-color: rgba(181, 137, 0, 0.7) !important;
   color: #8c6a00 !important;
+}
+
+[data-theme="light"] #btnOpenHsOrderModal {
+  color: #58a6ff !important;
+  border: 1px solid rgba(88, 166, 255, 0.4) !important;
+  background: rgba(88, 166, 255, 0.1) !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] #btnOpenHsOrderModal:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.2) !important;
+  border-color: rgba(88, 166, 255, 0.65) !important;
+  color: #0969da !important;
 }
 
 /* 3. Settings Modal — Hotspot Management Cards & Actions */

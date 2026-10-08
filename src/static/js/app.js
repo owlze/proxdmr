@@ -1,7 +1,7 @@
 import { safeEscapeHtml } from './modules/core/formatters.js';
 import { RecordingsManager } from './modules/audio/player.js';
 import './modules/ui/theme.js';
-import './modules/dmr/bm-monitor.js';
+import './modules/dmr/bm-monitor.js?v=2.9.267';
 import './modules/dmr/log-selection.js';
 import {
   handleCallTranscription,
@@ -31,11 +31,11 @@ import {
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js';
 import { initAndroidBridge } from './modules/core/android.js';
-import { setupDsdfmeModal } from './modules/settings/vocoder.js';
+import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.261';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
 import { initLanguageManager } from './modules/settings/language.js';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
-import { initGeneralSettings } from './modules/settings/general.js';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.261';
 import { initOrientationLock } from './modules/ui/orientation.js';
 import {
   initQuickAssign,
@@ -50,7 +50,7 @@ import {
   loadCallDbStats,
   loadTgDbStats,
   closeCallIdModal
-} from './modules/dmr/search.js';
+} from './modules/dmr/search.js?v=2.9.261';
 import {
   initContactsManager,
   openContactEditModal,
@@ -58,7 +58,7 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js';
+} from './modules/dmr/contacts.js?v=2.9.261';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
@@ -75,22 +75,24 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js';
+} from './modules/dmr/hotspots.js?v=2.9.267';
 import {
   initBmTgStaticManager
-} from './modules/dmr/bm-static-manager.js';
+} from './modules/dmr/bm-static-manager.js?v=2.9.261';
 import {
   initAudioRouting
-} from './modules/audio/routing.js';
+} from './modules/audio/routing.js?v=2.9.269';
 import {
   initAudioDsp
-} from './modules/audio/dsp.js';
+} from './modules/audio/dsp.js?v=2.9.262';
 import {
   initPttEngine,
-  updatePttLockUI
-} from './modules/ptt/engine.js';
+  updatePttLockUI,
+  checkPttConnectionStatus,
+  notifyPttConnectionBlocked
+} from './modules/ptt/engine.js?v=2.9.261';
 import { initAboutModal } from './modules/ui/about.js';
-import { initNavigation, pushNavState } from './modules/ui/navigation.js';
+import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.261';
 import {
   initFullscreen,
   toggleFullscreen,
@@ -119,8 +121,10 @@ import {
   setHotspotTg,
   setHotspotSlot,
   setTg,
-  selectHotspotTargetId
-} from './modules/ui/vfo-display.js';
+  selectHotspotTargetId,
+  getStoredLastRx,
+  saveStoredLastRx
+} from './modules/ui/vfo-display.js?v=2.9.271';
 import {
   loadCardPingHistory,
   saveCardPingHistory,
@@ -139,7 +143,7 @@ import {
   updatePingElement,
   calculateCardPacketLoss,
   calculateClientPacketLoss
-} from './modules/network/ping-sparklines.js';
+} from './modules/network/ping-sparklines.js?v=2.9.257';
 import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
@@ -210,7 +214,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js';
+} from './modules/network/ws.js?v=2.9.268';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application
@@ -350,10 +354,14 @@ document.addEventListener("DOMContentLoaded", () => {
   window.findNodeInTree = findNodeInTree;
   window.findParentNodeInTree = findParentNodeInTree;
   window.scheduleSyncClientSettings = scheduleSyncClientSettings;
+  window.getStoredLastRx = getStoredLastRx;
+  window.saveStoredLastRx = saveStoredLastRx;
 
   window.__proxdmr.handleServerMessage = handleServerMessage;
   window.__proxdmr.updateCardTgDisplay = updateCardTgDisplay;
   window.__proxdmr.updateCardModeBadge = updateCardModeBadge;
+  window.__proxdmr.getStoredLastRx = getStoredLastRx;
+  window.__proxdmr.saveStoredLastRx = saveStoredLastRx;
   window.__proxdmr.toggleFullscreen = toggleFullscreen;
   window.__proxdmr.isFullscreenActive = isFullscreenActive;
 

@@ -25,6 +25,7 @@ try:
     from dmr.audio_equalizer import ServerAudioEqualizer
     from dmr.tx_dsp import ServerTxDsp
     from dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
+    from dmr.tg_resolver import tg_resolver
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings, CONFIG_DIR
     from src.dmr.homebrew import BMState, DMRFrame, HomeBrewClient
@@ -37,6 +38,7 @@ except ImportError:
     from src.dmr.audio_equalizer import ServerAudioEqualizer
     from src.dmr.tx_dsp import ServerTxDsp
     from src.dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
+    from src.dmr.tg_resolver import tg_resolver
 
 CALLS_HISTORY_FILE = CONFIG_DIR / "calls_history.json"
 CALL_HISTORY_RETENTION_SEC = 86400.0  # 24 hours
@@ -156,6 +158,9 @@ class CallLogEntry:
     src_callsign: str = ""
     src_name: str = ""
     talker_alias: str = ""
+    dst_name: str = ""
+    city: str = ""
+    country: str = ""
     duration: float = 0.0
     active: bool = True
     is_tx: bool = False
@@ -184,6 +189,9 @@ class CallLogEntry:
             "talker_alias": self.talker_alias,
             "caller_display": self.format_caller(),
             "dst_id": self.dst_id,
+            "dst_name": self.dst_name,
+            "city": self.city,
+            "country": self.country,
             "call_type": self.call_type,
             "duration": round(self.duration, 1),
             "active": self.active,
@@ -1002,6 +1010,47 @@ class HotspotManager:
         self._notify_async({"type": "hotspot_created", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
         return rt
 
+    def reorder_hotspots(self, order: List[str], user_id: Optional[int] = None) -> bool:
+        uid = user_id if user_id is not None else self.active_user_id
+        settings = self.user_settings.get(uid, self.settings)
+        if not settings or not hasattr(settings, "hotspots"):
+            return False
+
+        # Rule: The first registered hotspot ALWAYS remains first (#1)
+        primary_hs = settings.hotspots[0]
+        primary_id = primary_hs.id
+
+        hs_by_id = {h.id: h for h in settings.hotspots if h.id != primary_id}
+        new_hotspots = [primary_hs]
+        for hid in order:
+            if hid != primary_id and hid in hs_by_id:
+                new_hotspots.append(hs_by_id.pop(hid))
+        for remaining in hs_by_id.values():
+            new_hotspots.append(remaining)
+        settings.hotspots = new_hotspots
+
+        if uid in self.user_runtimes:
+            old_map = self.user_runtimes[uid]
+            new_map = {}
+            for h in new_hotspots:
+                if h.id in old_map:
+                    new_map[h.id] = old_map[h.id]
+            for hid, rt in old_map.items():
+                if hid not in new_map:
+                    new_map[hid] = rt
+            self.user_runtimes[uid] = new_map
+
+        if uid == 1:
+            save_app_settings(settings)
+
+        self._notify_async({
+            "type": "hotspots_reordered",
+            "order": [h.id for h in new_hotspots],
+            "hotspots": [rt.to_dict() for rt in self.user_runtimes.get(uid, {}).values()],
+            "user_id": uid
+        }, user_id=uid)
+        return True
+
     async def set_hotspot_auto_tg_bm(self, hotspot_id: str, enabled: bool, user_id: Optional[int] = None) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         rt = self.get_runtime(uid, hotspot_id)
@@ -1347,6 +1396,7 @@ class HotspotManager:
                 active_call = active_calls.get(call_key)
                 if active_call and active_call.src_id == frame.src_id:
                     active_call.talker_alias = ta
+                cached_info = self.resolver.get_cached(frame.src_id)
                 self._notify_async({
                     "type": "caller_resolved",
                     "hotspot_id": hid,
@@ -1356,6 +1406,8 @@ class HotspotManager:
                     "src_name": slot_state.src_name,
                     "talker_alias": ta,
                     "caller_display": slot_state.format_caller(),
+                    "city": cached_info.get("city", "") if cached_info else "",
+                    "country": cached_info.get("country", "") if cached_info else "",
                     "user_id": uid,
                 }, user_id=uid)
 
@@ -1398,6 +1450,10 @@ class HotspotManager:
                     "user_id": uid,
                 }, user_id=uid)
 
+            cached_city = cached_info.get("city", "") if cached_info else ""
+            cached_country = cached_info.get("country", "") if cached_info else ""
+            dst_name = tg_resolver.get_name(frame.dst_id) if frame.dst_id else ""
+
             call_id = f"{int(time.time() * 1000)}_{frame.src_id}_{frame.slot}"
             new_call = CallLogEntry(
                 id=call_id,
@@ -1409,6 +1465,9 @@ class HotspotManager:
                 src_name=slot_state.src_name,
                 talker_alias=slot_state.talker_alias,
                 dst_id=frame.dst_id,
+                dst_name=dst_name,
+                city=cached_city,
+                country=cached_country,
                 call_type=frame.call_type,
                 active=True
             )
@@ -1425,7 +1484,10 @@ class HotspotManager:
                 "src_name": slot_state.src_name,
                 "talker_alias": slot_state.talker_alias,
                 "caller_display": slot_state.format_caller(),
+                "city": cached_city,
+                "country": cached_country,
                 "dst_id": frame.dst_id,
+                "dst_name": dst_name,
                 "call_type": frame.call_type,
                 "active": True,
                 "call_entry": new_call.to_dict(),
@@ -1503,6 +1565,8 @@ class HotspotManager:
             if active_call and active_call.src_id == src_id:
                 active_call.src_callsign = callsign
                 active_call.src_name = name
+                active_call.city = info.get("city", "")
+                active_call.country = info.get("country", "")
 
             # Notify clients that station info is now resolved
             self._notify_async({
@@ -1657,6 +1721,10 @@ class HotspotManager:
         rt = self.get_runtime(uid, hid) or self.get_active_runtime(uid)
         if not rt:
             logger.warning(f"[TX] Cannot start TX: runtime {hid} not found for user {uid}")
+            return False
+        if getattr(rt, "status", None) != BMState.ONLINE:
+            st_val = getattr(rt.status, "value", str(getattr(rt, "status", "UNKNOWN")))
+            logger.warning(f"[TX] Cannot start TX: hotspot {rt.config.id} is not connected to BM (status={st_val})")
             return False
 
         effective_hid = rt.config.id if rt else (hid or "default")

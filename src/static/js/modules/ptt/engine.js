@@ -220,6 +220,75 @@ function _isVolumeDownPttEnabled() {
   window.togglePttLock = togglePttLock;
   window.updatePttLockUI = updatePttLockUI;
   window.blinkPttLocked = blinkPttLocked;
+
+  function checkPttConnectionStatus(hid = null) {
+    const cid = _resolveHotspotId(hid || (typeof window !== "undefined" && window.activeHotspotId) || "default");
+
+    // 1. Check GW connection (WebSocket and user disconnect flag)
+    const ws = (typeof window !== "undefined") ? window.ws : null;
+    const isWsOpen = Boolean(ws && ws.readyState === WebSocket.OPEN);
+    const isGwUserDisabled = Boolean(
+      (typeof window !== "undefined" && typeof window.isHotspotGwDisconnected === "function" && window.isHotspotGwDisconnected(cid)) ||
+      (typeof window !== "undefined" && window.isManualGwDisconnect)
+    );
+    const isGwConnected = isWsOpen && !isGwUserDisabled;
+
+    // 2. Check BM connection
+    const currentHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+    const hs = currentHotspots.find(h => {
+      const hCid = _resolveHotspotId(h.id);
+      return hCid === cid;
+    }) || currentHotspots.find(h => h.id === cid) || (currentHotspots.length > 0 ? currentHotspots[0] : null);
+
+    const isCol = Boolean(typeof window !== "undefined" && typeof window.isHotspotCollapsed === "function" && window.isHotspotCollapsed(cid));
+    const isLive = Boolean(
+      (typeof window !== "undefined" && typeof window.isHotspotLiveCollapsed === "function" && window.isHotspotLiveCollapsed(cid))
+    );
+    const isCollapsed = isCol && !isLive;
+
+    let bmStatus = "OFFLINE";
+    if (hs && hs.status) {
+      bmStatus = hs.status;
+    } else if (typeof window !== "undefined" && window.currentBmStatus) {
+      bmStatus = window.currentBmStatus;
+    }
+
+    const isBmConnected = !isCollapsed && (bmStatus === "ONLINE");
+
+    return {
+      ok: isGwConnected && isBmConnected,
+      isGwConnected,
+      isBmConnected,
+      cid
+    };
+  }
+
+  function notifyPttConnectionBlocked(status, btnEl = null) {
+    if (typeof blinkPttLocked === "function") {
+      blinkPttLocked(btnEl);
+    }
+    if (typeof window !== "undefined" && typeof window.showToast === "function") {
+      let msg = "";
+      if (!status.isGwConnected && !status.isBmConnected) {
+        msg = (typeof window.t === "function")
+          ? window.t("ptt.no_gw_bm_toast", {}, "⚠️ Нет соединения с GW и BM. Передача заблокирована.")
+          : "⚠️ Нет соединения с GW и BM. Передача заблокирована.";
+      } else if (!status.isGwConnected) {
+        msg = (typeof window.t === "function")
+          ? window.t("ptt.gw_offline_toast", {}, "⚠️ Нет соединения со шлюзом (GW:OFFLINE). Передача заблокирована.")
+          : "⚠️ Нет соединения со шлюзом (GW:OFFLINE). Передача заблокирована.";
+      } else {
+        msg = (typeof window.t === "function")
+          ? window.t("ptt.bm_offline_toast", {}, "⚠️ Нет соединения с BrandMeister (BM:OFFLINE). Передача заблокирована.")
+          : "⚠️ Нет соединения с BrandMeister (BM:OFFLINE). Передача заблокирована.";
+      }
+      window.showToast(msg, 3000);
+    }
+  }
+
+  window.checkPttConnectionStatus = checkPttConnectionStatus;
+  window.notifyPttConnectionBlocked = notifyPttConnectionBlocked;
+
   let isTransmissionStarting = false;
   let cancelTransmissionStart = false;
 
@@ -242,10 +311,13 @@ function _isVolumeDownPttEnabled() {
       blinkPttLocked(ptt);
       return;
     }
-    if (typeof window.isHotspotGwDisconnected === "function" && window.isHotspotGwDisconnected(checkHid)) {
-      if (typeof window.showToast === "function") {
-        window.showToast(window.t ? window.t("gw.status_offline_toast", {}, "⚠️ Шлюз этого хотспота отключен (GW:OFFLINE)") : "⚠️ Шлюз этого хотспота отключен (GW:OFFLINE)", 2500);
-      }
+
+    // Protection: PTT is blocked unless both GW and BM are connected!
+    const conn = checkPttConnectionStatus(checkHid);
+    if (!conn.ok) {
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
+      const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+      notifyPttConnectionBlocked(conn, ptt);
       return;
     }
 
@@ -562,6 +634,13 @@ function _isVolumeDownPttEnabled() {
       }
       return;
     }
+    if (isDown) {
+      const conn = checkPttConnectionStatus(hid);
+      if (!conn.ok) {
+        notifyPttConnectionBlocked(conn);
+        return;
+      }
+    }
     const mode = getHotspotPttMode(hid);
     if (mode === "toggle") {
       if (isDown) {
@@ -587,6 +666,8 @@ function _isVolumeDownPttEnabled() {
   window.__proxdmr.startTransmission = startTransmission;
   window.__proxdmr.stopTransmission = stopTransmission;
   window.__proxdmr.triggerHardwarePtt = window.triggerHardwarePtt;
+  window.__proxdmr.checkPttConnectionStatus = checkPttConnectionStatus;
+  window.__proxdmr.notifyPttConnectionBlocked = notifyPttConnectionBlocked;
 
 
 
@@ -598,6 +679,11 @@ export function initPttEngine() {
       const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
       if (isPttLocked(hid)) {
         blinkPttLocked();
+        return;
+      }
+      const conn = checkPttConnectionStatus(hid);
+      if (!conn.ok) {
+        notifyPttConnectionBlocked(conn);
         return;
       }
       const mode = getHotspotPttMode(hid);
@@ -645,7 +731,9 @@ export {
   openTotConfigModal,
   closeTotConfigModal,
   startTransmission,
-  stopTransmission
+  stopTransmission,
+  checkPttConnectionStatus,
+  notifyPttConnectionBlocked
 };
 
 if (typeof window !== "undefined") {
@@ -700,6 +788,10 @@ if (typeof window !== "undefined") {
     closeTotConfigModal,
     startTransmission,
     stopTransmission,
+    checkPttConnectionStatus,
+    notifyPttConnectionBlocked,
     initPttEngine
   };
+  window.checkPttConnectionStatus = checkPttConnectionStatus;
+  window.notifyPttConnectionBlocked = notifyPttConnectionBlocked;
 }

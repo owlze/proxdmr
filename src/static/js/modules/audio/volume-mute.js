@@ -1060,16 +1060,18 @@ export function initVolumeMute() {
     }
   }
 
-  // AGC (АРУ по НЧ) toggle on Main Card
+  // AGC (АРУ по НЧ) toggle in Audio RX settings
   const agcToggle = document.getElementById("agcToggle");
   if (agcToggle) {
-    const agcActive = getHotspotAgc("default");
+    const initHid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+    const agcActive = getHotspotAgc(initHid);
     agcToggle.checked = agcActive;
     agcToggle.addEventListener("click", (e) => {
       e.stopPropagation();
     });
     agcToggle.addEventListener("change", () => {
-      setHotspotAgc("default", agcToggle.checked);
+      const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+      setHotspotAgc(hid, agcToggle.checked);
     });
   }
 

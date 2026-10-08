@@ -34,15 +34,20 @@ function setupDsdfmeModal() {
 
   function openModal() {
     if (dsdfmeModal) {
+      if (typeof window.closePrimaryModals === "function") {
+        window.closePrimaryModals("dsdfmeModal");
+      }
       const savedFec = localStorage.getItem("proxdmr_dsdfme_fec_tolerance");
       setFecToleranceValue(savedFec !== null ? savedFec : 1);
+      dsdfmeModal.style.display = "flex";
       dsdfmeModal.classList.add("active");
       pushNavState("modal", "dsdfmeModal");
     }
   }
   function closeModal() {
-    if (dsdfmeModal && dsdfmeModal.classList.contains("active")) {
+    if (dsdfmeModal && (dsdfmeModal.classList.contains("active") || dsdfmeModal.style.display === "flex")) {
       dsdfmeModal.classList.remove("active");
+      dsdfmeModal.style.display = "";
       notifyNavClosed();
     }
   }

@@ -472,15 +472,140 @@
       const hasCyr2 = /[а-яА-ЯёЁіІїЇєЄґҐ]/.test(p2);
       const hasLat2 = /[a-zA-Z]/.test(p2);
 
-      if (isCyr) {
-        if (hasCyr1 && !hasLat1) return p1;
-        if (hasCyr2 && !hasLat2) return p2;
-      } else {
-        if (hasLat2 && !hasCyr2) return p2;
-        if (hasLat1 && !hasCyr1) return p1;
+      // Only treat as bilingual if ONE part has Cyrillic and the other has Latin (translation pair)
+      if ((hasCyr1 && hasLat2 && !hasLat1 && !hasCyr2) || (hasLat1 && hasCyr2 && !hasCyr1 && !hasLat2)) {
+        if (isCyr) {
+          return hasCyr1 ? p1 : p2;
+        } else {
+          return hasLat1 ? p1 : p2;
+        }
       }
     }
     return clean;
+  }
+
+  export const CITY_LOCALIZATIONS = {
+    "kaliningrad": "Калининград",
+    "moscow": "Москва",
+    "saint petersburg": "Санкт-Петербург",
+    "st petersburg": "Санкт-Петербург",
+    "st. petersburg": "Санкт-Петербург",
+    "saint-petersburg": "Санкт-Петербург",
+    "spb": "Санкт-Петербург",
+    "novosibirsk": "Новосибирск",
+    "yekaterinburg": "Екатеринбург",
+    "ekaterinburg": "Екатеринбург",
+    "nizhny novgorod": "Нижний Новгород",
+    "kazan": "Казань",
+    "chelyabinsk": "Челябинск",
+    "omsk": "Омск",
+    "samara": "Самара",
+    "rostov-on-don": "Ростов-на-Дону",
+    "rostov on don": "Ростов-на-Дону",
+    "rostov": "Ростов-на-Дону",
+    "ufa": "Уфа",
+    "krasnoyarsk": "Красноярск",
+    "voronezh": "Воронеж",
+    "perm": "Пермь",
+    "volgograd": "Волгоград",
+    "krasnodar": "Краснодар",
+    "saratov": "Саратов",
+    "tyumen": "Тюмень",
+    "tolyatti": "Тольятти",
+    "izhevsk": "Ижевск",
+    "barnaul": "Барнаул",
+    "ulyanovsk": "Ульяновск",
+    "irkutsk": "Иркутск",
+    "khabarovsk": "Хабаровск",
+    "yaroslavl": "Ярославль",
+    "vladivostok": "Владивосток",
+    "makhachkala": "Махачкала",
+    "tomsk": "Томск",
+    "orenburg": "Оренбург",
+    "kemerovo": "Кемерово",
+    "novokuznetsk": "Новокузнецк",
+    "ryazan": "Рязань",
+    "astrakhan": "Астрахань",
+    "penza": "Пенза",
+    "naberezhnye chelny": "Набережные Челны",
+    "lipetsk": "Липецк",
+    "tula": "Тула",
+    "kirov": "Киров",
+    "cheboksary": "Чебоксары",
+    "kaluga": "Калуга",
+    "bryansk": "Брянск",
+    "kursk": "Курск",
+    "ivanovo": "Иваново",
+    "magnitogorsk": "Магнитогорск",
+    "tver": "Тверь",
+    "stavropol": "Ставрополь",
+    "simferopol": "Симферополь",
+    "sevastopol": "Севастополь",
+    "sochi": "Сочи",
+    "belgorod": "Белгород",
+    "vladimir": "Владимир",
+    "arhangelsk": "Архангельск",
+    "arkhangelsk": "Архангельск",
+    "chita": "Чита",
+    "smolensk": "Смоленск",
+    "kurgan": "Курган",
+    "cherepovets": "Череповец",
+    "vologda": "Вологда",
+    "saransk": "Саранск",
+    "orel": "Орёл",
+    "oryol": "Орёл",
+    "yakutsk": "Якутск",
+    "vladikavkaz": "Владикавказ",
+    "grozny": "Грозный",
+    "murmansk": "Мурманск",
+    "tambov": "Тамбов",
+    "petrozavodsk": "Петрозаводск",
+    "kostroma": "Кострома",
+    "taganrog": "Таганрог",
+    "sterlitamak": "Стерлитамак",
+    "petropavlovsk-kamchatsky": "Петропавловск-Камчатский",
+    "viluchinsk": "Вилючинск",
+    "vilyuchinsk": "Вилючинск",
+    "nalchik": "Нальчик",
+    "minsk": "Минск",
+    "almaty": "Алматы",
+    "astana": "Астана",
+    "yerevan": "Ереван",
+    "tbilisi": "Тбилиси",
+    "baku": "Баку",
+    "tashkent": "Ташкент",
+    "bishkek": "Бишкек",
+    "dushanbe": "Душанбе",
+    "ashgabat": "Ашхабад",
+    "chisinau": "Кишинёв",
+    "kiev": "Киев",
+    "kyiv": "Киев"
+  };
+
+  export function formatCallerLocation(countryInfo, city = "", lang = null) {
+    const curLang = lang || getActiveLang();
+    const isCyr = (curLang === "ru" || curLang === "uk");
+    let cName = "";
+    if (countryInfo && typeof countryInfo === "object") {
+      cName = isCyr ? (countryInfo.name || countryInfo.name_en) : (countryInfo.name_en || countryInfo.name);
+    } else if (typeof countryInfo === "string") {
+      cName = countryInfo.trim();
+    }
+    let cCity = (city || "").trim();
+    const cCityLower = cCity.toLowerCase();
+    if (cCityLower === "none" || cCityLower === "unknown" || cCityLower === "n/a" || cCityLower.includes("ask admin")) {
+      cCity = "";
+    }
+    if (cCity && isCyr && CITY_LOCALIZATIONS[cCityLower]) {
+      cCity = CITY_LOCALIZATIONS[cCityLower];
+    }
+    if (cName && cCity) {
+      if (cCity.toLowerCase() === cName.toLowerCase()) {
+        return cName;
+      }
+      return `${cName}, ${cCity}`;
+    }
+    return cName || cCity || "";
   }
 
   const BM_COMMON_TG_MAP = {
@@ -497,11 +622,37 @@
     25011: "Калининградская обл.",
     25020: "Конференция РОСХАМ",
     25033: "Ленинградская обл.",
+    250002: "Россия / Уфа",
+    250016: "Россия / Нижнекамск",
+    250023: "Россия / Краснодар",
+    250024: "Россия / Красноярск",
+    250025: "Россия / Владивосток",
+    250034: "Россия / Волгоград",
+    250036: "Россия / Воронеж",
+    250039: "Россия / Калининград",
+    250052: "Россия / Нижний Новгород",
+    250054: "Россия / Новосибирск",
+    250055: "Россия / Омск",
+    250059: "Россия / Пермь",
+    250061: "Россия / Ростов-на-Дону",
+    250063: "Россия / Самара",
+    250064: "Россия / Саратов",
+    250066: "Россия / Екатеринбург",
+    250070: "Россия / Томск",
+    250072: "Россия / Тюмень",
+    250074: "Россия / Челябинск",
+    250082: "Россия / Крым",
+    250351: "Россия / Челябинск",
     250601: "Волгоградская обл.",
     250602: "Ростовская обл.",
     250603: "Армения / Репитер",
+    250608: "Россия / Сочи",
+    250621: "Россия / Москва",
     250641: "Краснодарский край",
     250647: "Ставропольский край",
+    250707: "Россия / Севастополь",
+    250777: "Россия / Калининград",
+    250812: "Россия / Санкт-Петербург",
     250907: "Приморский край",
     91: "Worldwide",
     92: "Europe",
@@ -619,13 +770,19 @@
     str = str.replace(/(?:^|[\/\-])\s*регион(?:\s+\d+|\s*\(\d+\))?\s*(?:[\/\-]|$)/gi, " ");
     str = str.replace(/^\s*регион\s*$/gi, "");
 
-    // Strip leading "Россия / " or "Russia / " if a meaningful name follows
-    const countryPrefixRegex = /^(?:россия|russia)\s*[\/\-]\s*/i;
-    if (countryPrefixRegex.test(str)) {
-      const stripped = str.replace(countryPrefixRegex, "").trim();
-      if (stripped && /[a-zA-Zа-яА-ЯёЁ]/.test(stripped) && !/^\d+$/.test(stripped)) {
-        str = stripped;
+    // Format Country and City/Region: Option 2 (Country in text AND City in text)
+    const countrySlashRegex = /^(?:россия|russia)\s*[\/\-]\s*(.+)$/i;
+    let matchCountrySlash = str.match(countrySlashRegex);
+    if (!matchCountrySlash && knownRegion) {
+      matchCountrySlash = knownRegion.match(countrySlashRegex);
+    }
+    if (matchCountrySlash) {
+      let regionPart = matchCountrySlash[1].trim();
+      if (isCyr && CITY_LOCALIZATIONS[regionPart.toLowerCase()]) {
+        regionPart = CITY_LOCALIZATIONS[regionPart.toLowerCase()];
       }
+      const cLabel = isCyr ? "Россия" : "Russia";
+      return `${cLabel}, ${regionPart}`;
     }
 
     // Strip leftover punctuation/slashes from start and end
@@ -642,12 +799,23 @@
       cleanLower === "id" ||
       cleanLower === "регион"
     ) {
-      return knownRegion || "";
+      str = knownRegion || "";
     }
 
     // If string is literally just "Россия", but we know the specific region:
     if (cleanLower === "россия" && knownRegion) {
-      return knownRegion;
+      str = knownRegion;
+    }
+
+    // Re-check countrySlashRegex in case knownRegion was substituted
+    const mRegionSlash = str.match(countrySlashRegex);
+    if (mRegionSlash) {
+      let rPart = mRegionSlash[1].trim();
+      if (isCyr && CITY_LOCALIZATIONS[rPart.toLowerCase()]) {
+        rPart = CITY_LOCALIZATIONS[rPart.toLowerCase()];
+      }
+      const cLabel = isCyr ? "Россия" : "Russia";
+      return `${cLabel}, ${rPart}`;
     }
 
     // Must contain at least one meaningful letter
@@ -657,6 +825,20 @@
     }
 
     str = stripOuterBrackets(localizeBilingualText(str, curLang));
+
+    // If str does not contain country prefix yet, prepend country if known
+    const cInfo = getCountryInfo(sTg);
+    if (cInfo && cInfo.name && cInfo.name !== "Global") {
+      const cName = isCyr ? (cInfo.name || cInfo.name_en) : (cInfo.name_en || cInfo.name);
+      if (cName && !str.toLowerCase().includes(cName.toLowerCase())) {
+        let cityPart = str;
+        if (isCyr && CITY_LOCALIZATIONS[cityPart.toLowerCase()]) {
+          cityPart = CITY_LOCALIZATIONS[cityPart.toLowerCase()];
+        }
+        return `${cName}, ${cityPart}`;
+      }
+    }
+
     return str;
   }
 

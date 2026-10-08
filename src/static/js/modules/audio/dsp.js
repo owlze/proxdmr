@@ -48,14 +48,26 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
     function openModal() {
       if (audioRxModal) {
+        if (typeof window.closePrimaryModals === "function") {
+          window.closePrimaryModals("audioRxModal");
+        }
+        const agcToggle = document.getElementById("agcToggle");
+        if (agcToggle) {
+          const curHid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+          if (typeof window.getHotspotAgc === "function") {
+            agcToggle.checked = window.getHotspotAgc(curHid);
+          }
+        }
+        audioRxModal.style.display = "flex";
         audioRxModal.classList.add("active");
         _pushNavState("modal", "audioRxModal");
       }
     }
 
     function closeModal() {
-      if (audioRxModal && audioRxModal.classList.contains("active")) {
+      if (audioRxModal && (audioRxModal.classList.contains("active") || audioRxModal.style.display === "flex")) {
         audioRxModal.classList.remove("active");
+        audioRxModal.style.display = "";
         _notifyNavClosed();
       }
     }
@@ -568,14 +580,19 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
     function openModal() {
       if (audioTxModal) {
+        if (typeof window.closePrimaryModals === "function") {
+          window.closePrimaryModals("audioTxModal");
+        }
+        audioTxModal.style.display = "flex";
         audioTxModal.classList.add("active");
         _pushNavState("modal", "audioTxModal");
       }
     }
 
     function closeModal() {
-      if (audioTxModal && audioTxModal.classList.contains("active")) {
+      if (audioTxModal && (audioTxModal.classList.contains("active") || audioTxModal.style.display === "flex")) {
         audioTxModal.classList.remove("active");
+        audioTxModal.style.display = "";
         _notifyNavClosed();
       }
     }
