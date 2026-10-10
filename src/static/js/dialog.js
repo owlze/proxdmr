@@ -372,21 +372,56 @@
   global.showAppPrompt = showAppPrompt;
 
   // ── Universal Modal Save Confirmation Green Glow Pulse ───────────────────
-  function triggerModalSavePulse(targetEl) {
+  function closeSettingsModal() {
     if (typeof document === 'undefined') return;
+    const sModal = document.getElementById('settingsModal');
+    if (sModal) {
+      const content = sModal.querySelector('.modal-content');
+      if (content) {
+        content.classList.remove('modal-save-pulse');
+      }
+    }
+    const closeBtn = document.getElementById('closeSettingsBtn');
+    if (closeBtn) {
+      closeBtn.click();
+      return;
+    }
+    if (sModal) {
+      if (typeof window.saveCurrentSettingsState === 'function') {
+        window.saveCurrentSettingsState();
+      }
+      sModal.classList.remove('active');
+      sModal.style.display = '';
+      if (typeof window.notifyNavClosed === 'function') {
+        window.notifyNavClosed();
+      }
+    }
+  }
+
+  global.closeSettingsModal = closeSettingsModal;
+
+  // ── Universal Modal Save Confirmation Green Glow Pulse ───────────────────
+  function triggerModalSavePulse(targetEl, options) {
+    if (typeof document === 'undefined') return;
+    options = options || {};
 
     let modalContent = null;
+    let inSettingsModal = false;
+
     if (targetEl && targetEl.nodeType) {
       modalContent = targetEl.closest('.modal-content') || targetEl.closest('.modal');
+      inSettingsModal = Boolean(targetEl.closest('#settingsModal'));
     }
     if (!modalContent) {
       const activeModal = document.querySelector('#settingsModal.active, .modal.active, .modal[style*="display: flex"], .modal[style*="display: block"]');
       if (activeModal) {
         modalContent = activeModal.querySelector('.modal-content') || activeModal;
+        inSettingsModal = Boolean(activeModal.id === 'settingsModal' || activeModal.closest('#settingsModal'));
       }
     }
     if (!modalContent) {
       modalContent = document.querySelector('#settingsModal .modal-content') || document.querySelector('.modal-content');
+      inSettingsModal = Boolean(modalContent && modalContent.closest('#settingsModal'));
     }
     if (!modalContent) return;
 
@@ -401,6 +436,18 @@
       modalContent.classList.remove('modal-save-pulse');
       modalContent._savePulseTimer = null;
     }, 1050);
+
+    // Auto-close settings modal after the green contour indication completes
+    const shouldCloseSettings = Boolean(options.closeSettings || (inSettingsModal && options.isFooterSave));
+    if (shouldCloseSettings) {
+      if (window._settingsModalAutoCloseTimer) {
+        clearTimeout(window._settingsModalAutoCloseTimer);
+      }
+      window._settingsModalAutoCloseTimer = setTimeout(() => {
+        window._settingsModalAutoCloseTimer = null;
+        closeSettingsModal();
+      }, 950);
+    }
   }
 
   global.triggerModalSavePulse = triggerModalSavePulse;
@@ -429,7 +476,17 @@
         (btn.id && btn.id.toLowerCase().includes('save'));
 
       if (isSaveBtn) {
-        triggerModalSavePulse(btn);
+        const isSettings = Boolean(btn.closest('#settingsModal'));
+        const isFooterSave = isSettings && (
+          Boolean(btn.closest('.modal-footer')) ||
+          btn.id === 'btnSaveGeneralSettings' ||
+          i18n === 'buttons.save_settings' ||
+          i18n === 'hs_edit.btn_save' ||
+          text.includes('сохранить настройки') ||
+          text.includes('сохранить хотспот')
+        );
+
+        triggerModalSavePulse(btn, { isFooterSave: isFooterSave });
       }
     }, true);
 
@@ -439,7 +496,8 @@
       if (!form) return;
       const modal = form.closest ? form.closest('#settingsModal, .modal') : null;
       if (modal) {
-        triggerModalSavePulse(form);
+        const isSettings = Boolean(modal.id === 'settingsModal' || modal.closest('#settingsModal'));
+        triggerModalSavePulse(form, { isFooterSave: isSettings });
       }
     }, true);
   }

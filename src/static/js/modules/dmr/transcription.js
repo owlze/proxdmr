@@ -503,6 +503,13 @@ export class SummaryTtsReader {
   }
 
   start() {
+    if (typeof window.isAnySlotTtsActive === "function" && window.isAnySlotTtsActive()) {
+      if (typeof showToast === "function") {
+        showToast(window.t ? window.t("transcriber.live_tts_active_err", {}, "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для чтения стенограммы.") : "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для чтения стенограммы.", 3000);
+      }
+      return;
+    }
+
     const playlist = this.getChronologicalPlaylist();
     if (playlist.length === 0) {
       const slotLabel = (window.logFilter === "1") ? "TS1" : ((window.logFilter === "2") ? "TS2" : "TS1+TS2");

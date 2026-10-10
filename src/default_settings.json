@@ -22,6 +22,8 @@
   "transcriber_api_key": "",
   "transcriber_api_keys": [],
   "transcriber_model": "gemini-3.1-flash-lite",
+  "transcriber_engine": "groq",
+  "translation_engine": "groq",
   "transcriber_target_lang": "ru",
   "tts_enabled": false,
   "tts_engine": "piper",

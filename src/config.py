@@ -72,12 +72,16 @@ class AppSettings(BaseModel):
     transcriber_enabled: bool = False
     transcriber_api_key: str = ""
     transcriber_api_keys: List[str] = Field(default_factory=list)
+    transcriber_engine: str = "groq"
     transcriber_model: str = "gemini-3.5-flash"
+    translation_engine: str = "groq"
     transcriber_target_lang: str = "ru"
+    groq_api_key: str = ""
+    deepgram_api_key: str = ""
     tts_enabled: bool = False
-    tts_engine: str = "gemini"
+    tts_engine: str = "piper"
     tts_model: str = "gemini-3.1-flash-tts-preview"
-    tts_voice: str = "auto"
+    tts_voice: str = "ru_RU-terra5871-medium"
     tts_speed: float = 1.1
     tts_ducking_level: float = 0.80
     tts_pause_ducking_level: float = 1.0
@@ -89,6 +93,7 @@ class AppSettings(BaseModel):
     recordings_settings: Dict[str, Any] = Field(default_factory=dict)
     hamqth_username: str = ""
     hamqth_password: str = ""
+    disable_update_notifications: bool = False
     hotspots: List[HotspotConfig] = Field(default_factory=list)
     contacts: List[Dict[str, Any]] = Field(default_factory=list)
     contacts_gateway: Dict[str, Any] = Field(default_factory=lambda: {"hotspot_id": "default", "slot": 2})

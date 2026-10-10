@@ -173,6 +173,7 @@ def get_default_settings(login: str = "") -> dict:
         if login and settings.get("hotspots"):
             settings["hotspots"][0]["callsign"] = callsign
         return settings
+
     return {
         "active_hotspot_id": "default",
         "loopback_mode": False,
@@ -197,11 +198,15 @@ def get_default_settings(login: str = "") -> dict:
         "transcriber_api_key": "",
         "transcriber_api_keys": [],
         "transcriber_model": "gemini-3.5-flash",
+        "transcriber_engine": "groq",
+        "translation_engine": "groq",
         "transcriber_target_lang": "ru",
+        "groq_api_key": "",
+        "deepgram_api_key": "",
         "tts_enabled": False,
-        "tts_engine": "gemini",
+        "tts_engine": "piper",
         "tts_model": "gemini-3.1-flash-tts-preview",
-        "tts_voice": "auto",
+        "tts_voice": "ru_RU-terra5871-medium",
         "tts_speed": 1.1,
         "tts_ducking_level": 0.80,
         "tts_mute_others": True,

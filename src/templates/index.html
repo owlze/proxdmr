@@ -30,7 +30,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.270">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.275">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -46,6 +46,7 @@
       filename: window.SERVER_APK_FILENAME,
       path: window.SERVER_APK_PATH
     };
+    window.DISABLE_UPDATE_NOTIFICATIONS = {{ 'true' if disable_update_notifications else 'false' }};
     if (typeof window !== "undefined" && window.AndroidBridge) {
       document.documentElement.classList.add("is-apk-mode");
     }
@@ -2165,6 +2166,75 @@
           </div>
         </div>
 
+        <!-- System Updates Section (Collapsible Frame) -->
+        <div class="apikeys-frame collapsed" id="updateSettingsFrame" style="margin-bottom: 8px;">
+          <div class="apikeys-frame-header" id="updateSettingsToggle" style="cursor: pointer;">
+            <span class="apikeys-frame-title">
+              <span>🔄</span> <span data-i18n="updates.title">Обновление ProxDMR</span>
+              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: 10px; margin-left: 6px;">NEW</span>
+            </span>
+            <span class="apikeys-frame-actions">
+              <span class="apikeys-chevron" id="updateSettingsChevron">▼</span>
+            </span>
+          </div>
+          <div class="apikeys-frame-body" id="updateSettingsBody" style="padding: 10px 12px;">
+            <!-- Global checkbox: disable notifications -->
+            <div style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+              <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="optDisableUpdateNotifications" class="form-checkbox" style="width: 17px; height: 17px; margin-top: 2px; accent-color: #e74c3c; cursor: pointer;" {% if disable_update_notifications %}checked{% endif %}>
+                <div>
+                  <div style="font-size: 0.84rem; font-weight: 600; color: var(--text-primary);" data-i18n="updates.disable_notifications">
+                    Не оповещать об обновлениях
+                  </div>
+                  <div style="font-size: 0.74rem; color: #8b949e; line-height: 1.3; margin-top: 2px;" data-i18n="updates.disable_notifications_hint">
+                    Отключает всплывающие окна и баннеры о новых релизах. Статус и кнопка обновления останутся доступны в этом разделе.
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <!-- Version Status Card -->
+            <div id="systemUpdateStatusCard" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                <div style="font-size: 0.82rem; color: #8b949e;">
+                  <span data-i18n="updates.current_ver_label">Текущая версия:</span>
+                  <strong style="color: var(--text-primary);" id="systemCurrentVerLabel">v{{ app_version | default('1.41') }}</strong>
+                  <span style="font-size: 0.74rem; color: #6e7681;" id="systemCurrentDateLabel">({{ app_version_date | default('') }})</span>
+                </div>
+                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
+                  <span data-i18n="updates.up_to_date">✓ Актуальна</span>
+                </div>
+              </div>
+
+              <!-- Available update details block (hidden when up to date) -->
+              <div id="systemUpdateAvailableBlock" style="display: none; background: rgba(231, 76, 60, 0.08); border: 1px solid rgba(231, 76, 60, 0.25); border-radius: 6px; padding: 8px 10px; margin-top: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                  <div style="font-size: 0.84rem; font-weight: 700; color: #ff7675;">
+                    <span id="systemNewVerLabel">Доступно: v1.42</span>
+                    <span style="font-size: 0.75rem; font-weight: normal; color: #a4b0be; margin-left: 4px;" id="systemNewDateLabel"></span>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                  <button type="button" id="btnViewReleaseNotesSettings" class="btn-secondary" style="flex: 1; min-width: 120px; font-size: 0.82rem; padding: 7px 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                    <span>📋</span> <span data-i18n="updates.view_changes">Что нового</span>
+                  </button>
+                  <button type="button" id="btnApplyUpdateSettings" class="btn-primary" style="flex: 1; min-width: 130px; font-size: 0.82rem; font-weight: 700; padding: 7px 12px; cursor: pointer; background: #e74c3c; border-color: #c0392b; display: flex; align-items: center; justify-content: center; gap: 6px; display: {% if is_admin %}flex{% else %}none{% endif %};">
+                    <span>⚡</span> <span data-i18n="updates.apply_btn">Обновить сейчас</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Manual Check Button -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <button type="button" id="btnCheckUpdateManual" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                <span id="btnCheckUpdateIcon">🔄</span> <span id="btnCheckUpdateText" data-i18n="updates.check_btn">Проверить обновления</span>
+              </button>
+              <div id="systemCheckStatusText" style="font-size: 0.76rem; color: #8b949e; text-align: right;"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Server Restart Block (admin/superadmin only) -->
         <div id="serverRestartBlock" class="settings-action-block settings-server-block" style="display: {% if is_admin %}block{% else %}none{% endif %}; padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
           <div class="settings-server-title" style="font-size: 0.82rem; font-weight: 700; color: #e3b341; margin-bottom: 4px;" data-i18n="general.server_title">
@@ -2195,108 +2265,116 @@
         <form id="transcriberSettingsForm">
 
 
-          <!-- Gemini API Keys — collapsible frame (closed by default) -->
-          <div class="apikeys-frame collapsed" id="geminiApiKeysFrame">
-            <div class="apikeys-frame-header" id="geminiApiKeysToggle">
-              <span class="apikeys-frame-title">🔑 Gemini API Keys</span>
+                    <!-- Speech Recognition & Translation — collapsible frame -->
+          <div class="apikeys-frame" id="speechRecognitionFrame" style="margin-bottom: 14px;">
+            <div class="apikeys-frame-header" id="speechRecognitionToggle">
+              <span class="apikeys-frame-title" data-i18n="transcriber.speech_rec_title">🎙️ Распознавание и перевод речи</span>
               <span class="apikeys-frame-actions">
-                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="apikeys-get-key-link" data-i18n="transcriber.get_free_key" onclick="event.stopPropagation()">Google AI Studio ↗</a>
-                <button type="button" id="btnTestApiKeys" class="btn-apikey-test" onclick="event.stopPropagation(); window.testGeminiApiKeys && window.testGeminiApiKeys()" data-i18n="transcriber.btn_test_keys">🧪 Тест</button>
-                <span class="apikeys-chevron" id="geminiApiKeysChevron">▼</span>
+                <span class="apikeys-chevron" id="speechRecognitionChevron">▼</span>
               </span>
             </div>
-            <div class="apikeys-frame-body" id="geminiApiKeysBody">
-              <!-- Key 1 (primary) -->
-              <div class="apikey-row" data-key-index="0">
-                <input type="checkbox" class="apikey-cb" id="apiKeyCb0" checked title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
-                <input type="text" class="form-input apikey-name" id="apiKeyName0" value="name" placeholder="name" data-i18n-placeholder="transcriber.key_name_placeholder" autocomplete="off">
-                <div class="apikey-input-wrap">
-                  <input type="password" class="form-input apikey-input" id="optTranscriberApiKey" data-key-index="0" placeholder="AIzaSy..." autocomplete="off">
-                  <button type="button" class="apikey-eye-btn" data-target="optTranscriberApiKey" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                </div>
-              </div>
-              <!-- Key 2 -->
-              <div class="apikey-row" data-key-index="1">
-                <input type="checkbox" class="apikey-cb" id="apiKeyCb1" title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
-                <input type="text" class="form-input apikey-name" id="apiKeyName1" placeholder="Имя" data-i18n-placeholder="transcriber.key_name_placeholder" autocomplete="off">
-                <div class="apikey-input-wrap">
-                  <input type="password" class="form-input apikey-input" id="apiKeyInput1" data-key-index="1" placeholder="AIzaSy..." autocomplete="off">
-                  <button type="button" class="apikey-eye-btn" data-target="apiKeyInput1" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                </div>
-              </div>
-              <!-- Key 3 -->
-              <div class="apikey-row" data-key-index="2">
-                <input type="checkbox" class="apikey-cb" id="apiKeyCb2" title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
-                <input type="text" class="form-input apikey-name" id="apiKeyName2" placeholder="Имя" data-i18n-placeholder="transcriber.key_name_placeholder" autocomplete="off">
-                <div class="apikey-input-wrap">
-                  <input type="password" class="form-input apikey-input" id="apiKeyInput2" data-key-index="2" placeholder="AIzaSy..." autocomplete="off">
-                  <button type="button" class="apikey-eye-btn" data-target="apiKeyInput2" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                </div>
-              </div>
-              <!-- Key 4 -->
-              <div class="apikey-row" data-key-index="3">
-                <input type="checkbox" class="apikey-cb" id="apiKeyCb3" title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
-                <input type="text" class="form-input apikey-name" id="apiKeyName3" placeholder="Имя" data-i18n-placeholder="transcriber.key_name_placeholder" autocomplete="off">
-                <div class="apikey-input-wrap">
-                  <input type="password" class="form-input apikey-input" id="apiKeyInput3" data-key-index="3" placeholder="AIzaSy..." autocomplete="off">
-                  <button type="button" class="apikey-eye-btn" data-target="apiKeyInput3" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                </div>
-              </div>
-              <!-- Key 5 -->
-              <div class="apikey-row" data-key-index="4">
-                <input type="checkbox" class="apikey-cb" id="apiKeyCb4" title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
-                <input type="text" class="form-input apikey-name" id="apiKeyName4" placeholder="Имя" data-i18n-placeholder="transcriber.key_name_placeholder" autocomplete="off">
-                <div class="apikey-input-wrap">
-                  <input type="password" class="form-input apikey-input" id="apiKeyInput4" data-key-index="4" placeholder="AIzaSy..." autocomplete="off">
-                  <button type="button" class="apikey-eye-btn" data-target="apiKeyInput4" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                </div>
-              </div>
-              <!-- Key 6 (Paid Account) -->
-              <div class="apikey-row apikey-row-paid" data-key-index="5">
-                <input type="hidden" class="apikey-name" id="apiKeyNamePaid" value="paid">
-                <input type="checkbox" class="apikey-cb apikey-cb-paid" id="apiKeyCbPaid" title="Включить этот ключ" data-i18n-title="transcriber.key_enable_title">
-                <label for="apiKeyCbPaid" class="apikey-paid-label" data-i18n="transcriber.paid_key_label">Это ключ для платного аккаунта Gemini API, он условно сделан отличным для удобства переключения</label>
-                <div class="apikey-input-wrap">
-                  <input type="password" class="form-input apikey-input" id="apiKeyInputPaid" data-key-index="5" placeholder="AIzaSy..." autocomplete="off">
-                  <button type="button" class="apikey-eye-btn" data-target="apiKeyInputPaid" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                </div>
-              </div>
-              <small class="form-hint" style="margin-top:4px;display:block;" data-i18n="transcriber.keys_hint">Бесплатный ключ от Google AI Studio (до 15 запросов/мин на ключ). Несколько ключей с разных Google-аккаунтов позволяют распределить бесплатные запросы. При необходимости и возможности можно использовать один платный API-ключ — это удобней, и доступны более совершенные и качественные модели.</small>
-
-              <!-- Help card toggle -->
-              <div class="form-hint-row" style="margin-top:6px;">
-                <button type="button" id="btnGeminiApiHelp" class="btn-help-inline" title="Инструкция: как получить бесплатный API-ключ Gemini" data-i18n-title="transcriber.btn_help_title">
-                  <span data-i18n="transcriber.btn_help">❓ Инструкция Gemini</span>
-                </button>
+            <div class="apikeys-frame-body" id="speechRecognitionBody">
+              <!-- Item 1: Recognition Engine dropdown -->
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="optTranscriberEngine" data-i18n="transcriber.asr_engine_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🎙️ Движок распознавания речи:
+                </label>
+                <select id="optTranscriberEngine" class="form-input" style="cursor: pointer; width: 100%;">
+                  <option value="gemini" data-i18n="transcriber.engine_gemini">Gemini API</option>
+                  <option value="groq" selected data-i18n="transcriber.engine_groq">Groq Cloud API (Whisper Large-v3)</option>
+                </select>
               </div>
 
-              <!-- Collapsible Instructions Card for Gemini API -->
-              <div id="geminiApiHelpCard" class="bm-help-card hidden" style="border-left-color: #4285f4;">
-                <div class="bm-help-header">
-                  <strong data-i18n="transcriber.help_header">✨ Как получить бесплатный API-ключ Gemini:</strong>
-                  <button type="button" id="btnCloseGeminiApiHelp" class="btn-close-help" title="Закрыть" data-i18n-title="buttons.close">✕</button>
-                </div>
-                <div class="bm-help-body">
-                  <ol>
-                    <li data-i18n-html="transcriber.help_step1">Перейдите по ссылке: <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="bm-help-link" style="color: #58a6ff;">https://aistudio.google.com/app/apikey ↗</a></li>
-                    <li data-i18n-html="transcriber.help_step2">Войдите в свой Google-аккаунт.</li>
-                    <li data-i18n-html="transcriber.help_step3">Нажмите <strong>«Create API key»</strong>.</li>
-                    <li data-i18n-html="transcriber.help_step4">Выберите <strong>«Create API key in new project»</strong> (или укажите существующий проект).</li>
-                    <li data-i18n-html="transcriber.help_step5">Скопируйте созданный ключ и вставьте его в настройки приложения.</li>
-                  </ol>
-                  <div class="bm-help-note" style="margin-top: 10px; background: rgba(66, 133, 244, 0.08); border-left: 3px solid #4285f4; padding: 6px 8px;" data-i18n-html="transcriber.help_tier_note">
-                    💎 <strong>Тариф Free Tier:</strong> Бесплатный тариф активен по умолчанию и не требует ввода платежных данных или привязки банковской карты.
+              <!-- Item 2: Recognition API Key input -->
+              <div class="form-group" id="groupRecApiKey" style="margin-bottom: 10px;">
+                <label id="lblTranscriberRecApiKey" for="optTranscriberRecApiKey" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🔑 Ключ Gemini API (для распознавания):
+                </label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <div class="apikey-input-wrap" style="flex: 1;">
+                    <input type="password" id="optTranscriberRecApiKey" class="form-input apikey-input" placeholder="AIzaSy..." autocomplete="off">
+                    <button type="button" class="apikey-eye-btn" data-target="optTranscriberRecApiKey" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
                   </div>
+                  <a id="linkTranscriberRecApiKey" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center;">
+                    Google AI Studio ↗
+                  </a>
                 </div>
+                <small id="hintTranscriberRecApiKey" class="form-hint" style="margin-top: 4px; display: block;">
+                  Бесплатный ключ от Google AI Studio (aistudio.google.com).
+                </small>
+              </div>
+
+              <!-- Item 3: Gemini Recognition Sub-block (Models query & selection) -->
+              <div id="subBlockGeminiRec" style="margin-bottom: 12px; background: rgba(66, 133, 244, 0.05); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: 6px; padding: 10px;">
+                <label for="optTranscriberModel" data-i18n="transcriber.gemini_model_rec_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🤖 Модель Gemini для распознавания речи:
+                </label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <select id="optTranscriberModel" class="form-input" style="flex: 1; cursor: pointer;"></select>
+                  <button type="button" id="btnFetchTranscriberModels" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem;" data-i18n="transcriber.btn_update_models">
+                    🔄 Запросить модели
+                  </button>
+                </div>
+                <small class="form-hint" style="margin-top: 4px; display: block;" data-i18n="transcriber.model_hint">
+                  Запрос актуального списка моделей из Google Gemini API
+                </small>
+              </div>
+
+              <!-- Item 4: Translation Engine dropdown -->
+              <div class="form-group" id="groupTranslationEngine" style="margin-bottom: 10px;">
+                <label for="optTranslationEngine" data-i18n="transcriber.translation_engine_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🌐 Движок перевода речи:
+                </label>
+                <select id="optTranslationEngine" class="form-input" style="cursor: pointer; width: 100%;">
+                  <option value="gemini" data-i18n="transcriber.translation_engine_gemini">Gemini API</option>
+                  <option value="groq" selected data-i18n="transcriber.translation_engine_groq">Groq API (Llama 3.3 70B)</option>
+                </select>
+              </div>
+
+              <!-- Item 5: Translation API Key input -->
+              <div class="form-group" id="groupTransApiKey" style="margin-bottom: 10px;">
+                <label id="lblTranscriberTransApiKey" for="optTranscriberTransApiKey" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🔑 Ключ Gemini API (для перевода):
+                </label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <div class="apikey-input-wrap" style="flex: 1;">
+                    <input type="password" id="optTranscriberTransApiKey" class="form-input apikey-input" placeholder="AIzaSy..." autocomplete="off">
+                    <button type="button" class="apikey-eye-btn" data-target="optTranscriberTransApiKey" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
+                  </div>
+                  <a id="linkTranscriberTransApiKey" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center;">
+                    Google AI Studio ↗
+                  </a>
+                </div>
+                <small id="hintTranscriberTransApiKey" class="form-hint" style="margin-top: 4px; display: block;">
+                  Используется для перевода текста через Gemini.
+                </small>
+              </div>
+
+              <!-- Item 6: No Translation Checkbox -->
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); user-select: none;">
+                  <input type="checkbox" id="optTranscriberNoTranslate">
+                  <span data-i18n="transcriber.no_translate_lbl">Результат распознавания без перевода</span>
+                </label>
+              </div>
+
+              <!-- Item 7: Target Language Selection -->
+              <div class="form-group" id="groupTranscriberTargetLang" style="margin-bottom: 5px; transition: opacity 0.2s ease;">
+                <label for="optTranscriberTargetLang" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;" data-i18n="transcriber.target_lang">
+                  🌐 Целевой язык перевода / Target Language:
+                </label>
+                <select id="optTranscriberTargetLang" class="form-input" style="cursor: pointer; width: 100%;"></select>
+                <small class="form-hint" style="margin-top: 4px; display: block;" data-i18n="transcriber.target_lang_hint">
+                  Язык, НА который переводить речь (язык оригинала определяется автоматически)
+                </small>
               </div>
             </div>
           </div>
 
-          <!-- Gemini TTS / Speech Synthesis — collapsible frame (closed by default) -->
-          <!-- Gemini TTS / Speech Synthesis — collapsible frame (closed by default) -->
+          <!-- Speech Synthesis — collapsible frame (closed by default) -->
           <div class="apikeys-frame collapsed" id="geminiTtsFrame" style="margin-bottom: 14px;">
             <div class="apikeys-frame-header" id="geminiTtsToggle">
-              <span class="apikeys-frame-title" data-i18n="transcriber.tts_frame_title">🔊 Синтез речи (эксперементальная функция)</span>
+              <span class="apikeys-frame-title" data-i18n="transcriber.tts_frame_title">🔊 Синтез речи</span>
               <span class="apikeys-frame-actions">
                 <!-- TTS Voice Upload Background Task Indicator (Settings) -->
                 <div id="settingsTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" role="status" tabindex="0" onclick="event.stopPropagation();">
@@ -2314,15 +2392,18 @@
                   🎙️ Движок синтеза речи:
                 </label>
                 <select id="optTtsEngine" class="form-input" style="cursor: pointer; width: 100%;">
-                  <option value="gemini" selected data-i18n="transcriber.tts_engine_gemini">Gemini API (AI — Нейросетевой)</option>
-                  <option value="piper" data-i18n="transcriber.tts_engine_piper">Локальный Piper TTS</option>
-                  <option value="browser" data-i18n="transcriber.tts_engine_browser">System TTS (Web Speech API)</option>
+                  <option value="piper" selected data-i18n="transcriber.tts_engine_piper">Piper TTS (local)</option>
+                  <option value="edge" data-i18n="transcriber.tts_engine_edge">Edge TTS (Microsoft, network)</option>
+                  <option value="silero" data-i18n="transcriber.tts_engine_silero">Silero TTS v5 (local)</option>
+                  <option value="browser" data-i18n="transcriber.tts_engine_browser">System TTS (local)</option>
+                  <option value="gemini" data-i18n="transcriber.tts_engine_gemini">* Gemini API</option>
+                  <option value="groq" data-i18n="transcriber.tts_engine_groq">* Groq Cloud TTS</option>
                 </select>
               </div>
 
               <!-- Model select -->
               <div class="form-group" id="groupGeminiTtsModel" style="margin-bottom: 10px;">
-                <label for="optTtsModel" data-i18n="transcriber.tts_model_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                <label for="optTtsModel" id="lblTtsModel" data-i18n="transcriber.tts_model_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
                   🤖 Модель Gemini TTS:
                 </label>
                 <select id="optTtsModel" class="form-input" style="cursor: pointer; width: 100%;"></select>
@@ -2407,44 +2488,6 @@
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- Model Selection: Transcription / Translation -->
-          <div class="form-group" style="margin-bottom: 14px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <label for="optTranscriberModel" data-i18n="transcriber.model" style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); margin: 0;">
-                🤖 Модель Gemini для транскрибации и перевода:
-              </label>
-              <button type="button" id="btnFetchTranscriberModels" class="btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" data-i18n="transcriber.btn_fetch_models">
-                🔄 Запросить доступные модели
-              </button>
-            </div>
-            <select id="optTranscriberModel" class="form-input" style="cursor: pointer; width: 100%;"></select>
-            <small class="form-hint" style="margin-top: 5px;" data-i18n="transcriber.model_hint">
-              Только модели, поддерживающие распознавание речи и синхронный перевод
-            </small>
-          </div>
-
-          <!-- No Translation Checkbox (Transcription only) -->
-          <div class="form-group" style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; font-weight: 600; color: var(--text-primary); user-select: none;">
-              <input type="checkbox" id="optTranscriberNoTranslate">
-              <span data-i18n="transcriber.no_translate">Без перевода (транскрипция на языке оригинала речи)</span>
-            </label>
-            <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="transcriber.no_translate_hint">
-              Записывать речь дословно на языке оригинала без перевода
-            </small>
-          </div>
-
-          <!-- Target Language Selection -->
-          <div class="form-group" id="groupTranscriberTargetLang" style="margin-bottom: 20px; transition: opacity 0.2s ease;">
-            <label for="optTranscriberTargetLang" style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;" data-i18n="transcriber.target_lang">
-              🌐 Целевой язык перевода / Target Language:
-            </label>
-            <select id="optTranscriberTargetLang" class="form-input" style="cursor: pointer; width: 100%;"></select>
-            <small class="form-hint" style="margin-top: 5px;" data-i18n="transcriber.target_lang_hint">
-              Язык, НА который переводить речь (язык оригинала модель Gemini определяет автоматически и выводит бейджем)
-            </small>
           </div>
 
           <div class="modal-footer" style="padding-top: 10px; display: flex; justify-content: flex-end; gap: 10px;">
@@ -4282,6 +4325,263 @@
     </div>
   </div>
 
+  <!-- Floating Mini Notification Window for System Updates -->
+  <div id="systemUpdateBanner" class="system-update-banner" style="display: none;">
+    <div class="system-update-banner-header">
+      <div class="system-update-banner-title">
+        <span class="system-update-banner-icon">🚀</span>
+        <span id="systemBannerVerTitle" data-i18n="updates.banner_title">Доступно обновление ProxDMR</span>
+      </div>
+      <button type="button" id="btnCloseUpdateBanner" class="system-update-banner-close" title="Закрыть" aria-label="Close">&times;</button>
+    </div>
+    <div class="system-update-banner-body">
+      <div class="system-update-banner-desc" id="systemBannerDesc" data-i18n="updates.banner_desc">
+        Вышла новая версия ProxDMR. Ознакомьтесь с изменениями или запустите обновление.
+      </div>
+      <div class="system-update-banner-dismiss">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.76rem; color: #8b949e;">
+          <input type="checkbox" id="chkDismissUntilNextVer" style="width: 14px; height: 14px; accent-color: #3498db; cursor: pointer;">
+          <span data-i18n="updates.dismiss_until_next">Не оповещать до следующей версии</span>
+        </label>
+      </div>
+    </div>
+    <div class="system-update-banner-actions">
+      <button type="button" id="btnOpenChangelogFromBanner" class="btn-secondary system-update-btn-changelog" style="flex: 1; padding: 6px 10px; font-size: 0.8rem; cursor: pointer;">
+        <span data-i18n="updates.view_changes">Что нового</span>
+      </button>
+      <button type="button" id="btnApplyUpdateFromBanner" class="btn-primary system-update-btn-apply" style="flex: 1; padding: 6px 10px; font-size: 0.8rem; font-weight: 700; cursor: pointer; background: #e74c3c; border-color: #c0392b; display: {% if is_admin %}block{% else %}none{% endif %};">
+        <span data-i18n="updates.apply_btn">Обновить</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Multilingual Changelog Modal (Fullscreen on smartphones) -->
+  <div id="systemChangelogModal" class="modal-backdrop system-changelog-backdrop" style="display: none;">
+    <div class="system-changelog-window">
+      <!-- Modal Header -->
+      <div class="system-changelog-header">
+        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+          <span style="font-size: 1.2rem;">📋</span>
+          <h3 id="systemChangelogModalTitle" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="updates.modal_title">
+            Что нового в ProxDMR
+          </h3>
+        </div>
+        <button type="button" id="btnCloseChangelogModal" class="modal-close-btn" style="background: none; border: none; font-size: 1.5rem; color: #8b949e; cursor: pointer; padding: 0 4px; line-height: 1;">&times;</button>
+      </div>
+
+      <!-- Language Selector Bar (7 Languages Pills) -->
+      <div class="system-changelog-lang-bar">
+        <button type="button" class="changelog-lang-pill active" data-lang="ru">🇷🇺 Русский</button>
+        <button type="button" class="changelog-lang-pill" data-lang="en">🇬🇧 English</button>
+        <button type="button" class="changelog-lang-pill" data-lang="uk">🇺🇦 Українська</button>
+        <button type="button" class="changelog-lang-pill" data-lang="de">🇩🇪 Deutsch</button>
+        <button type="button" class="changelog-lang-pill" data-lang="es">🇪🇸 Español</button>
+        <button type="button" class="changelog-lang-pill" data-lang="fr">🇫🇷 Français</button>
+        <button type="button" class="changelog-lang-pill" data-lang="it">🇮🇹 Italiano</button>
+      </div>
+
+      <!-- Modal Body (Scrollable, formatted notes) -->
+      <div class="system-changelog-body" id="systemChangelogContent">
+        <div style="text-align: center; color: #8b949e; padding: 30px 10px;">
+          Загрузка информации об обновлении...
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="system-changelog-footer">
+        <button type="button" id="btnChangelogCloseBottom" class="btn-secondary" style="padding: 8px 16px; font-size: 0.85rem;" data-i18n="updates.modal_close">
+          Закрыть
+        </button>
+        <button type="button" id="btnApplyUpdateFromModal" class="btn-primary" style="padding: 8px 18px; font-size: 0.85rem; font-weight: 700; background: #e74c3c; border-color: #c0392b; display: flex; align-items: center; gap: 6px; display: {% if is_admin %}flex{% else %}none{% endif %};">
+          <span>⚡</span> <span data-i18n="updates.apply_btn">Обновить сейчас</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .system-update-banner {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 330px;
+      max-width: calc(100vw - 32px);
+      background: var(--bg-card, #1c2128);
+      border: 1px solid var(--border-color, #30363d);
+      border-radius: 12px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+      z-index: 9999;
+      padding: 14px 16px;
+      box-sizing: border-box;
+      animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (max-width: 600px) {
+      .system-update-banner {
+        bottom: 12px;
+        right: 12px;
+        left: 12px;
+        width: auto;
+        max-width: none;
+      }
+    }
+    .system-update-banner-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .system-update-banner-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--text-primary, #fff);
+    }
+    .system-update-banner-icon {
+      font-size: 1.1rem;
+    }
+    .system-update-banner-close {
+      background: none;
+      border: none;
+      color: var(--text-muted, #8b949e);
+      font-size: 1.3rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+      border-radius: 4px;
+    }
+    .system-update-banner-close:hover {
+      color: var(--text-primary, #fff);
+    }
+    .system-update-banner-desc {
+      font-size: 0.8rem;
+      color: var(--text-secondary, #a4b0be);
+      line-height: 1.4;
+      margin-bottom: 10px;
+    }
+    .system-update-banner-dismiss {
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .system-update-banner-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .system-changelog-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 10005;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .system-changelog-window {
+      width: 720px;
+      max-width: 95vw;
+      max-height: 88vh;
+      background: var(--bg-card, #161b22);
+      border: 1px solid var(--border-color, #30363d);
+      border-radius: 12px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-sizing: border-box;
+      animation: fadeInModal 0.25s ease-out;
+    }
+    .system-changelog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color, #30363d);
+      background: rgba(0, 0, 0, 0.15);
+    }
+    .system-changelog-lang-bar {
+      display: flex;
+      gap: 6px;
+      padding: 8px 14px;
+      background: rgba(0, 0, 0, 0.25);
+      border-bottom: 1px solid var(--border-color, #30363d);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+    .changelog-lang-pill {
+      padding: 4px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--border-color, #30363d);
+      background: #21262d;
+      color: #c9d1d9;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .changelog-lang-pill:hover {
+      background: #30363d;
+      color: #fff;
+    }
+    .changelog-lang-pill.active {
+      background: #238636;
+      border-color: #2ea043;
+      color: #fff;
+    }
+    .system-changelog-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      color: var(--text-primary, #e6edf3);
+      -webkit-overflow-scrolling: touch;
+    }
+    .system-changelog-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border-color, #30363d);
+      background: rgba(0, 0, 0, 0.15);
+    }
+    @media (max-width: 768px) {
+      .system-changelog-backdrop {
+        padding: 0 !important;
+      }
+      .system-changelog-window {
+        width: 100vw !important;
+        height: 100% !important;
+        height: 100dvh !important;
+        max-width: 100vw !important;
+        max-height: 100dvh !important;
+        border-radius: 0 !important;
+        border: none !important;
+        margin: 0 !important;
+      }
+      .system-changelog-header {
+        padding: 12px 14px;
+      }
+      .system-changelog-body {
+        padding: 12px 14px;
+        font-size: 0.85rem;
+      }
+      .system-changelog-footer {
+        padding: 10px 14px;
+      }
+    }
+  </style>
+
   <!-- Scripts -->
   <script src="/static/js/i18n.js?v=2.9.247"></script>
   <script src="/static/js/audio-player.js?v=2.9.172"></script>
@@ -4292,7 +4592,7 @@
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.193"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.271"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.278"></script>
 </body>
 </html>
 

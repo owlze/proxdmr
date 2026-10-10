@@ -27,7 +27,7 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js';
+} from './modules/dmr/transcriber.js?v=2.9.278';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js';
 import { initAndroidBridge } from './modules/core/android.js';
@@ -36,6 +36,7 @@ import { initAuth, initAccountManager } from './modules/settings/account.js';
 import { initLanguageManager } from './modules/settings/language.js';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
 import { initGeneralSettings } from './modules/settings/general.js?v=2.9.261';
+import { initSystemUpdater } from './modules/settings/system-updater.js';
 import { initOrientationLock } from './modules/ui/orientation.js';
 import {
   initQuickAssign,
@@ -397,6 +398,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.ProxDMRAdmin && window.ProxDMRAdmin.init) window.ProxDMRAdmin.init();
   initHamQthSettings();
   initGeneralSettings();
+  initSystemUpdater();
   initApkUpdater();
   initSlotTranscribeState();
   initTranscriberSettings();

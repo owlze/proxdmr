@@ -7,7 +7,7 @@ import { getCountryInfo, updateFlagElement } from '../core/formatters.js';
 import { updateAllHotspotRecUI } from '../audio/routing.js';
 import { initAudio, applyTxDspSettings, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js';
 import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js';
-import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js';
+import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, getRogerBeepDurationMs, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js';
 import { triggerHaptic } from '../core/haptic.js';
 
 let txStartTime = 0;
@@ -19,6 +19,8 @@ function getTotRemainingSeconds() {
   return totRemainingSeconds;
 }
 
+let isPttReleasing = false;
+let pttReleaseTimer = null;
 let txSilenceInterval = null;
 const SILENCE_BURST_BYTES = 960; // 60ms @ 8000Hz 16-bit PCM = 480 samples = 960 bytes
 
@@ -293,6 +295,9 @@ function _isVolumeDownPttEnabled() {
   let cancelTransmissionStart = false;
 
   async function startTransmission(targetHotspotId = null, targetSlotParam = null) {
+    if (isPttReleasing) {
+      finalizeTransmissionRelease(targetHotspotId || window.activeTxHotspotId || window.activeHotspotId);
+    }
   window.startTransmission = startTransmission;
     if (window.isPttPressed || isTransmissionStarting) return;
     if (window.isSwl) {
@@ -523,46 +528,17 @@ function _isVolumeDownPttEnabled() {
     }
   }
 
-  function stopTransmission() {
-  window.stopTransmission = stopTransmission;
-    if (isTransmissionStarting) {
-      cancelTransmissionStart = true;
+  function finalizeTransmissionRelease(hid = null) {
+    if (pttReleaseTimer) {
+      clearTimeout(pttReleaseTimer);
+      pttReleaseTimer = null;
     }
-    stopTxSilenceFallback();
-    if (!window.isPttPressed) return;
+    isPttReleasing = false;
+    window.isPttReleasing = false;
     window.isPttPressed = false;
-    const hid = window.activeTxHotspotId || window.activeHotspotId;
+    const targetHid = hid || window.activeTxHotspotId || window.activeHotspotId;
     window.activeTxHotspotId = null;
     updateAllHotspotRecUI();
-
-    if (totCountdownInterval) {
-      clearInterval(totCountdownInterval);
-      totCountdownInterval = null;
-    }
-    totRemainingSeconds = null;
-
-    if (window.workletNode && window.workletNode.port) {
-      window.workletNode.port.postMessage({ command: "set_active", active: false });
-    }
-    // Note: We do NOT set track.enabled = false here. Toggling MediaStreamTrack.enabled
-    // causes Chromium Bug 1238697 where MediaStreamAudioSourceNode permanently silences on
-    // subsequent PTT cycles. Microphone privacy & gating is 100% enforced by window.isPttPressed
-    // and worklet isActive = false.
-
-    // PTT Mute release (+1s tail): Keep muted during transmission + 1 second after release
-    if (_isMuteOnPttEnabled() && window.isPttMuteActive) {
-      if (window.pttMuteReleaseTimer) {
-        clearTimeout(window.pttMuteReleaseTimer);
-      }
-      window.pttMuteReleaseTimer = setTimeout(() => {
-        window.isPttMuteActive = false;
-        window.pttMuteReleaseTimer = null;
-        if (window.audioPlayer && window.audioPlayer.setPttMuted) {
-          window.audioPlayer.setPttMuted(false);
-        }
-        _updateAllVolumeAndMuteUI();
-      }, 1000);
-    }
 
     document.querySelectorAll(".ptt-button").forEach(b => b.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2"));
     document.querySelectorAll(".radio-container").forEach(card => {
@@ -584,15 +560,15 @@ function _isVolumeDownPttEnabled() {
     }
     document.querySelectorAll(".vfo-row").forEach(r => r.classList.remove("vfo-tx-active"));
     document.querySelectorAll(".vfo-tx-tag").forEach(t => t.classList.remove("active"));
-    const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+    const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`);
     if (activeCard) {
       _updateCardTgDisplay(activeCard);
     }
 
     stopVuMeter();
 
-    const txSlot = _getHotspotSlot(hid) || 1;
-    const st = getVuState(hid, txSlot);
+    const txSlot = _getHotspotSlot(targetHid) || 1;
+    const st = getVuState(targetHid, txSlot);
     st.mode = "IDLE";
     st.target = 0;
     ensureVuMeterLoop();
@@ -604,16 +580,50 @@ function _isVolumeDownPttEnabled() {
         console.warn("[AndroidBridge] updateRadioStatus standby failed:", err);
       }
     }
+  }
+
+  function stopTransmission() {
+    window.stopTransmission = stopTransmission;
+    if (isTransmissionStarting) {
+      cancelTransmissionStart = true;
+    }
+    stopTxSilenceFallback();
+    if (!window.isPttPressed || isPttReleasing) return;
+
+    const hid = window.activeTxHotspotId || window.activeHotspotId;
+
+    if (totCountdownInterval) {
+      clearInterval(totCountdownInterval);
+      totCountdownInterval = null;
+    }
+    totRemainingSeconds = null;
+
+    // Immediately stop microphone capture so room audio is not transmitted
+    if (window.workletNode && window.workletNode.port) {
+      window.workletNode.port.postMessage({ command: "set_active", active: false });
+    }
+
+    // PTT Mute release (+1s tail): Keep muted during transmission + 1 second after release
+    if (_isMuteOnPttEnabled() && window.isPttMuteActive) {
+      if (window.pttMuteReleaseTimer) {
+        clearTimeout(window.pttMuteReleaseTimer);
+      }
+      window.pttMuteReleaseTimer = setTimeout(() => {
+        window.isPttMuteActive = false;
+        window.pttMuteReleaseTimer = null;
+        if (window.audioPlayer && window.audioPlayer.setPttMuted) {
+          window.audioPlayer.setPttMuted(false);
+        }
+        _updateAllVolumeAndMuteUI();
+      }, 1000);
+    }
 
     triggerTactileVibrate([25, 25, 25]);
 
     const rogerBeep = getHotspotRogerBeep(hid);
     const rogerBeepPattern = rogerBeep ? getHotspotRogerBeepPattern(hid) : "";
 
-    if (rogerBeep) {
-      playLocalRogerBeep(rogerBeepPattern);
-    }
-
+    // Send ptt_release WebSocket message immediately so server begins roger beep + 0.5s tail transmission
     if (window.ws && window.ws.readyState === WebSocket.OPEN) {
       window.ws.send(JSON.stringify({
         type: "ptt_release",
@@ -622,7 +632,41 @@ function _isVolumeDownPttEnabled() {
         roger_beep_pattern: rogerBeepPattern
       }));
     }
+
+    if (rogerBeep) {
+      isPttReleasing = true;
+      window.isPttReleasing = true;
+      playLocalRogerBeep(rogerBeepPattern);
+      const beepDur = (typeof getRogerBeepDurationMs === "function")
+        ? getRogerBeepDurationMs(rogerBeepPattern)
+        : 160;
+      // Requirement: prolong transmission by Roger Beep duration + 1.0s (1000ms) tail
+      const totalExtensionMs = beepDur + 1000;
+
+      // Update mode badge to indicate transmitting Roger Beep tail
+      const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(hid)}"]`);
+      const mb = activeCard ? activeCard.querySelector(".mode-badge") : document.getElementById("modeBadge");
+      if (mb) {
+        const slot = _getHotspotSlot(hid) || 1;
+        mb.textContent = `TX TS${slot}`;
+      }
+
+      // Safety timeout: finalize release after extension (+150ms grace) if server state_change wasn't received
+      if (pttReleaseTimer) clearTimeout(pttReleaseTimer);
+      pttReleaseTimer = setTimeout(() => {
+        finalizeTransmissionRelease(hid);
+      }, totalExtensionMs + 150);
+    } else {
+      finalizeTransmissionRelease(hid);
+    }
   }
+
+  window.onServerTxEnded = function(msg) {
+    if (isPttReleasing || window.isPttPressed) {
+      const hid = (msg && msg.hotspot_id) || window.activeTxHotspotId || window.activeHotspotId;
+      finalizeTransmissionRelease(hid);
+    }
+  };
 
   window.startTransmission = startTransmission;
   window.stopTransmission = stopTransmission;
@@ -635,6 +679,7 @@ function _isVolumeDownPttEnabled() {
       return;
     }
     if (isDown) {
+      if (isPttReleasing) finalizeTransmissionRelease(hid);
       const conn = checkPttConnectionStatus(hid);
       if (!conn.ok) {
         notifyPttConnectionBlocked(conn);

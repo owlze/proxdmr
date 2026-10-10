@@ -5,9 +5,16 @@ import {
   renderTranscriptionSummary,
   updateLogTranscriptionPopoverIfActive
 } from './transcription.js';
-import { resolveHotspotId, scheduleSyncClientSettings, pushNavState } from '../core/state.js';
-import { getHotspotMute, setHotspotMute, getSoloMutedSet, saveSoloMutedSet, updateHotspotCardMuteUI } from '../audio/routing.js';
-import { triggerHaptic } from '../core/haptic.js';
+import {
+  getHotspotMute,
+  getPersistentHotspotMute,
+  setHotspotMute,
+  getSoloMutedSet,
+  saveSoloMutedSet,
+  updateHotspotCardMuteUI,
+  getHotspotTsAudioMode,
+  setHotspotTsAudioMode
+} from '../audio/routing.js';
 
 /**
  * ProxDMR AI Speech Transcriber & Teleprompter Module
@@ -38,19 +45,102 @@ function renderLogList() {
 
 // --- AI Speech Transcriber & Teleprompter Functions ---
 
+if (!window.transcriberKeysCache) {
+  window.transcriberKeysCache = {};
+}
+try {
+  window.transcriberKeysCache.gemini = localStorage.getItem("proxdmr_key_gemini") || "";
+  window.transcriberKeysCache.groq = localStorage.getItem("proxdmr_key_groq") || "";
+  window.transcriberKeysCache.deepgram = localStorage.getItem("proxdmr_key_deepgram") || "";
+} catch (_) {}
+
+export function getCachedTranscriberKey(engine) {
+  if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+  let k = window.transcriberKeysCache[engine];
+  if (!k && window.transcriberSettings) {
+    if (engine === "gemini") k = window.transcriberSettings.api_key;
+    else if (engine === "groq") k = window.transcriberSettings.groq_api_key;
+    else if (engine === "deepgram") k = window.transcriberSettings.deepgram_api_key;
+  }
+  if (!k) {
+    try {
+      k = localStorage.getItem(`proxdmr_key_${engine}`) || "";
+    } catch (_) {}
+  }
+  return (k || "").trim();
+}
+
+export function setTranscriberKey(engine, key) {
+  const clean = (key || "").trim();
+  if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+  window.transcriberKeysCache[engine] = clean;
+  try {
+    localStorage.setItem(`proxdmr_key_${engine}`, clean);
+  } catch (_) {}
+  if (window.transcriberSettings) {
+    if (engine === "gemini") window.transcriberSettings.api_key = clean;
+    else if (engine === "groq") window.transcriberSettings.groq_api_key = clean;
+    else if (engine === "deepgram") window.transcriberSettings.deepgram_api_key = clean;
+  }
+}
+
+window.getCachedTranscriberKey = getCachedTranscriberKey;
+window.setTranscriberKey = setTranscriberKey;
+
 window.transcriberSettings = {
   enabled: true,
+  transcriber_engine: "groq",
+  translation_engine: "groq",
   api_key: "",
+  groq_api_key: "",
+  deepgram_api_key: "",
   model: "gemini-3.5-flash",
   target_lang: "ru",
   tts_enabled: false,
-  tts_engine: "gemini",
+  tts_engine: "piper",
   tts_model: "gemini-3.1-flash-tts-preview",
-  tts_voice: "auto",
+  tts_voice: "ru_RU-terra5871-medium",
   tts_speed: 1.1,
   tts_ducking_level: 0.80,
   tts_mute_others: true,
   tts_announce_callsign: false
+};
+
+try {
+  window.transcriberSettings.api_key = localStorage.getItem("proxdmr_key_gemini") || "";
+  window.transcriberSettings.groq_api_key = localStorage.getItem("proxdmr_key_groq") || "";
+  window.transcriberSettings.deepgram_api_key = localStorage.getItem("proxdmr_key_deepgram") || "";
+  const lsRec = localStorage.getItem("proxdmr_rec_engine");
+  if (lsRec) window.transcriberSettings.transcriber_engine = lsRec;
+  const lsTrans = localStorage.getItem("proxdmr_trans_engine");
+  if (lsTrans) window.transcriberSettings.translation_engine = lsTrans;
+} catch (_) {}
+
+window.onTranscriberSettingsUpdate = function(settings) {
+  if (!settings) return;
+  window.transcriberSettings = Object.assign({}, window.transcriberSettings, settings);
+  if (settings.api_key) setTranscriberKey("gemini", settings.api_key);
+  if (settings.groq_api_key) setTranscriberKey("groq", settings.groq_api_key);
+  if (settings.deepgram_api_key) setTranscriberKey("deepgram", settings.deepgram_api_key);
+  if (settings.transcriber_engine) {
+    try { localStorage.setItem("proxdmr_rec_engine", settings.transcriber_engine); } catch (_) {}
+  }
+  if (settings.translation_engine) {
+    try { localStorage.setItem("proxdmr_trans_engine", settings.translation_engine); } catch (_) {}
+  }
+  const optRecEng = document.getElementById("optTranscriberEngine");
+  if (optRecEng && settings.transcriber_engine) {
+    optRecEng.value = settings.transcriber_engine;
+    if (typeof updateRecApiKeyUI === "function") updateRecApiKeyUI(settings.transcriber_engine);
+  }
+  const optTransEng = document.getElementById("optTranslationEngine");
+  if (optTransEng && settings.translation_engine) {
+    optTransEng.value = settings.translation_engine;
+    if (typeof updateTransApiKeyUI === "function") updateTransApiKeyUI(settings.translation_engine);
+  }
+  if (typeof refreshAllSlotTtsBadges === "function") {
+    refreshAllSlotTtsBadges();
+  }
 };
 
 export const TTS_TEST_PHRASES = {
@@ -579,7 +669,8 @@ function updateSlotTtsBadge(row, slot, isActive, customLangCode = null) {
     lang3 = get3LetterLangCode(customLangCode);
   } else {
     const s = window.transcriberSettings || {};
-    const isNoTranslate = (s.target_lang === "none") || (document.getElementById("optTranscriberNoTranslate")?.checked) || false;
+    const optNoTrEl = document.getElementById("optTranscriberNoTranslate");
+    const isNoTranslate = (s.target_lang === "none") || Boolean(optNoTrEl && optNoTrEl.checked);
     if (isNoTranslate) {
       lang3 = "RAW";
     } else if (s.target_lang && s.target_lang !== "none") {
@@ -622,7 +713,8 @@ function refreshAllSlotTtsBadges(customLangCode = null) {
       recLang3 = get3LetterLangCode(customLangCode);
     } else {
       const s = window.transcriberSettings || {};
-      const isNoTranslate = (s.target_lang === "none") || (document.getElementById("optTranscriberNoTranslate")?.checked) || false;
+      const optNoTrEl = document.getElementById("optTranscriberNoTranslate");
+      const isNoTranslate = (s.target_lang === "none") || Boolean(optNoTrEl && optNoTrEl.checked);
       if (isNoTranslate) {
         recLang3 = "RAW";
       } else if (s.target_lang && s.target_lang !== "none") {
@@ -708,17 +800,19 @@ function syncTtsSoloMode() {
           if (soloSet.has(slotKey)) {
             soloSet.delete(slotKey);
           }
-          if (getHotspotMute(hid, slot)) {
-            setHotspotMute(hid, slot, false);
+          const getMuteFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
+          if (getMuteFn(hid, slot)) {
+            setHotspotMute(hid, slot, false, true);
           }
         } else {
           // This is an other channel.
-          // If not already muted, mute it and record in soloSet!
-          const currentlyMuted = getHotspotMute(hid, slot);
-          if (!currentlyMuted) {
+          // Set temporary mute (isTemporary = true) so it does NOT affect localStorage or server DB
+          const getPersistFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
+          const wasAlreadyMuted = getPersistFn(hid, slot);
+          if (!wasAlreadyMuted) {
             soloSet.add(slotKey);
-            setHotspotMute(hid, slot, true);
           }
+          setHotspotMute(hid, slot, true, true);
         }
       });
     });
@@ -727,7 +821,7 @@ function syncTtsSoloMode() {
     }
   } else {
     // Solo is NOT active (either soloEnabled is false or no slots have TTS enabled)
-    // Restore all channels that were muted by Solo mode
+    // Restore all channels that were muted by Solo mode back to their persistent states
     if (soloSet.size > 0) {
       const toRestore = Array.from(soloSet);
       soloSet.clear();
@@ -739,7 +833,10 @@ function syncTtsSoloMode() {
         if (idx !== -1) {
           const hid = slotKey.substring(0, idx);
           const slot = parseInt(slotKey.substring(idx + 3), 10) || 1;
-          setHotspotMute(hid, slot, false);
+          const wasPersistentMuted = (typeof getPersistentHotspotMute === "function")
+            ? getPersistentHotspotMute(hid, slot)
+            : false;
+          setHotspotMute(hid, slot, wasPersistentMuted, true);
         }
       });
       if (typeof updateHotspotCardMuteUI === "function") {
@@ -755,6 +852,30 @@ function syncTtsSoloMode() {
 }
 window.syncTtsSoloMode = syncTtsSoloMode;
 if (window.__proxdmr) window.__proxdmr.syncTtsSoloMode = syncTtsSoloMode;
+
+export function isAnySlotTtsActive() {
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const hidSet = new Set();
+  hidSet.add(resolveHotspotId("default"));
+  if (Array.isArray(hsList)) {
+    hsList.forEach(hs => {
+      if (hs && hs.id) hidSet.add(resolveHotspotId(hs.id));
+    });
+  }
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".radio-container[data-hotspot-id]").forEach(el => {
+      if (el.dataset.hotspotId) hidSet.add(resolveHotspotId(el.dataset.hotspotId));
+    });
+  }
+  for (const hid of hidSet) {
+    if (isSlotTtsActive(hid, 1) || isSlotTtsActive(hid, 2)) {
+      return true;
+    }
+  }
+  return false;
+}
+window.isAnySlotTtsActive = isAnySlotTtsActive;
+if (window.__proxdmr) window.__proxdmr.isAnySlotTtsActive = isAnySlotTtsActive;
 
 
 let activeTtsPopoverOverlay = null;
@@ -873,6 +994,122 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
     if (hintEl) {
       hintEl.style.display = "none";
       hintEl.textContent = "";
+    }
+    return;
+  }
+
+  if (eng === "groq") {
+    selectEl.innerHTML = "";
+    selectEl.disabled = false;
+    const isArabic = (currentVoiceValue && ["fahad", "sultan", "noura", "lulwa", "aisha"].includes(currentVoiceValue));
+    const groqVoices = isArabic ? [
+      { value: "fahad", label: "Fahad — Мужской (Arabic Saudi)" },
+      { value: "sultan", label: "Sultan — Мужской (Arabic Saudi)" },
+      { value: "noura", label: "Noura — Женский (Arabic Saudi)" },
+      { value: "lulwa", label: "Lulwa — Женский (Arabic Saudi)" },
+      { value: "aisha", label: "Aisha — Женский (Arabic Saudi)" }
+    ] : [
+      { value: "troy", label: "Troy — Мужской (US, выразительный)" },
+      { value: "hannah", label: "Hannah — Женский (US, выразительный)" },
+      { value: "autumn", label: "Autumn — Женский (US, спокойный)" },
+      { value: "diana", label: "Diana — Женский (US, деловой)" },
+      { value: "austin", label: "Austin — Мужской (US, энергичный)" },
+      { value: "daniel", label: "Daniel — Мужской (US, дикторский)" }
+    ];
+    groqVoices.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v.value;
+      opt.textContent = v.label;
+      selectEl.appendChild(opt);
+    });
+    if (currentVoiceValue && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
+      selectEl.value = currentVoiceValue;
+    } else {
+      selectEl.value = groqVoices[0].value;
+    }
+    if (hintEl) {
+      hintEl.style.display = "block";
+      hintEl.textContent = window.t
+        ? window.t("transcriber.groq_tts_hint", {}, "Сверхбыстрый синтез Groq Orpheus TTS. Использует API-ключ Groq.")
+        : "Сверхбыстрый синтез Groq Orpheus TTS. Использует API-ключ Groq.";
+    }
+    return;
+  }
+
+  if (eng === "edge") {
+    selectEl.innerHTML = "";
+    selectEl.disabled = false;
+    let edgeVoices = [];
+    try {
+      const resp = await fetch(`/api/transcriber/edge/voices?lang=${encodeURIComponent(lang)}`);
+      const data = await resp.json();
+      if (data && data.voices) edgeVoices = data.voices;
+    } catch (_) {}
+    if (!edgeVoices || edgeVoices.length === 0) {
+      edgeVoices = (lang === "ru") ? [
+        { id: "ru-RU-SvetlanaNeural", name: "Светлана (Женский, нейросеть)" },
+        { id: "ru-RU-DmitryNeural", name: "Дмитрий (Мужской, нейросеть)" }
+      ] : [
+        { id: "en-US-JennyNeural", name: "Jenny (Female, US)" },
+        { id: "en-US-GuyNeural", name: "Guy (Male, US)" }
+      ];
+    }
+    edgeVoices.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v.id;
+      opt.textContent = v.name;
+      selectEl.appendChild(opt);
+    });
+    if (currentVoiceValue && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
+      selectEl.value = currentVoiceValue;
+    } else {
+      selectEl.value = edgeVoices[0].id;
+    }
+    if (hintEl) {
+      hintEl.style.display = "block";
+      hintEl.textContent = window.t
+        ? window.t("transcriber.edge_tts_hint", {}, "Высококачественный нейросетевой синтез Microsoft Edge TTS (бесплатно, без API-ключей).")
+        : "Высококачественный нейросетевой синтез Microsoft Edge TTS (бесплатно, без API-ключей).";
+    }
+    return;
+  }
+
+  if (eng === "silero") {
+    selectEl.innerHTML = "";
+    selectEl.disabled = false;
+    let sileroVoices = [];
+    try {
+      const resp = await fetch(`/api/transcriber/silero/voices?lang=${encodeURIComponent(lang)}`);
+      const data = await resp.json();
+      if (data && data.voices) sileroVoices = data.voices;
+    } catch (_) {}
+    if (!sileroVoices || sileroVoices.length === 0) {
+      sileroVoices = (lang === "ru") ? [
+        { id: "kseniya", name: "Ксения (Женский, v5)" },
+        { id: "aidar", name: "Айдар (Мужской, v5)" },
+        { id: "baya", name: "Бая (Женский, v5)" },
+        { id: "eugene", name: "Евгений (Мужской, v5)" },
+        { id: "xenia", name: "Ксения 2 (Женский, v5)" }
+      ] : [
+        { id: "kseniya", name: "Kseniya (v5)" }
+      ];
+    }
+    sileroVoices.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v.id;
+      opt.textContent = v.name;
+      selectEl.appendChild(opt);
+    });
+    if (currentVoiceValue && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
+      selectEl.value = currentVoiceValue;
+    } else {
+      selectEl.value = sileroVoices[0].id;
+    }
+    if (hintEl) {
+      hintEl.style.display = "block";
+      hintEl.textContent = window.t
+        ? window.t("transcriber.silero_tts_hint", {}, "Локальный автономный синтез Silero TTS v5 на CPU сервера (с авто-ударениями).")
+        : "Локальный автономный синтез Silero TTS v5 на CPU сервера (с авто-ударениями).";
     }
     return;
   }
@@ -1220,9 +1457,9 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   popup.className = "tts-quick-settings-popup";
 
   const s = window.transcriberSettings || {};
-  const curEngine = s.tts_engine || "gemini";
-  const curModel = s.tts_model || "gemini-3.1-flash-tts-preview";
-  const curVoice = s.tts_voice || "auto";
+  const curEngine = (s.tts_engine && ["gemini", "groq", "piper", "browser", "edge", "silero"].includes(s.tts_engine)) ? s.tts_engine : "piper";
+  const curModel = s.tts_model || (curEngine === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview");
+  const curVoice = s.tts_voice || (curEngine === "piper" ? "ru_RU-terra5871-medium" : "auto");
   const rawDuck = (s.tts_ducking_level !== undefined) ? s.tts_ducking_level : 0.80;
   const duckLevel = (rawDuck === 0.05) ? 0.80 : rawDuck;
   const duckPercent = Math.round(duckLevel * 100);
@@ -1279,29 +1516,41 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   rowEngine.innerHTML = `
     <label class="tts-quick-label">${window.t ? window.t("transcriber.tts_engine_lbl", {}, "🎙️ Движок синтеза речи:") : "🎙️ Движок синтеза речи:"}</label>
     <select class="tts-quick-select" id="ttsQuickEngine">
-      <option value="gemini" ${curEngine === "gemini" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_gemini", {}, "Gemini API (AI — Нейросетевой)") : "Gemini API (AI — Нейросетевой)"}</option>
-      <option value="piper" ${curEngine === "piper" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_piper", {}, "Локальный Piper TTS") : "Локальный Piper TTS"}</option>
-      <option value="browser" ${curEngine === "browser" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_browser", {}, "System TTS (Web Speech API)") : "System TTS (Web Speech API)"}</option>
+      <option value="piper" ${curEngine === "piper" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_piper", {}, "Piper TTS (local)") : "Piper TTS (local)"}</option>
+      <option value="edge" ${curEngine === "edge" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_edge", {}, "Edge TTS (Microsoft, network)") : "Edge TTS (Microsoft, network)"}</option>
+      <option value="silero" ${curEngine === "silero" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_silero", {}, "Silero TTS v5 (local)") : "Silero TTS v5 (local)"}</option>
+      <option value="browser" ${curEngine === "browser" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_browser", {}, "System TTS (local)") : "System TTS (local)"}</option>
+      <option value="gemini" ${curEngine === "gemini" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_gemini", {}, "* Gemini API") : "* Gemini API"}</option>
+      <option value="groq" ${curEngine === "groq" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_groq", {}, "* Groq Cloud TTS") : "* Groq Cloud TTS"}</option>
     </select>
   `;
 
-  // 2. Model (shown only if gemini)
+  // 2. Model (shown if gemini or groq)
   const recLabel = window.t ? window.t("transcriber.model_rec", {}, "⚡ Рекомендуется") : "⚡ Рекомендуется";
   const fastLabel = window.t ? window.t("transcriber.model_fast", {}, "Быстрый") : "Быстрый";
   const qualLabel = window.t ? window.t("transcriber.model_qual", {}, "Качество") : "Качество";
   const rowModel = document.createElement("div");
   rowModel.className = "tts-quick-row";
   rowModel.id = "ttsQuickRowModel";
-  rowModel.style.display = (curEngine === "gemini") ? "flex" : "none";
-  rowModel.innerHTML = `
-    <label class="tts-quick-label">${window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Модель Gemini TTS:") : "🤖 Модель Gemini TTS:"}</label>
-    <select class="tts-quick-select" id="ttsQuickModel">
+  rowModel.style.display = (curEngine === "gemini" || curEngine === "groq") ? "flex" : "none";
+  const modelLbl = (curEngine === "groq")
+    ? (window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Модель Groq TTS:") : "⚡ Модель Groq TTS:")
+    : (window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Модель Gemini TTS:") : "🤖 Модель Gemini TTS:");
+  const modelOptionsHtml = (curEngine === "groq") ? `
+      <option value="canopylabs/orpheus-v1-english" ${curModel === "canopylabs/orpheus-v1-english" ? "selected" : ""}>Orpheus V1 English (Expressive)</option>
+      <option value="canopylabs/orpheus-arabic-saudi" ${curModel === "canopylabs/orpheus-arabic-saudi" ? "selected" : ""}>Orpheus Arabic Saudi</option>
+  ` : `
       <option value="gemini-3.1-flash-tts-preview" ${curModel === "gemini-3.1-flash-tts-preview" ? "selected" : ""}>Gemini 3.1 Flash TTS Preview (${recLabel})</option>
       <option value="gemini-3.8-flash-lite-tts" ${curModel === "gemini-3.8-flash-lite-tts" ? "selected" : ""}>Gemini 3.8 Flash-Lite TTS (${fastLabel})</option>
       <option value="gemini-3.8-flash-tts" ${curModel === "gemini-3.8-flash-tts" ? "selected" : ""}>Gemini 3.8 Flash TTS (${qualLabel})</option>
       <option value="gemini-2.5-flash-preview-tts" ${curModel === "gemini-2.5-flash-preview-tts" ? "selected" : ""}>Gemini 2.5 Flash TTS Preview (Free)</option>
       <option value="gemini-2.5-pro-preview-tts" ${curModel === "gemini-2.5-pro-preview-tts" ? "selected" : ""}>Gemini 2.5 Pro TTS Preview (Pro)</option>
       <option value="gemini-3.1-flash-live-preview" ${curModel === "gemini-3.1-flash-live-preview" ? "selected" : ""}>Gemini 3.1 Flash Live (Live Voice)</option>
+  `;
+  rowModel.innerHTML = `
+    <label class="tts-quick-label">${modelLbl}</label>
+    <select class="tts-quick-select" id="ttsQuickModel">
+      ${modelOptionsHtml}
     </select>
   `;
 
@@ -1469,8 +1718,37 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     selEngine.addEventListener("change", async () => {
       const eng = selEngine.value;
       const chosenLang = getActiveLang();
-      rowModel.style.display = (eng === "gemini") ? "flex" : "none";
+      rowModel.style.display = (eng === "gemini" || eng === "groq") ? "flex" : "none";
       rowStyle.style.display = (eng === "gemini") ? "flex" : "none";
+      const lblMod = rowModel.querySelector(".tts-quick-label");
+      const selMod = rowModel.querySelector("#ttsQuickModel");
+      if (selMod) {
+        if (eng === "groq") {
+          if (lblMod) lblMod.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Модель Groq TTS:") : "⚡ Модель Groq TTS:";
+          selMod.innerHTML = `
+            <option value="canopylabs/orpheus-v1-english">Orpheus V1 English (Expressive)</option>
+            <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi</option>
+          `;
+        } else if (eng === "gemini") {
+          if (lblMod) lblMod.textContent = window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Модель Gemini TTS:") : "🤖 Модель Gemini TTS:";
+          selMod.innerHTML = `
+            <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview (${recLabel})</option>
+            <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (${fastLabel})</option>
+            <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (${qualLabel})</option>
+            <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash TTS Preview (Free)</option>
+            <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro TTS Preview (Pro)</option>
+          `;
+        }
+      }
+      if (selMod && !selMod._groqWired) {
+        selMod._groqWired = true;
+        selMod.addEventListener("change", () => {
+          if (selEngine && selEngine.value === "groq") {
+            const isAr = selMod.value.includes("arabic");
+            populateVoiceSelect(selVoice, "groq", isAr ? "ar" : "en", isAr ? "fahad" : "troy", hintVoice);
+          }
+        });
+      }
       if (eng === "piper") {
         const checkRes = await checkAndPromptPiperModel(chosenLang, (newVoiceId) => {
           populateVoiceSelect(selVoice, "piper", chosenLang, newVoiceId, hintVoice);
@@ -1618,7 +1896,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           testLang = vMatch[1].toLowerCase();
         }
       }
-      const testText = getTtsTestPhrase(testLang);
+      let testText = getTtsTestPhrase(testLang);
 
       try {
         if (eng === "browser") {
@@ -1709,6 +1987,53 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             console.warn("[TTS] Quick test Piper error:", res);
             const errDetail = res.message || res.detail || "Ошибка синтеза";
             showToast(window.t ? window.t("transcriber.toast_tts_piper_err", { error: errDetail }, `⚠️ Piper TTS: ${errDetail}`) : `⚠️ Piper TTS: ${errDetail}`, 3500);
+          }
+        } else if (eng === "groq") {
+          const testVoice = (voi === "auto" || !voi) ? "troy" : voi;
+          const groqKey = getCachedTranscriberKey("groq");
+          if (!groqKey) {
+            showToast("⚠️ Укажите API-ключ Groq для проверки звука", 3500);
+            btnTest.disabled = false;
+            btnTest.textContent = oldTxt;
+            return;
+          }
+
+          const resp = await fetch("/api/transcriber/tts-test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: testText,
+              voice: testVoice,
+              model: mod || "canopylabs/orpheus-v1-english",
+              api_key: groqKey,
+              target_lang: testLang,
+              engine: "groq",
+              speed: spd,
+              announce_callsign: announce,
+              callsign: "RX6AWG",
+              tts_style: sty
+            })
+          });
+          const res = await resp.json();
+          if (res.status === "ok" && res.audio_base64) {
+            if (window.ttsAudioQueueManager) {
+              window.ttsAudioQueueManager.enqueue({
+                hotspot_id: actHid,
+                slot: slot,
+                audio_base64: res.audio_base64,
+                text: testText,
+                engine: "groq",
+                speed: spd,
+                ducking_level: duckVal,
+                mute_others: solo,
+                is_test: true,
+                bypassMute: true
+              });
+            }
+            showToast(`🔊 Тест Groq TTS [${testLang.toUpperCase()}] (${testVoice})...`, 2500);
+          } else {
+            console.warn("[TTS] Quick test Groq error:", res);
+            showToast(`⚠️ Groq TTS: ${res.message || res.detail || "Ошибка синтеза"}`, 3500);
           }
         } else {
           const testVoice = (voi === "auto") ? "Puck" : voi;
@@ -1809,7 +2134,10 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
         const resJson = await resp.json();
         if (resJson.status === "ok") {
           if (resJson.settings) {
-            window.transcriberSettings = resJson.settings;
+            window.transcriberSettings = Object.assign({}, window.transcriberSettings, resJson.settings);
+            if (resJson.settings.api_key) setTranscriberKey("gemini", resJson.settings.api_key);
+            if (resJson.settings.groq_api_key) setTranscriberKey("groq", resJson.settings.groq_api_key);
+            if (resJson.settings.deepgram_api_key) setTranscriberKey("deepgram", resJson.settings.deepgram_api_key);
           } else {
             if (!window.transcriberSettings) window.transcriberSettings = {};
             window.transcriberSettings.target_lang = chosenTargetLang;
@@ -2101,6 +2429,10 @@ function setupRecTtsButton() {
       isLongPress = false;
       return;
     }
+    if (typeof window.isAnySlotTtsActive === "function" && window.isAnySlotTtsActive()) {
+      showToast(window.t ? window.t("transcriber.live_tts_active_rec_err", {}, "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для озвучки записи.") : "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для озвучки записи.", 3000);
+      return;
+    }
     const recMgr = window.recordingsManager || (window.__proxdmr && window.__proxdmr.recordingsManager);
     if (recMgr && typeof recMgr.toggleTtsPlayback === "function") {
       recMgr.toggleTtsPlayback();
@@ -2133,6 +2465,10 @@ function setupRecTtsButton() {
       }
       if (!isKeyLongPress) {
         e.preventDefault();
+        if (typeof window.isAnySlotTtsActive === "function" && window.isAnySlotTtsActive()) {
+          showToast(window.t ? window.t("transcriber.live_tts_active_rec_err", {}, "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для озвучки записи.") : "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для озвучки записи.", 3000);
+          return;
+        }
         const recMgr = window.recordingsManager || (window.__proxdmr && window.__proxdmr.recordingsManager);
         if (recMgr && typeof recMgr.toggleTtsPlayback === "function") {
           recMgr.toggleTtsPlayback();
@@ -2152,6 +2488,92 @@ function toggleSlotTts(row, slot) {
   const isCurrentlyActive = isSlotTtsActive(hid, slot);
   const newState = !isCurrentlyActive;
 
+  if (newState) {
+    // 1. STOP ALL OTHER LIVE SLOT TTS ACROSS ALL HOTSPOTS
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const allHids = new Set();
+    allHids.add(resolveHotspotId("default"));
+    if (Array.isArray(hsList)) {
+      hsList.forEach(h => { if (h && h.id) allHids.add(resolveHotspotId(h.id)); });
+    }
+    if (typeof document !== "undefined") {
+      document.querySelectorAll(".radio-container[data-hotspot-id]").forEach(el => {
+        if (el.dataset.hotspotId) allHids.add(resolveHotspotId(el.dataset.hotspotId));
+      });
+    }
+
+    allHids.forEach(h => {
+      [1, 2].forEach(s => {
+        if (h === hid && s === slot) return; // Skip currently targeted slot
+        if (isSlotTtsActive(h, s)) {
+          try {
+            localStorage.setItem(getSlotTtsKey(h, s), "0");
+          } catch (_) {}
+          const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${h}"]`) ||
+                             (h === "default" ? document.querySelector(".radio-container") : null);
+          const otherRow = targetCard ? targetCard.querySelector(s === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row") : null;
+          if (otherRow) {
+            updateSlotTtsBadge(otherRow, s, false);
+          }
+          if (window.ttsAudioQueueManager) {
+            window.ttsAudioQueueManager.stopSlot(h, s);
+          }
+          const ws = getWs();
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({
+                type: "set_tts_slot",
+                hotspot_id: h,
+                slot: s,
+                enabled: false
+              }));
+            } catch (_) {}
+          }
+        }
+      });
+    });
+
+    // 2. STOP READING FROM THE LOG (SummaryTtsReader)
+    if (typeof window.summaryTtsReader !== "undefined" && window.summaryTtsReader && window.summaryTtsReader.isPlaying) {
+      window.summaryTtsReader.stop();
+    }
+
+    // 3. STOP RECORDING TTS PLAYBACK IF RUNNING
+    const recMgr = window.recordingsManager || (window.__proxdmr && window.__proxdmr.recordingsManager);
+    if (recMgr && typeof recMgr.stopTtsPlayback === "function") {
+      recMgr.stopTtsPlayback();
+    }
+
+    // 4. SET AUDIO MODE OF THIS HOTSPOT TO SOLO (preserving previous mode for restoration)
+    window._preTtsAudioModes = window._preTtsAudioModes || {};
+    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
+      const curMode = getHotspotTsAudioMode(hid);
+      if (!window._preTtsAudioModes[hid]) {
+        window._preTtsAudioModes[hid] = curMode;
+      }
+      if (curMode !== "solo") {
+        setHotspotTsAudioMode(hid, "solo");
+      }
+    }
+
+    // 5. ACTIVATE THIS TS ON THIS HOTSPOT
+    if (card && typeof window.setCardSlot === "function") {
+      window.setCardSlot(card, slot, true);
+    } else if (typeof window.setActiveSlot === "function") {
+      window.setActiveSlot(slot, true);
+    }
+  } else {
+    // TURNING TTS OFF:
+    // Restore pre-TTS audio mode for this hotspot if saved
+    if (window._preTtsAudioModes && window._preTtsAudioModes[hid]) {
+      const prevMode = window._preTtsAudioModes[hid];
+      delete window._preTtsAudioModes[hid];
+      if (typeof setHotspotTsAudioMode === "function") {
+        setHotspotTsAudioMode(hid, prevMode);
+      }
+    }
+  }
+
   try {
     localStorage.setItem(getSlotTtsKey(hid, slot), newState ? "1" : "0");
   } catch (_) {}
@@ -2164,30 +2586,6 @@ function toggleSlotTts(row, slot) {
   // If TTS turned ON and transcription is OFF on this slot, auto-turn ON transcription
   if (newState && !row.classList.contains("has-transcribe")) {
     toggleSlotTranscribe(row, slot);
-  } else if (newState) {
-    // If transcription was already ON, also enforce mutual exclusion on TTS for other slot
-    const otherSlot = slot === 1 ? 2 : 1;
-    const otherRow = card ? card.querySelector(`.vfo-ts${otherSlot}-row`) : null;
-    if (otherRow && isSlotTtsActive(hid, otherSlot)) {
-      try {
-        localStorage.setItem(getSlotTtsKey(hid, otherSlot), "0");
-      } catch (_) {}
-      updateSlotTtsBadge(otherRow, otherSlot, false);
-      const ws = getWs();
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({
-            type: "set_tts_slot",
-            hotspot_id: hid,
-            slot: otherSlot,
-            enabled: false
-          }));
-        } catch (_) {}
-      }
-      if (window.ttsAudioQueueManager) {
-        window.ttsAudioQueueManager.stopSlot(hid, otherSlot);
-      }
-    }
   }
 
   const ws = getWs();
@@ -3446,10 +3844,15 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
 
   const popup = document.createElement("div");
   popup.className = "tts-quick-settings-popup txt-quick-settings-popup";
+  popup.style.width = "340px";
 
   const s = window.transcriberSettings || {};
+  let curRecEngine = (s.transcriber_engine || s.engine || localStorage.getItem("proxdmr_rec_engine") || "groq").toLowerCase();
+  if (curRecEngine === "deepgram") curRecEngine = "groq";
+  let curTransEngine = (s.translation_engine || localStorage.getItem("proxdmr_trans_engine") || "groq").toLowerCase();
   const curModel = s.model || getCurrentTranscriberModel() || "gemini-3.5-flash";
-  const isNoTranslate = (s.target_lang === "none") || (document.getElementById("optTranscriberNoTranslate")?.checked) || false;
+  const optNoTrEl = document.getElementById("optTranscriberNoTranslate");
+  const isNoTranslate = (s.target_lang === "none") || Boolean(optNoTrEl && optNoTrEl.checked);
   let curTargetLang = (s.target_lang && s.target_lang !== "none") ? s.target_lang : null;
   if (!curTargetLang) {
     const optTl = document.getElementById("optTranscriberTargetLang");
@@ -3462,7 +3865,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   header.innerHTML = `
     <div class="tts-quick-title">
       <span class="tts-quick-icon">📝</span>
-      <span>${window.t ? window.t("transcriber.txt_modal_title", { slot }, `Параметры транскрибатора TS${slot}`) : `Параметры транскрибатора TS${slot}`}</span>
+      <span>${window.t ? window.t("transcriber.txt_modal_title", { slot }, `Распознавание и перевод TS${slot}`) : `Распознавание и перевод TS${slot}`}</span>
     </div>
     <button type="button" class="tts-quick-close" aria-label="${window.t ? window.t("buttons.close", {}, "Закрыть") : "Закрыть"}">&times;</button>
   `;
@@ -3471,14 +3874,27 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   const body = document.createElement("div");
   body.className = "tts-quick-body";
 
-  // 1. Model select
+  // 1. Recognition Engine
+  const rowRecEngine = document.createElement("div");
+  rowRecEngine.className = "tts-quick-row";
+  rowRecEngine.innerHTML = `
+    <label class="tts-quick-label" for="popTxtRecEngine">${window.t ? window.t("transcriber.rec_engine_lbl", {}, "🎙️ Движок распознавания:") : "🎙️ Движок распознавания:"}</label>
+    <select class="tts-quick-select" id="popTxtRecEngine">
+      <option value="gemini"${curRecEngine === "gemini" ? " selected" : ""}>Gemini API</option>
+      <option value="groq"${curRecEngine === "groq" ? " selected" : ""}>Groq Cloud API (Whisper V3)</option>
+    </select>
+  `;
+  const selRecEngine = rowRecEngine.querySelector("#popTxtRecEngine");
+
+  // 2. Gemini Model Row
   const rowModel = document.createElement("div");
   rowModel.className = "tts-quick-row";
+  rowModel.id = "popTxtRowModel";
   rowModel.innerHTML = `
-    <label class="tts-quick-label" for="txtQuickModel">${window.t ? window.t("transcriber.model", {}, "🤖 Модель Gemini:") : "🤖 Модель Gemini:"}</label>
-    <select class="tts-quick-select" id="txtQuickModel"></select>
+    <label class="tts-quick-label" for="popTxtModel">${window.t ? window.t("transcriber.model", {}, "🤖 Модель Gemini:") : "🤖 Модель Gemini:"}</label>
+    <select class="tts-quick-select" id="popTxtModel"></select>
   `;
-  const selModel = rowModel.querySelector("#txtQuickModel");
+  const selModel = rowModel.querySelector("#popTxtModel");
 
   // Populate models
   const displayModels = (cachedTranscriberModels && cachedTranscriberModels.length > 0)
@@ -3512,52 +3928,83 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
     selModel.appendChild(opt);
   }
 
-  // 2. No Translate checkbox
+  // Update recognition engine UI
+  const updatePopRecEngineUI = (eng) => {
+    curRecEngine = eng;
+    if (rowModel) {
+      rowModel.style.display = (eng === "gemini") ? "flex" : "none";
+    }
+  };
+  selRecEngine.addEventListener("change", () => {
+    updatePopRecEngineUI(selRecEngine.value);
+    try { localStorage.setItem("proxdmr_rec_engine", selRecEngine.value); } catch (_) {}
+  });
+  updatePopRecEngineUI(curRecEngine);
+
+  // 3. No Translate checkbox
   const rowNoTrans = document.createElement("div");
   rowNoTrans.className = "tts-quick-row";
+  rowNoTrans.style.marginTop = "2px";
+  rowNoTrans.style.marginBottom = "2px";
   rowNoTrans.innerHTML = `
     <label class="tts-quick-cb-label">
-      <input type="checkbox" id="txtQuickNoTranslate" ${isNoTranslate ? "checked" : ""}>
-      <span>${window.t ? window.t("transcriber.no_translate", {}, "Без перевода (транскрипция на языке оригинала речи)") : "Без перевода (транскрипция на языке оригинала речи)"}</span>
+      <input type="checkbox" id="popTxtNoTranslate" ${isNoTranslate ? "checked" : ""}>
+      <span>${window.t ? window.t("transcriber.no_translate_lbl", {}, "Результат распознавания без перевода") : "Результат распознавания без перевода"}</span>
     </label>
   `;
-  const cbNoTranslate = rowNoTrans.querySelector("#txtQuickNoTranslate");
+  const cbNoTranslate = rowNoTrans.querySelector("#popTxtNoTranslate");
 
-  // 3. Target Language select
+  // 4. Translation Engine Row
+  const rowTransEngine = document.createElement("div");
+  rowTransEngine.className = "tts-quick-row";
+  rowTransEngine.id = "popTxtRowTransEngine";
+  rowTransEngine.innerHTML = `
+    <label class="tts-quick-label" for="popTxtTransEngine">${window.t ? window.t("transcriber.translation_engine_lbl", {}, "🌐 Движок перевода речи:") : "🌐 Движок перевода речи:"}</label>
+    <select class="tts-quick-select" id="popTxtTransEngine">
+      <option value="gemini"${curTransEngine === "gemini" ? " selected" : ""}>Gemini API</option>
+      <option value="groq"${curTransEngine === "groq" ? " selected" : ""}>Groq API (Llama / Qwen)</option>
+    </select>
+  `;
+  const selTransEngine = rowTransEngine.querySelector("#popTxtTransEngine");
+
+  const updatePopTransEngineUI = (eng) => {
+    curTransEngine = eng;
+  };
+  selTransEngine.addEventListener("change", () => {
+    updatePopTransEngineUI(selTransEngine.value);
+    try { localStorage.setItem("proxdmr_trans_engine", selTransEngine.value); } catch (_) {}
+  });
+  updatePopTransEngineUI(curTransEngine);
+
+  // 5. Target Language select
   const rowTargetLang = document.createElement("div");
   rowTargetLang.className = "tts-quick-row";
-  rowTargetLang.id = "txtQuickRowTargetLang";
+  rowTargetLang.id = "popTxtRowTargetLang";
   rowTargetLang.innerHTML = `
-    <label class="tts-quick-label" for="txtQuickTargetLang">${window.t ? window.t("transcriber.target_lang", {}, "🌐 Целевой язык перевода / Target Language:") : "🌐 Целевой язык перевода / Target Language:"}</label>
-    <select class="tts-quick-select" id="txtQuickTargetLang"></select>
+    <label class="tts-quick-label" for="popTxtTargetLang">${window.t ? window.t("transcriber.target_lang", {}, "🌐 Целевой язык перевода:") : "🌐 Целевой язык перевода:"}</label>
+    <select class="tts-quick-select" id="popTxtTargetLang"></select>
   `;
-  const selTargetLang = rowTargetLang.querySelector("#txtQuickTargetLang");
+  const selTargetLang = rowTargetLang.querySelector("#popTxtTargetLang");
   renderTargetLangSelect(selTargetLang);
   if (curTargetLang && curTargetLang !== "none") {
     selTargetLang.value = curTargetLang;
   }
 
-  // Toggle Target Lang enabled state based on No Translate
-  const syncTargetLangDisabled = () => {
-    const disabled = cbNoTranslate.checked;
-    selTargetLang.disabled = disabled;
-    rowTargetLang.style.opacity = disabled ? "0.4" : "1";
-    rowTargetLang.style.filter = disabled ? "grayscale(80%)" : "none";
-    rowTargetLang.style.pointerEvents = disabled ? "none" : "";
+  // Toggle Translation elements based on No Translate checkbox
+  const syncTranslationRows = () => {
+    const noTrans = cbNoTranslate.checked;
+    const disp = noTrans ? "none" : "flex";
+    rowTransEngine.style.display = disp;
+    rowTargetLang.style.display = disp;
   };
-  cbNoTranslate.addEventListener("change", syncTargetLangDisabled);
-  syncTargetLangDisabled();
+  cbNoTranslate.addEventListener("change", syncTranslationRows);
+  syncTranslationRows();
 
-  selTargetLang.addEventListener("change", async () => {
-    const effEng = (window.transcriberSettings && window.transcriberSettings.tts_engine) || "gemini";
-    const selectedLang = selTargetLang.value;
-    if (effEng === "piper" && selectedLang && selectedLang !== "none" && !cbNoTranslate.checked) {
-      await checkAndPromptPiperModel(selectedLang);
-    }
-  });
-
+  // Assemble body
+  body.appendChild(rowRecEngine);
   body.appendChild(rowModel);
   body.appendChild(rowNoTrans);
+  body.appendChild(rowTransEngine);
   body.appendChild(rowTargetLang);
 
   // Footer
@@ -3582,35 +4029,33 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   if (btnSave) {
     btnSave.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const newModel = selModel ? selModel.value : curModel;
-      const newNoTrans = cbNoTranslate ? cbNoTranslate.checked : false;
-      const newTargetLang = newNoTrans ? "none" : (selTargetLang ? selTargetLang.value : "ru");
-
       btnSave.disabled = true;
-      // Immediately stop any active or queued TTS speech on language change
+      btnSave.textContent = "⏳ Сохранение...";
+
       if (window.ttsAudioQueueManager) {
         window.ttsAudioQueueManager.stopAll();
       }
 
-      // If Piper TTS is active and language is translated, check Piper model
-      let resolvedPiperVoice = null;
-      const effEng = (window.transcriberSettings && window.transcriberSettings.tts_engine) || "gemini";
-      if (effEng === "piper" && !newNoTrans && newTargetLang !== "none") {
-        try {
-          const checkRes = await checkAndPromptPiperModel(newTargetLang);
-          if (checkRes && (checkRes.default_voice || checkRes.voice_id)) {
-            resolvedPiperVoice = checkRes.default_voice || checkRes.voice_id;
-          }
-        } catch (_) {}
-      }
+      const newRecEng = selRecEngine ? selRecEngine.value : curRecEngine;
+      const newTransEng = selTransEngine ? selTransEngine.value : curTransEngine;
+      const newModel = selModel ? selModel.value : curModel;
+      const newNoTrans = cbNoTranslate ? cbNoTranslate.checked : false;
+      const newTargetLang = newNoTrans ? "none" : (selTargetLang ? selTargetLang.value : "ru");
+
+      try {
+        localStorage.setItem("proxdmr_rec_engine", newRecEng);
+        localStorage.setItem("proxdmr_trans_engine", newTransEng);
+      } catch (_) {}
 
       const payload = {
+        transcriber_engine: newRecEng,
+        translation_engine: newTransEng,
         model: newModel,
-        target_lang: newTargetLang
+        target_lang: newTargetLang,
+        api_key: getCachedTranscriberKey("gemini"),
+        groq_api_key: getCachedTranscriberKey("groq"),
+        deepgram_api_key: getCachedTranscriberKey("deepgram")
       };
-      if (resolvedPiperVoice) {
-        payload.tts_voice = resolvedPiperVoice;
-      }
 
       try {
         const resp = await fetch("/api/transcriber/settings", {
@@ -3621,22 +4066,39 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
         const resJson = await resp.json();
         if (resJson && resJson.status === "ok") {
           if (resJson.settings) {
-            window.transcriberSettings = resJson.settings;
+            window.transcriberSettings = Object.assign({}, window.transcriberSettings, resJson.settings);
+            if (resJson.settings.api_key) setTranscriberKey("gemini", resJson.settings.api_key);
+            if (resJson.settings.groq_api_key) setTranscriberKey("groq", resJson.settings.groq_api_key);
+            if (resJson.settings.deepgram_api_key) setTranscriberKey("deepgram", resJson.settings.deepgram_api_key);
           } else {
             if (!window.transcriberSettings) window.transcriberSettings = {};
+            window.transcriberSettings.transcriber_engine = newRecEng;
+            window.transcriberSettings.translation_engine = newTransEng;
             window.transcriberSettings.model = newModel;
             window.transcriberSettings.target_lang = newTargetLang;
+            window.transcriberSettings.api_key = getCachedTranscriberKey("gemini");
+            window.transcriberSettings.groq_api_key = getCachedTranscriberKey("groq");
+            window.transcriberSettings.deepgram_api_key = getCachedTranscriberKey("deepgram");
           }
           refreshAllSlotTtsBadges(newTargetLang);
 
-          // Sync main settings modal form inputs if they exist
+          const optRecEng = document.getElementById("optTranscriberEngine");
+          if (optRecEng) {
+            optRecEng.value = newRecEng;
+            updateRecApiKeyUI(newRecEng);
+          }
+          const optTransEng = document.getElementById("optTranslationEngine");
+          if (optTransEng) {
+            optTransEng.value = newTransEng;
+            updateTransApiKeyUI(newTransEng);
+          }
           const optModel = document.getElementById("optTranscriberModel");
           if (optModel) optModel.value = newModel;
 
           const optNoTrans = document.getElementById("optTranscriberNoTranslate");
           if (optNoTrans) {
             optNoTrans.checked = newNoTrans;
-            optNoTrans.dispatchEvent(new Event("change"));
+            updateNoTranslateUI(newNoTrans);
           }
 
           const optTl = document.getElementById("optTranscriberTargetLang");
@@ -3644,18 +4106,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
             optTl.value = newTargetLang;
           }
 
-          // Refresh Piper TTS voice list if target language changed
-          const effLang = newNoTrans ? "ru" : newTargetLang;
-          const optTtsVoice = document.getElementById("optTtsVoice");
-          const ttsVoiceHint = document.getElementById("ttsVoiceHint");
-          const optTtsEngine = document.getElementById("optTtsEngine");
-          const effEngine = (window.transcriberSettings && window.transcriberSettings.tts_engine) || (optTtsEngine ? optTtsEngine.value : "gemini");
-          const effVoice = (window.transcriberSettings && window.transcriberSettings.tts_voice) || "auto";
-          if (optTtsVoice) {
-            populateVoiceSelect(optTtsVoice, effEngine, effLang, effVoice, ttsVoiceHint);
-          }
-
-          showToast(window.t ? window.t("transcriber.txt_saved", {}, "✓ Параметры транскрибатора сохранены") : "✓ Параметры транскрибатора сохранены", 2500);
+          showToast(window.t ? window.t("transcriber.txt_saved", {}, "✓ Параметры сохранены") : "✓ Параметры сохранены", 2500);
           closeTxtQuickSettingsPopover();
         } else {
           showToast(window.t ? window.t("transcriber.save_error", {}, "⚠️ Ошибка сохранения параметров") : "⚠️ Ошибка сохранения параметров", 3000);
@@ -4316,8 +4767,21 @@ function clearAllTranscribeLocalStorage() {
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
-      if (k && k !== "proxdmr_tts_solo_muted_slots" && (k.startsWith("proxdmr_transcribe_") || k.startsWith("proxdmr_max_transcribe_") || k.startsWith("proxdmr_tts_"))) {
-        localStorage.removeItem(k);
+      if (!k) continue;
+      if (
+        k.match(/^proxdmr_transcribe_.*_ts[12]$/) ||
+        k === "proxdmr_transcribe_ts1" ||
+        k === "proxdmr_transcribe_ts2" ||
+        k.startsWith("proxdmr_max_transcribe_") ||
+        k.startsWith("proxdmr_transcribe_automuted_")
+      ) {
+        localStorage.setItem(k, "0");
+      }
+      if (
+        k !== "proxdmr_tts_solo_muted_slots" &&
+        (k.match(/^proxdmr_tts_.*_ts[12]$/) || k === "proxdmr_tts_ts1" || k === "proxdmr_tts_ts2" || k.startsWith("proxdmr_tts_"))
+      ) {
+        localStorage.setItem(k, "0");
       }
     }
   } catch (_) {}
@@ -4435,6 +4899,12 @@ function disableAllTranscribe(silent = true, notifyWs = true) {
   if (typeof closeTranscriberModelPicker === "function") {
     closeTranscriberModelPicker();
   }
+  if (typeof closeTxtQuickSettingsPopover === "function") {
+    closeTxtQuickSettingsPopover();
+  }
+  if (typeof closeTtsQuickSettingsPopover === "function") {
+    closeTtsQuickSettingsPopover();
+  }
   if (window.ttsAudioQueueManager) {
     window.ttsAudioQueueManager.stopAll();
   }
@@ -4449,6 +4919,13 @@ function disableAllTranscribe(silent = true, notifyWs = true) {
         disableSlotTranscribe(row, slot, hid, silent, false);
       }
     });
+  });
+
+  document.querySelectorAll(".vfo-row[data-slot]").forEach(row => {
+    const slot = parseInt(row.dataset.slot, 10);
+    const card = row.closest(".radio-container");
+    const hid = resolveHotspotId(card ? card.dataset.hotspotId : window.activeHotspotId);
+    disableSlotTranscribe(row, slot, hid, silent, false);
   });
 
   const ws = getWs();
@@ -4466,13 +4943,84 @@ function disableAllTranscribe(silent = true, notifyWs = true) {
   }
 }
 
+function disableAllTts(silent = true, notifyWs = true) {
+  if (typeof closeTtsQuickSettingsPopover === "function") {
+    closeTtsQuickSettingsPopover();
+  }
+  if (window.ttsAudioQueueManager) {
+    window.ttsAudioQueueManager.stopAll();
+  }
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k !== "proxdmr_tts_solo_muted_slots" && k.startsWith("proxdmr_tts_")) {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch (_) {}
+
+  const cards = document.querySelectorAll(".radio-container");
+  cards.forEach(card => {
+    const hid = resolveHotspotId(card.dataset.hotspotId);
+    [1, 2].forEach(slot => {
+      try {
+        localStorage.setItem(getSlotTtsKey(hid, slot), "0");
+      } catch (_) {}
+      const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+      if (row) {
+        updateSlotTtsBadge(row, slot, false);
+      }
+    });
+  });
+
+  document.querySelectorAll(".vfo-row[data-slot]").forEach(row => {
+    const slot = parseInt(row.dataset.slot, 10);
+    const card = row.closest(".radio-container");
+    const cid = resolveHotspotId(card ? card.dataset.hotspotId : window.activeHotspotId);
+    try {
+      localStorage.setItem(getSlotTtsKey(cid, slot), "0");
+    } catch (_) {}
+    updateSlotTtsBadge(row, slot, false);
+  });
+
+  const ws = getWs();
+  if (notifyWs && ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({
+        type: "disable_all_tts_slots"
+      }));
+    } catch (_) {}
+  }
+
+  if (window._preTtsAudioModes) {
+    try {
+      Object.keys(window._preTtsAudioModes).forEach(h => {
+        const m = window._preTtsAudioModes[h];
+        if (m && typeof setHotspotTsAudioMode === "function") {
+          setHotspotTsAudioMode(h, m);
+        }
+      });
+    } catch (_) {}
+    window._preTtsAudioModes = {};
+  }
+
+  syncTtsSoloMode();
+  if (!silent) {
+    showToast(window.t ? window.t("transcriber.all_tts_off", {}, "✕ Все каналы озвучки выключены") : "✕ Все каналы озвучки выключены", 2000);
+  }
+}
+
 window.disableSlotTranscribe = disableSlotTranscribe;
 window.disableHotspotTranscribe = disableHotspotTranscribe;
 window.disableAllTranscribe = disableAllTranscribe;
+window.disableAllTts = disableAllTts;
 
 window.addEventListener("beforeunload", () => {
   try {
     disableAllTranscribe(true, true);
+  } catch (_) {}
+  try {
+    disableAllTts(true, true);
   } catch (_) {}
   try {
     navigator.sendBeacon("/api/transcriber/disable_all");
@@ -4482,6 +5030,9 @@ window.addEventListener("beforeunload", () => {
 window.addEventListener("pagehide", () => {
   try {
     disableAllTranscribe(true, true);
+  } catch (_) {}
+  try {
+    disableAllTts(true, true);
   } catch (_) {}
   try {
     navigator.sendBeacon("/api/transcriber/disable_all");
@@ -4543,7 +5094,9 @@ function syncAllTranscribeSlotsToServer() {
 
 function initSlotTranscribeState() {
   // Requirements: All text recognizers MUST be automatically disabled on program startup for all hotspots.
+  clearAllTranscribeLocalStorage();
   disableAllTranscribe(true, true);
+  disableAllTts(true, true);
 
   const cards = document.querySelectorAll(".radio-container");
   cards.forEach(card => {
@@ -4567,161 +5120,162 @@ function initSlotTranscribeState() {
   } catch (_) {}
 }
 
-// ── Gemini API Keys frame: collapse / eye toggles / checkbox status / test ──
-function initGeminiApiKeysFrame() {
-  const frame    = document.getElementById('geminiApiKeysFrame');
-  const toggle   = document.getElementById('geminiApiKeysToggle');
-  const body     = document.getElementById('geminiApiKeysBody');
+// ── Speech Recognition & Translation: dynamic keys and frame management ──
+function updateRecApiKeyUI(engine) {
+  const lbl = document.getElementById("lblTranscriberRecApiKey");
+  const inp = document.getElementById("optTranscriberRecApiKey");
+  const link = document.getElementById("linkTranscriberRecApiKey");
+  const hint = document.getElementById("hintTranscriberRecApiKey");
+  const subGemini = document.getElementById("subBlockGeminiRec");
+  if (!inp) return;
+
+  if (subGemini) {
+    subGemini.style.display = (engine === "gemini") ? "block" : "none";
+  }
+
+  const t = window.t || ((k, _, def) => def);
+
+  if (engine === "gemini") {
+    if (lbl) lbl.textContent = t("transcriber.rec_key_gemini_lbl", {}, "🔑 Ключ Gemini API (для распознавания):");
+    inp.placeholder = "AIzaSy...";
+    inp.value = getCachedTranscriberKey("gemini");
+    if (link) {
+      link.href = "https://aistudio.google.com/app/apikey";
+      link.textContent = "Google AI Studio ↗";
+    }
+    if (hint) hint.textContent = t("transcriber.rec_key_gemini_hint", {}, "Бесплатный ключ от Google AI Studio (aistudio.google.com).");
+  } else if (engine === "groq") {
+    if (lbl) lbl.textContent = t("transcriber.rec_key_groq_lbl", {}, "⚡ Ключ Groq Cloud API (для Whisper):");
+    inp.placeholder = "gsk_...";
+    inp.value = getCachedTranscriberKey("groq");
+    if (link) {
+      link.href = "https://console.groq.com/keys";
+      link.textContent = "🔑 Получить ключ ↗";
+    }
+    if (hint) hint.textContent = t("transcriber.rec_key_groq_hint", {}, "Бесплатный ключ на console.groq.com (до 2000 запросов/день). Обеспечивает сверхбыстрый Whisper Large-v3.");
+  }
+}
+
+function updateTransApiKeyUI(engine) {
+  const lbl = document.getElementById("lblTranscriberTransApiKey");
+  const inp = document.getElementById("optTranscriberTransApiKey");
+  const link = document.getElementById("linkTranscriberTransApiKey");
+  const hint = document.getElementById("hintTranscriberTransApiKey");
+  if (!inp) return;
+
+  const t = window.t || ((k, _, def) => def);
+
+  if (engine === "gemini") {
+    if (lbl) lbl.textContent = t("transcriber.trans_key_gemini_lbl", {}, "🔑 Ключ Gemini API (для перевода):");
+    inp.placeholder = "AIzaSy...";
+    inp.value = getCachedTranscriberKey("gemini");
+    if (link) {
+      link.href = "https://aistudio.google.com/app/apikey";
+      link.textContent = "Google AI Studio ↗";
+    }
+    if (hint) hint.textContent = t("transcriber.trans_key_gemini_hint", {}, "Используется для перевода текста через Gemini.");
+  } else if (engine === "groq") {
+    if (lbl) lbl.textContent = t("transcriber.trans_key_groq_lbl", {}, "⚡ Ключ Groq Cloud API (для перевода Llama 3.3):");
+    inp.placeholder = "gsk_...";
+    inp.value = getCachedTranscriberKey("groq");
+    if (link) {
+      link.href = "https://console.groq.com/keys";
+      link.textContent = "🔑 Получить ключ ↗";
+    }
+    if (hint) hint.textContent = t("transcriber.trans_key_groq_hint", {}, "Используется для сверхбыстрого перевода через модель Llama 3.3 70B.");
+  }
+}
+
+function updateNoTranslateUI(isNoTranslate) {
+  const gEngine = document.getElementById("groupTranslationEngine");
+  const gKey = document.getElementById("groupTransApiKey");
+  const gTarget = document.getElementById("groupTranscriberTargetLang");
+  const disp = isNoTranslate ? "none" : "block";
+  if (gEngine) gEngine.style.display = disp;
+  if (gKey) gKey.style.display = disp;
+  if (gTarget) gTarget.style.display = disp;
+}
+
+function initSpeechRecognitionFrame() {
+  const frame  = document.getElementById('speechRecognitionFrame');
+  const toggle = document.getElementById('speechRecognitionToggle');
+  const body   = document.getElementById('speechRecognitionBody');
   if (!frame || !toggle) return;
 
-  const LS_KEYS = 'proxdmr_gemini_apikeys'; // JSON array of {name, key, enabled}
-
-  // ── Persist helpers ────────────────────────────────────────────────────
-  function saveAll() {
-    const data = [];
-    body.querySelectorAll('.apikey-row').forEach(row => {
-      const cb   = row.querySelector('.apikey-cb');
-      const name = row.querySelector('.apikey-name');
-      const inp  = row.querySelector('.apikey-input');
-      data.push({
-        enabled: cb  ? cb.checked      : false,
-        name:    name ? name.value      : '',
-        key:     inp  ? inp.value       : ''
-      });
-    });
-    try { localStorage.setItem(LS_KEYS, JSON.stringify(data)); } catch (_) {}
-  }
-
-  function loadAll() {
-    let data;
-    try { data = JSON.parse(localStorage.getItem(LS_KEYS) || 'null'); } catch (_) {}
-    if (!Array.isArray(data)) return;
-    const rows = body.querySelectorAll('.apikey-row');
-    data.forEach((item, i) => {
-      if (i >= rows.length) return;
-      const row  = rows[i];
-      const cb   = row.querySelector('.apikey-cb');
-      const name = row.querySelector('.apikey-name');
-      const inp  = row.querySelector('.apikey-input');
-      if (cb   && item.enabled !== undefined) cb.checked  = Boolean(item.enabled);
-      if (name && item.name    !== undefined) name.value  = item.name;
-      if (inp  && item.key     !== undefined) inp.value   = item.key;
-    });
-  }
-
-  const paidRow = body.querySelector('.apikey-row-paid');
-  const paidCb  = paidRow ? paidRow.querySelector('.apikey-cb') : null;
-  const paidInp = paidRow ? paidRow.querySelector('.apikey-input') : null;
-
-  // ── Restore saved data ─────────────────────────────────────────────────
-  loadAll();
-  if (paidCb && paidCb.checked) {
-    body.querySelectorAll('.apikey-row:not(.apikey-row-paid)').forEach(r => {
-      const otherCb = r.querySelector('.apikey-cb');
-      if (otherCb) otherCb.checked = false;
-    });
-  }
-
-  // ── Collapse toggle (always closed by default on entry) ─────────────────
   frame.classList.add('collapsed');
   if (!toggle._wired) {
     toggle._wired = true;
     toggle.addEventListener('click', () => frame.classList.toggle('collapsed'));
   }
 
-  // ── Eye toggle buttons ─────────────────────────────────────────────────
-  body.querySelectorAll('.apikey-eye-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const inp = document.getElementById(btn.dataset.target);
-      if (!inp) return;
-      const show = inp.type === 'password';
-      inp.type = show ? 'text' : 'password';
-      btn.textContent = show ? '🙈' : '👁️';
+  if (body) {
+    body.querySelectorAll('.apikey-eye-btn').forEach(btn => {
+      if (btn._wired) return;
+      btn._wired = true;
+      btn.addEventListener('click', () => {
+        const inp = document.getElementById(btn.dataset.target);
+        if (!inp) return;
+        const show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        btn.textContent = show ? '🙈' : '👁️';
+      });
     });
-  });
-
-  // ── Checkbox → grey status + auto-save ────────────────────────────────
-  function applyKeyStatus(input, cb) {
-    input.classList.remove('key-status-ok', 'key-status-fail', 'key-status-disabled');
-    if (!cb.checked) input.classList.add('key-status-disabled');
   }
 
-  body.querySelectorAll('.apikey-cb').forEach(cb => {
-    const row = cb.closest('.apikey-row');
-    const inp = row ? row.querySelector('.apikey-input') : null;
-    if (!inp) return;
-    applyKeyStatus(inp, cb);
+  const optRecEng = document.getElementById('optTranscriberEngine');
+  const optTransEng = document.getElementById('optTranslationEngine');
+  const optNoTrans = document.getElementById('optTranscriberNoTranslate');
+  const inpRecKey = document.getElementById('optTranscriberRecApiKey');
+  const inpTransKey = document.getElementById('optTranscriberTransApiKey');
 
-    cb.addEventListener('change', () => {
-      if (cb === paidCb) {
-        if (paidCb.checked) {
-          // Paid key turned ON: turn off all free keys
-          body.querySelectorAll('.apikey-row:not(.apikey-row-paid)').forEach(r => {
-            const otherCb = r.querySelector('.apikey-cb');
-            const otherInp = r.querySelector('.apikey-input');
-            if (otherCb) {
-              otherCb.checked = false;
-              if (otherInp) applyKeyStatus(otherInp, otherCb);
-            }
-          });
-        } else {
-          // Paid key turned OFF: turn on all free keys that have non-empty value
-          body.querySelectorAll('.apikey-row:not(.apikey-row-paid)').forEach(r => {
-            const otherCb = r.querySelector('.apikey-cb');
-            const otherInp = r.querySelector('.apikey-input');
-            if (otherCb && otherInp) {
-              const hasVal = Boolean(otherInp.value && otherInp.value.trim());
-              otherCb.checked = hasVal;
-              applyKeyStatus(otherInp, otherCb);
-            }
-          });
-        }
-      } else {
-        // Free key toggled: if turned ON while paid key was ON, turn off paid key
-        if (cb.checked && paidCb && paidCb.checked) {
-          paidCb.checked = false;
-          if (paidInp) applyKeyStatus(paidInp, paidCb);
-        }
-      }
-      applyKeyStatus(inp, cb);
-      saveAll();
+  if (optRecEng && !optRecEng._wired) {
+    optRecEng._wired = true;
+    optRecEng.addEventListener('change', () => {
+      try { localStorage.setItem("proxdmr_rec_engine", optRecEng.value); } catch (_) {}
+      updateRecApiKeyUI(optRecEng.value);
     });
-  });
+  }
 
-  // ── Auto-save on input change ──────────────────────────────────────────
-  body.querySelectorAll('.apikey-input, .apikey-name').forEach(el => {
-    el.addEventListener('input', saveAll);
-  });
+  if (optTransEng && !optTransEng._wired) {
+    optTransEng._wired = true;
+    optTransEng.addEventListener('change', () => {
+      try { localStorage.setItem("proxdmr_trans_engine", optTransEng.value); } catch (_) {}
+      updateTransApiKeyUI(optTransEng.value);
+    });
+  }
 
-  // ── Test button — sequential API key validation ─────────────────────────
-  window.testGeminiApiKeys = async function () {
-    const btn = document.getElementById('btnTestApiKeys');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Тест...'; }
+  if (optNoTrans && !optNoTrans._wired) {
+    optNoTrans._wired = true;
+    optNoTrans.addEventListener('change', () => {
+      updateNoTranslateUI(optNoTrans.checked);
+    });
+  }
 
-    const rows = body.querySelectorAll('.apikey-row');
-    for (const row of rows) {
-      const cb  = row.querySelector('.apikey-cb');
-      const inp = row.querySelector('.apikey-input');
-      if (!inp) continue;
-      inp.classList.remove('key-status-ok', 'key-status-fail', 'key-status-disabled');
-      if (!cb || !cb.checked) {
-        inp.classList.add('key-status-disabled');
-        continue;
+  if (inpRecKey && !inpRecKey._wired) {
+    inpRecKey._wired = true;
+    inpRecKey.addEventListener('input', () => {
+      const curRec = optRecEng ? optRecEng.value : 'gemini';
+      const curTrans = optTransEng ? optTransEng.value : 'gemini';
+      const val = inpRecKey.value.trim();
+      setTranscriberKey(curRec, val);
+      if (curRec === curTrans && inpTransKey) {
+        inpTransKey.value = val;
       }
-      const key = inp.value.trim();
-      if (!key) { inp.classList.add('key-status-disabled'); continue; }
+    });
+  }
 
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=1`;
-        const res = await fetch(url, { method: 'GET' });
-        inp.classList.add(res.ok ? 'key-status-ok' : 'key-status-fail');
-      } catch (_) {
-        inp.classList.add('key-status-fail');
+  if (inpTransKey && !inpTransKey._wired) {
+    inpTransKey._wired = true;
+    inpTransKey.addEventListener('input', () => {
+      const curRec = optRecEng ? optRecEng.value : 'gemini';
+      const curTrans = optTransEng ? optTransEng.value : 'gemini';
+      const val = inpTransKey.value.trim();
+      setTranscriberKey(curTrans, val);
+      if (curRec === curTrans && inpRecKey) {
+        inpRecKey.value = val;
       }
-    }
-
-    if (btn) { btn.disabled = false; btn.textContent = '🧪 Тест'; }
-  };
+    });
+  }
 }
 
 // ── Gemini TTS frame: collapse / test speech ─────────────────────────────
@@ -4742,9 +5296,43 @@ function initGeminiTtsFrame() {
   const groupStyle = document.getElementById('groupGeminiTtsStyle');
   const updateEngineUI = () => {
     if (!optEngine) return;
-    const isGemini = optEngine.value === 'gemini';
-    if (groupModel) groupModel.style.display = isGemini ? 'block' : 'none';
+    const curEng = optEngine.value;
+    const isGemini = curEng === 'gemini';
+    const isGroq = curEng === 'groq';
+    const optTtsModel = document.getElementById('optTtsModel');
+    const lblTtsModel = document.getElementById('lblTtsModel');
+
+    if (groupModel) groupModel.style.display = (isGemini || isGroq) ? 'block' : 'none';
     if (groupStyle) groupStyle.style.display = isGemini ? 'block' : 'none';
+
+    if (optTtsModel) {
+      if (isGemini) {
+        if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Модель Gemini TTS:") : "🤖 Модель Gemini TTS:";
+        optTtsModel.innerHTML = `
+          <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview (⚡ Рекомендуется)</option>
+          <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (Быстрый)</option>
+          <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (Качество)</option>
+          <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash TTS Preview (Free)</option>
+          <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro TTS Preview (Pro)</option>
+        `;
+        const savedMod = (window.transcriberSettings && window.transcriberSettings.tts_model) || "gemini-3.1-flash-tts-preview";
+        if (Array.from(optTtsModel.options).some(o => o.value === savedMod)) {
+          optTtsModel.value = savedMod;
+        }
+      } else if (isGroq) {
+        if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Модель Groq TTS:") : "⚡ Модель Groq TTS:";
+        optTtsModel.innerHTML = `
+          <option value="canopylabs/orpheus-v1-english">Orpheus V1 English (⚡ Expressive, US)</option>
+          <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi (Саудовский арабский)</option>
+        `;
+        const savedMod = (window.transcriberSettings && window.transcriberSettings.tts_model) || "canopylabs/orpheus-v1-english";
+        if (Array.from(optTtsModel.options).some(o => o.value === savedMod)) {
+          optTtsModel.value = savedMod;
+        } else {
+          optTtsModel.value = "canopylabs/orpheus-v1-english";
+        }
+      }
+    }
   };
   if (optEngine && !optEngine._wired) {
     optEngine._wired = true;
@@ -4765,11 +5353,24 @@ function initGeminiTtsFrame() {
           populateVoiceSelect(optVoi, "piper", effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
         }
       } else {
-        populateVoiceSelect(optVoi, optEngine.value, effLang, (optEngine.value === "gemini" ? (window.transcriberSettings && window.transcriberSettings.tts_voice) : null), hint);
+        populateVoiceSelect(optVoi, optEngine.value, effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
       }
     });
     updateEngineUI();
   }
+  const optModelEl = document.getElementById('optTtsModel');
+  if (optModelEl && !optModelEl._groqModelWired) {
+    optModelEl._groqModelWired = true;
+    optModelEl.addEventListener('change', () => {
+      if (optEngine && optEngine.value === 'groq') {
+        const optVoi = document.getElementById('optTtsVoice');
+        const hint = document.getElementById('ttsVoiceHint');
+        const isAr = optModelEl.value.includes('arabic');
+        populateVoiceSelect(optVoi, 'groq', isAr ? 'ar' : 'en', isAr ? 'fahad' : 'troy', hint);
+      }
+    });
+  }
+
 
   const optVoice = document.getElementById("optTtsVoice");
   if (optVoice && !optVoice._downloadWired) {
@@ -4808,6 +5409,8 @@ function initGeminiTtsFrame() {
         }
       } else if (curEng === "browser") {
         populateVoiceSelect(optVoi, "browser", newLang, null, hint);
+      } else if (curEng === "edge" || curEng === "silero") {
+        populateVoiceSelect(optVoi, curEng, newLang, null, hint);
       }
     });
   }
@@ -4821,22 +5424,14 @@ function initGeminiTtsFrame() {
     const optTtsDucking = document.getElementById('optTtsDucking');
     const optTtsMuteOthers = document.getElementById('optTtsMuteOthers');
     const optTtsAnnounceCallsign = document.getElementById('optTtsAnnounceCallsign');
-
-    let key = '';
-    const keyInp = document.querySelector('#geminiApiKeysBody .apikey-cb:checked + .apikey-name + .apikey-input-wrap .apikey-input, #geminiApiKeysBody .apikey-cb:checked ~ .apikey-input-wrap .apikey-input');
-    if (keyInp && keyInp.value.trim()) {
-      key = keyInp.value.trim();
-    } else if (optApiKey && optApiKey.value.trim()) {
-      key = optApiKey.value.trim();
-    }
+    const optTtsStyle = document.getElementById('optTtsStyle');
+    const optTtsSpeed = document.getElementById('optTtsSpeed');
 
     const engine = optTtsEngine ? optTtsEngine.value : 'gemini';
-    const model = optTtsModel ? optTtsModel.value : 'gemini-3.1-flash-tts-preview';
-    const optTtsStyle = document.getElementById('optTtsStyle');
+    const model = optTtsModel ? optTtsModel.value : (engine === 'groq' ? 'canopylabs/orpheus-v1-english' : 'gemini-3.1-flash-tts-preview');
     const style = optTtsStyle ? optTtsStyle.value : 'radio';
-    const voice = (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith('__download__')) ? optTtsVoice.value : 'auto';
-    const optTtsSpeed = document.getElementById('optTtsSpeed');
-    const speed = optTtsSpeed ? (parseFloat(optTtsSpeed.value) || 1.1) : (window.transcriberSettings?.tts_speed || 1.1);
+    const voice = (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith('__download__')) ? optTtsVoice.value : (engine === 'groq' ? 'troy' : 'auto');
+    const speed = optTtsSpeed ? (parseFloat(optTtsSpeed.value) || 1.1) : ((window.transcriberSettings && window.transcriberSettings.tts_speed) || 1.1);
     const duckVal = optTtsDucking ? (Math.max(0, Math.min(100, parseFloat(optTtsDucking.value) || 20)) / 100.0) : 0.20;
     const solo = optTtsMuteOthers ? optTtsMuteOthers.checked : true;
     const announce = optTtsAnnounceCallsign ? optTtsAnnounceCallsign.checked : false;
@@ -4858,6 +5453,21 @@ function initGeminiTtsFrame() {
       }
     }
     const testText = getTtsTestPhrase(testLang);
+
+    let key = "";
+    if (engine === 'groq') {
+      key = getCachedTranscriberKey('groq');
+      if (!key) {
+        showToast("⚠️ Укажите API-ключ Groq для проверки звука", 3500);
+        return;
+      }
+    } else if (engine === 'gemini') {
+      key = getCachedTranscriberKey('gemini');
+      if (!key) {
+        showToast(window.t ? window.t("transcriber.toast_need_key", {}, "⚠️ Укажите API-ключ Gemini для проверки звука") : "⚠️ Укажите API-ключ Gemini для проверки звука", 3500);
+        return;
+      }
+    }
 
     if (engine === 'browser') {
       if (window.speechSynthesis) {
@@ -4967,7 +5577,7 @@ function initGeminiTtsFrame() {
           voice: voice,
           api_key: key,
           target_lang: testLang,
-          engine: 'gemini',
+          engine: engine,
           speed: speed,
           announce_callsign: announce,
           callsign: "RX6AWG",
@@ -4976,14 +5586,15 @@ function initGeminiTtsFrame() {
       });
       const data = await resp.json();
       if (data && data.status === 'ok' && data.audio_base64) {
-        showToast(window.t ? window.t("transcriber.toast_tts_gemini", { lang: testLang.toUpperCase(), voice }, `🔊 Озвучка Gemini TTS [${testLang.toUpperCase()}] (${voice})`) : `🔊 Озвучка Gemini TTS [${testLang.toUpperCase()}] (${voice})`, 2500);
+        const engTitle = engine === 'groq' ? 'Groq TTS' : (engine === 'piper' ? 'Piper TTS' : 'Gemini TTS');
+        showToast(`🔊 Озвучка ${engTitle} [${testLang.toUpperCase()}] (${voice || "default"})`, 2500);
         if (window.ttsAudioQueueManager) {
           window.ttsAudioQueueManager.enqueue({
             hotspot_id: actHid,
             slot: 1,
             audio_base64: data.audio_base64,
             text: testText,
-            engine: 'gemini',
+            engine: engine,
             speed: speed,
             ducking_level: duckVal,
             mute_others: solo,
@@ -5031,7 +5642,7 @@ function initTranscriberSettings() {
   const btnFetchModels = document.getElementById("btnFetchTranscriberModels");
 
   // Init collapsible frames
-  initGeminiApiKeysFrame();
+  initSpeechRecognitionFrame();
   initGeminiTtsFrame();
 
   // ── Model selectors: localStorage persistence ──────────────────────────
@@ -5251,20 +5862,54 @@ function initTranscriberSettings() {
     .then(r => r.json())
     .then(data => {
       if (data && data.settings) {
-        window.transcriberSettings = data.settings;
-        if (optApiKey) optApiKey.value = data.settings.api_key || "";
+        window.transcriberSettings = Object.assign({}, window.transcriberSettings, data.settings);
+        if (data.settings.api_key) setTranscriberKey("gemini", data.settings.api_key);
+        if (data.settings.groq_api_key) setTranscriberKey("groq", data.settings.groq_api_key);
         if (optModel && data.settings.model) {
           let mVal = data.settings.model;
           optModel.value = mVal;
         }
-        const effEngine = data.settings.tts_engine || "gemini";
-        const effVoice = data.settings.tts_voice || "auto";
+        let curRecEng = data.settings.transcriber_engine;
+        if (!curRecEng) {
+          try { curRecEng = localStorage.getItem("proxdmr_rec_engine"); } catch (_) {}
+        }
+        if (!curRecEng || curRecEng === "deepgram") curRecEng = "groq";
+
+        let curTransEng = data.settings.translation_engine;
+        if (!curTransEng) {
+          try { curTransEng = localStorage.getItem("proxdmr_trans_engine"); } catch (_) {}
+        }
+        if (!curTransEng || curTransEng === "deepgram") curTransEng = "groq";
+
+        const optTrEng = document.getElementById('optTranscriberEngine');
+        if (optTrEng) optTrEng.value = curRecEng;
+        const optTlEng = document.getElementById('optTranslationEngine');
+        if (optTlEng) optTlEng.value = curTransEng;
+
+        const isNoTrans = (data.settings.target_lang === "none");
+        if (optNoTranslate) optNoTranslate.checked = isNoTrans;
+
+        updateRecApiKeyUI(curRecEng);
+        updateTransApiKeyUI(curTransEng);
+        updateNoTranslateUI(isNoTrans);
+        let effEngine = (data.settings.tts_engine && ["gemini", "groq", "piper", "browser", "edge", "silero"].includes(data.settings.tts_engine)) ? data.settings.tts_engine : "piper";
+        if (effEngine === "deepgram") effEngine = "piper";
+        const effVoice = data.settings.tts_voice || "ru_RU-terra5871-medium";
         if (optTtsEngine) {
           optTtsEngine.value = effEngine;
           const groupModel = document.getElementById('groupGeminiTtsModel');
-          if (groupModel) groupModel.style.display = (effEngine === 'gemini') ? 'block' : 'none';
+          if (groupModel) groupModel.style.display = (effEngine === 'gemini' || effEngine === 'groq') ? 'block' : 'none';
           const groupStyle = document.getElementById('groupGeminiTtsStyle');
           if (groupStyle) groupStyle.style.display = (effEngine === 'gemini') ? 'block' : 'none';
+        }
+        const optTtsModel = document.getElementById('optTtsModel');
+        const lblTtsModel = document.getElementById('lblTtsModel');
+        if (optTtsModel && effEngine === 'groq') {
+          if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Модель Groq TTS:") : "⚡ Модель Groq TTS:";
+          optTtsModel.innerHTML = `
+            <option value="canopylabs/orpheus-v1-english">Orpheus V1 English (⚡ Expressive, US)</option>
+            <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi (Саудовский арабский)</option>
+          `;
         }
         if (data.settings.tts_model && optTtsModel) optTtsModel.value = data.settings.tts_model;
         const optTtsStyle = document.getElementById('optTtsStyle');
@@ -5347,10 +5992,9 @@ function initTranscriberSettings() {
 
   if (btnFetchModels) {
     btnFetchModels.addEventListener("click", async () => {
-      // Use first enabled API key from keys frame
-      const keyInp = document.querySelector('#geminiApiKeysBody .apikey-cb:checked + .apikey-name + .apikey-input-wrap .apikey-input, #geminiApiKeysBody .apikey-cb:checked ~ .apikey-input-wrap .apikey-input');
-      const key = (keyInp && keyInp.value.trim()) ? keyInp.value.trim()
-                : (optApiKey ? optApiKey.value.trim() : "");
+      const key = (window.transcriberKeysCache && window.transcriberKeysCache.gemini)
+                ? window.transcriberKeysCache.gemini.trim()
+                : ((window.transcriberSettings && window.transcriberSettings.api_key) || "");
 
       btnFetchModels.disabled = true;
       const originalText = btnFetchModels.textContent;
@@ -5456,27 +6100,29 @@ function initTranscriberSettings() {
       const isNoTrans = optNoTranslate ? optNoTranslate.checked : false;
       const targetLangVal = isNoTrans ? "none" : (optTargetLang && optTargetLang.value ? optTargetLang.value : "ru");
 
-      // Collect all enabled keys from keys frame
-      const enabledKeys = [];
-      const keysBody = document.getElementById("geminiApiKeysBody");
-      if (keysBody) {
-        keysBody.querySelectorAll(".apikey-row").forEach(row => {
-          const cb = row.querySelector(".apikey-cb");
-          const inp = row.querySelector(".apikey-input");
-          if (cb && cb.checked && inp && inp.value.trim()) {
-            enabledKeys.push(inp.value.trim());
-          }
-        });
+      const recEng = document.getElementById("optTranscriberEngine") ? document.getElementById("optTranscriberEngine").value : "gemini";
+      const transEng = document.getElementById("optTranslationEngine") ? document.getElementById("optTranslationEngine").value : "gemini";
+      const recInp = document.getElementById("optTranscriberRecApiKey");
+      const transInp = document.getElementById("optTranscriberTransApiKey");
+      if (recInp && recInp.value.trim()) {
+        setTranscriberKey(recEng, recInp.value.trim());
       }
-      if (enabledKeys.length === 0 && optApiKey && optApiKey.value.trim()) {
-        enabledKeys.push(optApiKey.value.trim());
+      if (transInp && transInp.value.trim()) {
+        setTranscriberKey(transEng, transInp.value.trim());
       }
+      try {
+        localStorage.setItem("proxdmr_rec_engine", recEng);
+        localStorage.setItem("proxdmr_trans_engine", transEng);
+      } catch (_) {}
 
       const payload = {
         enabled: true,
-        api_key: enabledKeys[0] || (optApiKey ? optApiKey.value.trim() : ""),
-        api_keys: enabledKeys,
+        api_key: getCachedTranscriberKey("gemini"),
+        groq_api_key: getCachedTranscriberKey("groq"),
+        deepgram_api_key: getCachedTranscriberKey("deepgram"),
         model: optModel ? optModel.value : "gemini-3.5-flash",
+        transcriber_engine: recEng,
+        translation_engine: transEng,
         target_lang: targetLangVal,
         tts_engine: optTtsEngine ? optTtsEngine.value : "gemini",
         tts_model: optTtsModel ? optTtsModel.value : "gemini-3.1-flash-tts-preview",
@@ -5497,16 +6143,21 @@ function initTranscriberSettings() {
         });
         const resJson = await resp.json();
         if (resJson.status === "ok") {
-          window.transcriberSettings = resJson.settings;
+          window.transcriberSettings = Object.assign({}, window.transcriberSettings, resJson.settings);
+          if (resJson.settings) {
+            if (resJson.settings.api_key) setTranscriberKey("gemini", resJson.settings.api_key);
+            if (resJson.settings.groq_api_key) setTranscriberKey("groq", resJson.settings.groq_api_key);
+            if (resJson.settings.deepgram_api_key) setTranscriberKey("deepgram", resJson.settings.deepgram_api_key);
+          }
           const qAnnounce = document.getElementById("ttsQuickAnnounceCallsign");
-          if (qAnnounce) qAnnounce.checked = Boolean(resJson.settings?.tts_announce_callsign);
+          if (qAnnounce) qAnnounce.checked = Boolean(resJson.settings && resJson.settings.tts_announce_callsign);
           const qSolo = document.getElementById("ttsQuickSolo");
-          if (qSolo) qSolo.checked = Boolean(resJson.settings?.tts_mute_others);
+          if (qSolo) qSolo.checked = Boolean(resJson.settings && resJson.settings.tts_mute_others);
           const qStyle = document.getElementById("ttsQuickStyle");
-          if (qStyle) qStyle.value = resJson.settings?.tts_style || "radio";
+          if (qStyle) qStyle.value = (resJson.settings && resJson.settings.tts_style) || "radio";
           const qSpeed = document.getElementById("ttsQuickSpeed");
           const qSpeedVal = document.getElementById("ttsQuickSpeedVal");
-          const curSpd = Number(resJson.settings?.tts_speed || 1.1);
+          const curSpd = Number((resJson.settings && resJson.settings.tts_speed) || 1.1);
           if (qSpeed) qSpeed.value = curSpd.toFixed(2);
           if (qSpeedVal) qSpeedVal.textContent = `${curSpd.toFixed(2).replace(/\.?0+$/, "")}x`;
           refreshAllSlotTtsBadges();
@@ -5515,10 +6166,16 @@ function initTranscriberSettings() {
           }
           showToast(window.t ? window.t("transcriber.settings_saved", {}, "✓ Настройки AI Транскрибатора сохранены") : "✓ Настройки AI Транскрибатора сохранены", 3000);
           if (typeof window.triggerModalSavePulse === "function") {
-            window.triggerModalSavePulse(form);
+            window.triggerModalSavePulse(form, { closeSettings: true });
           }
         }
       } catch (err) {
+        if (window._settingsModalAutoCloseTimer) {
+          clearTimeout(window._settingsModalAutoCloseTimer);
+          window._settingsModalAutoCloseTimer = null;
+        }
+        const modal = form.closest ? form.closest(".modal-content, .modal-dialog, #settingsModal") : null;
+        if (modal) modal.classList.remove("modal-save-pulse");
         console.error(err);
         showToast(window.t ? window.t("transcriber.settings_save_err", {}, "⚠️ Ошибка сохранения настроек транскрибатора") : "⚠️ Ошибка сохранения настроек транскрибатора", 3500);
       }
@@ -5642,6 +6299,7 @@ if (typeof window !== "undefined") {
   window.LANG_3LETTER_MAP = LANG_3LETTER_MAP;
   window.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
   window.syncTtsSoloMode = syncTtsSoloMode;
+  window.isAnySlotTtsActive = isAnySlotTtsActive;
 
   window.__proxdmr = window.__proxdmr || {};
   window.__proxdmr.handleCallTranscription = handleCallTranscription;
@@ -5660,10 +6318,12 @@ if (typeof window !== "undefined") {
   window.__proxdmr.syncCardSlotTranscribeUI = syncCardSlotTranscribeUI;
   window.__proxdmr.syncAllTranscribeSlotsToServer = syncAllTranscribeSlotsToServer;
   window.__proxdmr.disableAllTranscribe = disableAllTranscribe;
+  window.__proxdmr.disableAllTts = disableAllTts;
   window.__proxdmr.disableHotspotTranscribe = disableHotspotTranscribe;
   window.__proxdmr.disableSlotTranscribe = disableSlotTranscribe;
   window.__proxdmr.isSlotTranscribeActive = isSlotTranscribeActive;
   window.__proxdmr.isSlotTtsActive = isSlotTtsActive;
+  window.__proxdmr.isAnySlotTtsActive = isAnySlotTtsActive;
   window.__proxdmr.alignTranscribeCardHeight = alignTranscribeCardHeight;
   window.__proxdmr.updateCardTranscribeLayout = updateCardTranscribeLayout;
   window.__proxdmr.populateVoiceSelect = populateVoiceSelect;

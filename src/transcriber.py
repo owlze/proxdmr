@@ -55,6 +55,16 @@ LANG_NAMES: Dict[str, str] = {
     "none": "без перевода"
 }
 
+
+LANG_NAME_TO_CODE: Dict[str, str] = {
+    "russian": "ru", "english": "en", "ukrainian": "uk", "german": "de",
+    "french": "fr", "spanish": "es", "italian": "it", "latvian": "lv",
+    "polish": "pl", "japanese": "ja", "chinese": "zh", "portuguese": "pt",
+    "dutch": "nl", "turkish": "tr", "czech": "cs", "hungarian": "hu",
+    "swedish": "sv", "finnish": "fi", "norwegian": "no", "danish": "da",
+    "hebrew": "he", "arabic": "ar"
+}
+
 LANG_NAMES_EN: Dict[str, str] = {
     "ru": "Russian",
     "en": "English",
@@ -1048,7 +1058,11 @@ class GeminiTranscriberService:
         self.api_key: str = ""
         self.api_keys: List[str] = []
         self._key_index: int = 0
+        self.transcriber_engine: str = "gemini"
         self.model: str = "gemini-3.1-flash-lite"
+        self.translation_engine: str = "gemini"
+        self.groq_api_key: str = ""
+        self.deepgram_api_key: str = ""
         self.target_lang: str = "ru"
 
         # TTS configuration
@@ -1090,15 +1104,24 @@ class GeminiTranscriberService:
         tts_pause_ducking_level: float = 1.0,
         tts_mute_others: bool = True,
         tts_announce_callsign: bool = False,
-        tts_style: str = "radio"
+        tts_style: str = "radio",
+        transcriber_engine: str = "gemini",
+        translation_engine: str = "gemini",
+        groq_api_key: str = "",
+        deepgram_api_key: str = ""
     ):
-        clean_key = (api_key or "").strip()
-        cleaned_keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
-        if clean_key and clean_key not in cleaned_keys:
-            cleaned_keys.insert(0, clean_key)
-        self.api_keys = cleaned_keys
-        self.api_key = clean_key or (self.api_keys[0] if self.api_keys else "")
-        self.enabled = bool(enabled and (self.api_key or self.api_keys))
+        self.api_key = (api_key or "").strip()
+        self.transcriber_engine = (transcriber_engine or "gemini").lower().strip()
+        self.translation_engine = (translation_engine or "gemini").lower().strip()
+        self.groq_api_key = (groq_api_key or "").strip()
+        self.deepgram_api_key = (deepgram_api_key or "").strip()
+
+        if self.transcriber_engine == "groq":
+            self.enabled = bool(enabled and self.groq_api_key)
+        elif self.transcriber_engine == "deepgram":
+            self.enabled = bool(enabled and self.deepgram_api_key)
+        else:
+            self.enabled = bool(enabled and self.api_key)
 
         m = model.strip() if model and model.strip() else "gemini-3.1-flash-lite"
         if any(dep in m.lower() for dep in ["gemini-2.5-", "gemini-2.0-", "gemini-1.5-"]):
@@ -1106,8 +1129,13 @@ class GeminiTranscriberService:
         self.model = m
         self.target_lang = target_lang.strip() if target_lang and target_lang.strip() else "ru"
         self.tts_enabled = bool(tts_enabled)
-        self.tts_engine = tts_engine or "gemini"
-        self.tts_model = tts_model or "gemini-3.1-flash-tts-preview"
+        self.tts_engine = (tts_engine or "gemini").lower().strip()
+        if self.tts_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "edge", "silero"):
+            self.tts_engine = "gemini"
+        default_model = "aura-2-asteria-en" if self.tts_engine == "deepgram" else ("canopylabs/orpheus-v1-english" if self.tts_engine == "groq" else "gemini-3.1-flash-tts-preview")
+        self.tts_model = tts_model or default_model
+        if self.tts_engine not in ("groq", "deepgram") and any(k in self.tts_model.lower() for k in ("orpheus", "aura")):
+            self.tts_model = "gemini-3.1-flash-tts-preview"
         self.tts_voice = tts_voice or "auto"
         self.tts_speed = float(tts_speed or 1.1)
         self.tts_ducking_level = float(tts_ducking_level if tts_ducking_level is not None else 0.80)
@@ -1137,13 +1165,20 @@ class GeminiTranscriberService:
                 logger.debug(f"[TRANSCRIBER] Piper configure voice check error: {e}")
 
         logger.info(
-            f"[TRANSCRIBER] Configured: enabled={self.enabled}, model={self.model}, "
+            f"[TRANSCRIBER] Configured: enabled={self.enabled}, engine={self.transcriber_engine}, "
+            f"model={self.model}, trans_engine={self.translation_engine}, "
             f"target_lang={self.target_lang}, keys={len(self.api_keys)}, "
             f"tts={self.tts_enabled}/{self.tts_engine}/{self.tts_model}"
         )
 
     def is_enabled(self) -> bool:
-        return self.enabled and bool(self.api_key or self.api_keys)
+        if not self.enabled:
+            return False
+        if self.transcriber_engine == "groq":
+            return bool(self.groq_api_key)
+        elif self.transcriber_engine == "deepgram":
+            return bool(self.deepgram_api_key)
+        return bool(self.api_key)
 
     def get_all_keys(self) -> List[str]:
         if self.api_keys:
@@ -1249,6 +1284,136 @@ class GeminiTranscriberService:
                 self._process_chunk(hid, slot, src_id, callsign, final_pcm, is_final=True, call_id=cid)
             )
 
+
+    def _post_multipart_groq_asr(self, wav_bytes: bytes, api_key: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        import urllib.request, urllib.error, uuid, json
+        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+        body = bytearray()
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3\r\n".encode("utf-8"))
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\nverbose_json\r\n".encode("utf-8"))
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"temperature\"\r\n\r\n0.0\r\n".encode("utf-8"))
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n".encode("utf-8"))
+        body.extend(wav_bytes)
+        body.extend(b"\r\n")
+        body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            data=bytes(body),
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "ProxDMR/1.0"
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                text = (data.get("text") or "").strip()
+                raw_l = (data.get("language") or "ru").strip().lower()
+                lang = LANG_NAME_TO_CODE.get(raw_l, raw_l[:2])
+                return {"text": text, "lang": lang}, None
+        except urllib.error.HTTPError as e:
+            err_msg = f"Groq HTTP {e.code}"
+            try:
+                err_data = json.loads(e.read().decode("utf-8"))
+                if "error" in err_data and "message" in err_data["error"]:
+                    err_msg = f"Groq: {err_data['error']['message']}"
+            except Exception:
+                pass
+            return None, err_msg
+        except Exception as e:
+            return None, f"Groq: {e}"
+
+    def _post_deepgram_asr(self, wav_bytes: bytes, api_key: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        import urllib.request, urllib.error, json
+        url = "https://api.deepgram.com/v1/listen?model=nova-2&detect_language=true&smart_format=true&punctuate=true"
+        req = urllib.request.Request(
+            url,
+            data=wav_bytes,
+            headers={
+                "Content-Type": "audio/wav",
+                "Authorization": f"Token {api_key}",
+                "User-Agent": "ProxDMR/1.0"
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                ch = data.get("results", {}).get("channels", [{}])[0]
+                alt = ch.get("alternatives", [{}])[0]
+                text = (alt.get("transcript") or "").strip()
+                lang = (ch.get("detected_language") or "ru").strip().lower()
+                return {"text": text, "lang": lang[:2]}, None
+        except urllib.error.HTTPError as e:
+            err_msg = f"Deepgram HTTP {e.code}"
+            try:
+                err_data = json.loads(e.read().decode("utf-8"))
+                if "err_msg" in err_data:
+                    err_msg = f"Deepgram: {err_data['err_msg']}"
+            except Exception:
+                pass
+            return None, err_msg
+        except Exception as e:
+            return None, f"Deepgram: {e}"
+
+    def _post_groq_translate(self, text: str, source_lang: str, target_lang: str, api_key: str) -> Tuple[Optional[str], Optional[str]]:
+        import urllib.request, urllib.error, json
+        source_lang_en = LANG_NAMES_EN.get(source_lang[:2].lower(), source_lang)
+        target_lang_en = LANG_NAMES_EN.get(target_lang.lower(), target_lang)
+        sys_prompt = self._build_stage2_translation_instruction(source_lang_en, target_lang_en)
+        user_prompt = f"Translate this amateur radio transmission from {source_lang_en} into {target_lang_en}:\n{text}"
+        candidate_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+        last_err = None
+        for cand_model in candidate_models:
+            payload = {
+                "model": cand_model,
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.0,
+                "response_format": {"type": "json_object"},
+                "max_tokens": 250
+            }
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxDMR/1.0"
+                },
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    try:
+                        parsed = json.loads(content)
+                        translated = (parsed.get("text") or content).strip()
+                    except Exception:
+                        translated = content
+                    return translated, None
+            except urllib.error.HTTPError as e:
+                err_msg = f"Groq Translate HTTP {e.code}"
+                try:
+                    err_data = json.loads(e.read().decode("utf-8"))
+                    if "error" in err_data and "message" in err_data["error"]:
+                        err_msg = f"Groq: {err_data['error']['message']}"
+                except Exception:
+                    pass
+                last_err = err_msg
+                if e.code in (400, 404):
+                    continue
+                return None, err_msg
+            except Exception as e:
+                last_err = f"Groq Translate: {e}"
+        return None, last_err
+
     def _pcm_to_wav(self, pcm_bytes: bytes, sample_rate: int = 8000) -> bytes:
         bio = io.BytesIO()
         with wave.open(bio, "wb") as wav:
@@ -1323,25 +1488,14 @@ class GeminiTranscriberService:
     def _http_post_json_with_retry(
         self, endpoint: str, payload: Dict[str, Any]
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        keys = self.get_all_keys()
-        if not keys:
+        key = (self.api_key or "").strip()
+        if not key:
             return None, "Не указан API ключ Gemini"
-
-        attempts = min(len(keys), 5)
-        last_err = None
-        for _ in range(attempts):
-            key = self._get_next_key()
-            url = f"https://generativelanguage.googleapis.com/v1beta/{endpoint}?key={key}"
-            result_json, err = self._http_post_json(url, payload)
-            if not err and result_json:
-                return result_json, None
-            last_err = err
-            if err and any(term in str(err).lower() for term in ["429", "quota", "resource_exhausted", "limit"]):
-                logger.warning(f"[TRANSCRIBER] Gemini key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
-                continue
-            else:
-                break
-        return None, last_err
+        url = f"https://generativelanguage.googleapis.com/v1beta/{endpoint}?key={key}"
+        result_json, err = self._http_post_json(url, payload)
+        if not err and result_json:
+            return result_json, None
+        return None, err
 
     async def synthesize_speech(
         self,
@@ -1365,8 +1519,11 @@ class GeminiTranscriberService:
         effective_lang = (target_lang or self.target_lang or "ru").lower().strip()
         if effective_lang == "none":
             effective_lang = "ru"
+        eff_engine = (engine or self.tts_engine or "gemini").lower().strip()
+        if eff_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "edge", "silero"):
+            eff_engine = "gemini"
 
-        if (engine == "piper") or (self.tts_engine == "piper" and engine != "gemini"):
+        if eff_engine == "piper":
             from piper_service import PiperService
             from callsign_phonetic import get_callsign_announcement, concatenate_wavs
 
@@ -1422,14 +1579,182 @@ class GeminiTranscriberService:
                 return comb or wav_bytes, err
             return wav_bytes or call_announcement_wav, err
 
+        if eff_engine == "edge":
+            from edge_service import EdgeTtsService
+            from callsign_phonetic import get_callsign_announcement, concatenate_wavs
+
+            edge_srv = EdgeTtsService.get_instance()
+            actual_voice = edge_srv.resolve_voice(voice, lang=effective_lang, gender=gender)
+
+            call_announcement_wav = None
+            if announce_callsign and callsign:
+                call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="edge")
+                if call_phrase:
+                    c_wav, _ = await edge_srv.synthesize_async(
+                        text=call_phrase,
+                        voice=actual_voice,
+                        lang=effective_lang,
+                        speed=0.9,
+                        gender=gender
+                    )
+                    if c_wav:
+                        call_announcement_wav = c_wav
+
+            speech_text = strip_callsigns_for_tts(text, callsign=callsign)
+            if effective_lang == "ru":
+                speech_text = normalize_for_russian_tts(speech_text, strip_callsigns=True, callsign=callsign)
+
+            if not speech_text or not speech_text.strip():
+                if call_announcement_wav:
+                    return call_announcement_wav, None
+                return None, "Пустой текст для озвучки"
+
+            wav_bytes, err = await edge_srv.synthesize_async(
+                text=speech_text,
+                voice=actual_voice,
+                lang=effective_lang,
+                speed=speed or self.tts_speed,
+                gender=gender
+            )
+            if call_announcement_wav and wav_bytes:
+                comb, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=200)
+                return comb or wav_bytes, err
+            return wav_bytes or call_announcement_wav, err
+
+        if eff_engine == "silero":
+            from silero_service import SileroService
+            from callsign_phonetic import get_callsign_announcement, concatenate_wavs
+
+            silero_srv = SileroService.get_instance()
+            actual_voice = silero_srv.resolve_voice(voice, lang=effective_lang, gender=gender)
+
+            call_announcement_wav = None
+            if announce_callsign and callsign:
+                call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="silero")
+                if call_phrase:
+                    c_wav, _ = await silero_srv.synthesize_async(
+                        text=call_phrase,
+                        voice=actual_voice,
+                        lang=effective_lang,
+                        speed=0.9,
+                        gender=gender
+                    )
+                    if c_wav:
+                        call_announcement_wav = c_wav
+
+            speech_text = strip_callsigns_for_tts(text, callsign=callsign)
+            if effective_lang == "ru":
+                speech_text = normalize_for_russian_tts(speech_text, strip_callsigns=True, callsign=callsign)
+
+            if not speech_text or not speech_text.strip():
+                if call_announcement_wav:
+                    return call_announcement_wav, None
+                return None, "Пустой текст для озвучки"
+
+            wav_bytes, err = await silero_srv.synthesize_async(
+                text=speech_text,
+                voice=actual_voice,
+                lang=effective_lang,
+                speed=speed or self.tts_speed,
+                gender=gender
+            )
+            if call_announcement_wav and wav_bytes:
+                comb, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=200)
+                return comb or wav_bytes, err
+            return wav_bytes or call_announcement_wav, err
+
         from callsign_phonetic import get_callsign_announcement
-        eff_engine = (engine or self.tts_engine or "gemini").lower().strip()
         call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine=eff_engine) if (announce_callsign and callsign) else ""
         clean_text = prepare_text_for_tts(text, effective_lang, callsign=callsign)
         if call_phrase:
             clean_text = f"{call_phrase} {clean_text}".strip() if clean_text else call_phrase
         if not clean_text or not clean_text.strip():
             return None, "Пустой текст для озвучки"
+
+        if eff_engine == "groq":
+            groq_key = (api_key or self.groq_api_key or "").strip()
+            if not groq_key:
+                return None, "Не указан API ключ Groq для синтеза речи"
+
+            groq_model = (model or "canopylabs/orpheus-v1-english").strip()
+            if "orpheus" not in groq_model.lower():
+                groq_model = "canopylabs/orpheus-v1-english"
+
+            groq_voice = (voice or "troy").strip()
+            if groq_voice in ("auto", ""):
+                groq_voice = "troy" if gender != "female" else "hannah"
+
+            url = "https://api.groq.com/openai/v1/audio/speech"
+            headers = {
+                "Authorization": f"Bearer {groq_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxDMR/1.0"
+            }
+            body = {
+                "model": groq_model,
+                "input": clean_text,
+                "voice": groq_voice,
+                "response_format": "wav"
+            }
+            if speed and speed != 1.0:
+                body["speed"] = max(0.5, min(2.0, float(speed)))
+
+            try:
+                data_bytes = json.dumps(body).encode("utf-8")
+                req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    wav_data = resp.read()
+                    if wav_data and len(wav_data) > 44:
+                        return wav_data, None
+                    return None, "Groq TTS вернул пустые аудиоданные"
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="replace")
+                logger.warning(f"[TRANSCRIBER] Groq TTS HTTP {e.code}: {err_body}")
+                return None, f"Ошибка Groq TTS {e.code}: {err_body[:200]}"
+            except Exception as e:
+                logger.warning(f"[TRANSCRIBER] Groq TTS error: {e}")
+                return None, f"Ошибка Groq TTS: {e}"
+
+        if eff_engine == "deepgram":
+            dg_key = (api_key or self.deepgram_api_key or "").strip()
+            if not dg_key:
+                return None, "Не указан API ключ Deepgram для синтеза речи"
+
+            dg_voice = (voice or "").strip()
+            if not dg_voice or dg_voice in ("auto", "default"):
+                dg_voice = "aura-2-orion-en" if gender != "female" else "aura-2-asteria-en"
+            elif not dg_voice.startswith("aura"):
+                dg_voice = f"aura-2-{dg_voice}-en"
+
+            dg_model = (model or dg_voice).strip()
+            if not dg_model.startswith("aura"):
+                dg_model = dg_voice
+
+            url = f"https://api.deepgram.com/v1/speak?model={dg_model}&encoding=linear16&container=wav"
+            headers = {
+                "Authorization": f"Token {dg_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxDMR/1.0"
+            }
+            body = {
+                "text": clean_text
+            }
+
+            try:
+                data_bytes = json.dumps(body).encode("utf-8")
+                req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    wav_data = resp.read()
+                    if wav_data and len(wav_data) > 44:
+                        return wav_data, None
+                    return None, "Deepgram TTS вернул пустые аудиоданные"
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="replace")
+                logger.warning(f"[TRANSCRIBER] Deepgram TTS HTTP {e.code}: {err_body}")
+                return None, f"Ошибка Deepgram TTS {e.code}: {err_body[:200]}"
+            except Exception as e:
+                logger.warning(f"[TRANSCRIBER] Deepgram TTS error: {e}")
+                return None, f"Ошибка Deepgram TTS: {e}"
 
         eff_style = (style or self.tts_style or "radio").lower().strip()
         style_cfg = TTS_STYLE_CONFIG.get(eff_style, TTS_STYLE_CONFIG["radio"])
@@ -1512,105 +1837,152 @@ class GeminiTranscriberService:
     async def _process_chunk(
         self, hid: str, slot: int, src_id: int, callsign: str, pcm_bytes: bytes, is_final: bool, call_id: str = ""
     ):
-        if not self.api_key and not self.api_keys:
-            err = "Не указан API ключ Gemini"
-            logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
-            await self._notify_error(hid, slot, err)
-            return
-
-        if not await self._check_rate_limit():
-            err = "Превышен лимит запросов (Rate Limit: 15 req/min)"
-            logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
-            await self._notify_error(hid, slot, err)
-            return
-
-        wav_bytes = self._pcm_to_wav(pcm_bytes)
-        b64_audio = base64.b64encode(wav_bytes).decode("ascii")
-
-        # --- STAGE 1: SPEECH RECOGNITION (ASR in original language) ---
-        stage1_instruction = self._build_stage1_asr_instruction()
-        user_prompt_stage1 = (
-            "Transcribe this amateur radio audio recording verbatim in its original spoken language. "
-            "Detect spoken language, speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. "
-            "Output strictly valid JSON: {\"lang\": \"...\", \"gender\": \"...\", \"pitch\": \"...\", \"text\": \"...\"}."
-        )
-
-        payload_stage1 = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "inline_data": {
-                                "mime_type": "audio/wav",
-                                "data": b64_audio
-                            }
-                        },
-                        {
-                            "text": user_prompt_stage1
-                        }
-                    ]
-                }
-            ],
-            "system_instruction": {
-                "parts": [
-                    {
-                        "text": stage1_instruction
-                    }
-                ]
-            },
-            "generationConfig": {
-                "temperature": 0.0,
-                "response_mime_type": "application/json"
-            }
-        }
-
-        model_name = self.model
-        if model_name.startswith("models/"):
-            model_name = model_name[len("models/"):]
-        endpoint = f"models/{model_name}:generateContent"
-
         try:
-            result_json, err = await asyncio.to_thread(
-                self._http_post_json_with_retry, endpoint, payload_stage1
-            )
-            if err or not result_json:
-                error_text = err or "Пустой ответ Gemini API (ASR)"
-                logger.warning(f"[TRANSCRIBER] TS{slot} Stage 1 error: {error_text}")
-                await self._notify_error(hid, slot, error_text)
-                return
+            wav_bytes = self._pcm_to_wav(pcm_bytes)
 
-            if "promptFeedback" in result_json and result_json["promptFeedback"].get("blockReason"):
-                reason = result_json["promptFeedback"]["blockReason"]
-                err = f"Блокировка фильтром Gemini ({reason})"
-                logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
-                await self._notify_error(hid, slot, err)
-                return
+            if self.transcriber_engine == "groq":
+                if not self.groq_api_key:
+                    err = "Не указан API ключ Groq"
+                    logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
+                    await self._notify_error(hid, slot, err)
+                    return
+                res, err = await asyncio.to_thread(self._post_multipart_groq_asr, wav_bytes, self.groq_api_key)
+                if err or not res:
+                    error_text = err or "Ошибка распознавания Groq Cloud API"
+                    logger.warning(f"[TRANSCRIBER] TS{slot} Groq ASR error: {error_text}")
+                    await self._notify_error(hid, slot, error_text)
+                    return
+                original_text = clean_transcription_text(res.get("text", "").strip())
+                if not original_text:
+                    return
+                lang_code = (res.get("lang", "ru") or "ru").upper().strip()
+                detected_lang = lang_code[:3] if len(lang_code) > 3 else lang_code
+                detected_gender = "male"
+                detected_pitch = "medium"
 
-            if "candidates" in result_json and result_json["candidates"]:
-                cand = result_json["candidates"][0]
-                finish_reason = cand.get("finishReason")
-                if finish_reason and finish_reason not in ("STOP", "MAX_TOKENS"):
-                    err = f"Отклонено Gemini ({finish_reason})"
+            elif self.transcriber_engine == "deepgram":
+                if not self.deepgram_api_key:
+                    err = "Не указан API ключ Deepgram"
+                    logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
+                    await self._notify_error(hid, slot, err)
+                    return
+                res, err = await asyncio.to_thread(self._post_deepgram_asr, wav_bytes, self.deepgram_api_key)
+                if err or not res:
+                    error_text = err or "Ошибка распознавания Deepgram API"
+                    logger.warning(f"[TRANSCRIBER] TS{slot} Deepgram ASR error: {error_text}")
+                    await self._notify_error(hid, slot, error_text)
+                    return
+                original_text = clean_transcription_text(res.get("text", "").strip())
+                if not original_text:
+                    return
+                lang_code = (res.get("lang", "ru") or "ru").upper().strip()
+                detected_lang = lang_code[:3] if len(lang_code) > 3 else lang_code
+                detected_gender = "male"
+                detected_pitch = "medium"
+
+            else:
+                if not self.api_key and not self.api_keys:
+                    err = "Не указан API ключ Gemini"
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
 
-            parsed = self._extract_result(result_json)
-            if not parsed or not parsed.get("text"):
-                return
+                if not await self._check_rate_limit():
+                    err = "Превышен лимит запросов (Rate Limit: 15 req/min)"
+                    logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
+                    await self._notify_error(hid, slot, err)
+                    return
 
-            detected_lang = parsed.get("lang", "---").upper().strip()
-            if len(detected_lang) > 3:
-                detected_lang = detected_lang[:3]
-            detected_gender = parsed.get("gender", "male").lower().strip()
-            detected_pitch = parsed.get("pitch", "medium").lower().strip()
-            original_text = parsed.get("text", "").strip()
-            original_text = clean_transcription_text(original_text)
+                wav_bytes = self._pcm_to_wav(pcm_bytes)
+                b64_audio = base64.b64encode(wav_bytes).decode("ascii")
 
-            if not original_text:
-                return
+                # --- STAGE 1: SPEECH RECOGNITION (ASR in original language) ---
+                stage1_instruction = self._build_stage1_asr_instruction()
+                user_prompt_stage1 = (
+                    "Transcribe this amateur radio audio recording verbatim in its original spoken language. "
+                    "Detect spoken language, speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. "
+                    "Output strictly valid JSON: {\"lang\": \"...\", \"gender\": \"...\", \"pitch\": \"...\", \"text\": \"...\"}."
+                )
 
-            # --- STAGE 2: TRANSLATION (LLM in same model) ---
+                payload_stage1 = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "inline_data": {
+                                        "mime_type": "audio/wav",
+                                        "data": b64_audio
+                                    }
+                                },
+                                {
+                                    "text": user_prompt_stage1
+                                }
+                            ]
+                        }
+                    ],
+                    "system_instruction": {
+                        "parts": [
+                            {
+                                "text": stage1_instruction
+                            }
+                        ]
+                    },
+                    "generationConfig": {
+                        "temperature": 0.0,
+                        "response_mime_type": "application/json"
+                    }
+                }
+
+                model_name = self.model
+                if model_name.startswith("models/"):
+                    model_name = model_name[len("models/"):]
+                endpoint = f"models/{model_name}:generateContent"
+
+                try:
+                    result_json, err = await asyncio.to_thread(
+                        self._http_post_json_with_retry, endpoint, payload_stage1
+                    )
+                    if err or not result_json:
+                        error_text = err or "Пустой ответ Gemini API (ASR)"
+                        logger.warning(f"[TRANSCRIBER] TS{slot} Stage 1 error: {error_text}")
+                        await self._notify_error(hid, slot, error_text)
+                        return
+
+                    if "promptFeedback" in result_json and result_json["promptFeedback"].get("blockReason"):
+                        reason = result_json["promptFeedback"]["blockReason"]
+                        err = f"Блокировка фильтром Gemini ({reason})"
+                        logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
+                        await self._notify_error(hid, slot, err)
+                        return
+
+                    if "candidates" in result_json and result_json["candidates"]:
+                        cand = result_json["candidates"][0]
+                        finish_reason = cand.get("finishReason")
+                        if finish_reason and finish_reason not in ("STOP", "MAX_TOKENS"):
+                            err = f"Отклонено Gemini ({finish_reason})"
+                            logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
+                            await self._notify_error(hid, slot, err)
+                            return
+
+                    parsed = self._extract_result(result_json)
+                    if not parsed or not parsed.get("text"):
+                        return
+
+                    detected_lang = parsed.get("lang", "---").upper().strip()
+                    if len(detected_lang) > 3:
+                        detected_lang = detected_lang[:3]
+                    detected_gender = parsed.get("gender", "male").lower().strip()
+                    detected_pitch = parsed.get("pitch", "medium").lower().strip()
+                    original_text = parsed.get("text", "").strip()
+                    original_text = clean_transcription_text(original_text)
+
+                    if not original_text:
+                        return
+                except Exception as e:
+                    logger.error(f"[TRANSCRIBER] TS{slot} Gemini ASR exception: {e}")
+                    return
+
+            # --- STAGE 2: TRANSLATION ---
             target_lang_code = self.target_lang.lower().strip()
             is_direct = target_lang_code == "none"
 
@@ -1628,44 +2000,69 @@ class GeminiTranscriberService:
             if is_direct or is_same_lang:
                 translated_text = original_text
             else:
-                source_lang_en = LANG_NAMES_EN.get(d_lower[:2], detected_lang)
-                target_lang_en = LANG_NAMES_EN.get(target_lang_code, target_lang_code)
-                stage2_instruction = self._build_stage2_translation_instruction(source_lang_en, target_lang_en)
-
-                payload_stage2 = {
-                    "contents": [
-                        {
-                            "parts": [
-                                {
-                                    "text": f"Translate this amateur radio transmission from {source_lang_en} into {target_lang_en}:\n{original_text}"
-                                }
-                            ]
-                        }
-                    ],
-                    "system_instruction": {
-                        "parts": [
-                            {
-                                "text": stage2_instruction
-                            }
-                        ]
-                    },
-                    "generationConfig": {
-                        "temperature": 0.0,
-                        "response_mime_type": "application/json"
-                    }
-                }
-
-                result2_json, err2 = await asyncio.to_thread(
-                    self._http_post_json_with_retry, endpoint, payload_stage2
-                )
-                if result2_json:
-                    parsed2 = self._extract_result(result2_json)
-                    if parsed2 and parsed2.get("text"):
-                        translated_text = clean_transcription_text(parsed2.get("text", "").strip())
-                    else:
+                if self.translation_engine == "groq":
+                    if not self.groq_api_key:
+                        logger.warning(f"[TRANSCRIBER] TS{slot}: Groq API key missing for translation. Keeping original.")
                         translated_text = original_text
+                    else:
+                        tr_res, tr_err = await asyncio.to_thread(
+                            self._post_groq_translate, original_text, d_lower[:2], target_lang_code, self.groq_api_key
+                        )
+                        if tr_res:
+                            translated_text = clean_transcription_text(tr_res)
+                        else:
+                            logger.warning(f"[TRANSCRIBER] TS{slot} Groq translation failed: {tr_err}. Falling back to original.")
+                            translated_text = original_text
+                elif self.translation_engine == "gemini":
+                    if not self.api_key and not self.api_keys:
+                        logger.warning(f"[TRANSCRIBER] TS{slot}: Gemini API key missing for translation. Keeping original.")
+                        translated_text = original_text
+                    else:
+                        model_name = self.model
+                        if model_name.startswith("models/"):
+                            model_name = model_name[len("models/"):]
+                        endpoint = f"models/{model_name}:generateContent"
+
+                        source_lang_en = LANG_NAMES_EN.get(d_lower[:2], detected_lang)
+                        target_lang_en = LANG_NAMES_EN.get(target_lang_code, target_lang_code)
+                        stage2_instruction = self._build_stage2_translation_instruction(source_lang_en, target_lang_en)
+
+                        payload_stage2 = {
+                            "contents": [
+                                {
+                                    "parts": [
+                                        {
+                                            "text": f"Translate this amateur radio transmission from {source_lang_en} into {target_lang_en}:\n{original_text}"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "system_instruction": {
+                                "parts": [
+                                    {
+                                        "text": stage2_instruction
+                                    }
+                                ]
+                            },
+                            "generationConfig": {
+                                "temperature": 0.0,
+                                "response_mime_type": "application/json"
+                            }
+                        }
+
+                        result2_json, err2 = await asyncio.to_thread(
+                            self._http_post_json_with_retry, endpoint, payload_stage2
+                        )
+                        if result2_json:
+                            parsed2 = self._extract_result(result2_json)
+                            if parsed2 and parsed2.get("text"):
+                                translated_text = clean_transcription_text(parsed2.get("text", "").strip())
+                            else:
+                                translated_text = original_text
+                        else:
+                            logger.warning(f"[TRANSCRIBER] TS{slot} Stage 2 translation failed: {err2}. Falling back to original.")
+                            translated_text = original_text
                 else:
-                    logger.warning(f"[TRANSCRIBER] TS{slot} Stage 2 translation failed: {err2}. Falling back to original.")
                     translated_text = original_text
 
             final_text = original_text if is_direct else translated_text
@@ -1702,7 +2099,15 @@ class GeminiTranscriberService:
 
             # --- STAGE 3: SPEECH SYNTHESIS (TTS) ---
             if self.is_slot_tts_enabled(hid, slot):
-                actual_voice = resolve_tts_voice(self.tts_voice, gender=detected_gender, pitch=detected_pitch)
+                eff_l_choice = (detected_lang if is_direct else self.target_lang) or "ru"
+                if self.tts_engine == "edge":
+                    from edge_service import EdgeTtsService
+                    actual_voice = EdgeTtsService.get_instance().resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
+                elif self.tts_engine == "silero":
+                    from silero_service import SileroService
+                    actual_voice = SileroService.get_instance().resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
+                else:
+                    actual_voice = resolve_tts_voice(self.tts_voice, gender=detected_gender, pitch=detected_pitch)
                 if self.tts_engine == "piper":
                     try:
                         from piper_service import PiperService
@@ -1864,7 +2269,7 @@ class GeminiTranscriberService:
                                     pass
                     except Exception as e:
                         logger.warning(f"[TRANSCRIBER] Piper TTS exception TS{slot}: {e}")
-                elif self.tts_engine == "gemini":
+                elif self.tts_engine in ("gemini", "groq", "deepgram", "edge", "silero"):
                     try:
                         clean_text = strip_callsigns_for_tts(display_text, callsign=callsign)
                         effective_callsign = (callsign or "").strip()
@@ -1875,7 +2280,7 @@ class GeminiTranscriberService:
 
                         if self.tts_announce_callsign and effective_callsign and is_short_replica:
                             logger.info(
-                                f"[TRANSCRIBER] TS{slot} Skipping callsign announcement (Gemini): short replica "
+                                f"[TRANSCRIBER] TS{slot} Skipping callsign announcement ({self.tts_engine}): short replica "
                                 f"(<= 20 chars, len={len(clean_replica)}): '{clean_replica}'"
                             )
 
@@ -1884,15 +2289,16 @@ class GeminiTranscriberService:
                             if len(self._announced_call_ids) > 500:
                                 self._announced_call_ids.popitem(last=False)
                             from callsign_phonetic import get_callsign_announcement
-                            call_phrase = get_callsign_announcement(effective_callsign, lang=eff_l, engine="gemini")
+                            call_phrase = get_callsign_announcement(effective_callsign, lang=eff_l, engine=self.tts_engine)
                             if call_phrase:
                                 logger.info(f"[TRANSCRIBER] TS{slot} Announcing callsign [{effective_callsign}] ({eff_l}): '{call_phrase}'")
                                 clean_text = f"{call_phrase} {clean_text}".strip() if clean_text else call_phrase
                         if not clean_text or not clean_text.strip():
-                            logger.info(f"[TRANSCRIBER] TS{slot} Gemini TTS skipped: text empty after callsign strip.")
+                            logger.info(f"[TRANSCRIBER] TS{slot} {self.tts_engine} TTS skipped: text empty after callsign strip.")
                         else:
                             wav_bytes, tts_err = await self.synthesize_speech(
                                 clean_text,
+                                voice=actual_voice,
                                 gender=detected_gender,
                                 pitch=detected_pitch,
                                 callsign=callsign
@@ -1906,7 +2312,7 @@ class GeminiTranscriberService:
                                     "audio_base64": b64_wav,
                                     "text": clean_text,
                                     "call_id": call_id,
-                                    "engine": "gemini",
+                                    "engine": self.tts_engine,
                                     "voice": actual_voice,
                                     "gender": detected_gender,
                                     "pitch": detected_pitch,

@@ -27,7 +27,7 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js';
+} from '../dmr/transcriber.js?v=2.9.278';
 import { renderTranscriptionSummary } from '../dmr/transcription.js';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js';
 import { updateApkUpdateUI } from '../core/updater.js';
@@ -357,6 +357,9 @@ export function connectWebSocket(force = false) {
         try {
           ws.send(JSON.stringify({ type: "disable_all_transcribe_slots" }));
         } catch (_) {}
+        try {
+          ws.send(JSON.stringify({ type: "disable_all_tts_slots" }));
+        } catch (_) {}
       } else if (typeof syncAllTranscribeSlotsToServer === "function") {
         syncAllTranscribeSlotsToServer();
       }
@@ -484,6 +487,7 @@ export function connectWebSocket(force = false) {
           ws.onerror = null;
         }
       } catch (_) {}
+      resetTranscribeAndTtsOnDisconnect();
       handleGwDisconnectFailure(event);
     };
 
@@ -496,7 +500,31 @@ export function connectWebSocket(force = false) {
       console.error("[WS] Socket error:", err);
     };
   }
+
+export function resetTranscribeAndTtsOnDisconnect() {
+  try {
+    if (typeof window.disableAllTranscribe === "function") {
+      window.disableAllTranscribe(true, false);
+    } else if (window.__proxdmr && typeof window.__proxdmr.disableAllTranscribe === "function") {
+      window.__proxdmr.disableAllTranscribe(true, false);
+    }
+  } catch (err) {
+    console.warn("[WS] Error resetting transcribe on disconnect:", err);
+  }
+  try {
+    if (typeof window.disableAllTts === "function") {
+      window.disableAllTts(true, false);
+    } else if (window.__proxdmr && typeof window.__proxdmr.disableAllTts === "function") {
+      window.__proxdmr.disableAllTts(true, false);
+    }
+  } catch (err) {
+    console.warn("[WS] Error resetting TTS on disconnect:", err);
+  }
+  window._appTranscribeWsInitDone = false;
+}
+
 export function handleGwDisconnectFailure(eventOrReason) {
+    resetTranscribeAndTtsOnDisconnect();
     if (wsConnectTimeoutTimer) {
       clearTimeout(wsConnectTimeoutTimer);
       wsConnectTimeoutTimer = null;
@@ -590,6 +618,14 @@ export function handleGwDisconnectFailure(eventOrReason) {
     }
   }
 export function handleServerMessage(msg) {
+    if (msg.type === "state_change") {
+      if (msg.is_tx === false) {
+        if (typeof window.onServerTxEnded === "function") {
+          window.onServerTxEnded(msg);
+        }
+      }
+      return;
+    }
     if (msg.type === "bm_import_progress") {
       if (typeof window.onBmImportProgress === "function") {
         window.onBmImportProgress(msg.task || msg);
@@ -599,6 +635,12 @@ export function handleServerMessage(msg) {
     if (msg.type === "bm_import_finished") {
       if (typeof window.onBmImportFinished === "function") {
         window.onBmImportFinished(msg.task || msg);
+      }
+      return;
+    }
+    if (msg.type === "transcriber_settings_change" || msg.type === "transcriber_settings_update") {
+      if (typeof window.onTranscriberSettingsUpdate === "function") {
+        window.onTranscriberSettingsUpdate(msg.settings || msg);
       }
       return;
     }
@@ -2054,6 +2096,14 @@ export function startPing() {
   }
 
 if (typeof window !== "undefined") {
+  window.addEventListener("offline", () => {
+    console.warn("[NET] Browser offline event detected. Disconnecting and resetting transcribe/TTS buttons...");
+    resetTranscribeAndTtsOnDisconnect();
+    if (typeof handleGwDisconnectFailure === "function") {
+      handleGwDisconnectFailure("Browser offline");
+    }
+  });
+
   window.addEventListener("online", () => {
     console.log("[NET] Browser online event detected. Forcing immediate WebSocket reconnection...");
     if (typeof window.connectWebSocket === "function" && !window.isManualGwDisconnect) {
@@ -2062,16 +2112,16 @@ if (typeof window !== "undefined") {
   });
 }
 
-
-
 // Global attachments
 window.connectWebSocket = connectWebSocket;
 window.handleGwDisconnectFailure = handleGwDisconnectFailure;
 window.handleServerMessage = handleServerMessage;
 window.startPing = startPing;
+window.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;
 
 window.__proxdmr = window.__proxdmr || {};
 window.__proxdmr.connectWebSocket = connectWebSocket;
 window.__proxdmr.handleGwDisconnectFailure = handleGwDisconnectFailure;
 window.__proxdmr.handleServerMessage = handleServerMessage;
 window.__proxdmr.startPing = startPing;
+window.__proxdmr.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;

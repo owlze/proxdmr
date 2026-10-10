@@ -12,7 +12,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 2048M
     environment:
       - PORT=8266
       - USE_SSL=${USE_SSL:-true}

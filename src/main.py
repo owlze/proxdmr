@@ -49,6 +49,7 @@ try:
         is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
     )
     from settings_io import export_settings, import_settings, get_export_filename, inspect_backup_archive
+    from updater import check_for_updates, apply_update
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings
     from src.dmr.homebrew import BMState
@@ -72,6 +73,7 @@ except ImportError:
         is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
     )
     from src.settings_io import export_settings, import_settings, get_export_filename, inspect_backup_archive
+    from src.updater import check_for_updates, apply_update
 
 logging.basicConfig(
     level=logging.INFO,
@@ -246,6 +248,10 @@ transcriber_service.configure(
     tts_mute_others=getattr(app_settings, "tts_mute_others", True),
     tts_announce_callsign=getattr(app_settings, "tts_announce_callsign", False),
     tts_style=getattr(app_settings, "tts_style", "radio"),
+    transcriber_engine=getattr(app_settings, "transcriber_engine", "gemini"),
+    translation_engine=getattr(app_settings, "translation_engine", "gemini"),
+    groq_api_key=getattr(app_settings, "groq_api_key", ""),
+    deepgram_api_key=getattr(app_settings, "deepgram_api_key", ""),
 )
 
 hotspot_manager = HotspotManager(
@@ -509,15 +515,19 @@ async def ensure_active_user(user_id: int, login: str = "", force_reload: bool =
             target_lang=getattr(user_app_settings, "transcriber_target_lang", "ru"),
             api_keys=getattr(user_app_settings, "transcriber_api_keys", []),
             tts_enabled=getattr(user_app_settings, "tts_enabled", False),
-            tts_engine=getattr(user_app_settings, "tts_engine", "gemini"),
+            tts_engine=getattr(user_app_settings, "tts_engine", "piper"),
             tts_model=getattr(user_app_settings, "tts_model", "gemini-3.1-flash-tts-preview"),
-            tts_voice=getattr(user_app_settings, "tts_voice", "Puck"),
+            tts_voice=getattr(user_app_settings, "tts_voice", "ru_RU-terra5871-medium"),
             tts_speed=getattr(user_app_settings, "tts_speed", 1.1),
             tts_ducking_level=getattr(user_app_settings, "tts_ducking_level", 0.80),
             tts_pause_ducking_level=getattr(user_app_settings, "tts_pause_ducking_level", 1.0),
             tts_mute_others=getattr(user_app_settings, "tts_mute_others", True),
             tts_announce_callsign=getattr(user_app_settings, "tts_announce_callsign", False),
             tts_style=getattr(user_app_settings, "tts_style", "radio"),
+            transcriber_engine=getattr(user_app_settings, "transcriber_engine", "groq"),
+            translation_engine=getattr(user_app_settings, "translation_engine", "groq"),
+            groq_api_key=getattr(user_app_settings, "groq_api_key", ""),
+            deepgram_api_key=getattr(user_app_settings, "deepgram_api_key", ""),
         )
     return user_app_settings
 
@@ -1365,6 +1375,7 @@ async def get_index(request: Request):
         check_mic_on_tx = getattr(s, "check_mic_on_tx", True)
         hamqth_username = getattr(s, "hamqth_username", "") or ""
         hamqth_password = getattr(s, "hamqth_password", "") or ""
+        disable_update_notifications = bool(getattr(s, "disable_update_notifications", False))
 
         wp_dir = STATIC_DIR / "img" / "wallpapers"
         custom_bg_dark = (wp_dir / f"bg-custom-u{uid}-dark.jpg").exists()
@@ -1419,6 +1430,7 @@ async def get_index(request: Request):
         check_mic_on_tx = True
         hamqth_username = ""
         hamqth_password = ""
+        disable_update_notifications = False
 
     uc = await user_count()
     is_first_run = (uc == 0)
@@ -1459,6 +1471,7 @@ async def get_index(request: Request):
             "check_mic_on_tx": check_mic_on_tx,
             "hamqth_username": hamqth_username,
             "hamqth_password": hamqth_password,
+            "disable_update_notifications": disable_update_notifications,
             "app_version": APP_VERSION,
             "app_version_date": APP_VERSION_DATE,
             "apk_version": get_current_apk_metadata()["apk_version"],
@@ -1657,6 +1670,7 @@ class GeneralSettingsUpdate(BaseModel):
     quick_mem: Optional[Dict[str, Any]] = None
     hamqth_username: Optional[str] = None
     hamqth_password: Optional[str] = None
+    disable_update_notifications: Optional[bool] = None
 
 @app.get("/api/settings/general")
 async def get_general_settings(request: Request):
@@ -1689,6 +1703,7 @@ async def get_general_settings(request: Request):
             "quick_mem": s.quick_mem,
             "hamqth_username": getattr(s, "hamqth_username", "") or "",
             "hamqth_password": getattr(s, "hamqth_password", "") or "",
+            "disable_update_notifications": getattr(s, "disable_update_notifications", False),
         }
     }
 
@@ -1802,6 +1817,9 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
     if update.hamqth_password is not None and update.hamqth_password != getattr(s, "hamqth_password", ""):
         s.hamqth_password = update.hamqth_password.strip()
         changed = True
+    if update.disable_update_notifications is not None and update.disable_update_notifications != getattr(s, "disable_update_notifications", False):
+        s.disable_update_notifications = bool(update.disable_update_notifications)
+        changed = True
 
     if changed:
         await save_user_settings(uid, s.model_dump())
@@ -1879,8 +1897,12 @@ class TranscriberSettingsUpdate(BaseModel):
     enabled: Optional[bool] = None
     api_key: Optional[str] = None
     api_keys: Optional[List[str]] = None
+    transcriber_engine: Optional[str] = None
     model: Optional[str] = None
+    translation_engine: Optional[str] = None
     target_lang: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    deepgram_api_key: Optional[str] = None
     tts_enabled: Optional[bool] = None
     tts_engine: Optional[str] = None
     tts_model: Optional[str] = None
@@ -1926,12 +1948,16 @@ async def get_transcriber_settings(request: Request):
             "enabled": getattr(s, "transcriber_enabled", False),
             "api_key": getattr(s, "transcriber_api_key", ""),
             "api_keys": getattr(s, "transcriber_api_keys", []) or [],
-            "model": getattr(s, "transcriber_model", "gemini-3.1-flash-lite"),
+            "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
+            "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
+            "translation_engine": getattr(s, "translation_engine", "groq"),
             "target_lang": getattr(s, "transcriber_target_lang", "ru"),
+            "groq_api_key": getattr(s, "groq_api_key", ""),
+            "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
             "tts_enabled": getattr(s, "tts_enabled", False),
-            "tts_engine": getattr(s, "tts_engine", "gemini"),
+            "tts_engine": getattr(s, "tts_engine", "piper"),
             "tts_model": getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
-            "tts_voice": getattr(s, "tts_voice", "auto"),
+            "tts_voice": getattr(s, "tts_voice", "ru_RU-terra5871-medium"),
             "tts_speed": getattr(s, "tts_speed", 1.1),
             "tts_ducking_level": getattr(s, "tts_ducking_level", 0.80),
             "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
@@ -1959,6 +1985,18 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         if clean_keys != getattr(s, "transcriber_api_keys", []):
             s.transcriber_api_keys = clean_keys
             changed = True
+    if update.transcriber_engine is not None and update.transcriber_engine != getattr(s, "transcriber_engine", "gemini"):
+        s.transcriber_engine = update.transcriber_engine
+        changed = True
+    if update.translation_engine is not None and update.translation_engine != getattr(s, "translation_engine", "gemini"):
+        s.translation_engine = update.translation_engine
+        changed = True
+    if update.groq_api_key is not None and update.groq_api_key.strip() != getattr(s, "groq_api_key", ""):
+        s.groq_api_key = update.groq_api_key.strip()
+        changed = True
+    if update.deepgram_api_key is not None and update.deepgram_api_key.strip() != getattr(s, "deepgram_api_key", ""):
+        s.deepgram_api_key = update.deepgram_api_key.strip()
+        changed = True
     if update.model is not None:
         target_model = update.model.strip()
         if any(dep in target_model.lower() for dep in ["gemini-2.5-", "gemini-2.0-", "gemini-1.5-"]):
@@ -2035,7 +2073,11 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             tts_pause_ducking_level=getattr(s, "tts_pause_ducking_level", 1.0),
             tts_mute_others=getattr(s, "tts_mute_others", True),
             tts_announce_callsign=getattr(s, "tts_announce_callsign", False),
-            tts_style=getattr(s, "tts_style", "radio")
+            tts_style=getattr(s, "tts_style", "radio"),
+            transcriber_engine=getattr(s, "transcriber_engine", "gemini"),
+            translation_engine=getattr(s, "translation_engine", "gemini"),
+            groq_api_key=getattr(s, "groq_api_key", ""),
+            deepgram_api_key=getattr(s, "deepgram_api_key", "")
         )
         # Proactively ensure Piper voice is downloaded/preloaded if Piper TTS is active
         if effective_engine == "piper" and eff_l != "none":
@@ -2069,6 +2111,10 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_mute_others": getattr(s, "tts_mute_others", True),
             "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
             "tts_style": getattr(s, "tts_style", "radio"),
+            "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
+            "translation_engine": getattr(s, "translation_engine", "gemini"),
+            "has_groq_key": bool(getattr(s, "groq_api_key", "")),
+            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", ""))
         })
 
     return {
@@ -2077,8 +2123,12 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "enabled": s.transcriber_enabled,
             "api_key": s.transcriber_api_key,
             "api_keys": getattr(s, "transcriber_api_keys", []) or [],
+            "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
             "model": s.transcriber_model,
+            "translation_engine": getattr(s, "translation_engine", "gemini"),
             "target_lang": s.transcriber_target_lang,
+            "groq_api_key": getattr(s, "groq_api_key", ""),
+            "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
             "tts_enabled": getattr(s, "tts_enabled", False),
             "tts_engine": getattr(s, "tts_engine", "gemini"),
             "tts_model": getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
@@ -2194,6 +2244,32 @@ async def api_piper_download_status(voice_id: Optional[str] = None):
     else:
         status = srv.get_any_active_download_status()
     return {"status": "ok", "download": status}
+
+
+@app.get("/api/transcriber/edge/voices")
+async def api_edge_voices(lang: Optional[str] = None):
+    from edge_service import EdgeTtsService
+    srv = EdgeTtsService.get_instance()
+    voices = srv.get_voices_for_lang(lang)
+    return {
+        "status": "ok",
+        "available": srv.is_available(),
+        "voices": voices,
+        "lang": lang or "ru"
+    }
+
+
+@app.get("/api/transcriber/silero/voices")
+async def api_silero_voices(lang: Optional[str] = None):
+    from silero_service import SileroService
+    srv = SileroService.get_instance()
+    voices = srv.get_voices_for_lang(lang)
+    return {
+        "status": "ok",
+        "available": srv.is_available(),
+        "voices": voices,
+        "lang": lang or "ru"
+    }
 
 @app.get("/api/transcriber/models")
 async def get_transcriber_models(api_key: Optional[str] = None):
@@ -4091,6 +4167,52 @@ async def restart_system(request: Request):
     asyncio.create_task(_do_restart())
     return {"status": "ok", "message": "Сервер перезагружается..."}
 
+class ApplyUpdateRequest(BaseModel):
+    tarball_url: Optional[str] = None
+
+@app.get("/api/system/check-update")
+async def check_update_endpoint(request: Request, force: bool = False):
+    user = _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        data = await asyncio.to_thread(check_for_updates, force=force)
+        sett = hotspot_manager.user_settings.get(1) or hotspot_manager.settings
+        data["disable_update_notifications"] = bool(getattr(sett, "disable_update_notifications", False))
+        data["is_admin"] = user.get("role") in ("admin", "superadmin")
+        return data
+    except Exception as e:
+        logger.error(f"[UPDATER] Error checking updates: {e}")
+        return {"status": "error", "message": str(e), "has_update": False}
+
+@app.post("/api/system/apply-update")
+async def apply_update_endpoint(request: Request, payload: Optional[ApplyUpdateRequest] = None):
+    _require_admin(request)
+    url = payload.tarball_url if payload else None
+    logger.warning("[SYSTEM] Update initiated via client API")
+    try:
+        await broadcast_json({
+            "type": "server_updating",
+            "message": "Установка обновления и перезагрузка сервера..."
+        })
+    except Exception as e:
+        logger.error(f"[SYSTEM] Error broadcasting update status: {e}")
+
+    success, msg = await asyncio.to_thread(apply_update, tarball_url=url)
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    try:
+        await hotspot_manager.stop()
+    except Exception:
+        pass
+    try:
+        bm_ping_service.stop()
+    except Exception:
+        pass
+
+    return {"status": "ok", "message": msg}
+
 # --- HamQTH.com XML API Endpoints ---
 
 class HamQthTestRequest(BaseModel):
@@ -5084,7 +5206,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     if u_radio_state.transmitting_client_id == client_id:
                         roger_beep = bool(data.get("roger_beep", False))
                         roger_beep_pattern = str(data.get("roger_beep_pattern", "")).strip()
-                        hotspot_manager.stop_tx(
+                        await hotspot_manager.stop_tx(
                             user_id=ws_user_id,
                             roger_beep=roger_beep,
                             roger_beep_pattern=roger_beep_pattern,
@@ -5601,7 +5723,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             if not user_clients[disc_uid]:
                 user_clients.pop(disc_uid, None)
         if u_radio_state.transmitting_client_id == client_id:
-            hotspot_manager.stop_tx(user_id=ws_user_id)
+            await hotspot_manager.stop_tx(user_id=ws_user_id)
             u_radio_state.is_transmitting = False
             u_radio_state.transmitting_client_id = None
             await broadcast_user_json(ws_user_id, {

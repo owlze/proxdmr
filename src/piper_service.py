@@ -76,7 +76,7 @@ VOICE_FRIENDLY_NAMES = {
 }
 
 LANG_PREFS: Dict[str, List[str]] = {
-    "ru": ["ru_RU-igm3804-medium", "ru_RU-sushkov_v4-medium", "ru_RU-terra5871-medium"],
+    "ru": ["ru_RU-terra5871-medium", "ru_RU-igm3804-medium", "ru_RU-sushkov_v4-medium"],
     "en": ["en_US-bryce-medium", "en_GB-alan-medium", "en_US-amy-medium"],
     "uk": ["uk_UA-ukrainian_tts-medium", "uk_UA-mykyta-high", "uk_UA-tetiana-high"],
     "de": ["de_DE-thorsten-medium", "de_DE-thorsten_emotional-medium"],

@@ -8,6 +8,7 @@
  * - Sync System Volume (Android)
  * - Volume Down -> PTT (Android)
  * - HamQTH.com Credentials
+ * - System Update Notifications Toggle
  */
 
 import { showToast } from "../core/toast.js";
@@ -46,6 +47,7 @@ export function initGeneralSettings() {
     const optHapticDur = document.getElementById("optHapticDuration");
     const optHamUser = document.getElementById("optHamQthUsername");
     const optHamPw = document.getElementById("optHamQthPassword");
+    const optDisableUpdates = document.getElementById("optDisableUpdateNotifications");
 
     const optCheckMic = document.getElementById("optCheckMicOnTx");
 
@@ -58,6 +60,7 @@ export function initGeneralSettings() {
     const hapticDuration = optHapticDur ? parseInt(optHapticDur.value, 10) : undefined;
     const hamUser = optHamUser ? optHamUser.value.trim() : undefined;
     const hamPw = optHamPw ? optHamPw.value.trim() : undefined;
+    const disableUpdates = optDisableUpdates ? optDisableUpdates.checked : undefined;
 
     // Apply client-side states
     if (muteOnPtt !== undefined) setMuteOnPttEnabled(muteOnPtt, false);
@@ -66,6 +69,7 @@ export function initGeneralSettings() {
     if (checkMicOnTx !== undefined) setCheckMicOnTxEnabled(checkMicOnTx, false);
     if (hapticFeedback !== undefined) setHapticEnabled(hapticFeedback, false);
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) setHapticDuration(hapticDuration, false);
+    if (disableUpdates !== undefined) window.DISABLE_UPDATE_NOTIFICATIONS = disableUpdates;
 
     const payload = {};
     if (lang !== undefined) payload.language = lang;
@@ -77,6 +81,7 @@ export function initGeneralSettings() {
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) payload.haptic_duration = hapticDuration;
     if (hamUser !== undefined) payload.hamqth_username = hamUser;
     if (hamPw !== undefined) payload.hamqth_password = hamPw;
+    if (disableUpdates !== undefined) payload.disable_update_notifications = disableUpdates;
 
     btnSave.disabled = true;
     const originalText = btnSave.textContent;
@@ -108,12 +113,23 @@ export function initGeneralSettings() {
 
       if (data && data.status === "ok") {
         showToast(window.t ? window.t("general.settings_saved", {}, "✓ Настройки успешно сохранены") : "✓ Настройки успешно сохранены", "success");
+        if (typeof window.triggerModalSavePulse === "function") {
+          window.triggerModalSavePulse(btnSave, { closeSettings: true });
+        }
       } else {
         showToast(window.t ? window.t("general.settings_save_err", {}, "⚠️ Ошибка сохранения настроек") : "⚠️ Ошибка сохранения настроек", "warning");
+        if (window._settingsModalAutoCloseTimer) {
+          clearTimeout(window._settingsModalAutoCloseTimer);
+          window._settingsModalAutoCloseTimer = null;
+        }
       }
     } catch (err) {
       console.warn("[GENERAL SETTINGS] Save failed:", err);
       showToast(`✕ ${err.message}`, "error");
+      if (window._settingsModalAutoCloseTimer) {
+        clearTimeout(window._settingsModalAutoCloseTimer);
+        window._settingsModalAutoCloseTimer = null;
+      }
     } finally {
       btnSave.disabled = false;
       btnSave.textContent = originalText;

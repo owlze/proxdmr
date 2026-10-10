@@ -50,7 +50,7 @@ export function saveSoloMutedSet(s) {
 }
 
 // --- Timeslot Selective Muting (Per Hotspot) ---
-export function getHotspotMute(hid, slot) {
+export function getPersistentHotspotMute(hid, slot) {
   const s = parseInt(slot, 10) || 1;
   const cid = _resolveHotspotId(hid);
 
@@ -72,45 +72,71 @@ export function getHotspotMute(hid, slot) {
   return false;
 }
 
-export function setHotspotMute(hid, slot, muted) {
+export function getHotspotMute(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+
+  // If slot is temporarily muted by live TTS Solo mode, effective state is true
+  const soloSet = getSoloMutedSet();
+  if (soloSet && (soloSet.has(`${cid}_ts${s}`) || (cid === "default" && soloSet.has(`default_ts${s}`)))) {
+    return true;
+  }
+
+  return getPersistentHotspotMute(hid, slot);
+}
+
+export function setHotspotMute(hid, slot, muted, isTemporary = false) {
   const s = parseInt(slot, 10) || 1;
   const cid = _resolveHotspotId(hid);
   const val = muted ? "true" : "false";
 
-  // If a slot is unmuted (either manually by user or by restore), remove from Solo Mute tracking set
-  if (!muted) {
-    const soloSet = getSoloMutedSet();
-    if (soloSet && soloSet.size > 0) {
-      soloSet.delete(`${cid}_ts${s}`);
+  const soloSet = getSoloMutedSet();
+  const slotKey = `${cid}_ts${s}`;
+
+  if (isTemporary) {
+    // Temporary mute for TTS Solo Mode: DO NOT persist to localStorage or server DB
+    if (muted) {
+      soloSet.add(slotKey);
+    } else {
+      soloSet.delete(slotKey);
       soloSet.delete(`default_ts${s}`);
-      const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
-      const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
-      if (isPrimary && hsList && hsList[0] && hsList[0].id) {
-        soloSet.delete(`${_resolveHotspotId(hsList[0].id)}_ts${s}`);
-      }
-      saveSoloMutedSet(soloSet);
     }
-  }
+    saveSoloMutedSet(soloSet);
+  } else {
+    // User explicitly changed mute: update persistent storage and sync to server
+    if (!muted) {
+      if (soloSet && soloSet.size > 0) {
+        soloSet.delete(slotKey);
+        soloSet.delete(`default_ts${s}`);
+        const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
+        if (isPrimary && hsList && hsList[0] && hsList[0].id) {
+          soloSet.delete(`${_resolveHotspotId(hsList[0].id)}_ts${s}`);
+        }
+        saveSoloMutedSet(soloSet);
+      }
+    }
 
-  localStorage.setItem(`proxdmr_mute_${cid}_ts${s}`, val);
-  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
-  const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
-  if (isPrimary) {
-    localStorage.setItem(`proxdmr_mute_default_ts${s}`, val);
-    localStorage.setItem(`proxdmr_mute_ts${s}`, val);
-  }
+    localStorage.setItem(`proxdmr_mute_${cid}_ts${s}`, val);
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
+    if (isPrimary) {
+      localStorage.setItem(`proxdmr_mute_default_ts${s}`, val);
+      localStorage.setItem(`proxdmr_mute_ts${s}`, val);
+    }
 
-  // Sync to server backend so headless mode & other clients can respect it
-  if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
-    try {
-      window.ws.send(JSON.stringify({
-        type: "set_slot_mute",
-        hotspot_id: cid,
-        slot: s,
-        muted: !!muted
-      }));
-    } catch (err) {
-      console.warn("[AUDIO] Failed to sync slot mute over WS:", err);
+    // Sync to server backend so headless mode & other clients can respect it
+    if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
+      try {
+        window.ws.send(JSON.stringify({
+          type: "set_slot_mute",
+          hotspot_id: cid,
+          slot: s,
+          muted: !!muted
+        }));
+      } catch (err) {
+        console.warn("[AUDIO] Failed to sync slot mute over WS:", err);
+      }
     }
   }
 
@@ -119,6 +145,8 @@ export function setHotspotMute(hid, slot, muted) {
 
   // Apply mute directly to audio player if instance exists
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
   if (ap) {
     if (typeof ap.setSlotMute === "function") {
       ap.setSlotMute(cid, s, muted);
@@ -134,7 +162,9 @@ export function setHotspotMute(hid, slot, muted) {
     window.ttsAudioQueueManager.syncCurrentVolume();
   }
 
-  _scheduleSyncClientSettings(1000);
+  if (!isTemporary) {
+    _scheduleSyncClientSettings(1000);
+  }
 }
 
 // --- TS Audio Mode (Solo / Doubl / Auto) Subsystem ---
@@ -1146,6 +1176,7 @@ export function initAudioRouting() {
 // Global window registration for backward compatibility
 if (typeof window !== "undefined") {
   window.getHotspotMute = getHotspotMute;
+  window.getPersistentHotspotMute = getPersistentHotspotMute;
   window.setHotspotMute = setHotspotMute;
   window.toggleHotspotMute = toggleHotspotMute;
   window.enforceSingleTsMute = enforceSingleTsMute;
@@ -1184,6 +1215,7 @@ if (typeof window !== "undefined") {
   window.__proxdmr = window.__proxdmr || {};
   window.__proxdmr.routing = {
     getHotspotMute,
+    getPersistentHotspotMute,
     setHotspotMute,
     getSoloMutedSet,
     saveSoloMutedSet,

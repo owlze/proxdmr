@@ -24,7 +24,7 @@ import {
   syncCardSlotTranscribeUI,
   syncAllTranscribeSlotsToServer,
   disableHotspotTranscribe
-} from './transcriber.js';
+} from './transcriber.js?v=2.9.278';
 import {
   startTransmission,
   stopTransmission,
@@ -2622,6 +2622,12 @@ export function initHotspotsManager() {
       const rawSsid = editHsSsid ? editHsSsid.value.trim() : "";
       const parsedSsid = rawSsid !== "" ? parseInt(rawSsid, 10) : 1;
       if (rawSsid !== "" && (isNaN(parsedSsid) || parsedSsid < 1 || parsedSsid > 99)) {
+        if (window._settingsModalAutoCloseTimer) {
+          clearTimeout(window._settingsModalAutoCloseTimer);
+          window._settingsModalAutoCloseTimer = null;
+        }
+        const mContent = hotspotEditForm.closest('.modal-content');
+        if (mContent) mContent.classList.remove('modal-save-pulse');
         showToast(window.t ? window.t("hotspots.invalid_ssid", {}, "❌ SSID должен быть в диапазоне от 1 до 99") : "❌ SSID должен быть в диапазоне от 1 до 99", 3000);
         if (editHsSsid) {
           editHsSsid.value = Math.max(1, Math.min(99, isNaN(parsedSsid) ? 1 : parsedSsid));
@@ -2699,7 +2705,7 @@ export function initHotspotsManager() {
         const savedHs = data.hotspot || payload;
         showToast(window.t ? window.t("hotspots.settings_saved", {}, "Настройки хотспота сохранены") : "Настройки хотспота сохранены", 2500);
         if (typeof window.triggerModalSavePulse === "function") {
-          window.triggerModalSavePulse(hotspotEditForm);
+          window.triggerModalSavePulse(hotspotEditForm, { closeSettings: true });
         }
 
         await loadHotspots();
@@ -2707,6 +2713,12 @@ export function initHotspotsManager() {
           populateEditHotspotFormFields(savedHs);
         }
       } catch (err) {
+        if (window._settingsModalAutoCloseTimer) {
+          clearTimeout(window._settingsModalAutoCloseTimer);
+          window._settingsModalAutoCloseTimer = null;
+        }
+        const mContent = hotspotEditForm.closest('.modal-content');
+        if (mContent) mContent.classList.remove('modal-save-pulse');
         const errMsg = "Ошибка при сохранении: " + (err && err.message ? err.message : err);
         if (window.showAppAlert) {
           await window.showAppAlert(errMsg, { title: "Ошибка", icon: "⚠️" });

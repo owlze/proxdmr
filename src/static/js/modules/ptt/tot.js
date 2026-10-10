@@ -263,6 +263,20 @@ export function parseTonePattern(patternStr) {
  * Play Roger Beep locally using Web Audio API
  * @param {string} patternStr
  */
+/**
+ * Calculate total Roger Beep duration in milliseconds
+ * @param {string} patternStr
+ * @returns {number} duration in ms
+ */
+export function getRogerBeepDurationMs(patternStr) {
+  const tones = parseTonePattern(patternStr);
+  let totalMs = 0;
+  for (const t of tones) {
+    totalMs += (t.durationMs || 0);
+  }
+  return totalMs;
+}
+
 export function playLocalRogerBeep(patternStr) {
   try {
     const tones = parseTonePattern(patternStr);
@@ -604,6 +618,7 @@ if (typeof window !== "undefined") {
   window.setHotspotRogerBeepPattern = setHotspotRogerBeepPattern;
   window.parseTonePattern = parseTonePattern;
   window.playLocalRogerBeep = playLocalRogerBeep;
+  window.getRogerBeepDurationMs = getRogerBeepDurationMs;
   window.formatTotDuration = formatTotDuration;
   window.openTotConfigModal = openTotConfigModal;
   window.closeTotConfigModal = closeTotConfigModal;

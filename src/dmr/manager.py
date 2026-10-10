@@ -134,6 +134,7 @@ class HotspotRuntime:
 @dataclass
 class UserTxState:
     active: bool = False
+    is_releasing: bool = False
     hotspot_id: Optional[str] = None
     slot: int = 2
     dst_id: int = 9990
@@ -1735,6 +1736,7 @@ class HotspotManager:
         src_name = "ME (ProxDMR)"
 
         tx_st.active = True
+        tx_st.is_releasing = False
         tx_st.hotspot_id = effective_hid
         tx_st.slot = slot
         tx_st.dst_id = dst_id
@@ -1877,7 +1879,7 @@ class HotspotManager:
     def process_tx_audio(self, pcm_bytes: bytes, user_id: Optional[int] = None):
         uid = user_id if user_id is not None else self.active_user_id
         tx_st = self._get_user_tx(uid)
-        if not tx_st.active or not tx_st.hotspot_id:
+        if not tx_st.active or getattr(tx_st, "is_releasing", False) or not tx_st.hotspot_id:
             logger.warning(f"[TX] process_tx_audio: TX not active (active={tx_st.active}, hid={tx_st.hotspot_id})")
             return
 
@@ -1937,42 +1939,33 @@ class HotspotManager:
             else:
                 logger.warning(f"[TX] Cannot send burst to BM: client={bool(rt.client)}, status={rt.status if rt else 'None'}")
 
-    def stop_tx(self, user_id: Optional[int] = None, roger_beep: bool = False, roger_beep_pattern: str = "") -> bool:
+    async def stop_tx(self, user_id: Optional[int] = None, roger_beep: bool = False, roger_beep_pattern: str = "") -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         tx_st = self._get_user_tx(uid)
         if not tx_st.active:
             return False
 
-        now = time.time()
+        tx_st.is_releasing = True
         hid = tx_st.hotspot_id
         rt = self.get_runtime(uid, hid) if hid else None
         slot = tx_st.slot
-
-        active_calls = self._get_user_active_calls(uid)
-        # Finalize active TX CallLogEntry
-        tx_call_key = f"tx_{hid}_{slot}"
-        active_tx_call = active_calls.pop(tx_call_key, None)
-        duration = 0.0
-        if active_tx_call:
-            active_tx_call.active = False
-            active_tx_call.duration = max(0.1, now - active_tx_call.timestamp)
-            duration = active_tx_call.duration
-        elif tx_st.start_time > 0:
-            duration = max(0.1, now - tx_st.start_time)
 
         if rt and rt.client and rt.status == BMState.ONLINE:
             try:
                 src_id = rt.config.dmr_id
 
-                # If roger beep is requested, append beep PCM before flushing
+                # If roger beep is requested, append Roger Beep PCM + 0.5s silence tail
                 if roger_beep and roger_beep_pattern:
                     try:
                         beep_pcm = BeepMarkerGenerator.get_marker_bytes(roger_beep_pattern)
                         if beep_pcm:
+                            # 1.0 sec silence carrier tail at 8000 Hz 16-bit mono = 16000 bytes (8000 samples)
+                            silence_tail = b"\x00" * 16000
+                            full_tail = beep_pcm + silence_tail
                             if hasattr(self, "recorder") and self.recorder:
-                                self.recorder.feed_tx(beep_pcm)
-                            tx_st.audio_buffer.extend(beep_pcm)
-                            logger.info(f"[TX] Appended Roger Beep ({len(beep_pcm)} bytes, '{roger_beep_pattern}')")
+                                self.recorder.feed_tx(full_tail)
+                            tx_st.audio_buffer.extend(full_tail)
+                            logger.info(f"[TX] Appended Roger Beep ({len(beep_pcm)} bytes) + 1.0s tail ({len(silence_tail)} bytes, '{roger_beep_pattern}')")
                     except Exception as e:
                         logger.error(f"[TX] Error generating Roger Beep: {e}")
 
@@ -2009,6 +2002,10 @@ class HotspotManager:
                         if tx_st.burst_index == 0:
                             tx_st.superframe_index += 1
 
+                        # Pace bursts at 60ms cadence if transmitting roger beep / tail so BM receives real-time stream
+                        if roger_beep and roger_beep_pattern:
+                            await asyncio.sleep(0.060)
+
                 # If leftover audio >= 320 bytes (20 ms), pad to 960 bytes and send last burst
                 if len(tx_st.audio_buffer) >= 320:
                     pad_len = 960 - len(tx_st.audio_buffer)
@@ -2040,6 +2037,8 @@ class HotspotManager:
                             burst_index=tx_st.burst_index,
                         )
                         tx_st.seq_no = (tx_st.seq_no + 1) % 256
+                        if roger_beep and roger_beep_pattern:
+                            await asyncio.sleep(0.060)
 
                 term_payload = self.tx_framer.create_terminator(
                     src_id=src_id,
@@ -2077,7 +2076,21 @@ class HotspotManager:
             st.src_name = ""
             st.talker_alias = ""
 
+        # Measure duration at the very end so roger beep and 0.5s tail are included
+        now = time.time()
+        active_calls = self._get_user_active_calls(uid)
+        tx_call_key = f"tx_{hid}_{slot}"
+        active_tx_call = active_calls.pop(tx_call_key, None)
+        duration = 0.0
+        if active_tx_call:
+            active_tx_call.active = False
+            active_tx_call.duration = max(0.1, now - active_tx_call.timestamp)
+            duration = active_tx_call.duration
+        elif tx_st.start_time > 0:
+            duration = max(0.1, now - tx_st.start_time)
+
         tx_st.active = False
+        tx_st.is_releasing = False
         tx_st.audio_buffer.clear()
         if rt and hasattr(rt, "tx_dsp") and rt.tx_dsp:
             rt.tx_dsp.reset()
@@ -2136,4 +2149,4 @@ class HotspotManager:
         """Return live metadata about an active master recording session."""
         if hasattr(self, "recorder") and self.recorder:
             return self.recorder.get_session_status(user_id=user_id)
-        return None
+        return None
