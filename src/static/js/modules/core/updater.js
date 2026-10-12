@@ -136,7 +136,7 @@ function updateApkUpdateUI(serverInfo) {
       // App is up-to-date (installed >= server):
       // Requirement 1: Button is INACTIVE / DISABLED!
       const displayVer = installedVer || serverVer || "";
-      const defaultTitle = isCyr ? `📱 ProxDMR актуален (v${displayVer})` : `📱 ProxDMR is up to date (v${displayVer})`;
+      const defaultTitle = isCyr ? `📱 ProxDMR v.${displayVer} (apk-оболочка для Android)` : `📱 ProxDMR v.${displayVer} (Android APK shell)`;
       const defaultDesc = isCyr 
         ? `У вас установлена последняя версия v${displayVer}. Обновлений не требуется.`
         : `You have the latest version v${displayVer}. No updates required.`;

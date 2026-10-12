@@ -4,11 +4,11 @@
  * hotspot switching, BrandMeister master server dropdowns, and hotspot settings forms.
  */
 
-import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js';
+import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName, getCountryInfo, getFlagBadgeHtml, getCleanTgDesc } from '../core/formatters.js?v=2.9.284';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 import { openBmBenchmarkModal } from './bm-benchmark.js';
-import { openBmTgStaticModal, dropDynamicTGs } from './bm-static-manager.js';
+import { openBmTgStaticModal, dropDynamicTGs } from './bm-static-manager.js?v=2.9.284';
 import {
   cycleHotspotPan,
   toggleHotspotMute,
@@ -24,7 +24,7 @@ import {
   syncCardSlotTranscribeUI,
   syncAllTranscribeSlotsToServer,
   disableHotspotTranscribe
-} from './transcriber.js?v=2.9.278';
+} from './transcriber.js?v=2.9.281';
 import {
   startTransmission,
   stopTransmission,
@@ -38,7 +38,7 @@ import {
   notifyPttConnectionBlocked
 } from '../ptt/engine.js?v=2.9.260';
 import { wireCardStatusInteractions, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js';
-import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js';
+import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.282';
 import { showLongPressEffect } from '../ui/long-press.js';
 
 // Accessors for app functions and state
@@ -1528,9 +1528,178 @@ export function renderRadiosGrid() {
           setupCollapseButtonLongPress(collapseBtn, cid);
         }
 
-        // Quick TG Direct Dial (Быстрый набор TG)
+        // Quick TG Direct Dial (Быстрый набор TG) + Live TG Preview Quote Popup
         const quickInput = card.querySelector(".quick-tg-input");
         const quickApply = card.querySelector(".btn-quick-tg-apply");
+        const quickBox = quickInput ? quickInput.closest(".quick-tg-box") : null;
+        let previewPopup = quickBox ? quickBox.querySelector(".quick-tg-preview-popup") : null;
+        if (quickBox && !previewPopup) {
+          previewPopup = document.createElement("div");
+          previewPopup.className = "quick-tg-preview-popup";
+          previewPopup.setAttribute("aria-live", "polite");
+          quickBox.appendChild(previewPopup);
+        }
+
+        let previewDebounceTimer = null;
+        let previewBlurTimer = null;
+        if (!window._quickTgPreviewCache) {
+          window._quickTgPreviewCache = {};
+        }
+
+        const hideQuickPreview = () => {
+          if (previewDebounceTimer) {
+            clearTimeout(previewDebounceTimer);
+            previewDebounceTimer = null;
+          }
+          if (previewPopup) {
+            previewPopup.classList.remove("visible");
+          }
+        };
+
+        const renderQuickPreview = () => {
+          if (!quickInput || !previewPopup) return;
+          const cleanDigits = quickInput.value.replace(/\D/g, "");
+          if (quickInput.value !== cleanDigits) {
+            quickInput.value = cleanDigits;
+          }
+          const num = parseInt(cleanDigits, 10);
+          if (!cleanDigits || isNaN(num) || num <= 0 || num > 9999999) {
+            hideQuickPreview();
+            return;
+          }
+
+          const cache = window._quickTgPreviewCache || {};
+          const userCalls = (typeof window !== "undefined" && window.USER_CALLSIGNS) || {};
+          const u = userCalls[num];
+          const isPrivate = Boolean(u || num > 999999);
+
+          if (isPrivate) {
+            const cInfo = getCountryInfo(num, u?.callsign || "", u?.country || "");
+            const flagHtml = getFlagBadgeHtml(cInfo, false);
+            const cLabel = (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "DMR ID";
+            let quoteHtml = "";
+            let isKnown = false;
+
+            if (u && (u.callsign || u.name)) {
+              isKnown = true;
+              const cs = (u.callsign || "").trim();
+              const nm = (u.name || "").trim();
+              const loc = [u.city, u.country].filter(Boolean).join(", ");
+              quoteHtml = `<span class="quick-tg-pop-main"><strong>${safeEscapeHtml(cs)}</strong>${nm ? ` — ${safeEscapeHtml(nm)}` : ""}</span>` +
+                (loc ? `<span class="quick-tg-pop-sub">${safeEscapeHtml(loc)}</span>` : "");
+            } else if (cache["id_" + num] === "not_found") {
+              const notFoundTxt = window.t ? window.t("tgtx.private_id_custom", {}, "Личный вызов DMR ID (нет в базе RadioID)") : "Личный вызов DMR ID (нет в базе RadioID)";
+              quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(notFoundTxt)}</span>`;
+            } else {
+              const searchTxt = window.t ? window.t("tgtx.private_id_searching", {}, "Личный вызов DMR ID • поиск позывного...") : "Личный вызов DMR ID • поиск позывного...";
+              quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(searchTxt)}</span>`;
+              if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+              previewDebounceTimer = setTimeout(async () => {
+                try {
+                  const res = await fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=5`);
+                  const data = await res.json();
+                  const exact = ((data && data.results) || []).find(it => Number(it.id) === num);
+                  if (exact) {
+                    if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
+                    window.USER_CALLSIGNS[num] = exact;
+                    cache["id_" + num] = "found";
+                  } else {
+                    cache["id_" + num] = "not_found";
+                  }
+                } catch (_) {
+                  cache["id_" + num] = "not_found";
+                }
+                if (quickInput && quickInput.value.replace(/\D/g, "") === String(num)) {
+                  renderQuickPreview();
+                }
+              }, 140);
+            }
+
+            previewPopup.innerHTML = `
+              <div class="quick-tg-pop-header">
+                <span class="quick-tg-pop-flag">${flagHtml}</span>
+                <span class="quick-tg-pop-badge is-id">ID ${num}</span>
+                <span class="quick-tg-pop-country">${safeEscapeHtml(cLabel)}</span>
+                <span class="quick-tg-pop-tx-hint">TX ⏎</span>
+              </div>
+              <div class="quick-tg-pop-quote ${isKnown ? "is-known" : "is-unknown"}">
+                ${quoteHtml}
+              </div>
+            `;
+            previewPopup.classList.add("visible");
+            return;
+          }
+
+          // TalkGroup (1 .. 999999)
+          const isParrot = (num === 9990);
+          const tgNames = (typeof window !== "undefined" && window.TG_NAMES) || {};
+          const rawName = tgNames[num] ? String(tgNames[num]).trim() : (isParrot ? "Parrot / Echo (Эхо-тест)" : "");
+          const cleanDesc = getCleanTgDesc(num, rawName);
+          const cInfo = (num >= 100 || rawName) ? getCountryInfo(num, "", "") : { name: "Global", name_en: "", flag: "🌐" };
+          const flagHtml = getFlagBadgeHtml(cInfo, isParrot);
+          const cLabel = isParrot ? "Эхо-тест" : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup");
+
+          let quoteHtml = "";
+          let isKnown = false;
+
+          if (cleanDesc) {
+            isKnown = true;
+            quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cleanDesc)}»</span>`;
+          } else if (cache["tg_" + num]) {
+            const cached = cache["tg_" + num];
+            if (cached.exactName) {
+              isKnown = true;
+              quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cached.exactName)}»</span>`;
+            } else {
+              const customTxt = window.t ? window.t("tgtx.custom_group_hint", { tg: num }, `Группа TG ${num} (вне справочника)`) : `Группа TG ${num} (вне справочника)`;
+              quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(customTxt)}</span>` +
+                (cached.prefix ? `<span class="quick-tg-pop-sub">↳ Напр.: <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "");
+            }
+          } else {
+            const typingTxt = window.t ? window.t("tgtx.typing_group_hint", { tg: num }, `Группа TG ${num} • проверка...`) : `Группа TG ${num} • проверка...`;
+            quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(typingTxt)}</span>`;
+            if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+            previewDebounceTimer = setTimeout(async () => {
+              try {
+                const res = await fetch(`/api/tg/search?q=${encodeURIComponent(String(num))}&limit=8`);
+                const data = await res.json();
+                const list = (data && data.results) || [];
+                const exact = list.find(r => Number(r.tg) === num);
+                const prefixItem = list.find(r => Number(r.tg) !== num && String(r.tg).startsWith(String(num)));
+                let exactClean = "";
+                if (exact && exact.name) {
+                  exactClean = getCleanTgDesc(num, exact.name) || exact.name;
+                  if (!window.TG_NAMES) window.TG_NAMES = {};
+                  window.TG_NAMES[num] = exact.name;
+                }
+                let prefixObj = null;
+                if (prefixItem) {
+                  const pDesc = getCleanTgDesc(prefixItem.tg, prefixItem.name) || prefixItem.name || ("TG " + prefixItem.tg);
+                  prefixObj = { tg: prefixItem.tg, desc: pDesc };
+                }
+                cache["tg_" + num] = { exactName: exactClean, prefix: prefixObj };
+              } catch (_) {
+                cache["tg_" + num] = { exactName: "", prefix: null };
+              }
+              if (quickInput && quickInput.value.replace(/\D/g, "") === String(num)) {
+                renderQuickPreview();
+              }
+            }, 120);
+          }
+
+          previewPopup.innerHTML = `
+            <div class="quick-tg-pop-header">
+              <span class="quick-tg-pop-flag">${flagHtml}</span>
+              <span class="quick-tg-pop-badge is-tg">TG ${num}</span>
+              <span class="quick-tg-pop-country">${safeEscapeHtml(cLabel)}</span>
+              <span class="quick-tg-pop-tx-hint">TX ⏎</span>
+            </div>
+            <div class="quick-tg-pop-quote ${isKnown ? "is-known" : "is-unknown"}">
+              ${quoteHtml}
+            </div>
+          `;
+          previewPopup.classList.add("visible");
+        };
 
         const applyQuick = () => {
           if (!quickInput) return;
@@ -1538,6 +1707,7 @@ export function renderRadiosGrid() {
           const val = parseInt(valStr, 10);
           const cid = card.dataset.hotspotId || hs.id;
           const slot = card._activeSlot || getHotspotSlot(cid);
+          hideQuickPreview();
           if (!isNaN(val) && val > 0 && val <= 9999999) {
             switchActiveHotspot(cid);
             setHotspotTg(cid, slot, val, true);
@@ -1557,16 +1727,51 @@ export function renderRadiosGrid() {
           }
         };
 
+        if (previewPopup) {
+          previewPopup.addEventListener("pointerdown", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyQuick();
+            if (quickInput && typeof quickInput.blur === "function") {
+              quickInput.blur();
+            }
+          });
+        }
+
         if (quickInput) {
+          quickInput.addEventListener("input", () => {
+            if (previewBlurTimer) {
+              clearTimeout(previewBlurTimer);
+              previewBlurTimer = null;
+            }
+            renderQuickPreview();
+          });
           quickInput.addEventListener("keydown", (e) => {
             if (e.key === "Enter") {
               e.preventDefault();
               applyQuick();
+              quickInput.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              hideQuickPreview();
+              quickInput.blur();
             }
           });
           quickInput.addEventListener("focus", () => {
+            if (previewBlurTimer) {
+              clearTimeout(previewBlurTimer);
+              previewBlurTimer = null;
+            }
             const cid = card.dataset.hotspotId || hs.id;
             switchActiveHotspot(cid);
+            if (quickInput.value.trim()) {
+              renderQuickPreview();
+            }
+          });
+          quickInput.addEventListener("blur", () => {
+            previewBlurTimer = setTimeout(() => {
+              hideQuickPreview();
+            }, 160);
           });
         }
 

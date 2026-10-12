@@ -27,10 +27,10 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.278';
+} from '../dmr/transcriber.js?v=2.9.281';
 import { renderTranscriptionSummary } from '../dmr/transcription.js';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js';
-import { updateApkUpdateUI } from '../core/updater.js';
+import { updateApkUpdateUI } from '../core/updater.js?v=2.9.282';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js';
 
 // State variables declared in module scope
@@ -1181,6 +1181,19 @@ export function handleServerMessage(msg) {
           applyServerClientSettings(msg.client_settings);
         }
       }
+      // Always reset interface to standard VFO view with transcription and TTS turned off on initial open
+      try {
+        if (typeof disableAllTranscribe === "function") {
+          disableAllTranscribe(true, false);
+        } else if (typeof window.disableAllTranscribe === "function") {
+          window.disableAllTranscribe(true, false);
+        }
+      } catch (_) {}
+      try {
+        if (typeof window.disableAllTts === "function") {
+          window.disableAllTts(true, false);
+        }
+      } catch (_) {}
     } else if (msg.type === "theme_change") {
       const theme = msg.theme === "light" ? "light" : "dark";
       if (theme !== currentTheme) {

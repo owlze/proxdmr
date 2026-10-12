@@ -30,7 +30,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.275">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.284">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -235,7 +235,7 @@
           <div class="onboarding-form-group">
             <label for="onboardingConfirmPassword" data-i18n="auth.confirm_password_label">Подтвердите пароль</label>
             <div style="position: relative; display: flex; align-items: center;">
-              <input type="password" id="onboardingConfirmPassword" class="form-input onboarding-input" placeholder="повторите пароль" autocomplete="new-password" style="padding-right: 38px;">
+              <input type="password" id="onboardingConfirmPassword" class="form-input onboarding-input" placeholder="повторите пароль" data-i18n-placeholder="auth.confirm_password_placeholder" autocomplete="new-password" style="padding-right: 38px;">
               <button type="button" id="btnToggleOnboardingConfirmPwd" class="password-toggle-btn" tabindex="-1">👁️</button>
             </div>
           </div>
@@ -262,7 +262,7 @@
           <div class="onboarding-form-group">
             <label for="onboardingBmPassword" data-i18n="setup.bm_password_label">Пароль хотспота BrandMeister (SelfCare)</label>
             <div style="position: relative; display: flex; align-items: center;">
-              <input type="password" id="onboardingBmPassword" class="form-input onboarding-input" placeholder="пароль хотспота" autocomplete="off" style="padding-right: 38px;">
+              <input type="password" id="onboardingBmPassword" class="form-input onboarding-input" placeholder="пароль хотспота" data-i18n-placeholder="setup.bm_password_placeholder" autocomplete="off" style="padding-right: 38px;">
               <button type="button" id="btnToggleOnboardingBmPwd" class="password-toggle-btn" tabindex="-1">👁️</button>
             </div>
             <div class="onboarding-field-hint" data-i18n="setup.bm_password_hint">Пароль, заданный в личном кабинете на master.brandmeister.network</div>
@@ -476,13 +476,13 @@
               <span class="rec-letter">R</span>
             </button>
             <!-- BM Upload Background Task Indicator -->
-            <div id="headerBmUploadIndicator" class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" role="button" tabindex="0">
+            <div id="headerBmUploadIndicator" class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" data-i18n-title="header.bm_upload_indicator_title" data-i18n-title="header.bm_upload_indicator_title" role="button" tabindex="0">
               <img src="/static/img/BM_Upload.png?v=2.9.170" alt="BM Upload" class="bm-upload-img">
               <span id="headerBmUploadPercent" class="bm-upload-percent">0%</span>
             </div>
 
             <!-- TTS Voice Upload Background Task Indicator -->
-            <div id="headerTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" role="status" tabindex="0">
+            <div id="headerTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0">
               <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
               <span id="headerTtsUploadPercent" class="tts-upload-percent">0%</span>
             </div>
@@ -1125,13 +1125,13 @@
           </button>
 
           <!-- BM Upload Background Task Indicator -->
-          <div class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" role="button" tabindex="0">
+          <div class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" data-i18n-title="header.bm_upload_indicator_title" role="button" tabindex="0">
             <img src="/static/img/BM_Upload.png?v=2.9.170" alt="BM Upload" class="bm-upload-img">
             <span class="bm-upload-percent">0%</span>
           </div>
 
           <!-- TTS Voice Upload Background Task Indicator -->
-          <div class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" role="status" tabindex="0">
+          <div class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0">
             <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
             <span class="tts-upload-percent">0%</span>
           </div>
@@ -1542,17 +1542,17 @@
               <div style="display: flex; flex-direction: column; gap: 10px;">
                 <div>
                   <label for="changePwdCurrentInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.current_pwd_label">Текущий пароль:</label>
-                  <input type="password" id="changePwdCurrentInput" class="form-input" placeholder="Введите текущий пароль" autocomplete="current-password"
+                  <input type="password" id="changePwdCurrentInput" class="form-input" placeholder="Введите текущий пароль" data-i18n-placeholder="account.current_pwd_placeholder" autocomplete="current-password"
                     style="width: 100%; padding: 8px 10px; border-radius: 6px; box-sizing: border-box;">
                 </div>
                 <div>
                   <label for="changePwdNewInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.new_pwd_label">Новый пароль:</label>
-                  <input type="password" id="changePwdNewInput" class="form-input" placeholder="Новый пароль (мин. 6 символов)" autocomplete="new-password"
+                  <input type="password" id="changePwdNewInput" class="form-input" placeholder="Новый пароль (мин. 6 символов)" data-i18n-placeholder="account.new_pwd_placeholder" autocomplete="new-password"
                     style="width: 100%; padding: 8px 10px; border-radius: 6px; box-sizing: border-box;">
                 </div>
                 <div>
                   <label for="changePwdConfirmInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.confirm_pwd_label">Повторите новый пароль:</label>
-                  <input type="password" id="changePwdConfirmInput" class="form-input" placeholder="Повторите новый пароль" autocomplete="new-password"
+                  <input type="password" id="changePwdConfirmInput" class="form-input" placeholder="Повторите новый пароль" data-i18n-placeholder="account.confirm_pwd_placeholder" autocomplete="new-password"
                     style="width: 100%; padding: 8px 10px; border-radius: 6px; box-sizing: border-box;">
                 </div>
                 <div id="changePwdError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em;"></div>
@@ -2377,7 +2377,7 @@
               <span class="apikeys-frame-title" data-i18n="transcriber.tts_frame_title">🔊 Синтез речи</span>
               <span class="apikeys-frame-actions">
                 <!-- TTS Voice Upload Background Task Indicator (Settings) -->
-                <div id="settingsTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" role="status" tabindex="0" onclick="event.stopPropagation();">
+                <div id="settingsTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0" onclick="event.stopPropagation();">
                   <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
                   <span id="settingsTtsUploadPercent" class="tts-upload-percent">0%</span>
                 </div>
@@ -2393,7 +2393,6 @@
                 </label>
                 <select id="optTtsEngine" class="form-input" style="cursor: pointer; width: 100%;">
                   <option value="piper" selected data-i18n="transcriber.tts_engine_piper">Piper TTS (local)</option>
-                  <option value="edge" data-i18n="transcriber.tts_engine_edge">Edge TTS (Microsoft, network)</option>
                   <option value="silero" data-i18n="transcriber.tts_engine_silero">Silero TTS v5 (local)</option>
                   <option value="browser" data-i18n="transcriber.tts_engine_browser">System TTS (local)</option>
                   <option value="gemini" data-i18n="transcriber.tts_engine_gemini">* Gemini API</option>
@@ -4583,7 +4582,7 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.247"></script>
+  <script src="/static/js/i18n.js?v=2.9.285"></script>
   <script src="/static/js/audio-player.js?v=2.9.172"></script>
   <script src="/static/js/dialog.js?v=2.9.170"></script>
   <script src="/static/js/auth.js?v=2.9.255"></script>
@@ -4592,7 +4591,7 @@
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.193"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.278"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.284"></script>
 </body>
 </html>
 

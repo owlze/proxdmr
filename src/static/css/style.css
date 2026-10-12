@@ -25702,3 +25702,263 @@ body.is-swl-mode .ptt-button::after,
 
 
 
+
+/* Quick TG Direct Dial Live Preview Quote Popup */
+.quick-tg-box {
+  position: relative !important;
+  overflow: visible !important;
+}
+
+.ptt-side,
+.ptt-side-left,
+.ptt-grid,
+.ptt-section {
+  overflow: visible !important;
+}
+
+.quick-tg-preview-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(295px, 86vw);
+  z-index: 120;
+  box-sizing: border-box;
+  background: linear-gradient(155deg, rgba(22, 27, 34, 0.98), rgba(13, 17, 23, 0.98));
+  border: 1.5px solid #388bfd;
+  border-radius: 10px;
+  padding: 7px 10px 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.68), 0 0 12px rgba(56, 139, 253, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(4px) scale(0.98);
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s ease;
+  text-align: left;
+  user-select: none;
+}
+
+.quick-tg-preview-popup.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  cursor: pointer;
+}
+
+.quick-tg-preview-popup::before {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 22px;
+  border-width: 6px;
+  border-style: solid;
+  border-color: #388bfd transparent transparent transparent;
+}
+
+.quick-tg-preview-popup::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 23px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: #11161d transparent transparent transparent;
+}
+
+.quick-tg-pop-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  line-height: 1.2;
+}
+
+.quick-tg-pop-flag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+
+.quick-tg-pop-flag .flag-badge,
+.quick-tg-pop-flag svg,
+.quick-tg-pop-flag img {
+  width: 16px;
+  height: 12px;
+  vertical-align: middle;
+}
+
+.quick-tg-pop-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.77rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.quick-tg-pop-badge.is-tg {
+  background: rgba(210, 153, 34, 0.18);
+  border: 1px solid rgba(210, 153, 34, 0.55);
+  color: #f0b72f;
+}
+
+.quick-tg-pop-badge.is-id {
+  background: rgba(56, 139, 253, 0.18);
+  border: 1px solid rgba(56, 139, 253, 0.55);
+  color: #58a6ff;
+}
+
+.quick-tg-pop-country {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #8b949e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.quick-tg-pop-tx-hint {
+  margin-left: auto;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #3fb950;
+  background: rgba(46, 160, 67, 0.14);
+  border: 1px solid rgba(46, 160, 67, 0.35);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.quick-tg-pop-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 7px;
+  border-left: 2.5px solid #30363d;
+  font-size: 0.80rem;
+  line-height: 1.28;
+  color: #c9d1d9;
+  word-break: break-word;
+}
+
+.quick-tg-pop-quote.is-known {
+  border-left-color: #3fb950;
+  color: #f0f6fc;
+  font-weight: 600;
+}
+
+.quick-tg-pop-quote.is-unknown {
+  border-left-color: #58a6ff;
+  color: #8b949e;
+  font-weight: 500;
+}
+
+.quick-tg-pop-main {
+  display: block;
+}
+
+.quick-tg-pop-sub {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #8b949e;
+}
+
+.quick-tg-pop-sub b {
+  color: #58a6ff;
+}
+
+[data-theme="light"] .quick-tg-preview-popup {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.99));
+  border-color: #0284c7;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16), 0 0 10px rgba(2, 132, 199, 0.16);
+}
+
+[data-theme="light"] .quick-tg-preview-popup::before {
+  border-color: #0284c7 transparent transparent transparent;
+}
+
+[data-theme="light"] .quick-tg-preview-popup::after {
+  border-color: #f8fafc transparent transparent transparent;
+}
+
+[data-theme="light"] .quick-tg-pop-badge.is-tg {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+[data-theme="light"] .quick-tg-pop-badge.is-id {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0369a1;
+}
+
+[data-theme="light"] .quick-tg-pop-country {
+  color: #64748b;
+}
+
+[data-theme="light"] .quick-tg-pop-tx-hint {
+  color: #15803d;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+[data-theme="light"] .quick-tg-pop-quote {
+  border-left-color: #cbd5e1;
+  color: #334155;
+}
+
+[data-theme="light"] .quick-tg-pop-quote.is-known {
+  border-left-color: #16a34a;
+  color: #0f172a;
+}
+
+[data-theme="light"] .quick-tg-pop-quote.is-unknown {
+  border-left-color: #0284c7;
+  color: #64748b;
+}
+
+[data-theme="light"] .quick-tg-pop-sub {
+  color: #64748b;
+}
+
+[data-theme="light"] .quick-tg-pop-sub b {
+  color: #0284c7;
+}
+
+/* Quick TG Preview Popup in BM Static Modal & Contact Edit Modal */
+.bm-add-manual-row,
+#contactEditTgGroup,
+#contactEditDmrIdGroup {
+  position: relative !important;
+  overflow: visible !important;
+}
+
+.bm-add-section,
+.bm-slot-column {
+  overflow: visible !important;
+}
+
+.quick-tg-preview-popup.in-bm-static-modal {
+  bottom: calc(100% + 7px);
+  left: 0;
+  max-width: min(320px, 88vw);
+  z-index: 250;
+}
+
+.quick-tg-preview-popup.in-contact-edit-modal {
+  bottom: calc(100% - 18px);
+  left: 0;
+  max-width: min(340px, 88vw);
+  z-index: 250;
+}

@@ -1130,7 +1130,7 @@ class GeminiTranscriberService:
         self.target_lang = target_lang.strip() if target_lang and target_lang.strip() else "ru"
         self.tts_enabled = bool(tts_enabled)
         self.tts_engine = (tts_engine or "gemini").lower().strip()
-        if self.tts_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "edge", "silero"):
+        if self.tts_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "silero"):
             self.tts_engine = "gemini"
         default_model = "aura-2-asteria-en" if self.tts_engine == "deepgram" else ("canopylabs/orpheus-v1-english" if self.tts_engine == "groq" else "gemini-3.1-flash-tts-preview")
         self.tts_model = tts_model or default_model
@@ -1520,7 +1520,7 @@ class GeminiTranscriberService:
         if effective_lang == "none":
             effective_lang = "ru"
         eff_engine = (engine or self.tts_engine or "gemini").lower().strip()
-        if eff_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "edge", "silero"):
+        if eff_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "silero"):
             eff_engine = "gemini"
 
         if eff_engine == "piper":
@@ -1573,48 +1573,6 @@ class GeminiTranscriberService:
                 speed=speed or self.tts_speed,
                 noise_scale=0.7,
                 noise_w=0.8
-            )
-            if call_announcement_wav and wav_bytes:
-                comb, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=200)
-                return comb or wav_bytes, err
-            return wav_bytes or call_announcement_wav, err
-
-        if eff_engine == "edge":
-            from edge_service import EdgeTtsService
-            from callsign_phonetic import get_callsign_announcement, concatenate_wavs
-
-            edge_srv = EdgeTtsService.get_instance()
-            actual_voice = edge_srv.resolve_voice(voice, lang=effective_lang, gender=gender)
-
-            call_announcement_wav = None
-            if announce_callsign and callsign:
-                call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="edge")
-                if call_phrase:
-                    c_wav, _ = await edge_srv.synthesize_async(
-                        text=call_phrase,
-                        voice=actual_voice,
-                        lang=effective_lang,
-                        speed=0.9,
-                        gender=gender
-                    )
-                    if c_wav:
-                        call_announcement_wav = c_wav
-
-            speech_text = strip_callsigns_for_tts(text, callsign=callsign)
-            if effective_lang == "ru":
-                speech_text = normalize_for_russian_tts(speech_text, strip_callsigns=True, callsign=callsign)
-
-            if not speech_text or not speech_text.strip():
-                if call_announcement_wav:
-                    return call_announcement_wav, None
-                return None, "Пустой текст для озвучки"
-
-            wav_bytes, err = await edge_srv.synthesize_async(
-                text=speech_text,
-                voice=actual_voice,
-                lang=effective_lang,
-                speed=speed or self.tts_speed,
-                gender=gender
             )
             if call_announcement_wav and wav_bytes:
                 comb, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=200)
@@ -2100,10 +2058,7 @@ class GeminiTranscriberService:
             # --- STAGE 3: SPEECH SYNTHESIS (TTS) ---
             if self.is_slot_tts_enabled(hid, slot):
                 eff_l_choice = (detected_lang if is_direct else self.target_lang) or "ru"
-                if self.tts_engine == "edge":
-                    from edge_service import EdgeTtsService
-                    actual_voice = EdgeTtsService.get_instance().resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
-                elif self.tts_engine == "silero":
+                if self.tts_engine == "silero":
                     from silero_service import SileroService
                     actual_voice = SileroService.get_instance().resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
                 else:
@@ -2269,7 +2224,7 @@ class GeminiTranscriberService:
                                     pass
                     except Exception as e:
                         logger.warning(f"[TRANSCRIBER] Piper TTS exception TS{slot}: {e}")
-                elif self.tts_engine in ("gemini", "groq", "deepgram", "edge", "silero"):
+                elif self.tts_engine in ("gemini", "groq", "deepgram", "silero"):
                     try:
                         clean_text = strip_callsigns_for_tts(display_text, callsign=callsign)
                         effective_callsign = (callsign or "").strip()

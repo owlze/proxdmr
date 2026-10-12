@@ -2246,17 +2246,6 @@ async def api_piper_download_status(voice_id: Optional[str] = None):
     return {"status": "ok", "download": status}
 
 
-@app.get("/api/transcriber/edge/voices")
-async def api_edge_voices(lang: Optional[str] = None):
-    from edge_service import EdgeTtsService
-    srv = EdgeTtsService.get_instance()
-    voices = srv.get_voices_for_lang(lang)
-    return {
-        "status": "ok",
-        "available": srv.is_available(),
-        "voices": voices,
-        "lang": lang or "ru"
-    }
 
 
 @app.get("/api/transcriber/silero/voices")

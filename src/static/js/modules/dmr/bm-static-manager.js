@@ -1,5 +1,6 @@
 import { showToast } from '../core/toast.js';
 import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js';
+import { attachTgLivePreview } from '../core/formatters.js?v=2.9.284';
 
 /**
  * ProxDMR BrandMeister Static & Dynamic TalkGroups Manager Module
@@ -721,8 +722,18 @@ async function executeAddTg(slot, tg) {
 }
 
 if (btnAddTgTs1 && inputAddTgTs1) {
+  const previewCtrlTs1 = attachTgLivePreview(inputAddTgTs1, {
+    anchorEl: inputAddTgTs1.closest(".bm-add-manual-row") || inputAddTgTs1.parentElement,
+    popupClass: "in-bm-static-modal",
+    mode: "tg",
+    actionHint: "+ TS1 ⏎",
+    onAction: () => {
+      btnAddTgTs1.click();
+    }
+  });
   btnAddTgTs1.addEventListener("click", () => {
     const val = parseInt(inputAddTgTs1.value, 10);
+    if (previewCtrlTs1 && previewCtrlTs1.hidePreview) previewCtrlTs1.hidePreview();
     if (val > 0) {
       executeAddTg(1, val);
       inputAddTgTs1.value = "";
@@ -747,8 +758,18 @@ if (btnAddPresetTs1 && selectPresetTs1) {
 }
 
 if (btnAddTgTs2 && inputAddTgTs2) {
+  const previewCtrlTs2 = attachTgLivePreview(inputAddTgTs2, {
+    anchorEl: inputAddTgTs2.closest(".bm-add-manual-row") || inputAddTgTs2.parentElement,
+    popupClass: "in-bm-static-modal",
+    mode: "tg",
+    actionHint: "+ TS2 ⏎",
+    onAction: () => {
+      btnAddTgTs2.click();
+    }
+  });
   btnAddTgTs2.addEventListener("click", () => {
     const val = parseInt(inputAddTgTs2.value, 10);
+    if (previewCtrlTs2 && previewCtrlTs2.hidePreview) previewCtrlTs2.hidePreview();
     if (val > 0) {
       executeAddTg(2, val);
       inputAddTgTs2.value = "";

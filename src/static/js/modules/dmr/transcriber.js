@@ -790,6 +790,21 @@ function syncTtsSoloMode() {
   if (shouldSolo) {
     // Solo is active!
     hidSet.forEach(hid => {
+      // In "doubl" mode, respect simultaneous dual audio and do not auto-mute other slots!
+      const mode = (typeof getHotspotTsAudioMode === "function") ? getHotspotTsAudioMode(hid) : "doubl";
+      if (mode === "doubl") {
+        [1, 2].forEach(slot => {
+          const slotKey = `${hid}_ts${slot}`;
+          if (soloSet.has(slotKey)) {
+            soloSet.delete(slotKey);
+          }
+          if (hid === "default" && soloSet.has(`default_ts${slot}`)) {
+            soloSet.delete(`default_ts${slot}`);
+          }
+        });
+        return;
+      }
+
       [1, 2].forEach(slot => {
         const slotKey = `${hid}_ts${slot}`;
         const isTts = activeTtsSlots.some(t => t.hid === hid && t.slot === slot);
@@ -809,10 +824,9 @@ function syncTtsSoloMode() {
           // Set temporary mute (isTemporary = true) so it does NOT affect localStorage or server DB
           const getPersistFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
           const wasAlreadyMuted = getPersistFn(hid, slot);
-          if (!wasAlreadyMuted) {
-            soloSet.add(slotKey);
+          if (wasAlreadyMuted) {
+            setHotspotMute(hid, slot, true, true);
           }
-          setHotspotMute(hid, slot, true, true);
         }
       });
     });
@@ -1036,43 +1050,6 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
     return;
   }
 
-  if (eng === "edge") {
-    selectEl.innerHTML = "";
-    selectEl.disabled = false;
-    let edgeVoices = [];
-    try {
-      const resp = await fetch(`/api/transcriber/edge/voices?lang=${encodeURIComponent(lang)}`);
-      const data = await resp.json();
-      if (data && data.voices) edgeVoices = data.voices;
-    } catch (_) {}
-    if (!edgeVoices || edgeVoices.length === 0) {
-      edgeVoices = (lang === "ru") ? [
-        { id: "ru-RU-SvetlanaNeural", name: "Светлана (Женский, нейросеть)" },
-        { id: "ru-RU-DmitryNeural", name: "Дмитрий (Мужской, нейросеть)" }
-      ] : [
-        { id: "en-US-JennyNeural", name: "Jenny (Female, US)" },
-        { id: "en-US-GuyNeural", name: "Guy (Male, US)" }
-      ];
-    }
-    edgeVoices.forEach(v => {
-      const opt = document.createElement("option");
-      opt.value = v.id;
-      opt.textContent = v.name;
-      selectEl.appendChild(opt);
-    });
-    if (currentVoiceValue && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
-      selectEl.value = currentVoiceValue;
-    } else {
-      selectEl.value = edgeVoices[0].id;
-    }
-    if (hintEl) {
-      hintEl.style.display = "block";
-      hintEl.textContent = window.t
-        ? window.t("transcriber.edge_tts_hint", {}, "Высококачественный нейросетевой синтез Microsoft Edge TTS (бесплатно, без API-ключей).")
-        : "Высококачественный нейросетевой синтез Microsoft Edge TTS (бесплатно, без API-ключей).";
-    }
-    return;
-  }
 
   if (eng === "silero") {
     selectEl.innerHTML = "";
@@ -1457,7 +1434,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   popup.className = "tts-quick-settings-popup";
 
   const s = window.transcriberSettings || {};
-  const curEngine = (s.tts_engine && ["gemini", "groq", "piper", "browser", "edge", "silero"].includes(s.tts_engine)) ? s.tts_engine : "piper";
+  const curEngine = (s.tts_engine && ["gemini", "groq", "piper", "browser", "silero"].includes(s.tts_engine)) ? s.tts_engine : "piper";
   const curModel = s.tts_model || (curEngine === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview");
   const curVoice = s.tts_voice || (curEngine === "piper" ? "ru_RU-terra5871-medium" : "auto");
   const rawDuck = (s.tts_ducking_level !== undefined) ? s.tts_ducking_level : 0.80;
@@ -1517,7 +1494,6 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     <label class="tts-quick-label">${window.t ? window.t("transcriber.tts_engine_lbl", {}, "🎙️ Движок синтеза речи:") : "🎙️ Движок синтеза речи:"}</label>
     <select class="tts-quick-select" id="ttsQuickEngine">
       <option value="piper" ${curEngine === "piper" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_piper", {}, "Piper TTS (local)") : "Piper TTS (local)"}</option>
-      <option value="edge" ${curEngine === "edge" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_edge", {}, "Edge TTS (Microsoft, network)") : "Edge TTS (Microsoft, network)"}</option>
       <option value="silero" ${curEngine === "silero" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_silero", {}, "Silero TTS v5 (local)") : "Silero TTS v5 (local)"}</option>
       <option value="browser" ${curEngine === "browser" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_browser", {}, "System TTS (local)") : "System TTS (local)"}</option>
       <option value="gemini" ${curEngine === "gemini" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_gemini", {}, "* Gemini API") : "* Gemini API"}</option>
@@ -2544,15 +2520,17 @@ function toggleSlotTts(row, slot) {
       recMgr.stopTtsPlayback();
     }
 
-    // 4. SET AUDIO MODE OF THIS HOTSPOT TO SOLO (preserving previous mode for restoration)
+    // 4. In solo or auto mode, ensure current TS is active; in doubl mode, preserve simultaneous dual audio
     window._preTtsAudioModes = window._preTtsAudioModes || {};
     if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
       const curMode = getHotspotTsAudioMode(hid);
-      if (!window._preTtsAudioModes[hid]) {
-        window._preTtsAudioModes[hid] = curMode;
-      }
-      if (curMode !== "solo") {
-        setHotspotTsAudioMode(hid, "solo");
+      if (curMode !== "doubl") {
+        if (!window._preTtsAudioModes[hid]) {
+          window._preTtsAudioModes[hid] = curMode;
+        }
+        if (curMode !== "solo") {
+          setHotspotTsAudioMode(hid, "solo");
+        }
       }
     }
 
@@ -2908,8 +2886,6 @@ class TtsAudioQueueManager {
           const isTts = isSlotTtsActive(hid, slot);
           if (isTts && pauseDuckLevel < 0.999) {
             channel.setSlotDucking(slot, true, pauseDuckLevel, fadeTimeSec);
-          } else if (!isTts && soloMode && hasActiveTts) {
-            channel.setSlotDucking(slot, true, 0.0, fadeTimeSec);
           } else {
             channel.setSlotDucking(slot, false, 1.0, fadeTimeSec);
           }
@@ -3449,7 +3425,9 @@ function updateSlotLangBadge(row, slot, isActive, langCode = null) {
   const langBadge = row.querySelector(".vfo-lang-badge");
   if (!langBadge) return;
 
-  if (isActive) {
+  const effectiveActive = Boolean(isActive && row.classList.contains("has-transcribe"));
+
+  if (effectiveActive) {
     langBadge.classList.add("transcribe-on");
     if (langCode && langCode !== "---") {
       setLangBadgeText(langBadge, langCode.toUpperCase());
@@ -4397,15 +4375,7 @@ function toggleSlotTranscribe(row, slot) {
   }
 
   if (newState) {
-    // Mutual exclusion: Auto-mute other slot and deactivate any transcription/TTS on it
     const otherSlot = slot === 1 ? 2 : 1;
-    const autoMuteKey = `proxdmr_transcribe_automuted_${hid}_ts${otherSlot}`;
-    if (!getHotspotMute(hid, otherSlot)) {
-      try {
-        sessionStorage.setItem(autoMuteKey, "1");
-      } catch (_) {}
-    }
-    setHotspotMute(hid, otherSlot, true);
 
     const otherRow = card ? card.querySelector(`.vfo-ts${otherSlot}-row`) : null;
     if (otherRow) {
@@ -4448,7 +4418,6 @@ function toggleSlotTranscribe(row, slot) {
       }
     }
 
-    scheduleSyncClientSettings();
     showToast(window.t ? window.t("transcriber.ts_on", { slot }, `✓ Режим транскрибации TS${slot} включен`) : `✓ Режим транскрибации TS${slot} включен`, 2000);
     const hasKey = Boolean(window.transcriberSettings && window.transcriberSettings.api_key);
     if (!hasKey) {
@@ -4456,7 +4425,6 @@ function toggleSlotTranscribe(row, slot) {
       openHotspotSettings(null, "tab-transcriber");
     }
   } else {
-    scheduleSyncClientSettings();
     const captionStream = row.querySelector(".vfo-caption-stream");
     const captionBox = row.querySelector(".vfo-caption-box");
     if (captionStream) {
@@ -4779,6 +4747,8 @@ function clearAllTranscribeLocalStorage() {
       }
       if (
         k !== "proxdmr_tts_solo_muted_slots" &&
+        k !== "proxdmr_tts_model" &&
+        k !== "proxdmr_tts_model_opts" &&
         (k.match(/^proxdmr_tts_.*_ts[12]$/) || k === "proxdmr_tts_ts1" || k === "proxdmr_tts_ts2" || k.startsWith("proxdmr_tts_"))
       ) {
         localStorage.setItem(k, "0");
@@ -4953,7 +4923,7 @@ function disableAllTts(silent = true, notifyWs = true) {
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
-      if (k && k !== "proxdmr_tts_solo_muted_slots" && k.startsWith("proxdmr_tts_")) {
+      if (k && k !== "proxdmr_tts_solo_muted_slots" && k !== "proxdmr_tts_model" && k !== "proxdmr_tts_model_opts" && k.startsWith("proxdmr_tts_")) {
         localStorage.removeItem(k);
       }
     }
@@ -5042,21 +5012,32 @@ window.addEventListener("pagehide", () => {
 function syncCardSlotTranscribeUI(card, hid) {
   if (!card) return;
   const cid = resolveHotspotId(hid || card.dataset.hotspotId);
+  const isCardInTranscribeMode = card.classList.contains("has-transcribe-mode");
 
-  // Enforce single-slot mutual exclusion from saved preferences
-  const ts1Active = isSlotTranscribeActive(cid, 1);
-  const ts2Active = isSlotTranscribeActive(cid, 2);
-  if (ts1Active && ts2Active) {
+  // When a card is first wired or not actively in transcribe mode, always start in standard view with TXT/TTS off
+  if (!isCardInTranscribeMode) {
     try {
+      localStorage.setItem(getSlotTranscribeKey(cid, 1), "0");
       localStorage.setItem(getSlotTranscribeKey(cid, 2), "0");
+      localStorage.setItem(getSlotTtsKey(cid, 1), "0");
       localStorage.setItem(getSlotTtsKey(cid, 2), "0");
     } catch (_) {}
+  } else {
+    // Enforce single-slot mutual exclusion from saved preferences
+    const ts1Active = isSlotTranscribeActive(cid, 1);
+    const ts2Active = isSlotTranscribeActive(cid, 2);
+    if (ts1Active && ts2Active) {
+      try {
+        localStorage.setItem(getSlotTranscribeKey(cid, 2), "0");
+        localStorage.setItem(getSlotTtsKey(cid, 2), "0");
+      } catch (_) {}
+    }
   }
 
   [1, 2].forEach(slot => {
     const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
     if (!row) return;
-    const isActive = isSlotTranscribeActive(cid, slot);
+    const isActive = isCardInTranscribeMode ? isSlotTranscribeActive(cid, slot) : false;
     row.classList.toggle("has-transcribe", isActive);
     row.classList.remove("is-maximized");
     updateSlotLangBadge(row, slot, isActive);
@@ -5064,7 +5045,7 @@ function syncCardSlotTranscribeUI(card, hid) {
     setupCaptionBoxLongPress(row, slot);
 
     setupSlotTtsClick(row, slot);
-    updateSlotTtsBadge(row, slot, isSlotTtsActive(cid, slot));
+    updateSlotTtsBadge(row, slot, isCardInTranscribeMode ? isSlotTtsActive(cid, slot) : false);
   });
 
   updateCardTranscribeLayout(card);
@@ -5409,7 +5390,7 @@ function initGeminiTtsFrame() {
         }
       } else if (curEng === "browser") {
         populateVoiceSelect(optVoi, "browser", newLang, null, hint);
-      } else if (curEng === "edge" || curEng === "silero") {
+      } else if (curEng === "silero") {
         populateVoiceSelect(optVoi, curEng, newLang, null, hint);
       }
     });
@@ -5892,8 +5873,8 @@ function initTranscriberSettings() {
         updateRecApiKeyUI(curRecEng);
         updateTransApiKeyUI(curTransEng);
         updateNoTranslateUI(isNoTrans);
-        let effEngine = (data.settings.tts_engine && ["gemini", "groq", "piper", "browser", "edge", "silero"].includes(data.settings.tts_engine)) ? data.settings.tts_engine : "piper";
-        if (effEngine === "deepgram") effEngine = "piper";
+        let effEngine = (data.settings.tts_engine && ["gemini", "groq", "piper", "browser", "silero"].includes(data.settings.tts_engine)) ? data.settings.tts_engine : "piper";
+        if (effEngine === "deepgram" || effEngine === "edge") effEngine = "piper";
         const effVoice = data.settings.tts_voice || "ru_RU-terra5871-medium";
         if (optTtsEngine) {
           optTtsEngine.value = effEngine;

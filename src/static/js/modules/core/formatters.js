@@ -1047,7 +1047,263 @@ export function safeEscapeHtml(str) {
 }
 export const escapeHtml = safeEscapeHtml;
 
+export function attachTgLivePreview(inputEl, opts = {}) {
+  if (!inputEl || inputEl._tgLivePreviewAttached) return inputEl?._tgLivePreviewCtrl || null;
+  inputEl._tgLivePreviewAttached = true;
+
+  const anchorEl = opts.anchorEl || inputEl.parentElement;
+  if (!anchorEl) return null;
+  anchorEl.style.position = "relative";
+  anchorEl.style.overflow = "visible";
+
+  let previewPopup = anchorEl.querySelector(".quick-tg-preview-popup");
+  if (!previewPopup) {
+    previewPopup = document.createElement("div");
+    previewPopup.className = "quick-tg-preview-popup" + (opts.popupClass ? ` ${opts.popupClass}` : "");
+    previewPopup.setAttribute("aria-live", "polite");
+    anchorEl.appendChild(previewPopup);
+  }
+
+  let previewDebounceTimer = null;
+  let previewBlurTimer = null;
+  let lastRenderedInfo = null;
+  if (typeof window !== "undefined" && !window._quickTgPreviewCache) {
+    window._quickTgPreviewCache = {};
+  }
+
+  const hidePreview = () => {
+    if (previewDebounceTimer) {
+      clearTimeout(previewDebounceTimer);
+      previewDebounceTimer = null;
+    }
+    if (previewPopup) {
+      previewPopup.classList.remove("visible");
+    }
+  };
+
+  const renderPreview = () => {
+    if (!inputEl || !previewPopup) return;
+    const rawVal = String(inputEl.value || "");
+    const cleanDigits = rawVal.replace(/\D/g, "");
+    const num = parseInt(cleanDigits, 10);
+    const maxVal = opts.max || 99999999;
+    if (!cleanDigits || isNaN(num) || num <= 0 || num > maxVal) {
+      lastRenderedInfo = null;
+      hidePreview();
+      return;
+    }
+
+    const cache = (typeof window !== "undefined" && window._quickTgPreviewCache) || {};
+    const userCalls = (typeof window !== "undefined" && window.USER_CALLSIGNS) || {};
+    const u = userCalls[num];
+    const mode = opts.mode || "auto";
+    const isPrivate = mode === "id" ? true : (mode === "tg" ? false : Boolean(u || num > 999999));
+
+    if (isPrivate) {
+      const cInfo = getCountryInfo(num, u?.callsign || "", u?.country || "");
+      const flagHtml = getFlagBadgeHtml(cInfo, false);
+      const cLabel = (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "DMR ID";
+      let quoteHtml = "";
+      let isKnown = false;
+
+      if (u && (u.callsign || u.name)) {
+        isKnown = true;
+        const cs = (u.callsign || "").trim();
+        const nm = (u.name || "").trim();
+        const loc = [u.city, u.country].filter(Boolean).join(", ");
+        quoteHtml = `<span class="quick-tg-pop-main"><strong>${safeEscapeHtml(cs)}</strong>${nm ? ` — ${safeEscapeHtml(nm)}` : ""}</span>` +
+          (loc ? `<span class="quick-tg-pop-sub">${safeEscapeHtml(loc)}</span>` : "");
+      } else if (cache["id_" + num] === "not_found") {
+        const notFoundTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.private_id_custom", {}, "Личный вызов DMR ID (нет в базе RadioID)") : "Личный вызов DMR ID (нет в базе RadioID)";
+        quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(notFoundTxt)}</span>`;
+      } else {
+        const searchTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.private_id_searching", {}, "Личный вызов DMR ID • поиск позывного...") : "Личный вызов DMR ID • поиск позывного...";
+        quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(searchTxt)}</span>`;
+        if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+        previewDebounceTimer = setTimeout(async () => {
+          try {
+            const res = await fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=5`);
+            const data = await res.json();
+            const exact = ((data && data.results) || []).find(it => Number(it.id) === num);
+            if (exact) {
+              if (typeof window !== "undefined") {
+                if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
+                window.USER_CALLSIGNS[num] = exact;
+              }
+              cache["id_" + num] = "found";
+            } else {
+              cache["id_" + num] = "not_found";
+            }
+          } catch (_) {
+            cache["id_" + num] = "not_found";
+          }
+          if (inputEl && String(inputEl.value || "").replace(/\D/g, "") === String(num)) {
+            renderPreview();
+          }
+        }, 140);
+      }
+
+      lastRenderedInfo = {
+        num,
+        isPrivate: true,
+        isKnown,
+        user: u || null,
+        cleanDesc: u ? [u.callsign, u.name].filter(Boolean).join(" ").trim() : "",
+        country: (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : ""
+      };
+
+      const hintText = typeof opts.actionHint === "function"
+        ? opts.actionHint(lastRenderedInfo)
+        : (opts.actionHint !== undefined ? opts.actionHint : "TX ⏎");
+
+      previewPopup.innerHTML = `
+        <div class="quick-tg-pop-header">
+          <span class="quick-tg-pop-flag">${flagHtml}</span>
+          <span class="quick-tg-pop-badge is-id">ID ${num}</span>
+          <span class="quick-tg-pop-country">${safeEscapeHtml(cLabel)}</span>
+          ${hintText ? `<span class="quick-tg-pop-tx-hint">${safeEscapeHtml(hintText)}</span>` : ""}
+        </div>
+        <div class="quick-tg-pop-quote ${isKnown ? "is-known" : "is-unknown"}">
+          ${quoteHtml}
+        </div>
+      `;
+      previewPopup.classList.add("visible");
+      return;
+    }
+
+    // TalkGroup
+    const isParrot = (num === 9990);
+    const tgNames = (typeof window !== "undefined" && window.TG_NAMES) || {};
+    const rawName = tgNames[num] ? String(tgNames[num]).trim() : (isParrot ? "Parrot / Echo (Эхо-тест)" : "");
+    let cleanDesc = getCleanTgDesc(num, rawName);
+    const cInfo = (num >= 100 || rawName) ? getCountryInfo(num, "", "") : { name: "Global", name_en: "", flag: "🌐" };
+    const flagHtml = getFlagBadgeHtml(cInfo, isParrot);
+    const cLabel = isParrot ? "Эхо-тест" : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup");
+
+    let quoteHtml = "";
+    let isKnown = false;
+
+    if (cleanDesc) {
+      isKnown = true;
+      quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cleanDesc)}»</span>`;
+    } else if (cache["tg_" + num]) {
+      const cached = cache["tg_" + num];
+      if (cached.exactName) {
+        isKnown = true;
+        cleanDesc = cached.exactName;
+        quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cached.exactName)}»</span>`;
+      } else {
+        const customTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.custom_group_hint", { tg: num }, `Группа TG ${num} (вне справочника)`) : `Группа TG ${num} (вне справочника)`;
+        quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(customTxt)}</span>` +
+          (cached.prefix ? `<span class="quick-tg-pop-sub">↳ Напр.: <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "");
+      }
+    } else {
+      const typingTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.typing_group_hint", { tg: num }, `Группа TG ${num} • проверка...`) : `Группа TG ${num} • проверка...`;
+      quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(typingTxt)}</span>`;
+      if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+      previewDebounceTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/tg/search?q=${encodeURIComponent(String(num))}&limit=8`);
+          const data = await res.json();
+          const list = (data && data.results) || [];
+          const exact = list.find(r => Number(r.tg) === num);
+          const prefixItem = list.find(r => Number(r.tg) !== num && String(r.tg).startsWith(String(num)));
+          let exactClean = "";
+          if (exact && exact.name) {
+            exactClean = getCleanTgDesc(num, exact.name) || exact.name;
+            if (typeof window !== "undefined") {
+              if (!window.TG_NAMES) window.TG_NAMES = {};
+              window.TG_NAMES[num] = exact.name;
+            }
+          }
+          let prefixObj = null;
+          if (prefixItem) {
+            const pDesc = getCleanTgDesc(prefixItem.tg, prefixItem.name) || prefixItem.name || ("TG " + prefixItem.tg);
+            prefixObj = { tg: prefixItem.tg, desc: pDesc };
+          }
+          cache["tg_" + num] = { exactName: exactClean, prefix: prefixObj };
+        } catch (_) {
+          cache["tg_" + num] = { exactName: "", prefix: null };
+        }
+        if (inputEl && String(inputEl.value || "").replace(/\D/g, "") === String(num)) {
+          renderPreview();
+        }
+      }, 120);
+    }
+
+    lastRenderedInfo = {
+      num,
+      isPrivate: false,
+      isKnown,
+      user: null,
+      cleanDesc: cleanDesc || "",
+      country: (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : ""
+    };
+
+    const hintText = typeof opts.actionHint === "function"
+      ? opts.actionHint(lastRenderedInfo)
+      : (opts.actionHint !== undefined ? opts.actionHint : "TX ⏎");
+
+    previewPopup.innerHTML = `
+      <div class="quick-tg-pop-header">
+        <span class="quick-tg-pop-flag">${flagHtml}</span>
+        <span class="quick-tg-pop-badge is-tg">TG ${num}</span>
+        <span class="quick-tg-pop-country">${safeEscapeHtml(cLabel)}</span>
+        ${hintText ? `<span class="quick-tg-pop-tx-hint">${safeEscapeHtml(hintText)}</span>` : ""}
+      </div>
+      <div class="quick-tg-pop-quote ${isKnown ? "is-known" : "is-unknown"}">
+        ${quoteHtml}
+      </div>
+    `;
+    previewPopup.classList.add("visible");
+  };
+
+  previewPopup.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof opts.onAction === "function") {
+      opts.onAction(lastRenderedInfo);
+    }
+    hidePreview();
+  });
+
+  inputEl.addEventListener("input", () => {
+    if (previewBlurTimer) {
+      clearTimeout(previewBlurTimer);
+      previewBlurTimer = null;
+    }
+    renderPreview();
+  });
+
+  inputEl.addEventListener("focus", () => {
+    if (previewBlurTimer) {
+      clearTimeout(previewBlurTimer);
+      previewBlurTimer = null;
+    }
+    if (String(inputEl.value || "").trim()) {
+      renderPreview();
+    }
+  });
+
+  inputEl.addEventListener("blur", () => {
+    previewBlurTimer = setTimeout(() => {
+      hidePreview();
+    }, 160);
+  });
+
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" || e.key === "Enter") {
+      hidePreview();
+    }
+  });
+
+  const ctrl = { hidePreview, renderPreview };
+  inputEl._tgLivePreviewCtrl = ctrl;
+  return ctrl;
+}
+
 if (typeof window !== "undefined") {
   window.safeEscapeHtml = safeEscapeHtml;
   window.escapeHtml = safeEscapeHtml;
+  window.attachTgLivePreview = attachTgLivePreview;
 }

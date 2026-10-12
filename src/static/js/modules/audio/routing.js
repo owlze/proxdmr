@@ -76,10 +76,14 @@ export function getHotspotMute(hid, slot) {
   const s = parseInt(slot, 10) || 1;
   const cid = _resolveHotspotId(hid);
 
-  // If slot is temporarily muted by live TTS Solo mode, effective state is true
-  const soloSet = getSoloMutedSet();
-  if (soloSet && (soloSet.has(`${cid}_ts${s}`) || (cid === "default" && soloSet.has(`default_ts${s}`)))) {
-    return true;
+  // If hotspot mode is "doubl", never let soloSet mute slots! In doubl mode, user expects dual reception
+  const mode = (typeof getHotspotTsAudioMode === "function") ? getHotspotTsAudioMode(cid) : "doubl";
+  if (mode !== "doubl") {
+    // If slot is temporarily muted by live TTS Solo mode, effective state is true
+    const soloSet = getSoloMutedSet();
+    if (soloSet && (soloSet.has(`${cid}_ts${s}`) || (cid === "default" && soloSet.has(`default_ts${s}`)))) {
+      return true;
+    }
   }
 
   return getPersistentHotspotMute(hid, slot);
@@ -155,6 +159,10 @@ export function setHotspotMute(hid, slot, muted, isTemporary = false) {
     if (typeof ap.updateSlotMute === "function") {
       ap.updateSlotMute(cid, s, muted);
       if (isPrimary) ap.updateSlotMute("default", s, muted);
+    }
+    if (!muted && typeof ap.setSlotDucking === "function") {
+      ap.setSlotDucking(cid, s, false, 1.0, 0.05);
+      if (isPrimary) ap.setSlotDucking("default", s, false, 1.0, 0.05);
     }
   }
 

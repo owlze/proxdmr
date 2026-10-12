@@ -27,13 +27,13 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.278';
+} from './modules/dmr/transcriber.js?v=2.9.281';
 import { blePtt } from './modules/ptt/ble.js';
-import { initApkUpdater } from './modules/core/updater.js';
+import { initApkUpdater } from './modules/core/updater.js?v=2.9.282';
 import { initAndroidBridge } from './modules/core/android.js';
 import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.261';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
-import { initLanguageManager } from './modules/settings/language.js';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.284';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
 import { initGeneralSettings } from './modules/settings/general.js?v=2.9.261';
 import { initSystemUpdater } from './modules/settings/system-updater.js';
@@ -59,7 +59,7 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.261';
+} from './modules/dmr/contacts.js?v=2.9.284';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
@@ -76,13 +76,13 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.267';
+} from './modules/dmr/hotspots.js?v=2.9.284';
 import {
   initBmTgStaticManager
-} from './modules/dmr/bm-static-manager.js?v=2.9.261';
+} from './modules/dmr/bm-static-manager.js?v=2.9.284';
 import {
   initAudioRouting
-} from './modules/audio/routing.js?v=2.9.269';
+} from './modules/audio/routing.js?v=2.9.280';
 import {
   initAudioDsp
 } from './modules/audio/dsp.js?v=2.9.262';
@@ -149,7 +149,7 @@ import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js';
+} from './modules/settings/sync.js?v=2.9.281';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -188,7 +188,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js';
+} from './modules/audio/volume-mute.js?v=2.9.284';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -206,7 +206,7 @@ import {
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js';
+} from './modules/dmr/bm-status.js?v=2.9.284';
 import {
   connectWebSocket,
   handleServerMessage,
@@ -215,7 +215,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.268';
+} from './modules/network/ws.js?v=2.9.282';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application

@@ -5,7 +5,7 @@
  */
 
 import { resolveHotspotId } from "../network/ping-sparklines.js";
-import { updateSlotLangBadge } from "../dmr/transcriber.js";
+import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.281";
 
 let clientSettingsSyncTimer = null;
 
@@ -96,6 +96,25 @@ export function getClientSettingsSnapshot() {
       presets: txPresets
     };
 
+function isTransientTranscribeOrTtsKey(k) {
+  if (!k) return false;
+  if (k === "proxdmr_tts_model" || k === "proxdmr_tts_model_opts") {
+    return false;
+  }
+  return (
+    k === "proxdmr_transcribe_ts1" ||
+    k === "proxdmr_transcribe_ts2" ||
+    k.startsWith("proxdmr_max_transcribe_") ||
+    k.startsWith("proxdmr_transcribe_automuted_") ||
+    /^proxdmr_transcribe_.*_ts[12]$/.test(k) ||
+    k === "proxdmr_tts_ts1" ||
+    k === "proxdmr_tts_ts2" ||
+    k === "proxdmr_tts_solo_muted_slots" ||
+    /^proxdmr_tts_.*_ts[12]$/.test(k) ||
+    k.startsWith("proxdmr_tts_")
+  );
+}
+
   const storageDump = {};
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -106,6 +125,7 @@ export function getClientSettingsSnapshot() {
           !k.startsWith("proxdmr_user_callsigns_") &&
           !k.startsWith("proxdmr_collapsed_") &&
           !k.startsWith("proxdmr_gw_disconnected_") &&
+          !isTransientTranscribeOrTtsKey(k) &&
           k !== "proxdmr_log_visible" &&
           k !== "proxdmr_log_hotspot") {
         storageDump[k] = localStorage.getItem(k);
@@ -150,13 +170,14 @@ export function scheduleSyncClientSettings() {
 export function applyServerClientSettings(cs) {
   if (!cs || typeof cs !== "object") return;
 
-  // 1. Restore from storage_dump if present (excluding transient UI state)
+  // 1. Restore from storage_dump if present (excluding transient UI state & live transcribe/TTS flags)
   if (cs.storage_dump && typeof cs.storage_dump === "object") {
     try {
       for (const [k, v] of Object.entries(cs.storage_dump)) {
         if (k && k.startsWith("proxdmr_") && v !== null && v !== undefined &&
             !k.startsWith("proxdmr_collapsed_") &&
             !k.startsWith("proxdmr_gw_disconnected_") &&
+            !isTransientTranscribeOrTtsKey(k) &&
             k !== "proxdmr_log_visible" &&
             k !== "proxdmr_log_hotspot") {
           localStorage.setItem(k, String(v));
@@ -347,17 +368,28 @@ export function applyServerClientSettings(cs) {
     window.updateAllVolumeAndMuteUI();
   }
 
-  // Update transcribe badges if rows exist
+  // Ensure VFO rows not actively in live transcribe mode stay in standard view with TXT/TTS off
   document.querySelectorAll(".vfo-row").forEach(row => {
     const card = row.closest(".radio-container");
     if (!card) return;
     const cid = resolveHotspotId(card.dataset.hotspotId);
     const slot = row.classList.contains("vfo-ts1-row") ? 1 : 2;
-    const isTranscribeActive = localStorage.getItem(`proxdmr_transcribe_${cid}_ts${slot}`) === "1" ||
-      (cid === "default" && localStorage.getItem(`proxdmr_transcribe_ts${slot}`) === "1");
-    row.classList.toggle("has-transcribe", isTranscribeActive);
-    if (typeof updateSlotLangBadge === "function") {
-      updateSlotLangBadge(row, slot, isTranscribeActive);
+    const isCardInTranscribeMode = card.classList.contains("has-transcribe-mode") && row.classList.contains("has-transcribe");
+    if (!isCardInTranscribeMode) {
+      try {
+        localStorage.setItem(`proxdmr_transcribe_${cid}_ts${slot}`, "0");
+        localStorage.setItem(`proxdmr_tts_${cid}_ts${slot}`, "0");
+      } catch (_) {}
+      row.classList.remove("has-transcribe", "is-maximized", "vfo-hidden-by-max");
+      if (typeof updateSlotLangBadge === "function") {
+        updateSlotLangBadge(row, slot, false);
+      }
+      if (typeof window !== "undefined" && typeof window.updateSlotTtsBadge === "function") {
+        window.updateSlotTtsBadge(row, slot, false);
+      }
+      if (typeof window !== "undefined" && typeof window.updateCardTranscribeLayout === "function") {
+        window.updateCardTranscribeLayout(card);
+      }
     }
   });
 }

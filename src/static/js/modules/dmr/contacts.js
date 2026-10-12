@@ -5,7 +5,7 @@
  * contact creation/editing modals, JSON import/export, and gateway settings.
  */
 
-import { escapeHtml } from '../core/formatters.js';
+import { escapeHtml, attachTgLivePreview } from '../core/formatters.js?v=2.9.284';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 import { resolveHotspotId } from '../core/state.js';
@@ -1412,6 +1412,50 @@ export function initContactsManager() {
         if (r.checked) updateContactFormFieldsVisibility(r.value);
       });
     });
+
+    // Live TG / DMR ID preview quote popup in Contact Edit Modal
+    if (contactEditTg) {
+      attachTgLivePreview(contactEditTg, {
+        anchorEl: document.getElementById("contactEditTgGroup") || contactEditTg.parentElement,
+        popupClass: "in-contact-edit-modal",
+        mode: "tg",
+        actionHint: (info) => (info && info.isKnown ? "Заполнить ⏎" : ""),
+        onAction: (info) => {
+          if (info && info.cleanDesc && contactEditName && !contactEditName.value.trim()) {
+            contactEditName.value = info.cleanDesc;
+          } else if (info && info.cleanDesc && contactEditName) {
+            contactEditName.value = info.cleanDesc;
+          }
+          if (info && info.country && contactEditCity && !contactEditCity.value.trim()) {
+            contactEditCity.value = info.country;
+          }
+        }
+      });
+    }
+
+    if (contactEditDmrId) {
+      attachTgLivePreview(contactEditDmrId, {
+        anchorEl: document.getElementById("contactEditDmrIdGroup") || contactEditDmrId.parentElement,
+        popupClass: "in-contact-edit-modal",
+        mode: "id",
+        actionHint: (info) => (info && info.isKnown ? "Заполнить ⏎" : ""),
+        onAction: (info) => {
+          if (info && info.user) {
+            if (contactEditCallsign && info.user.callsign) {
+              contactEditCallsign.value = info.user.callsign.trim().toUpperCase();
+            }
+            if (contactEditName && (info.user.name || info.user.callsign)) {
+              const nm = [info.user.name, info.user.callsign].filter(Boolean).join(" ").trim();
+              if (nm) contactEditName.value = nm;
+            }
+            if (contactEditCity && !contactEditCity.value.trim()) {
+              const loc = [info.user.city, info.user.country].filter(Boolean).join(", ");
+              if (loc) contactEditCity.value = loc;
+            }
+          }
+        }
+      });
+    }
 
     // Contacts Tree Delegation
     if (contactsTreeContainer) {
