@@ -112,7 +112,7 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
     if not force and _update_cache["data"] and (now - _update_cache["checked_at"] < _update_cache["ttl_sec"]):
         return _update_cache["data"]
 
-    url = f"{GITHUB_API_BASE}/releases/latest"
+    url = f"{GITHUB_API_BASE}/releases?per_page=5"
     req = urllib.request.Request(
         url,
         headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
@@ -121,34 +121,38 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
     release_data = None
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
-            release_data = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, list) and len(data) > 0:
+                release_data = data[0]
+            elif isinstance(data, dict) and "tag_name" in data:
+                release_data = data
     except urllib.error.HTTPError as e:
-        if e.code == 404:
-            logger.info("[UPDATER] No GitHub releases found (404), checking tags...")
-            try:
-                tags_url = f"{GITHUB_API_BASE}/tags"
-                req_t = urllib.request.Request(
-                    tags_url,
-                    headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
-                )
-                with urllib.request.urlopen(req_t, timeout=8) as resp_t:
-                    tags = json.loads(resp_t.read().decode("utf-8"))
-                    if tags and isinstance(tags, list):
-                        latest_tag = tags[0]
-                        release_data = {
-                            "tag_name": latest_tag["name"],
-                            "name": f"Release {latest_tag['name']}",
-                            "body": "Обновление ProxDMR",
-                            "published_at": "",
-                            "html_url": f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/{latest_tag['name']}",
-                            "tarball_url": latest_tag.get("tarball_url")
-                        }
-            except Exception as te:
-                logger.warning(f"[UPDATER] Tags check failed: {te}")
-        else:
-            logger.warning(f"[UPDATER] GitHub HTTP {e.code}: {e.reason}")
+        logger.warning(f"[UPDATER] GitHub HTTP {e.code}: {e.reason}")
     except Exception as e:
         logger.warning(f"[UPDATER] Failed to check GitHub updates: {e}")
+
+    # Fallback to tags if no releases found
+    if not release_data:
+        try:
+            tags_url = f"{GITHUB_API_BASE}/tags"
+            req_t = urllib.request.Request(
+                tags_url,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
+            )
+            with urllib.request.urlopen(req_t, timeout=8) as resp_t:
+                tags = json.loads(resp_t.read().decode("utf-8"))
+                if tags and isinstance(tags, list):
+                    latest_tag = tags[0]
+                    release_data = {
+                        "tag_name": latest_tag["name"],
+                        "name": f"Release {latest_tag['name']}",
+                        "body": "",
+                        "published_at": "",
+                        "html_url": f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/{latest_tag['name']}",
+                        "tarball_url": latest_tag.get("tarball_url")
+                    }
+        except Exception as te:
+            logger.warning(f"[UPDATER] Tags check failed: {te}")
 
     current_ver = APP_VERSION
     current_tuple = parse_version_tuple(current_ver)
@@ -194,14 +198,21 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
                 local_raw = local_notes_file.read_text(encoding="utf-8")
                 local_notes = parse_multilingual_notes(local_raw)
                 for l, txt in local_notes.items():
-                    if txt and not notes_by_lang.get(l):
-                        notes_by_lang[l] = txt
-                if not raw_body:
+                    if txt:
+                        if not notes_by_lang.get(l) or "<!-- lang:" not in raw_body:
+                            notes_by_lang[l] = txt
+                if not raw_body or "<!-- lang:" not in raw_body:
                     raw_body = local_raw
             except Exception as le:
                 logger.warning(f"[UPDATER] Could not read local release notes: {le}")
 
-    tarball = release_data.get("tarball_url") or f"https://github.com/{REPO_OWNER}/{REPO_NAME}/archive/refs/tags/{release_data.get('tag_name')}.tar.gz"
+    tarball = ""
+    for asset in release_data.get("assets", []):
+        if asset.get("name") == "ProxDMR-Release.tar.gz" and asset.get("browser_download_url"):
+            tarball = asset.get("browser_download_url")
+            break
+    if not tarball:
+        tarball = release_data.get("tarball_url") or f"https://github.com/{REPO_OWNER}/{REPO_NAME}/archive/refs/tags/{release_data.get('tag_name')}.tar.gz"
 
     res = {
         "status": "ok",
