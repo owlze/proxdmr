@@ -1,7 +1,7 @@
 import { safeEscapeHtml } from './modules/core/formatters.js';
 import { RecordingsManager } from './modules/audio/player.js';
 import './modules/ui/theme.js';
-import './modules/dmr/bm-monitor.js?v=2.9.267';
+import './modules/dmr/bm-monitor.js?v=2.9.309';
 import './modules/dmr/log-selection.js';
 import {
   handleCallTranscription,
@@ -27,21 +27,21 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.281';
+} from './modules/dmr/transcriber.js?v=2.9.309';
 import { blePtt } from './modules/ptt/ble.js';
-import { initApkUpdater } from './modules/core/updater.js?v=2.9.282';
+import { initApkUpdater } from './modules/core/updater.js?v=2.9.309';
 import { initAndroidBridge } from './modules/core/android.js';
-import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.261';
+import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.309';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
-import { initLanguageManager } from './modules/settings/language.js?v=2.9.284';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.309';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
-import { initGeneralSettings } from './modules/settings/general.js?v=2.9.261';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.309';
 import { initSystemUpdater } from './modules/settings/system-updater.js';
 import { initOrientationLock } from './modules/ui/orientation.js';
 import {
   initQuickAssign,
   renderQuickMemButtons
-} from './modules/dmr/quick-assign.js';
+} from './modules/dmr/quick-assign.js?v=2.9.309';
 import { initStationClocks, updateClocks } from './modules/ui/clocks.js';
 import {
   renderTranscriptionSummary
@@ -51,7 +51,7 @@ import {
   loadCallDbStats,
   loadTgDbStats,
   closeCallIdModal
-} from './modules/dmr/search.js?v=2.9.261';
+} from './modules/dmr/search.js?v=2.9.309';
 import {
   initContactsManager,
   openContactEditModal,
@@ -59,7 +59,7 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.284';
+} from './modules/dmr/contacts.js?v=2.9.309';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
@@ -76,24 +76,24 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.284';
+} from './modules/dmr/hotspots.js?v=2.9.309';
 import {
   initBmTgStaticManager
-} from './modules/dmr/bm-static-manager.js?v=2.9.284';
+} from './modules/dmr/bm-static-manager.js?v=2.9.309';
 import {
   initAudioRouting
-} from './modules/audio/routing.js?v=2.9.280';
+} from './modules/audio/routing.js?v=2.9.309';
 import {
   initAudioDsp
-} from './modules/audio/dsp.js?v=2.9.262';
+} from './modules/audio/dsp.js?v=2.9.309';
 import {
   initPttEngine,
   updatePttLockUI,
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
-} from './modules/ptt/engine.js?v=2.9.261';
+} from './modules/ptt/engine.js?v=2.9.309';
 import { initAboutModal } from './modules/ui/about.js';
-import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.261';
+import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.309';
 import {
   initFullscreen,
   toggleFullscreen,
@@ -125,7 +125,7 @@ import {
   selectHotspotTargetId,
   getStoredLastRx,
   saveStoredLastRx
-} from './modules/ui/vfo-display.js?v=2.9.271';
+} from './modules/ui/vfo-display.js?v=2.9.309';
 import {
   loadCardPingHistory,
   saveCardPingHistory,
@@ -144,12 +144,12 @@ import {
   updatePingElement,
   calculateCardPacketLoss,
   calculateClientPacketLoss
-} from './modules/network/ping-sparklines.js?v=2.9.257';
+} from './modules/network/ping-sparklines.js?v=2.9.309';
 import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js?v=2.9.281';
+} from './modules/settings/sync.js?v=2.9.309';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -188,7 +188,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.284';
+} from './modules/audio/volume-mute.js?v=2.9.309';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -206,7 +206,7 @@ import {
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js?v=2.9.284';
+} from './modules/dmr/bm-status.js?v=2.9.309';
 import {
   connectWebSocket,
   handleServerMessage,
@@ -215,7 +215,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.282';
+} from './modules/network/ws.js?v=2.9.309';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application

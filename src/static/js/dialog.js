@@ -371,16 +371,27 @@
   global.showAppAlert = showAppAlert;
   global.showAppPrompt = showAppPrompt;
 
-  // ── Universal Modal Save Confirmation Green Glow Pulse ───────────────────
-  function closeSettingsModal() {
+  // ── Universal Modal Save Confirmation Green Glow Pulse & Fade-Out ────────
+  function clearSettingsModalFade() {
     if (typeof document === 'undefined') return;
     const sModal = document.getElementById('settingsModal');
     if (sModal) {
+      sModal.classList.remove('modal-backdrop-fadeout');
       const content = sModal.querySelector('.modal-content');
       if (content) {
-        content.classList.remove('modal-save-pulse');
+        content.classList.remove('modal-save-pulse', 'modal-save-fadeout');
+        if (content._savePulseTimer) {
+          clearTimeout(content._savePulseTimer);
+          content._savePulseTimer = null;
+        }
       }
     }
+  }
+
+  function closeSettingsModal() {
+    if (typeof document === 'undefined') return;
+    clearSettingsModalFade();
+    const sModal = document.getElementById('settingsModal');
     const closeBtn = document.getElementById('closeSettingsBtn');
     if (closeBtn) {
       closeBtn.click();
@@ -399,8 +410,8 @@
   }
 
   global.closeSettingsModal = closeSettingsModal;
+  global.clearSettingsModalFade = clearSettingsModalFade;
 
-  // ── Universal Modal Save Confirmation Green Glow Pulse ───────────────────
   function triggerModalSavePulse(targetEl, options) {
     if (typeof document === 'undefined') return;
     options = options || {};
@@ -425,7 +436,35 @@
     }
     if (!modalContent) return;
 
-    modalContent.classList.remove('modal-save-pulse');
+    const shouldCloseSettings = Boolean(options.closeSettings || (inSettingsModal && options.isFooterSave));
+
+    if (shouldCloseSettings) {
+      const sModal = document.getElementById('settingsModal') || modalContent.closest('.modal');
+      if (!modalContent.classList.contains('modal-save-fadeout')) {
+        modalContent.classList.remove('modal-save-pulse', 'modal-save-fadeout');
+        if (sModal) sModal.classList.remove('modal-backdrop-fadeout');
+        void modalContent.offsetWidth; // Force reflow
+        modalContent.classList.add('modal-save-fadeout');
+        if (sModal) sModal.classList.add('modal-backdrop-fadeout');
+      }
+
+      if (modalContent._savePulseTimer) {
+        clearTimeout(modalContent._savePulseTimer);
+      }
+      modalContent._savePulseTimer = setTimeout(() => {
+        clearSettingsModalFade();
+      }, 1050);
+
+      if (!window._settingsModalAutoCloseTimer) {
+        window._settingsModalAutoCloseTimer = setTimeout(() => {
+          window._settingsModalAutoCloseTimer = null;
+          closeSettingsModal();
+        }, 950);
+      }
+      return;
+    }
+
+    modalContent.classList.remove('modal-save-pulse', 'modal-save-fadeout');
     void modalContent.offsetWidth; // Force reflow to restart animation from 0%
     modalContent.classList.add('modal-save-pulse');
 
@@ -436,18 +475,6 @@
       modalContent.classList.remove('modal-save-pulse');
       modalContent._savePulseTimer = null;
     }, 1050);
-
-    // Auto-close settings modal after the green contour indication completes
-    const shouldCloseSettings = Boolean(options.closeSettings || (inSettingsModal && options.isFooterSave));
-    if (shouldCloseSettings) {
-      if (window._settingsModalAutoCloseTimer) {
-        clearTimeout(window._settingsModalAutoCloseTimer);
-      }
-      window._settingsModalAutoCloseTimer = setTimeout(() => {
-        window._settingsModalAutoCloseTimer = null;
-        closeSettingsModal();
-      }, 950);
-    }
   }
 
   global.triggerModalSavePulse = triggerModalSavePulse;

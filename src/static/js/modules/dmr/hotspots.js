@@ -24,7 +24,7 @@ import {
   syncCardSlotTranscribeUI,
   syncAllTranscribeSlotsToServer,
   disableHotspotTranscribe
-} from './transcriber.js?v=2.9.281';
+} from './transcriber.js?v=2.9.290';
 import {
   startTransmission,
   stopTransmission,

@@ -797,28 +797,38 @@ export function selectHotspotTargetId(card, cid, slot, targetId, type, triggerEl
     setCardSlot(card, s, true);
   }
 
-  // 3. If caller ID, cache correspondent info in USER_CALLSIGNS
+  // 3. If caller ID, cache correspondent info in USER_CALLSIGNS (only if VFO row matches this caller ID)
   if (type === "CALLER") {
     const vfoRow = card ? card.querySelector(s === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row") : null;
     const callEl = vfoRow ? vfoRow.querySelector(".ts-caller-call") : null;
     const idEl = vfoRow ? vfoRow.querySelector(".ts-caller-id") : null;
     const countryEl = vfoRow ? vfoRow.querySelector(".ts-caller-country") : null;
 
+    const rowRadioId = parseInt(idEl?.dataset.radioId || callEl?.dataset.radioId || "0", 10);
     const callsign = (idEl?.dataset.callsign || callEl?.dataset.callsign || "").trim();
     const name = (idEl?.dataset.name || callEl?.dataset.name || "").trim();
     const country = (idEl?.dataset.country || countryEl?.textContent || "").trim();
     const city = (idEl?.dataset.city || countryEl?.dataset.city || "").trim();
 
     const users = getUserCallsigns();
-    users[tid] = {
-      callsign: callsign || (callEl ? callEl.textContent.trim() : `ID ${tid}`),
-      name: name,
-      country: country,
-      city: city
-    };
-    try {
-      localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(users));
-    } catch (e) {}
+    if (rowRadioId === tid && callsign) {
+      users[tid] = {
+        callsign: callsign,
+        name: name || (users[tid] && users[tid].name) || "",
+        country: country || (users[tid] && users[tid].country) || "",
+        city: city || (users[tid] && users[tid].city) || ""
+      };
+      try {
+        localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(users));
+      } catch (e) {}
+    } else if (!users[tid] || !users[tid].callsign) {
+      users[tid] = {
+        callsign: `ID ${tid}`,
+        name: "",
+        country: "",
+        city: ""
+      };
+    }
   }
 
   // 4. Update unified PTT target

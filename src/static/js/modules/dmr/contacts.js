@@ -972,7 +972,7 @@ export async function deleteContactNode(id) {
     }
   }
 
-  // Call Proposal Dialog
+  // Call Proposal Dialog -> Unified into Direct Call Modal
 export function openContactCallProposal(node) {
     ensureElements();
     if (!node) return;
@@ -980,83 +980,28 @@ export function openContactCallProposal(node) {
 
     const isTg = node.type === "tg";
     const isRepeater = node.type === "repeater";
+    const targetVal = isTg ? parseInt(node.tg || node.dmr_id, 10) : parseInt(node.dmr_id || node.tg, 10);
+    if (!targetVal || targetVal <= 0) return;
 
-    if (proposalTypeBadge) {
-      if (isTg) {
-        proposalTypeBadge.className = "proposal-badge badge-tg";
-        proposalTypeBadge.textContent = window.t ? window.t("contacts.type_tg", {}, "🎯 TalkGroup") : "🎯 TalkGroup";
-      } else if (isRepeater) {
-        proposalTypeBadge.className = "proposal-badge badge-repeater";
-        proposalTypeBadge.textContent = window.t ? window.t("contacts.type_repeater", {}, "📡 Репитер") : "📡 Репитер";
-      } else {
-        proposalTypeBadge.className = "proposal-badge badge-person";
-        proposalTypeBadge.textContent = window.t ? window.t("contacts.type_operator", {}, "👤 Корреспондент") : "👤 Корреспондент";
-      }
-    }
-
-    if (proposalAvatar) {
-      proposalAvatar.textContent = isTg ? "🎯" : (isRepeater ? "📡" : "👤");
-    }
-
-    if (proposalTargetTitle) {
-      proposalTargetTitle.textContent = isTg
-        ? `TG ${node.tg}`
-        : (node.callsign ? `${node.callsign} (${node.dmr_id})` : `ID ${node.dmr_id}`);
-    }
-
-    if (proposalHeroName) proposalHeroName.textContent = getLocalizedContactName(node) || (isTg ? `TG ${node.tg}` : (node.callsign || `ID ${node.dmr_id}`));
-    if (proposalHeroMeta) {
-      proposalHeroMeta.textContent = isTg
-        ? (window.t ? window.t("contacts.meta_tg", { city: node.city || 'BM Network' }, `Группа передачи • ${node.city || 'BM Network'}`) : `Группа передачи • ${node.city || 'BM Network'}`)
-        : (window.t ? window.t("contacts.meta_private", { id: node.dmr_id || node.tg, city: node.city || 'RadioID' }, `DMR ID: ${node.dmr_id || node.tg} • ${node.city || 'RadioID'}`) : `DMR ID: ${node.dmr_id || node.tg} • ${node.city || 'RadioID'}`);
-    }
-    if (proposalHeroDesc) proposalHeroDesc.textContent = node.comment || "";
-
-    // Set Routing Hotspot
-    if (proposalHotspotSelect) {
-      proposalHotspotSelect.innerHTML = "";
-      const allHs = Array.isArray(window.currentHotspots) && window.currentHotspots.length > 0
-        ? window.currentHotspots
-        : [{ id: "default", name: "Main 📻" }];
-
-      const eligibleHs = allHs.filter(hs => hs.auto_tg_bm !== false);
-      const list = eligibleHs.length > 0 ? eligibleHs : allHs;
-
-      let targetHid = contactsGateway.hotspot_id || window.activeHotspotId || "default";
-      if (!list.some(h => resolveHotspotId(h.id) === resolveHotspotId(targetHid))) {
-        targetHid = list[0].id;
-      }
-      selectedProposalHid = targetHid;
-      list.forEach(hs => {
-        const opt = document.createElement("option");
-        opt.value = hs.id;
-        opt.textContent = getHotspotDisplayName(hs.id);
-        if (String(hs.id) === String(selectedProposalHid) || resolveHotspotId(hs.id) === resolveHotspotId(selectedProposalHid)) {
-          opt.selected = true;
-        }
-        proposalHotspotSelect.appendChild(opt);
-      });
-    }
-
-    // Set Slot
-    selectedProposalSlot = (node.slot_override === 1 || node.slot_override === 2)
+    const targetSlot = (node.slot_override === 1 || node.slot_override === 2)
       ? node.slot_override
-      : (contactsGateway.slot === 1 ? 1 : 2);
-    setProposalSlotUI(selectedProposalSlot);
+      : (contactsGateway && (contactsGateway.slot === 1 || contactsGateway.slot === 2) ? contactsGateway.slot : undefined);
+    const targetHid = (contactsGateway && contactsGateway.hotspot_id) || window.activeHotspotId || "default";
 
-    if (proposalApplyText) {
-      proposalApplyText.textContent = isTg
-        ? (window.t ? window.t("contacts.btn_apply_tg", {}, "Установить TG") : "Установить TG")
-        : (isRepeater
-          ? (window.t ? window.t("contacts.btn_apply_repeater", {}, "Установить репитер") : "Установить репитер")
-          : (window.t ? window.t("contacts.btn_apply_private", {}, "Установить Private Call") : "Установить Private Call"));
-    }
-    if (proposalPttText) {
-      proposalPttText.textContent = isTg ? (window.t ? window.t("contacts.btn_call_tg", {}, "Вызов TG") : "Вызов TG") : (isRepeater ? (window.t ? window.t("contacts.btn_call_repeater", {}, "Вызов репитера") : "Вызов репитера") : (window.t ? window.t("contacts.btn_call_private", {}, "Вызов") : "Вызов"));
-    }
+    const displayName = getLocalizedContactName(node) || node.name || "";
+    const targetObj = {
+      type: (isTg || isRepeater) ? "TG" : "ID",
+      value: targetVal,
+      callsign: node.callsign || "",
+      name: [node.callsign, displayName].filter(Boolean).join(" ").trim() || displayName,
+      city: node.city || "",
+      hotspotId: targetHid,
+      slot: targetSlot
+    };
 
-    if (contactCallProposalModal) {
-      contactCallProposalModal.classList.add("active");
+    if (typeof window !== "undefined" && typeof window.openDirectCallModal === "function") {
+      window.openDirectCallModal(targetObj);
+      return;
     }
   }
 
@@ -1089,173 +1034,23 @@ export async function executeProposalApply(shouldStartPtt = false) {
     const hsName = getHotspotDisplayName(cid);
     const isTg = node.type === "tg";
     const isRepeater = node.type === "repeater";
+    const targetVal = isTg ? parseInt(node.tg || node.dmr_id, 10) : parseInt(node.dmr_id || node.tg, 10);
 
-    // 1. Close proposal and contacts modals immediately
     closeContactCallProposalModal();
     closeMyContactsModal();
 
-    showToast(window.t ? window.t("contacts.toast_call_prep", { name: hsName, slot }, `⏳ [${hsName}] Подготовка вызова TS${slot}...`) : `⏳ [${hsName}] Подготовка вызова TS${slot}...`, 2500);
-
-    // 2. Hotspot Isolation:
-    // Collapse / close and disconnect all other hotspots
-    const allCards = document.querySelectorAll(".radio-container");
-    for (const cardEl of allCards) {
-      const cardHid = resolveHotspotId(cardEl.dataset.hotspotId || "default");
-      if (cardHid !== cid && !isHotspotCollapsed(cardHid)) {
-        await collapseHotspot(cardHid);
-      }
-    }
-    if (Array.isArray(window.currentHotspots)) {
-      for (const hs of window.currentHotspots) {
-        const hsCid = resolveHotspotId(hs.id);
-        if (hsCid !== cid && !isHotspotCollapsed(hsCid)) {
-          await collapseHotspot(hsCid);
-        }
-      }
-    }
-
-    // 3. Expand target hotspot if closed / collapsed
-    if (isHotspotCollapsed(cid)) {
-      await expandHotspot(cid);
-    }
-
-    // 4. Set target hotspot as active and activate requested slot
-    switchActiveHotspot(cid);
-    const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) ||
-                       document.querySelector(`.hotspot-card[data-hotspot-id="${cid}"]`) ||
-                       radioContainer;
-    if (targetCard) {
-      setCardSlot(targetCard, slot, true);
-    }
-    setActiveSlot(slot, true);
-
-    // 5. BrandMeister (BM) Reset on target slot:
-    const targetProposalHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.find(h => resolveHotspotId(h.id) === cid)) || null;
-    if (targetProposalHs && targetProposalHs.auto_tg_bm === false) {
-      console.log(`[CALL_PROPOSAL] Hotspot ${targetProposalHs.name} has auto_tg_bm disabled; skipping BM auto-configuration`);
-      return;
-    }
-
-    // A. Drop dynamic groups
-    try {
-      await fetch("/api/bm/drop-dynamic", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hotspot_id: cid, slot: slot })
+    if (targetVal > 0 && typeof window !== "undefined" && typeof window.handleQuickAssignSelect === "function") {
+      const displayName = getLocalizedContactName(node) || node.name || "";
+      await window.handleQuickAssignSelect(cid, slot, targetVal, hsName, {
+        type: (isTg || isRepeater) ? "TG" : "ID",
+        value: targetVal,
+        callsign: node.callsign || "",
+        name: [node.callsign, displayName].filter(Boolean).join(" ").trim() || displayName,
+        city: node.city || "",
+        hotspotId: cid,
+        slot: slot
       });
-    } catch (err) {
-      console.warn(`[CALL_PROPOSAL] Error dropping dynamic groups on ${cid} TS${slot}:`, err);
     }
-
-    // B. Fetch existing static groups on BM
-    let existingTgs = [];
-    try {
-      const resp = await fetch(`/api/bm/static-groups?hotspot_id=${encodeURIComponent(cid)}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data && data.status === "ok") {
-          const list = slot === 1 ? (data.ts1 || []) : (data.ts2 || []);
-          existingTgs = list.map(item => item.talkgroup).filter(tg => tg > 0);
-        }
-      }
-    } catch (err) {
-      console.warn(`[CALL_PROPOSAL] Error fetching static groups for ${cid}:`, err);
-    }
-
-    // 6. Call Routing & PTT assignment based on contact type:
-    if (isTg || isRepeater) {
-      const targetId = parseInt(node.tg || node.dmr_id, 10);
-      if (targetId > 0) {
-        if (node.name) {
-          TG_NAMES[targetId] = node.name;
-          try {
-            localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(TG_NAMES));
-          } catch (_) {}
-        }
-
-        // Drop any other static TGs on this slot from BM
-        const toDelete = existingTgs.filter(tg => tg !== targetId);
-        if (toDelete.length > 0) {
-          try {
-            await fetch("/api/bm/static-groups", {
-              method: "DELETE",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                hotspot_id: cid,
-                slot: slot,
-                talkgroups: toDelete
-              })
-            });
-          } catch (err) {
-            console.warn(`[CALL_PROPOSAL] Error deleting static groups on ${cid}:`, err);
-          }
-        }
-
-        // Register targetId as static group in BM if not already present
-        if (!existingTgs.includes(targetId)) {
-          try {
-            await fetch("/api/bm/static-groups", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                hotspot_id: cid,
-                slot: slot,
-                talkgroups: [targetId]
-              })
-            });
-          } catch (err) {
-            console.warn(`[CALL_PROPOSAL] Error adding static group ${targetId}:`, err);
-          }
-        }
-
-        // Set PTT target
-        selectHotspotTargetId(targetCard, cid, slot, targetId, "TG", null);
-        const groupLabel = node.name || (isRepeater ? "Репитер" : "Группа");
-        showToast(window.t ? window.t("contacts.toast_tg_ready", { name: hsName, slot, tg: targetId, group: groupLabel }, `🎯 [${hsName}] TS${slot} -> TG ${targetId} (${groupLabel}) готова`) : `🎯 [${hsName}] TS${slot} -> TG ${targetId} (${groupLabel}) готова`, 3500);
-      }
-    } else {
-      // Personal / Private call:
-      // Clear ALL static groups on this slot
-      if (existingTgs.length > 0) {
-        try {
-          await fetch("/api/bm/static-groups", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              hotspot_id: cid,
-              slot: slot,
-              talkgroups: existingTgs
-            })
-          });
-        } catch (err) {
-          console.warn(`[CALL_PROPOSAL] Error clearing static groups for private call on ${cid}:`, err);
-        }
-      }
-
-      const rid = parseInt(node.dmr_id || node.tg, 10);
-      if (rid > 0) {
-        window.USER_CALLSIGNS[rid] = {
-          callsign: node.callsign || `ID ${rid}`,
-          name: node.name || "",
-          country: node.city || ""
-        };
-        try {
-          localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS));
-        } catch (_) {}
-
-        selectHotspotTargetId(targetCard, cid, slot, rid, "CALLER", null);
-        showToast(window.t ? window.t("contacts.toast_private_ready", { name: hsName, slot, call: node.callsign || rid, user_name: node.name || "" }, `👤 [${hsName}] TS${slot} -> Личный вызов ${node.callsign || rid} (${node.name || ""}) готов к передаче`) : `👤 [${hsName}] TS${slot} -> Личный вызов ${node.callsign || rid} (${node.name || ""}) готов к передаче`, 3500);
-      }
-    }
-
-    // 7. Refresh BM static groups modal/cache if active
-    if (typeof loadBmTgStaticGroups === "function") {
-      try {
-        loadBmTgStaticGroups(cid).catch(() => {});
-      } catch (_) {}
-    }
-
-    // Без автонажатия PTT: частота, таймслот, BM и PTT настроены, оператор нажимает PTT вручную!
   }
 
 export function exportContactsToJson() {

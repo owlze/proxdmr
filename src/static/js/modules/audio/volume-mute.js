@@ -820,6 +820,12 @@ export async function expandHotspot(hid) {
     if (nameBadge && hs && hs.status === "ONLINE") {
       nameBadge.classList.add("is-online");
     }
+    const wasMuted = localStorage.getItem(`proxdmr_pre_collapse_mute_${cid}`) === "1";
+    setHotspotAudioMute(cid, wasMuted);
+    updateHotspotVolumeAndMuteUI(cid);
+    if (typeof window !== "undefined" && typeof window.updateHotspotCardMuteUI === "function") {
+      window.updateHotspotCardMuteUI(cid, card);
+    }
     scheduleSyncClientSettings();
     return;
   }

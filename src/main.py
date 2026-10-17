@@ -247,11 +247,15 @@ transcriber_service.configure(
     tts_pause_ducking_level=getattr(app_settings, "tts_pause_ducking_level", 1.0),
     tts_mute_others=getattr(app_settings, "tts_mute_others", True),
     tts_announce_callsign=getattr(app_settings, "tts_announce_callsign", False),
+    tts_skip_short_callsign=getattr(app_settings, "tts_skip_short_callsign", True),
     tts_style=getattr(app_settings, "tts_style", "radio"),
     transcriber_engine=getattr(app_settings, "transcriber_engine", "gemini"),
     translation_engine=getattr(app_settings, "translation_engine", "gemini"),
     groq_api_key=getattr(app_settings, "groq_api_key", ""),
+    groq_api_keys=getattr(app_settings, "groq_api_keys", []),
     deepgram_api_key=getattr(app_settings, "deepgram_api_key", ""),
+    gemini_use_first_key_only=getattr(app_settings, "gemini_use_first_key_only", False),
+    groq_use_first_key_only=getattr(app_settings, "groq_use_first_key_only", False),
 )
 
 hotspot_manager = HotspotManager(
@@ -382,7 +386,7 @@ def _record_attempt(ip: str):
 # --- JWT Auth Middleware ---
 
 _AUTH_SKIP_PREFIXES = ("/static/", "/api/auth/", "/ws/")
-_AUTH_SKIP_EXACT = ("/", "/favicon.ico", "/apk", "/download/apk", "/api/apk/info", "/api/apk/version")
+_AUTH_SKIP_EXACT = ("/", "/favicon.ico", "/apk", "/download/apk", "/api/apk/info", "/api/apk/version", "/api/health")
 
 # Короткий TTL-кэш (blocked, role) на user_id: избавляет от 2 запросов к БД на каждый HTTP-запрос.
 _USER_STATE_TTL = 3.0
@@ -523,11 +527,15 @@ async def ensure_active_user(user_id: int, login: str = "", force_reload: bool =
             tts_pause_ducking_level=getattr(user_app_settings, "tts_pause_ducking_level", 1.0),
             tts_mute_others=getattr(user_app_settings, "tts_mute_others", True),
             tts_announce_callsign=getattr(user_app_settings, "tts_announce_callsign", False),
+            tts_skip_short_callsign=getattr(user_app_settings, "tts_skip_short_callsign", True),
             tts_style=getattr(user_app_settings, "tts_style", "radio"),
             transcriber_engine=getattr(user_app_settings, "transcriber_engine", "groq"),
             translation_engine=getattr(user_app_settings, "translation_engine", "groq"),
             groq_api_key=getattr(user_app_settings, "groq_api_key", ""),
+            groq_api_keys=getattr(user_app_settings, "groq_api_keys", []),
             deepgram_api_key=getattr(user_app_settings, "deepgram_api_key", ""),
+            gemini_use_first_key_only=getattr(user_app_settings, "gemini_use_first_key_only", False),
+            groq_use_first_key_only=getattr(user_app_settings, "groq_use_first_key_only", False),
         )
     return user_app_settings
 
@@ -1902,7 +1910,10 @@ class TranscriberSettingsUpdate(BaseModel):
     translation_engine: Optional[str] = None
     target_lang: Optional[str] = None
     groq_api_key: Optional[str] = None
+    groq_api_keys: Optional[List[str]] = None
     deepgram_api_key: Optional[str] = None
+    gemini_use_first_key_only: Optional[bool] = None
+    groq_use_first_key_only: Optional[bool] = None
     tts_enabled: Optional[bool] = None
     tts_engine: Optional[str] = None
     tts_model: Optional[str] = None
@@ -1912,7 +1923,12 @@ class TranscriberSettingsUpdate(BaseModel):
     tts_pause_ducking_level: Optional[float] = None
     tts_mute_others: Optional[bool] = None
     tts_announce_callsign: Optional[bool] = None
+    tts_skip_short_callsign: Optional[bool] = None
     tts_style: Optional[str] = None
+
+class TestKeysRequest(BaseModel):
+    engine: str = "gemini"
+    keys: List[str] = []
 
 class TtsTestRequest(BaseModel):
     text: Optional[str] = None
@@ -1953,6 +1969,9 @@ async def get_transcriber_settings(request: Request):
             "translation_engine": getattr(s, "translation_engine", "groq"),
             "target_lang": getattr(s, "transcriber_target_lang", "ru"),
             "groq_api_key": getattr(s, "groq_api_key", ""),
+            "groq_api_keys": getattr(s, "groq_api_keys", []) or [],
+            "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
+            "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
             "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
             "tts_enabled": getattr(s, "tts_enabled", False),
             "tts_engine": getattr(s, "tts_engine", "piper"),
@@ -1963,6 +1982,7 @@ async def get_transcriber_settings(request: Request):
             "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
             "tts_mute_others": getattr(s, "tts_mute_others", True),
             "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
+            "tts_skip_short_callsign": getattr(s, "tts_skip_short_callsign", True),
             "tts_style": getattr(s, "tts_style", "radio")
         }
     }
@@ -1984,7 +2004,12 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         clean_keys = [k.strip() for k in update.api_keys if k and k.strip()]
         if clean_keys != getattr(s, "transcriber_api_keys", []):
             s.transcriber_api_keys = clean_keys
+            if clean_keys:
+                s.transcriber_api_key = clean_keys[0]
             changed = True
+    if update.gemini_use_first_key_only is not None and update.gemini_use_first_key_only != getattr(s, "gemini_use_first_key_only", False):
+        s.gemini_use_first_key_only = update.gemini_use_first_key_only
+        changed = True
     if update.transcriber_engine is not None and update.transcriber_engine != getattr(s, "transcriber_engine", "gemini"):
         s.transcriber_engine = update.transcriber_engine
         changed = True
@@ -1993,6 +2018,16 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         changed = True
     if update.groq_api_key is not None and update.groq_api_key.strip() != getattr(s, "groq_api_key", ""):
         s.groq_api_key = update.groq_api_key.strip()
+        changed = True
+    if update.groq_api_keys is not None:
+        clean_groq = [k.strip() for k in update.groq_api_keys if k and k.strip()]
+        if clean_groq != getattr(s, "groq_api_keys", []):
+            s.groq_api_keys = clean_groq
+            if clean_groq:
+                s.groq_api_key = clean_groq[0]
+            changed = True
+    if update.groq_use_first_key_only is not None and update.groq_use_first_key_only != getattr(s, "groq_use_first_key_only", False):
+        s.groq_use_first_key_only = update.groq_use_first_key_only
         changed = True
     if update.deepgram_api_key is not None and update.deepgram_api_key.strip() != getattr(s, "deepgram_api_key", ""):
         s.deepgram_api_key = update.deepgram_api_key.strip()
@@ -2050,6 +2085,9 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
     if update.tts_announce_callsign is not None and update.tts_announce_callsign != getattr(s, "tts_announce_callsign", False):
         s.tts_announce_callsign = update.tts_announce_callsign
         changed = True
+    if update.tts_skip_short_callsign is not None and update.tts_skip_short_callsign != getattr(s, "tts_skip_short_callsign", True):
+        s.tts_skip_short_callsign = update.tts_skip_short_callsign
+        changed = True
     if update.tts_style is not None and update.tts_style != getattr(s, "tts_style", "radio"):
         s.tts_style = update.tts_style
         changed = True
@@ -2073,11 +2111,15 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             tts_pause_ducking_level=getattr(s, "tts_pause_ducking_level", 1.0),
             tts_mute_others=getattr(s, "tts_mute_others", True),
             tts_announce_callsign=getattr(s, "tts_announce_callsign", False),
+            tts_skip_short_callsign=getattr(s, "tts_skip_short_callsign", True),
             tts_style=getattr(s, "tts_style", "radio"),
             transcriber_engine=getattr(s, "transcriber_engine", "gemini"),
             translation_engine=getattr(s, "translation_engine", "gemini"),
             groq_api_key=getattr(s, "groq_api_key", ""),
-            deepgram_api_key=getattr(s, "deepgram_api_key", "")
+            groq_api_keys=getattr(s, "groq_api_keys", []),
+            deepgram_api_key=getattr(s, "deepgram_api_key", ""),
+            gemini_use_first_key_only=getattr(s, "gemini_use_first_key_only", False),
+            groq_use_first_key_only=getattr(s, "groq_use_first_key_only", False)
         )
         # Proactively ensure Piper voice is downloaded/preloaded if Piper TTS is active
         if effective_engine == "piper" and eff_l != "none":
@@ -2110,6 +2152,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
             "tts_mute_others": getattr(s, "tts_mute_others", True),
             "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
+            "tts_skip_short_callsign": getattr(s, "tts_skip_short_callsign", True),
             "tts_style": getattr(s, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
             "translation_engine": getattr(s, "translation_engine", "gemini"),
@@ -2128,6 +2171,9 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "translation_engine": getattr(s, "translation_engine", "gemini"),
             "target_lang": s.transcriber_target_lang,
             "groq_api_key": getattr(s, "groq_api_key", ""),
+            "groq_api_keys": getattr(s, "groq_api_keys", []) or [],
+            "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
+            "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
             "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
             "tts_enabled": getattr(s, "tts_enabled", False),
             "tts_engine": getattr(s, "tts_engine", "gemini"),
@@ -2138,9 +2184,69 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
             "tts_mute_others": getattr(s, "tts_mute_others", True),
             "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
+            "tts_skip_short_callsign": getattr(s, "tts_skip_short_callsign", True),
             "tts_style": getattr(s, "tts_style", "radio"),
         }
     }
+
+@app.post("/api/transcriber/test-keys")
+async def test_transcriber_keys(req: TestKeysRequest):
+    import urllib.request, urllib.error
+    engine = (req.engine or "gemini").lower().strip()
+    keys = [k.strip() for k in (req.keys or []) if k and k.strip()]
+    if not keys:
+        return {"status": "ok", "results": []}
+
+    async def _test_one(k: str) -> Dict[str, Any]:
+        if engine == "groq":
+            url = "https://api.groq.com/openai/v1/models"
+            try:
+                r = urllib.request.Request(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {k}",
+                        "User-Agent": "ProxDMR/1.0"
+                    }
+                )
+                def _do_groq():
+                    with urllib.request.urlopen(r, timeout=6) as resp:
+                        return resp.status
+                await asyncio.to_thread(_do_groq)
+                return {"key": k, "valid": True, "error": None}
+            except urllib.error.HTTPError as e:
+                err_text = f"HTTP {e.code}"
+                try:
+                    b = json.loads(e.read().decode("utf-8", errors="replace"))
+                    if "error" in b and "message" in b["error"]:
+                        err_text = b["error"]["message"]
+                except Exception:
+                    pass
+                return {"key": k, "valid": False, "error": err_text}
+            except Exception as e:
+                return {"key": k, "valid": False, "error": str(e)}
+        else:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={k}"
+            try:
+                r = urllib.request.Request(url, headers={"User-Agent": "ProxDMR/1.0"})
+                def _do_gemini():
+                    with urllib.request.urlopen(r, timeout=6) as resp:
+                        return resp.status
+                await asyncio.to_thread(_do_gemini)
+                return {"key": k, "valid": True, "error": None}
+            except urllib.error.HTTPError as e:
+                err_text = f"HTTP {e.code}"
+                try:
+                    b = json.loads(e.read().decode("utf-8", errors="replace"))
+                    if "error" in b and "message" in b["error"]:
+                        err_text = b["error"]["message"]
+                except Exception:
+                    pass
+                return {"key": k, "valid": False, "error": err_text}
+            except Exception as e:
+                return {"key": k, "valid": False, "error": str(e)}
+
+    results = await asyncio.gather(*[_test_one(k) for k in keys])
+    return {"status": "ok", "results": results}
 
 @app.post("/api/transcriber/tts-test")
 async def test_transcriber_tts(req: TtsTestRequest, request: Request):
@@ -2250,15 +2356,27 @@ async def api_piper_download_status(voice_id: Optional[str] = None):
 
 @app.get("/api/transcriber/silero/voices")
 async def api_silero_voices(lang: Optional[str] = None):
-    from silero_service import SileroService
+    from silero_service import SileroService, SILERO_VOICES_BY_LANG
     srv = SileroService.get_instance()
-    voices = srv.get_voices_for_lang(lang)
+    clean_lang = (lang or "ru").lower().strip()
+    if clean_lang == "ua":
+        clean_lang = "uk"
+    is_supp = srv.is_lang_supported(clean_lang)
+    voices = srv.get_voices_for_lang(clean_lang)
     return {
         "status": "ok",
         "available": srv.is_available(),
+        "supported": is_supp,
+        "supported_languages": list(SILERO_VOICES_BY_LANG.keys()),
         "voices": voices,
-        "lang": lang or "ru"
+        "lang": clean_lang
     }
+
+@app.get("/api/transcriber/translation/status")
+async def api_translation_status():
+    from translation_service import TranslationService
+    srv = TranslationService.get_instance()
+    return {"status": "ok", "models": srv.get_status()}
 
 @app.get("/api/transcriber/models")
 async def get_transcriber_models(api_key: Optional[str] = None):
@@ -4095,6 +4213,25 @@ async def get_bm_info(
 
 # --- General Status & Backward Compatibility API ---
 
+@app.get("/api/health")
+async def get_health():
+    total_online = 0
+    total_hs = 0
+    try:
+        for u in hotspot_manager.user_runtimes.values():
+            for rt in u.values():
+                total_hs += 1
+                if getattr(rt.status, 'value', str(rt.status)).lower() == 'online':
+                    total_online += 1
+    except Exception:
+        pass
+    return {
+        "status": "online",
+        "hotspots_online": total_online,
+        "hotspots_total": total_hs,
+        "clients_connected": len(connected_clients)
+    }
+
 @app.get("/api/status")
 async def get_status(request: Request = None):
     user = _get_user_from_request(request) if request else None
@@ -5729,7 +5866,7 @@ if __name__ == "__main__":
     ssl_key_path = None
 
     if use_ssl:
-        host_ip = (os.environ.get("HOST_IP") or os.environ.get("EXTERNAL_HOST") or "").strip()
+        host_ip = os.environ.get("HOST_IP", "")
         cert_file, key_file = ensure_ssl_certificates(host_ip)
         ssl_cert_path = cert_file
         ssl_key_path = key_file

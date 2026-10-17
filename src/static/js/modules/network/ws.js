@@ -20,6 +20,7 @@ import { getVuState, ensureVuMeterLoop, updateHotspotVuMeter } from '../audio/ds
 import { getHotspotMute, getHotspotTsAudioMode, syncAllSlotMutesToServer, updateCardRecUI, updateAllHotspotRecUI } from '../audio/routing.js';
 import {
   handleCallTranscription,
+  handlePipelineStage,
   handleTranscriptionError,
   handleTtsSpeech,
   handleTtsError,
@@ -27,9 +28,9 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.281';
+} from '../dmr/transcriber.js?v=2.9.305';
 import { renderTranscriptionSummary } from '../dmr/transcription.js';
-import { renderQuickMemButtons } from '../dmr/quick-assign.js';
+import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.306';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.282';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js';
 
@@ -1884,6 +1885,10 @@ export function handleServerMessage(msg) {
       loadHotspots();
     } else if (msg.type === "recording_transcribed") {
       updateCallLogTranscription(msg);
+    } else if (msg.type === "pipeline_stage") {
+      if (typeof handlePipelineStage === "function") {
+        handlePipelineStage(msg);
+      }
     } else if (msg.type === "call_transcription") {
       handleCallTranscription(msg);
     } else if (msg.type === "tts_speech") {
@@ -1931,6 +1936,13 @@ export function handleServerMessage(msg) {
           if (optAnnounce) optAnnounce.checked = Boolean(msg.tts_announce_callsign);
           const qAnnounce = document.getElementById("ttsQuickAnnounceCallsign");
           if (qAnnounce) qAnnounce.checked = Boolean(msg.tts_announce_callsign);
+        }
+        if (msg.tts_skip_short_callsign !== undefined) {
+          window.transcriberSettings.tts_skip_short_callsign = msg.tts_skip_short_callsign;
+          const optSkipShort = document.getElementById("optTtsSkipShortCallsign");
+          if (optSkipShort) optSkipShort.checked = Boolean(msg.tts_skip_short_callsign);
+          const qSkipShort = document.getElementById("ttsQuickSkipShortCallsign");
+          if (qSkipShort) qSkipShort.checked = Boolean(msg.tts_skip_short_callsign);
         }
       }
       const optNoTrans = document.getElementById("optTranscriberNoTranslate");

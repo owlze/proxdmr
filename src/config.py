@@ -77,7 +77,10 @@ class AppSettings(BaseModel):
     translation_engine: str = "groq"
     transcriber_target_lang: str = "ru"
     groq_api_key: str = ""
+    groq_api_keys: List[str] = Field(default_factory=list)
     deepgram_api_key: str = ""
+    gemini_use_first_key_only: bool = False
+    groq_use_first_key_only: bool = False
     tts_enabled: bool = False
     tts_engine: str = "piper"
     tts_model: str = "gemini-3.1-flash-tts-preview"
@@ -87,6 +90,7 @@ class AppSettings(BaseModel):
     tts_pause_ducking_level: float = 1.0
     tts_mute_others: bool = True
     tts_announce_callsign: bool = False
+    tts_skip_short_callsign: bool = True
     tts_style: str = "radio"
     quick_mem: Dict[str, Any] = Field(default_factory=dict)
     client_settings: Dict[str, Any] = Field(default_factory=dict)

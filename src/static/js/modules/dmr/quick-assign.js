@@ -64,9 +64,9 @@ function selectHotspotTargetId(card, hid, slot, targetId, targetType) {
   }
 }
 
-function collapseHotspot(hid) {
+function collapseHotspot(hid, options) {
   if (typeof window.collapseHotspot === "function") {
-    return window.collapseHotspot(hid);
+    return window.collapseHotspot(hid, options);
   }
 }
 
@@ -74,6 +74,57 @@ function expandHotspot(hid) {
   if (typeof window.expandHotspot === "function") {
     return window.expandHotspot(hid);
   }
+}
+
+function setHotspotAudioMute(hid, muted) {
+  if (typeof window.setHotspotAudioMute === "function") {
+    return window.setHotspotAudioMute(hid, muted);
+  }
+}
+
+function isHotspotAudioMuted(hid) {
+  if (typeof window.isHotspotAudioMuted === "function") {
+    return window.isHotspotAudioMuted(hid);
+  }
+  return false;
+}
+
+function isHotspotCollapsed(hid) {
+  if (typeof window.isHotspotCollapsed === "function") {
+    return window.isHotspotCollapsed(hid);
+  }
+  return false;
+}
+
+function isHotspotLiveCollapsed(hid) {
+  if (typeof window.isHotspotLiveCollapsed === "function") {
+    return window.isHotspotLiveCollapsed(hid);
+  }
+  return false;
+}
+
+function hasHotspotTranscribeActive(card, hid) {
+  const cid = resolveHotspotId(hid);
+  const c = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+  const ts1 = (typeof window.isSlotTranscribeActive === "function" && window.isSlotTranscribeActive(cid, 1)) ||
+    localStorage.getItem(`proxdmr_transcribe_${cid}_ts1`) === "1" ||
+    Boolean(c && c.querySelector(".vfo-ts1-row.has-transcribe"));
+  const ts2 = (typeof window.isSlotTranscribeActive === "function" && window.isSlotTranscribeActive(cid, 2)) ||
+    localStorage.getItem(`proxdmr_transcribe_${cid}_ts2`) === "1" ||
+    Boolean(c && c.querySelector(".vfo-ts2-row.has-transcribe"));
+  return Boolean(ts1 || ts2 || (c && c.classList.contains("has-transcribe-mode")));
+}
+
+function hasHotspotActiveSession(card, hid) {
+  const cid = resolveHotspotId(hid);
+  const c = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+  if (hasHotspotTranscribeActive(c, cid)) return true;
+  const isLive = isHotspotLiveCollapsed(cid) ||
+    Boolean(c && c.classList.contains("live-collapsed")) ||
+    localStorage.getItem(`proxdmr_live_collapsed_${cid}`) === "true";
+  const isLocked = Boolean(c && (c.classList.contains("locked") || c.classList.contains("pinned"))) ||
+    localStorage.getItem(`proxdmr_hs_locked_${cid}`) === "true";
+  return Boolean(isLive || isLocked);
 }
 
 function loadBmTgStaticGroups(hid) {
@@ -851,15 +902,16 @@ function openDirectCallModal(target) {
 
   const pillEl = document.getElementById("directCallPill");
   const nameEl = document.getElementById("directCallName");
+  const isId = target.type === "ID" || target.type === "person";
 
   if (pillEl) {
-    if (target.type === "ID") {
+    if (isId) {
       pillEl.innerHTML = `ID <span class="dmr-id-text">${target.value}</span>`;
     } else {
-      pillEl.textContent = `${target.type || 'TG'} ${target.value}`;
+      pillEl.textContent = `TG ${target.value}`;
     }
-    pillEl.classList.toggle("is-id", target.type === "ID");
-    pillEl.classList.toggle("is-tg", target.type !== "ID");
+    pillEl.classList.toggle("is-id", isId);
+    pillEl.classList.toggle("is-tg", !isId);
   }
   if (nameEl) {
     nameEl.textContent = target.name || target.callsign || "";
@@ -868,7 +920,17 @@ function openDirectCallModal(target) {
 
   const directCallHsSelect = document.getElementById("directCallHsSelect");
   const directCallSlotToggleGroup = document.getElementById("directCallSlotToggleGroup");
+  const directCallSoloCheckbox = document.getElementById("directCallSoloCheckbox");
   const btnApplyDirectCall = document.getElementById("btnApplyDirectCall");
+
+  if (directCallSoloCheckbox) {
+    directCallSoloCheckbox.checked = localStorage.getItem("proxdmr_direct_call_solo") === "true";
+    directCallSoloCheckbox.onchange = () => {
+      try {
+        localStorage.setItem("proxdmr_direct_call_solo", directCallSoloCheckbox.checked ? "true" : "false");
+      } catch (_) {}
+    };
+  }
 
   const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length > 0)
     ? window.currentHotspots
@@ -917,8 +979,12 @@ function openDirectCallModal(target) {
       const targetSlot = directCallSelectedSlot || 1;
       const hsObj = hsList.find(h => h.id === chosenHid || resolveHotspotId(h.id) === resolveHotspotId(chosenHid));
       const hsTitle = hsObj ? (hsObj.name || hsObj.id) : chosenHid;
+      const isSolo = directCallSoloCheckbox ? Boolean(directCallSoloCheckbox.checked) : (localStorage.getItem("proxdmr_direct_call_solo") === "true");
+      try {
+        localStorage.setItem("proxdmr_direct_call_solo", isSolo ? "true" : "false");
+      } catch (_) {}
       closeDirectCallModal();
-      handleQuickAssignSelect(chosenHid, targetSlot, target.value, hsTitle);
+      handleQuickAssignSelect(chosenHid, targetSlot, target.value, hsTitle, target, isSolo);
     };
   }
 
@@ -2760,11 +2826,18 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
             } catch (e) {}
           }
           const qInfo = currentBmInfoQuery && currentBmInfoQuery.tgOrIdInfo;
-          const targetHid = (qInfo && qInfo.hotspot_id) || window.activeHotspotId || "default";
+          const targetHid = (qInfo && (qInfo.hotspotId || qInfo.hotspot_id)) || window.activeHotspotId || "default";
           const targetSlot = (qInfo && qInfo.slot) || window.activeSlot || 1;
-          setHotspotTg(targetHid, targetSlot, rid, true);
           closeBmInfoModal();
-          if (typeof closeCallIdModal === "function") closeCallIdModal();
+          openDirectCallModal({
+            type: "ID",
+            value: rid,
+            callsign: regCall || `ID ${rid}`,
+            name: [regCall, opName].filter(Boolean).join(" "),
+            country: opLoc || "",
+            hotspotId: targetHid,
+            slot: targetSlot
+          });
         }
       };
     }
@@ -2775,11 +2848,16 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
         const tgNum = parseInt(targetId, 10);
         if (tgNum > 0) {
           const qInfo = currentBmInfoQuery && currentBmInfoQuery.tgOrIdInfo;
-          const targetHid = (qInfo && qInfo.hotspot_id) || window.activeHotspotId || "default";
+          const targetHid = (qInfo && (qInfo.hotspotId || qInfo.hotspot_id)) || window.activeHotspotId || "default";
           const targetSlot = (qInfo && qInfo.slot) || window.activeSlot || 1;
-          setHotspotTg(targetHid, targetSlot, tgNum, false);
           closeBmInfoModal();
-          if (typeof closeSearchTgIdModal === "function") closeSearchTgIdModal();
+          openDirectCallModal({
+            type: "TG",
+            value: tgNum,
+            name: (qInfo && qInfo.name) || ((window.TG_NAMES && window.TG_NAMES[tgNum]) ? window.TG_NAMES[tgNum] : `TG ${tgNum}`),
+            hotspotId: targetHid,
+            slot: targetSlot
+          });
         }
       };
     }
@@ -3207,28 +3285,93 @@ window.closeBmInfoModal = closeBmInfoModal;
 window.switchBmInfoTab = switchBmInfoTab;
 window.loadHamQthInfo = loadHamQthInfo;
 
-async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotName) {
-  closeQuickAssignModal();
+async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotName, explicitTarget = null, explicitSolo = null) {
+  // Capture target info and solo flag BEFORE closing modals (since closeQuickAssignModal clears currentTgIdActionTarget)
+  const targetInfo = explicitTarget || currentTgIdActionTarget || currentQuickAssignTarget || null;
+  const soloCheckbox = document.getElementById("directCallSoloCheckbox");
+  const isSolo = explicitSolo !== null
+    ? Boolean(explicitSolo)
+    : Boolean(soloCheckbox ? soloCheckbox.checked : (localStorage.getItem("proxdmr_direct_call_solo") === "true"));
 
+  const sourceHid = resolveHotspotId((targetInfo && targetInfo.hotspotId) || window.activeHotspotId || "default");
   const resolvedTargetHid = resolveHotspotId(targetHid);
+  const targetVal = parseInt(targetTg, 10);
 
-  // 1. Collapse all other hotspots (except pinned/locked ones), expand and activate chosen one
+  closeQuickAssignModal();
+  if (typeof window.closeMyContactsModal === "function") window.closeMyContactsModal();
+  if (typeof window.closeContactCallProposalModal === "function") window.closeContactCallProposalModal();
+  if (typeof closeSearchTgIdModal === "function") closeSearchTgIdModal();
+  if (typeof closeCallIdModal === "function") closeCallIdModal();
+  if (typeof closeBmInfoModal === "function") closeBmInfoModal();
+
+  // 1. Manage other hotspots according to Solo mode or Active Session scheme
   const allCards = document.querySelectorAll(".radio-container");
-  if (allCards.length > 1) {
-    for (const card of allCards) {
-      const cardHid = resolveHotspotId(card.dataset.hotspotId || "default");
-      const isLocked = card.classList.contains("locked") || card.classList.contains("pinned") || localStorage.getItem(`proxdmr_hs_locked_${cardHid}`) === "true";
-      if (cardHid === resolvedTargetHid) {
-        await expandHotspot(cardHid);
-      } else if (!isLocked) {
-        await collapseHotspot(cardHid);
+  const processedHids = new Set();
+
+  for (const card of allCards) {
+    const cardHid = resolveHotspotId(card.dataset.hotspotId || "default");
+    processedHids.add(cardHid);
+    if (cardHid === resolvedTargetHid) continue;
+
+    if (isSolo) {
+      // Solo ON: completely disconnect and mute all other hotspots
+      await collapseHotspot(cardHid, { isLive: false });
+      setHotspotAudioMute(cardHid, true);
+      if (window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.stopSlot === "function") {
+        window.ttsAudioQueueManager.stopSlot(cardHid, 1);
+        window.ttsAudioQueueManager.stopSlot(cardHid, 2);
+      }
+    } else {
+      // Solo OFF:
+      // - Source hotspot (if different from target and has no active transcription) closes
+      // - Other hotspots with active sessions (transcription / log recording / live-collapsed / locked) collapse into live background mode with audio Muted
+      // - Idle hotspots close completely
+      const hasActive = hasHotspotActiveSession(card, cardHid);
+      const isSourceWithoutTranscribe = (cardHid === sourceHid) && !hasHotspotTranscribeActive(card, cardHid);
+
+      if (hasActive && !isSourceWithoutTranscribe) {
+        if (!isHotspotLiveCollapsed(cardHid)) {
+          localStorage.setItem(`proxdmr_pre_collapse_mute_${cardHid}`, isHotspotAudioMuted(cardHid) ? "1" : "0");
+        }
+        if (!isHotspotCollapsed(cardHid) || !isHotspotLiveCollapsed(cardHid)) {
+          await collapseHotspot(cardHid, { isLive: true });
+        }
+        setHotspotAudioMute(cardHid, true);
+        if (window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.stopSlot === "function") {
+          window.ttsAudioQueueManager.stopSlot(cardHid, 1);
+          window.ttsAudioQueueManager.stopSlot(cardHid, 2);
+        }
+      } else {
+        if (!isHotspotCollapsed(cardHid) || isHotspotLiveCollapsed(cardHid)) {
+          await collapseHotspot(cardHid, { isLive: false });
+        }
+        setHotspotAudioMute(cardHid, true);
       }
     }
-  } else {
-    await expandHotspot(resolvedTargetHid);
   }
 
-  // 2. Switch active hotspot
+  // Also check window.currentHotspots in case any hotspot doesn't have a rendered card element
+  if (Array.isArray(window.currentHotspots)) {
+    for (const hs of window.currentHotspots) {
+      const hsCid = resolveHotspotId(hs.id);
+      if (hsCid === resolvedTargetHid || processedHids.has(hsCid)) continue;
+      if (isSolo || !hasHotspotActiveSession(null, hsCid)) {
+        if (!isHotspotCollapsed(hsCid) || isHotspotLiveCollapsed(hsCid)) {
+          await collapseHotspot(hsCid, { isLive: false });
+        }
+        setHotspotAudioMute(hsCid, true);
+      } else {
+        if (!isHotspotCollapsed(hsCid) || !isHotspotLiveCollapsed(hsCid)) {
+          await collapseHotspot(hsCid, { isLive: true });
+        }
+        setHotspotAudioMute(hsCid, true);
+      }
+    }
+  }
+
+  // 2. Expand target hotspot, unmute its audio, and set it active
+  await expandHotspot(resolvedTargetHid);
+  setHotspotAudioMute(resolvedTargetHid, false);
   switchActiveHotspot(resolvedTargetHid);
 
   // 3. Local transceiver slot and TG/ID setup
@@ -3238,20 +3381,44 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
   }
   setActiveSlot(targetSlot, true);
 
-  const isIdTarget = Boolean(currentTgIdActionTarget && currentTgIdActionTarget.type === "ID");
+  const isIdTarget = Boolean(
+    (targetInfo && (targetInfo.type === "ID" || targetInfo.type === "person")) ||
+    (!targetInfo && targetVal >= 1000000)
+  );
+
   if (isIdTarget) {
-    selectHotspotTargetId(targetCard, resolvedTargetHid, targetSlot, targetTg, "CALLER");
-    showToast(window.t ? window.t("quick_assign.call_activated", { name: hotspotName, slot: targetSlot, id: targetTg }, `✅ [${hotspotName}] TS${targetSlot}: Вызов ID ${targetTg} активирован`) : `✅ [${hotspotName}] TS${targetSlot}: Вызов ID ${targetTg} активирован`, 3500);
-    return;
+    if (targetInfo && (targetInfo.callsign || targetInfo.name)) {
+      if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
+      window.USER_CALLSIGNS[targetVal] = {
+        callsign: targetInfo.callsign || `ID ${targetVal}`,
+        name: targetInfo.name || "",
+        country: targetInfo.country || targetInfo.city || ""
+      };
+      try {
+        localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS));
+      } catch (_) {}
+    }
+    selectHotspotTargetId(targetCard, resolvedTargetHid, targetSlot, targetVal, "CALLER");
+  } else {
+    if (targetInfo && targetInfo.name) {
+      if (!window.TG_NAMES) window.TG_NAMES = {};
+      window.TG_NAMES[targetVal] = targetInfo.name;
+      try {
+        localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES));
+      } catch (_) {}
+    }
+    setHotspotTg(resolvedTargetHid, targetSlot, targetVal, true);
+    setTg(targetVal, true);
+    selectHotspotTargetId(targetCard, resolvedTargetHid, targetSlot, targetVal, "TG");
   }
 
-  setHotspotTg(resolvedTargetHid, targetSlot, targetTg, true);
-  setTg(targetTg, true);
-
-  // 4. Background BrandMeister update
+  // 4. Background BrandMeister update (for BOTH TG and Private ID: always clear dynamic & static on target slot; only add static TG if not Private ID)
   const targetHsObj = (Array.isArray(window.currentHotspots) && window.currentHotspots.find(h => resolveHotspotId(h.id) === resolvedTargetHid)) || null;
   if (targetHsObj && targetHsObj.auto_tg_bm === false) {
     console.log(`[QUICK_ASSIGN] Hotspot ${targetHsObj.name} has auto_tg_bm disabled; skipping BM auto-configuration`);
+    if (isIdTarget) {
+      showToast(window.t ? window.t("quick_assign.call_activated", { name: hotspotName, slot: targetSlot, id: targetVal }, `✅ [${hotspotName}] TS${targetSlot}: Вызов ID ${targetVal} активирован`) : `✅ [${hotspotName}] TS${targetSlot}: Вызов ID ${targetVal} активирован`, 3500);
+    }
     return;
   }
 
@@ -3283,44 +3450,72 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
         console.warn("[QUICK_ASSIGN] Fetch static groups warning:", err);
       }
 
-      // C. Remove all static groups on this slot except targetTg
-      const toDelete = existingTgs.filter(tg => tg !== targetTg);
-      if (toDelete.length > 0) {
-        try {
-          await fetch("/api/bm/static-groups", {
-            method: "DELETE",
+      if (isIdTarget) {
+        // C1. Private Call (DMR ID): remove ALL static groups on targetSlot so nothing interferes with the private call
+        if (existingTgs.length > 0) {
+          try {
+            await fetch("/api/bm/static-groups", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                hotspot_id: resolvedTargetHid,
+                slot: targetSlot,
+                talkgroups: existingTgs
+              })
+            });
+          } catch (err) {
+            console.warn("[QUICK_ASSIGN] Delete static groups for private call warning:", err);
+          }
+        }
+        const callLabel = (targetInfo && (targetInfo.callsign || targetInfo.name))
+          ? `${targetInfo.callsign || targetVal}${targetInfo.name && targetInfo.name !== targetInfo.callsign ? ' (' + targetInfo.name + ')' : ''}`
+          : `ID ${targetVal}`;
+        showToast(
+          window.t
+            ? window.t("quick_assign.private_bm_ready_toast", { name: hotspotName, slot: targetSlot, target: callLabel }, `✅ [${hotspotName}] TS${targetSlot} очищен в BM • Вызов ${callLabel} в PTT`)
+            : `✅ [${hotspotName}] TS${targetSlot} очищен в BM • Вызов ${callLabel} в PTT`,
+          4500
+        );
+      } else {
+        // C2. TalkGroup Call: remove all static groups on this slot except targetVal
+        const toDelete = existingTgs.filter(tg => tg !== targetVal);
+        if (toDelete.length > 0) {
+          try {
+            await fetch("/api/bm/static-groups", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                hotspot_id: resolvedTargetHid,
+                slot: targetSlot,
+                talkgroups: toDelete
+              })
+            });
+          } catch (err) {
+            console.warn("[QUICK_ASSIGN] Delete static groups warning:", err);
+          }
+        }
+
+        // D. Add targetVal as static group if not already present
+        if (!existingTgs.includes(targetVal)) {
+          const addResp = await fetch("/api/bm/static-groups", {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               hotspot_id: resolvedTargetHid,
               slot: targetSlot,
-              talkgroups: toDelete
+              talkgroups: [targetTg]
             })
           });
-        } catch (err) {
-          console.warn("[QUICK_ASSIGN] Delete static groups warning:", err);
-        }
-      }
-
-      // D. Add targetTg as static group if not already present
-      if (!existingTgs.includes(targetTg)) {
-        const addResp = await fetch("/api/bm/static-groups", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            hotspot_id: resolvedTargetHid,
-            slot: targetSlot,
-            talkgroups: [targetTg]
-          })
-        });
-        const addData = await addResp.json();
-        if (addData && addData.status === "ok") {
-          showToast(window.t ? window.t("quick_assign.bm_set_toast", { name: hotspotName, slot: targetSlot, tg: targetTg }, `✅ [${hotspotName}] TS${targetSlot}: TG ${targetTg} установлен в BM`) : `✅ [${hotspotName}] TS${targetSlot}: TG ${targetTg} установлен в BM`, 4500);
+          const addData = await addResp.json();
+          if (addData && addData.status === "ok") {
+            showToast(window.t ? window.t("quick_assign.bm_set_toast", { name: hotspotName, slot: targetSlot, tg: targetVal }, `✅ [${hotspotName}] TS${targetSlot}: TG ${targetVal} установлен в BM`) : `✅ [${hotspotName}] TS${targetSlot}: TG ${targetVal} установлен в BM`, 4500);
+          } else {
+            const errDetail = addData?.detail || addData?.errors?.join("; ") || "Ошибка добавления в BM";
+            showToast(`⚠️ [${hotspotName}] TS${targetSlot}: ${errDetail}`, 5000);
+          }
         } else {
-          const errDetail = addData?.detail || addData?.errors?.join("; ") || "Ошибка добавления в BM";
-          showToast(`⚠️ [${hotspotName}] TS${targetSlot}: ${errDetail}`, 5000);
+          showToast(window.t ? window.t("quick_assign.bm_active_cleared", { name: hotspotName, slot: targetSlot, tg: targetVal }, `✅ [${hotspotName}] TS${targetSlot}: TG ${targetVal} активен в BM (динамика очищена)`) : `✅ [${hotspotName}] TS${targetSlot}: TG ${targetVal} активен в BM (динамика очищена)`, 4500);
         }
-      } else {
-        showToast(window.t ? window.t("quick_assign.bm_active_cleared", { name: hotspotName, slot: targetSlot, tg: targetTg }, `✅ [${hotspotName}] TS${targetSlot}: TG ${targetTg} активен в BM (динамика очищена)`) : `✅ [${hotspotName}] TS${targetSlot}: TG ${targetTg} активен в BM (динамика очищена)`, 4500);
       }
 
       // E. Reload BM static modal if open

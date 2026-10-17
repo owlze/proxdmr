@@ -54,13 +54,45 @@ try {
   window.transcriberKeysCache.deepgram = localStorage.getItem("proxdmr_key_deepgram") || "";
 } catch (_) {}
 
+export function getEngineKeys(engine) {
+  const eng = (engine || "").toLowerCase().trim();
+  const s = window.transcriberSettings || {};
+  if (eng === "groq") {
+    if (Array.isArray(s.groq_api_keys) && s.groq_api_keys.length > 0) {
+      return [...s.groq_api_keys];
+    }
+    const single = (s.groq_api_key || getCachedTranscriberKey("groq") || "").trim();
+    return single ? [single] : [];
+  } else if (eng === "gemini") {
+    if (Array.isArray(s.api_keys) && s.api_keys.length > 0) {
+      return [...s.api_keys];
+    }
+    const single = (s.api_key || getCachedTranscriberKey("gemini") || "").trim();
+    return single ? [single] : [];
+  }
+  const single = getCachedTranscriberKey(eng);
+  return single ? [single] : [];
+}
+
 export function getCachedTranscriberKey(engine) {
   if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
   let k = window.transcriberKeysCache[engine];
   if (!k && window.transcriberSettings) {
-    if (engine === "gemini") k = window.transcriberSettings.api_key;
-    else if (engine === "groq") k = window.transcriberSettings.groq_api_key;
-    else if (engine === "deepgram") k = window.transcriberSettings.deepgram_api_key;
+    if (engine === "gemini") {
+      if (Array.isArray(window.transcriberSettings.api_keys) && window.transcriberSettings.api_keys.length > 0) {
+        k = window.transcriberSettings.api_keys[0];
+      } else {
+        k = window.transcriberSettings.api_key;
+      }
+    } else if (engine === "groq") {
+      if (Array.isArray(window.transcriberSettings.groq_api_keys) && window.transcriberSettings.groq_api_keys.length > 0) {
+        k = window.transcriberSettings.groq_api_keys[0];
+      } else {
+        k = window.transcriberSettings.groq_api_key;
+      }
+    } else if (engine === "deepgram") {
+      k = window.transcriberSettings.deepgram_api_key;
+    }
   }
   if (!k) {
     try {
@@ -78,9 +110,23 @@ export function setTranscriberKey(engine, key) {
     localStorage.setItem(`proxdmr_key_${engine}`, clean);
   } catch (_) {}
   if (window.transcriberSettings) {
-    if (engine === "gemini") window.transcriberSettings.api_key = clean;
-    else if (engine === "groq") window.transcriberSettings.groq_api_key = clean;
-    else if (engine === "deepgram") window.transcriberSettings.deepgram_api_key = clean;
+    if (engine === "gemini") {
+      window.transcriberSettings.api_key = clean;
+      if (!Array.isArray(window.transcriberSettings.api_keys) || window.transcriberSettings.api_keys.length === 0) {
+        window.transcriberSettings.api_keys = clean ? [clean] : [];
+      } else if (clean) {
+        window.transcriberSettings.api_keys[0] = clean;
+      }
+    } else if (engine === "groq") {
+      window.transcriberSettings.groq_api_key = clean;
+      if (!Array.isArray(window.transcriberSettings.groq_api_keys) || window.transcriberSettings.groq_api_keys.length === 0) {
+        window.transcriberSettings.groq_api_keys = clean ? [clean] : [];
+      } else if (clean) {
+        window.transcriberSettings.groq_api_keys[0] = clean;
+      }
+    } else if (engine === "deepgram") {
+      window.transcriberSettings.deepgram_api_key = clean;
+    }
   }
 }
 
@@ -103,7 +149,8 @@ window.transcriberSettings = {
   tts_speed: 1.1,
   tts_ducking_level: 0.80,
   tts_mute_others: true,
-  tts_announce_callsign: false
+  tts_announce_callsign: false,
+  tts_skip_short_callsign: true
 };
 
 try {
@@ -472,7 +519,7 @@ function formatGeminiError(rawError, context = "tts") {
     if (lang === "de") return "Spracherkennungsfehler";
     if (lang === "fr") return "Erreur de reconnaissance vocale";
     if (lang === "it") return "Errore di riconoscimento vocale";
-    return "Сбой распознавания речи";
+    return "Сбой транскрибации речи";
   } else {
     if (lang === "en") return "Speech synthesis error";
     if (lang === "uk") return "Збій синтезу мовлення";
@@ -659,6 +706,177 @@ function isSlotTtsActive(hid, slot) {
   }
 }
 
+
+// ── AI Pipeline Stage Status Helpers ──────────────────────────────────────────
+function ensurePipelineStage(row) {
+  if (!row) return null;
+  let stageBox = row.querySelector(".vfo-pipeline-stage");
+  if (!stageBox) {
+    stageBox = document.createElement("div");
+    stageBox.className = "vfo-pipeline-stage";
+    stageBox.innerHTML = `
+      <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)">
+        <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+          <line x1="9" y1="5" x2="15" y2="5"/>
+          <line x1="9" y1="8" x2="15" y2="8"/>
+          <path d="M5 10a7 7 0 0 0 14 0"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+        </svg>
+      </div>
+      <div class="vfo-pipeline-icon icon-trans" title="Перевод текста">
+        <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="17 1 21 5 17 9"/>
+          <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+          <polyline points="7 23 3 19 7 15"/>
+          <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+      </div>
+      <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)">
+        <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+      </div>
+    `;
+    row.appendChild(stageBox);
+  }
+  return stageBox;
+}
+
+function updateSlotPipelineVisibility(row, slot) {
+  if (!row) return;
+  const stageBox = ensurePipelineStage(row);
+  if (!stageBox) return;
+
+  const isTrans = row.classList.contains("has-transcribe") ||
+                  Boolean(row.querySelector(".vfo-lang-badge.transcribe-on"));
+  const ttsBadge = row.querySelector(".vfo-tts-badge");
+  const isTts = Boolean(ttsBadge && ttsBadge.classList.contains("tts-on"));
+
+  row.classList.toggle("has-tts", isTts);
+
+  if (isTrans) {
+    stageBox.style.setProperty("display", "flex", "important");
+  } else {
+    stageBox.style.setProperty("display", "none", "important");
+  }
+
+  const iconMic = stageBox.querySelector(".icon-mic");
+  const iconTrans = stageBox.querySelector(".icon-trans");
+  const iconTts = stageBox.querySelector(".icon-tts");
+
+  if (iconMic) iconMic.style.display = isTrans ? "inline-flex" : "none";
+  if (iconTrans) iconTrans.style.display = isTrans ? "inline-flex" : "none";
+  if (iconTts) iconTts.style.display = (isTrans && isTts) ? "inline-flex" : "none";
+}
+
+function isStageLocalEngine(stage, engineOverride = null) {
+  const s = window.transcriberSettings || {};
+  let eng = engineOverride;
+  if (!eng) {
+    if (stage === "asr") eng = s.transcriber_engine || "groq";
+    else if (stage === "translate") eng = s.translation_engine || "groq";
+    else if (stage === "tts") eng = s.tts_engine || "piper";
+  }
+  eng = (eng || "").toLowerCase().trim();
+  const LOCAL_ENGINES = ["whisper", "whisper_local", "vosk", "sherpa", "qwen", "marian", "piper", "silero", "browser", "system", "local"];
+  return LOCAL_ENGINES.includes(eng);
+}
+
+function setPipelineStageState(hid, slot, stage, status, extraData = {}) {
+  const targetHid = resolveHotspotId(hid);
+  const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`) ||
+                     document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+  if (!targetCard) return;
+
+  const vfoRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+  if (!vfoRow) return;
+
+  const stageBox = ensurePipelineStage(vfoRow);
+  if (!stageBox) return;
+
+  updateSlotPipelineVisibility(vfoRow, slot);
+
+  if (stage === "all") {
+    stageBox.querySelectorAll(".vfo-pipeline-icon").forEach(icon => {
+      if (icon._resetTimer) {
+        clearTimeout(icon._resetTimer);
+        icon._resetTimer = null;
+      }
+      if (status === "error") {
+        icon.classList.remove("is-request", "is-result", "is-active");
+        icon.classList.add("is-error");
+        icon._resetTimer = setTimeout(() => {
+          icon.classList.remove("is-error");
+          icon._resetTimer = null;
+        }, 5000);
+      } else {
+        icon.classList.remove("is-request", "is-result", "is-active", "is-error");
+      }
+    });
+    return;
+  }
+
+  let selector = "";
+  if (stage === "asr") selector = ".icon-mic";
+  else if (stage === "translate") selector = ".icon-trans";
+  else if (stage === "tts") selector = ".icon-tts";
+  if (!selector) return;
+
+  const icon = stageBox.querySelector(selector);
+  if (!icon) return;
+
+  if (icon._resetTimer) {
+    clearTimeout(icon._resetTimer);
+    icon._resetTimer = null;
+  }
+
+  icon.classList.remove("is-request", "is-result", "is-active");
+
+  // Determine local vs network engine
+  const isLocal = isStageLocalEngine(stage, extraData && extraData.engine);
+  if (isLocal) {
+    icon.classList.add("is-local");
+    icon.classList.remove("is-network");
+  } else {
+    icon.classList.add("is-network");
+    icon.classList.remove("is-local");
+  }
+
+  if (status === "error") {
+    icon.classList.add("is-error");
+    icon._resetTimer = setTimeout(() => {
+      icon.classList.remove("is-error");
+      icon._resetTimer = null;
+    }, 5000);
+  } else {
+    // Non-error status clears error
+    icon.classList.remove("is-error");
+
+    if (status === "request") {
+      icon.classList.add("is-request");
+    } else if (status === "active") {
+      icon.classList.add("is-active");
+    } else if (status === "result") {
+      icon.classList.add("is-result");
+      icon._resetTimer = setTimeout(() => {
+        icon.classList.remove("is-result");
+        icon._resetTimer = null;
+      }, 800);
+    }
+  }
+}
+
+function handlePipelineStage(msg) {
+  if (!msg) return;
+  const hid = resolveHotspotId(msg.hotspot_id);
+  const slot = msg.slot || 1;
+  setPipelineStageState(hid, slot, msg.stage, msg.status, msg);
+}
+
 function updateSlotTtsBadge(row, slot, isActive, customLangCode = null) {
   if (!row) return;
   const ttsBadge = row.querySelector(".vfo-tts-badge");
@@ -694,6 +912,8 @@ function updateSlotTtsBadge(row, slot, isActive, customLangCode = null) {
   ttsBadge.title = isActive
     ? (window.t ? window.t("transcriber.tts_badge_active_hint", { slot, lang: langTitleStr }, `Озвучка речи TS${slot} [${langTitleStr}] включена (клик — выключить, удержание — настройки)`) : `Озвучка речи TS${slot} [${langTitleStr}] включена (клик — выключить, удержание — настройки)`)
     : (window.t ? window.t("transcriber.tts_badge_inactive_hint", { slot, lang: langTitleStr }, `Озвучка речи TS${slot} [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`) : `Озвучка речи TS${slot} [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`);
+
+  updateSlotPipelineVisibility(row, slot);
 }
 
 function refreshAllSlotTtsBadges(customLangCode = null) {
@@ -1053,23 +1273,51 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
 
   if (eng === "silero") {
     selectEl.innerHTML = "";
+    const cleanLang = (lang || "ru").toLowerCase().trim();
+    const isSupported = SILERO_SUPPORTED_LANGUAGES.includes(cleanLang);
+
+    if (!isSupported) {
+      selectEl.disabled = true;
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.disabled = true;
+      opt.selected = true;
+      opt.textContent = `⚠️ Язык [${cleanLang.toUpperCase()}] не поддерживается в Silero`;
+      selectEl.appendChild(opt);
+      if (hintEl) {
+        hintEl.style.display = "block";
+        hintEl.innerHTML = `<span style="color:#ff4d4f;font-weight:600;">⚠️ Язык [${cleanLang.toUpperCase()}] не поддерживается в Silero TTS.</span> Рекомендуется выбрать <b>Piper TTS</b> или <b>Gemini API</b>.`;
+      }
+      return;
+    }
+
     selectEl.disabled = false;
     let sileroVoices = [];
     try {
-      const resp = await fetch(`/api/transcriber/silero/voices?lang=${encodeURIComponent(lang)}`);
+      const resp = await fetch(`/api/transcriber/silero/voices?lang=${encodeURIComponent(cleanLang)}`);
       const data = await resp.json();
       if (data && data.voices) sileroVoices = data.voices;
     } catch (_) {}
     if (!sileroVoices || sileroVoices.length === 0) {
-      sileroVoices = (lang === "ru") ? [
+      sileroVoices = (cleanLang === "ru") ? [
         { id: "kseniya", name: "Ксения (Женский, v5)" },
         { id: "aidar", name: "Айдар (Мужской, v5)" },
         { id: "baya", name: "Бая (Женский, v5)" },
         { id: "eugene", name: "Евгений (Мужской, v5)" },
         { id: "xenia", name: "Ксения 2 (Женский, v5)" }
-      ] : [
-        { id: "kseniya", name: "Kseniya (v5)" }
-      ];
+      ] : (cleanLang === "uk" ? [
+        { id: "mykyta", name: "Микита (Чоловічий, v4)" }
+      ] : (cleanLang === "en" ? [
+        { id: "en_0", name: "Voice 0 (Female)" },
+        { id: "en_1", name: "Voice 1 (Male)" }
+      ] : (cleanLang === "de" ? [
+        { id: "eva", name: "Eva (Weiblich)" },
+        { id: "karl", name: "Karl (Männlich)" }
+      ] : (cleanLang === "es" ? [
+        { id: "es_0", name: "Voz 0 (Femenino)" }
+      ] : (cleanLang === "fr" ? [
+        { id: "fr_0", name: "Voix 0 (Féminin)" }
+      ] : [])))));
     }
     sileroVoices.forEach(v => {
       const opt = document.createElement("option");
@@ -1080,7 +1328,7 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
     if (currentVoiceValue && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
       selectEl.value = currentVoiceValue;
     } else {
-      selectEl.value = sileroVoices[0].id;
+      selectEl.value = sileroVoices.length > 0 ? sileroVoices[0].id : "";
     }
     if (hintEl) {
       hintEl.style.display = "block";
@@ -1420,6 +1668,45 @@ async function checkAndPromptPiperModel(lang, onModelDownloaded, onFallbackReque
   }
 }
 
+const SILERO_SUPPORTED_LANGUAGES = ["ru", "uk", "en", "de", "es", "fr", "ba", "xal", "tt", "uz"];
+
+/**
+ * Checks if target language is supported by Silero TTS.
+ * If not supported, displays an informative prompt offering fallback to Piper TTS or Gemini API.
+ */
+async function checkAndPromptSileroModel(lang, onFallbackRequested) {
+  const cleanLang = (lang || resolveCurrentTargetLang() || "ru").toLowerCase().trim();
+  if (SILERO_SUPPORTED_LANGUAGES.includes(cleanLang)) {
+    return { ok: true };
+  }
+
+  const langUpper = cleanLang.toUpperCase();
+  const msg = window.t
+    ? window.t("transcriber.silero_unsupported_confirm", { lang: langUpper }, `Язык «<b>${langUpper}</b>» отсутствует в моделях синтезатора Silero TTS (доступны: RU, UK, EN, DE, ES, FR).<br><br>Переключить синтез речи на <b>Piper TTS</b> (поддерживает офлайн-модели) или <b>Gemini API</b>?`)
+    : `Язык «<b>${langUpper}</b>» отсутствует в моделях синтезатора Silero TTS (доступны: RU, UK, EN, DE, ES, FR).<br><br>Переключить синтез речи на <b>Piper TTS</b> (поддерживает офлайн-модели) или <b>Gemini API</b>?`;
+
+  let fallback = "piper";
+  if (typeof window.showAppConfirm === "function") {
+    const res = await window.showAppConfirm({
+      title: window.t ? window.t("transcriber.silero_unsupported_title", {}, "Язык не поддерживается в Silero TTS") : "Язык не поддерживается в Silero TTS",
+      message: msg,
+      confirmText: window.t ? window.t("transcriber.switch_to_piper", {}, "Переключить на Piper TTS") : "Переключить на Piper TTS",
+      cancelText: window.t ? window.t("transcriber.switch_to_gemini", {}, "Использовать Gemini API") : "Использовать Gemini API"
+    });
+    fallback = res ? "piper" : "gemini";
+  } else {
+    const res = window.confirm(`Язык ${langUpper} не поддерживается в Silero TTS. Переключить на Piper TTS (OK) или Gemini API (Отмена)?`);
+    fallback = res ? "piper" : "gemini";
+  }
+
+  if (typeof onFallbackRequested === "function") {
+    onFallbackRequested(fallback);
+  }
+  return { ok: false, reason: "unsupported", fallback };
+}
+window.checkAndPromptSileroModel = checkAndPromptSileroModel;
+window.SILERO_SUPPORTED_LANGUAGES = SILERO_SUPPORTED_LANGUAGES;
+
 function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   closeTtsQuickSettingsPopover();
   closeTxtQuickSettingsPopover();
@@ -1444,6 +1731,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   const pauseDuckPercent = Math.round(rawPauseDuck * 100);
   const curSolo = (s.tts_mute_others !== undefined) ? Boolean(s.tts_mute_others) : true;
   const curAnnounce = (s.tts_announce_callsign !== undefined) ? Boolean(s.tts_announce_callsign) : false;
+  const curSkipShort = (s.tts_skip_short_callsign !== undefined) ? Boolean(s.tts_skip_short_callsign) : true;
   const curStyle = s.tts_style || "radio";
 
   const duckMute = window.t ? window.t("transcriber.tts_ducking_mute", {}, "0% (тишина)") : "0% (тишина)";
@@ -1493,11 +1781,11 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   rowEngine.innerHTML = `
     <label class="tts-quick-label">${window.t ? window.t("transcriber.tts_engine_lbl", {}, "🎙️ Движок синтеза речи:") : "🎙️ Движок синтеза речи:"}</label>
     <select class="tts-quick-select" id="ttsQuickEngine">
-      <option value="piper" ${curEngine === "piper" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_piper", {}, "Piper TTS (local)") : "Piper TTS (local)"}</option>
-      <option value="silero" ${curEngine === "silero" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_silero", {}, "Silero TTS v5 (local)") : "Silero TTS v5 (local)"}</option>
-      <option value="browser" ${curEngine === "browser" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_browser", {}, "System TTS (local)") : "System TTS (local)"}</option>
-      <option value="gemini" ${curEngine === "gemini" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_gemini", {}, "* Gemini API") : "* Gemini API"}</option>
-      <option value="groq" ${curEngine === "groq" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_groq", {}, "* Groq Cloud TTS") : "* Groq Cloud TTS"}</option>
+      <option value="piper" ${curEngine === "piper" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_piper", {}, "🏠 Piper TTS (local)") : "🏠 Piper TTS (local)"}</option>
+      <option value="silero" ${curEngine === "silero" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_silero", {}, "🏠 Silero TTS v5 (local)") : "🏠 Silero TTS v5 (local)"}</option>
+      <option value="browser" ${curEngine === "browser" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_browser", {}, "🏠 System TTS (local)") : "🏠 System TTS (local)"}</option>
+      <option value="gemini" ${curEngine === "gemini" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_gemini", {}, "🌐 Gemini API") : "🌐 Gemini API"}</option>
+      <option value="groq" ${curEngine === "groq" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_groq", {}, "🌐 Groq Cloud TTS") : "🌐 Groq Cloud TTS"}</option>
     </select>
   `;
 
@@ -1608,6 +1896,10 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     <label class="tts-quick-cb-label">
       <input type="checkbox" id="ttsQuickAnnounceCallsign" ${curAnnounce ? "checked" : ""}>
       <span>${window.t ? window.t("transcriber.tts_announce_callsign", {}, "Проговаривать позывной") : "Проговаривать позывной"}</span>
+    </label>
+    <label class="tts-quick-cb-label">
+      <input type="checkbox" id="ttsQuickSkipShortCallsign" ${curSkipShort ? "checked" : ""}>
+      <span>${window.t ? window.t("transcriber.tts_skip_short_callsign", {}, "Не проговаривать Call sign для реплик короче 20 букв") : "Не проговаривать Call sign для реплик короче 20 букв"}</span>
     </label>
   `;
 
@@ -1837,6 +2129,19 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     });
   }
 
+  // Wire Skip short callsign checkbox
+  const cbSkipShort = popup.querySelector("#ttsQuickSkipShortCallsign");
+  if (cbSkipShort) {
+    cbSkipShort.addEventListener("change", () => {
+      const isSkipShort = cbSkipShort.checked;
+      if (window.transcriberSettings) {
+        window.transcriberSettings.tts_skip_short_callsign = isSkipShort;
+      }
+      const optSkipShort = document.getElementById("optTtsSkipShortCallsign");
+      if (optSkipShort) optSkipShort.checked = isSkipShort;
+    });
+  }
+
   // Test button
   const btnTest = popup.querySelector("#btnTtsQuickTest");
   if (btnTest) {
@@ -2012,7 +2317,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             showToast(`⚠️ Groq TTS: ${res.message || res.detail || "Ошибка синтеза"}`, 3500);
           }
         } else {
-          const testVoice = (voi === "auto") ? "Puck" : voi;
+          const testVoice = (eng === "gemini" && voi === "auto") ? "Puck" : voi;
           const keyInp = document.querySelector('#geminiApiKeysBody .apikey-cb:checked + .apikey-name + .apikey-input-wrap .apikey-input, #geminiApiKeysBody .apikey-cb:checked ~ .apikey-input-wrap .apikey-input');
           const key = (keyInp && keyInp.value.trim()) ? keyInp.value.trim() : (window.transcriberSettings ? window.transcriberSettings.api_key : "");
 
@@ -2025,7 +2330,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
               model: mod,
               api_key: key,
               target_lang: testLang,
-              engine: "gemini",
+              engine: eng,
               speed: spd,
               announce_callsign: announce,
               callsign: "RX6AWG",
@@ -2040,7 +2345,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
                 slot: slot,
                 audio_base64: res.audio_base64,
                 text: testText,
-                engine: "gemini",
+                engine: eng,
                 speed: spd,
                 ducking_level: duckVal,
                 mute_others: solo,
@@ -2048,7 +2353,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
                 bypassMute: true
               });
             }
-            showToast(`🔊 Тест Gemini TTS [${testLang.toUpperCase()}] (${testVoice})...`, 2500);
+            const engLabel = (eng === "silero") ? "Silero TTS" : "Gemini TTS";
+            showToast(`🔊 Тест ${engLabel} [${testLang.toUpperCase()}] (${testVoice || "default"})...`, 2500);
           } else {
             console.warn("[TTS] Quick test error:", res);
             showToast(`⚠️ ${formatGeminiError(res.message || res.detail || res, "tts")}`, 3500);
@@ -2079,6 +2385,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       const pVal = rngPauseDucking ? (Math.max(0, Math.min(100, parseFloat(rngPauseDucking.value) || 100)) / 100.0) : 1.0;
       const solo = popup.querySelector("#ttsQuickSolo") ? popup.querySelector("#ttsQuickSolo").checked : true;
       const announce = popup.querySelector("#ttsQuickAnnounceCallsign") ? popup.querySelector("#ttsQuickAnnounceCallsign").checked : false;
+      const skipShort = popup.querySelector("#ttsQuickSkipShortCallsign") ? popup.querySelector("#ttsQuickSkipShortCallsign").checked : true;
 
       btnSave.disabled = true;
       btnSave.textContent = "⏳...";
@@ -2098,6 +2405,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
         tts_pause_ducking_level: pVal,
         tts_mute_others: solo,
         tts_announce_callsign: announce,
+        tts_skip_short_callsign: skipShort,
         tts_style: sty
       };
 
@@ -2125,6 +2433,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             window.transcriberSettings.tts_pause_ducking_level = pVal;
             window.transcriberSettings.tts_mute_others = solo;
             window.transcriberSettings.tts_announce_callsign = announce;
+            window.transcriberSettings.tts_skip_short_callsign = skipShort;
             window.transcriberSettings.tts_style = sty;
           }
 
@@ -2178,6 +2487,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           if (optMute) optMute.checked = solo;
           const optAnnounce = document.getElementById("optTtsAnnounceCallsign");
           if (optAnnounce) optAnnounce.checked = announce;
+          const optSkipShort = document.getElementById("optTtsSkipShortCallsign");
+          if (optSkipShort) optSkipShort.checked = skipShort;
 
           syncTtsSoloMode();
           if (typeof window.summaryTtsReader !== "undefined" && window.summaryTtsReader && window.summaryTtsReader.isPlaying) {
@@ -2564,6 +2875,8 @@ function toggleSlotTts(row, slot) {
   // If TTS turned ON and transcription is OFF on this slot, auto-turn ON transcription
   if (newState && !row.classList.contains("has-transcribe")) {
     toggleSlotTranscribe(row, slot);
+  } else {
+    updateSlotPipelineVisibility(row, slot);
   }
 
   const ws = getWs();
@@ -2585,7 +2898,8 @@ function toggleSlotTts(row, slot) {
       window.t
         ? window.t("transcriber.tts_ts_on", { slot }, `✓ Голосовой синтез TS${slot} включен`)
         : `✓ Голосовой синтез TS${slot} включен`,
-      2000
+      2000,
+      card || hid
     );
     if (window.ttsAudioQueueManager) {
       window.ttsAudioQueueManager.syncIdleDucking(0.15);
@@ -2598,7 +2912,8 @@ function toggleSlotTts(row, slot) {
       window.t
         ? window.t("transcriber.tts_ts_off", { slot }, `✕ Голосовой синтез TS${slot} выключен`)
         : `✕ Голосовой синтез TS${slot} выключен`,
-      2000
+      2000,
+      card || hid
     );
   }
 }
@@ -2643,19 +2958,24 @@ class TtsAudioQueueManager {
     // Duck original DMR radio channels
     const duckLevel = (item.ducking_level !== undefined && item.ducking_level !== null)
       ? item.ducking_level
-      : ((window.transcriberSettings && window.transcriberSettings.tts_ducking_level) !== undefined
+      : ((window.transcriberSettings && window.transcriberSettings.tts_ducking_level !== undefined)
           ? window.transcriberSettings.tts_ducking_level
           : 0.80);
-    const muteOthers = item.mute_others !== false;
+    const muteOthers = (item.mute_others !== undefined && item.mute_others !== null)
+      ? Boolean(item.mute_others)
+      : ((window.transcriberSettings && window.transcriberSettings.tts_mute_others !== undefined)
+          ? Boolean(window.transcriberSettings.tts_mute_others)
+          : true);
     this.applyDucking(hid, slot, duckLevel, muteOthers);
 
-    // Playback speed: configurable 1.0x - 2.0x (default 1.1x)
+    // Playback speed: configurable 1.0x - 2.0x (default 1.1x), or 0.9x-1.0x for standalone callsign announcements
     const effectiveSpeed = (item.speed !== undefined && item.speed !== null)
       ? Number(item.speed)
       : ((window.transcriberSettings && window.transcriberSettings.tts_speed !== undefined)
           ? Number(window.transcriberSettings.tts_speed)
           : 1.1);
-    const speed = Math.max(1.0, Math.min(2.0, effectiveSpeed || 1.1));
+    const minSpd = item.is_callsign_announcement ? 0.85 : 1.0;
+    const speed = Math.max(minSpd, Math.min(2.0, effectiveSpeed || 1.1));
 
     if (item.engine === "browser" || (!item.audio_base64 && item.text)) {
       this.playBrowserSpeech(item, speed);
@@ -2776,7 +3096,7 @@ class TtsAudioQueueManager {
     try {
       const rawText = item.text || "";
       const targetLang = (window.transcriberSettings && window.transcriberSettings.target_lang) || "ru";
-      const cleanText = cleanTextForClientTts(rawText, targetLang);
+      const cleanText = item.is_callsign_announcement ? rawText : cleanTextForClientTts(rawText, targetLang);
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.rate = Math.max(0.7, Math.min(2.0, speed));
       if (targetLang && targetLang !== "none") {
@@ -2937,8 +3257,11 @@ class TtsAudioQueueManager {
     const hid = this.activeHotspotId || (typeof window.getActiveHotspotId === "function" ? window.getActiveHotspotId() : "default");
     const slot = this.activeSlot || 1;
     const s = window.transcriberSettings || {};
+    const effectiveDuck = (newLevel !== undefined && newLevel !== null)
+      ? newLevel
+      : ((s.tts_ducking_level !== undefined && s.tts_ducking_level !== null) ? s.tts_ducking_level : 0.80);
     const muteOthers = (s.tts_mute_others !== undefined) ? Boolean(s.tts_mute_others) : true;
-    this.applyDucking(hid, slot, newLevel, muteOthers);
+    this.applyDucking(hid, slot, effectiveDuck, muteOthers);
   }
 
   finishPlayback() {
@@ -3067,6 +3390,7 @@ class TtsAudioQueueManager {
     if (badge) {
       badge.classList.toggle("tts-speaking", Boolean(isSpeaking));
     }
+    setPipelineStageState(hid, slot, "tts", isSpeaking ? "active" : "idle");
   }
 
   clear() {
@@ -3285,6 +3609,11 @@ function handleCallTranscription(msg) {
   const langBadge = vfoRow.querySelector(".vfo-lang-badge");
   if (langBadge) {
     langBadge.classList.remove("has-ai-error", "ai-error-blink");
+    setPipelineStageState(msg.hotspot_id, slot, "asr", "result");
+    const sTrans = window.transcriberSettings || {};
+    if (sTrans.target_lang !== "none") {
+      setPipelineStageState(msg.hotspot_id, slot, "translate", "result");
+    }
     if (langBadge._errorTimer) {
       clearTimeout(langBadge._errorTimer);
       langBadge._errorTimer = null;
@@ -3367,6 +3696,7 @@ function handleCallTranscription(msg) {
     // 5. Autoscroll only if user hasn't scrolled up to read earlier text
     requestAnimationFrame(() => {
       if (!captionBox._isUserScrolled) {
+        if (captionStream) captionStream.scrollTop = captionStream.scrollHeight;
         captionBox.scrollTop = captionBox.scrollHeight;
       }
     });
@@ -3395,6 +3725,7 @@ function triggerSlotTranscribeError(langBadge, slot, errorMsg) {
 
 function handleTtsError(msg) {
   if (!msg) return;
+  setPipelineStageState(msg.hotspot_id, msg.slot || 1, "tts", "error", msg);
   const slot = msg.slot || 1;
   console.warn(`[TTS] Slot TS${slot} raw error:`, msg);
   const cleanError = formatGeminiError(msg.error || msg.message, "tts");
@@ -3405,6 +3736,8 @@ if (window.__proxdmr) window.__proxdmr.handleTtsError = handleTtsError;
 
 function handleTranscriptionError(msg) {
   if (!msg) return;
+  const stage = msg.stage || (String(msg.error || "").toLowerCase().includes("translate") || String(msg.error || "").toLowerCase().includes("перевод") ? "translate" : "asr");
+  setPipelineStageState(msg.hotspot_id, msg.slot || 1, stage, "error", msg);
   const targetHid = resolveHotspotId(msg.hotspot_id);
   const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`) ||
                      document.querySelector(`.radio-container[data-hotspot-id="${msg.hotspot_id}"]`);
@@ -3449,6 +3782,8 @@ function updateSlotLangBadge(row, slot, isActive, langCode = null) {
     setLangBadgeText(langBadge, "TXT");
     langBadge.title = window.t ? window.t("transcriber.lang_badge_off", { slot }, `Транскрибатор TS${slot}: выключен. Клик — вкл, удержание — параметры`) : `Транскрибатор TS${slot}: выключен. Клик — вкл, удержание — параметры`;
   }
+
+  updateSlotPipelineVisibility(row, slot);
 }
 
 // --- Transcriber Model Picker Subsystem ---
@@ -3843,7 +4178,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   header.innerHTML = `
     <div class="tts-quick-title">
       <span class="tts-quick-icon">📝</span>
-      <span>${window.t ? window.t("transcriber.txt_modal_title", { slot }, `Распознавание и перевод TS${slot}`) : `Распознавание и перевод TS${slot}`}</span>
+      <span>${window.t ? window.t("transcriber.txt_modal_title", { slot }, `Транскрибация и перевод TS${slot}`) : `Транскрибация и перевод TS${slot}`}</span>
     </div>
     <button type="button" class="tts-quick-close" aria-label="${window.t ? window.t("buttons.close", {}, "Закрыть") : "Закрыть"}">&times;</button>
   `;
@@ -3856,10 +4191,10 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   const rowRecEngine = document.createElement("div");
   rowRecEngine.className = "tts-quick-row";
   rowRecEngine.innerHTML = `
-    <label class="tts-quick-label" for="popTxtRecEngine">${window.t ? window.t("transcriber.rec_engine_lbl", {}, "🎙️ Движок распознавания:") : "🎙️ Движок распознавания:"}</label>
+    <label class="tts-quick-label" for="popTxtRecEngine">${window.t ? window.t("transcriber.rec_engine_lbl", {}, "🎙️ Движок транскрибации:") : "🎙️ Движок транскрибации:"}</label>
     <select class="tts-quick-select" id="popTxtRecEngine">
-      <option value="gemini"${curRecEngine === "gemini" ? " selected" : ""}>Gemini API</option>
-      <option value="groq"${curRecEngine === "groq" ? " selected" : ""}>Groq Cloud API (Whisper V3)</option>
+      <option value="gemini"${curRecEngine === "gemini" ? " selected" : ""}>${window.t ? window.t("transcriber.engine_gemini", {}, "🌐 Gemini API") : "🌐 Gemini API"}</option>
+      <option value="groq"${curRecEngine === "groq" ? " selected" : ""}>${window.t ? window.t("transcriber.engine_groq", {}, "🌐 Groq Cloud API (Whisper Large-v3)") : "🌐 Groq Cloud API (Whisper Large-v3)"}</option>
     </select>
   `;
   const selRecEngine = rowRecEngine.querySelector("#popTxtRecEngine");
@@ -3869,7 +4204,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   rowModel.className = "tts-quick-row";
   rowModel.id = "popTxtRowModel";
   rowModel.innerHTML = `
-    <label class="tts-quick-label" for="popTxtModel">${window.t ? window.t("transcriber.model", {}, "🤖 Модель Gemini:") : "🤖 Модель Gemini:"}</label>
+    <label class="tts-quick-label" for="popTxtModel">${window.t ? window.t("transcriber.model", {}, "🤖 Модель Gemini для транскрибации:") : "🤖 Модель Gemini для транскрибации:"}</label>
     <select class="tts-quick-select" id="popTxtModel"></select>
   `;
   const selModel = rowModel.querySelector("#popTxtModel");
@@ -3927,7 +4262,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   rowNoTrans.innerHTML = `
     <label class="tts-quick-cb-label">
       <input type="checkbox" id="popTxtNoTranslate" ${isNoTranslate ? "checked" : ""}>
-      <span>${window.t ? window.t("transcriber.no_translate_lbl", {}, "Результат распознавания без перевода") : "Результат распознавания без перевода"}</span>
+      <span>${window.t ? window.t("transcriber.no_translate_lbl", {}, "Результат транскрибации без перевода") : "Результат транскрибации без перевода"}</span>
     </label>
   `;
   const cbNoTranslate = rowNoTrans.querySelector("#popTxtNoTranslate");
@@ -3937,10 +4272,11 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   rowTransEngine.className = "tts-quick-row";
   rowTransEngine.id = "popTxtRowTransEngine";
   rowTransEngine.innerHTML = `
-    <label class="tts-quick-label" for="popTxtTransEngine">${window.t ? window.t("transcriber.translation_engine_lbl", {}, "🌐 Движок перевода речи:") : "🌐 Движок перевода речи:"}</label>
+    <label class="tts-quick-label" for="popTxtTransEngine">${window.t ? window.t("transcriber.translation_engine_lbl", {}, "🌐 Движок перевода:") : "🌐 Движок перевода:"}</label>
     <select class="tts-quick-select" id="popTxtTransEngine">
-      <option value="gemini"${curTransEngine === "gemini" ? " selected" : ""}>Gemini API</option>
-      <option value="groq"${curTransEngine === "groq" ? " selected" : ""}>Groq API (Llama / Qwen)</option>
+      <option value="gemini"${curTransEngine === "gemini" ? " selected" : ""}>${window.t ? window.t("transcriber.translation_engine_gemini", {}, "🌐 Gemini API") : "🌐 Gemini API"}</option>
+      <option value="groq"${curTransEngine === "groq" ? " selected" : ""}>${window.t ? window.t("transcriber.translation_engine_groq", {}, "🌐 Groq API (Llama 3.3 70B)") : "🌐 Groq API (Llama 3.3 70B)"}</option>
+      <option value="qwen"${curTransEngine === "qwen" ? " selected" : ""}>${window.t ? window.t("transcriber.translation_engine_qwen", {}, "🏠 Qwen 2.5 1.5B") : "🏠 Qwen 2.5 1.5B"}</option>
     </select>
   `;
   const selTransEngine = rowTransEngine.querySelector("#popTxtTransEngine");
@@ -4359,6 +4695,7 @@ function toggleSlotTranscribe(row, slot) {
 
   const key = getSlotTranscribeKey(hid, slot);
   localStorage.setItem(key, newState ? "1" : "0");
+  updateSlotPipelineVisibility(row, slot);
 
   const ws = getWs();
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -4418,10 +4755,10 @@ function toggleSlotTranscribe(row, slot) {
       }
     }
 
-    showToast(window.t ? window.t("transcriber.ts_on", { slot }, `✓ Режим транскрибации TS${slot} включен`) : `✓ Режим транскрибации TS${slot} включен`, 2000);
+    showToast(window.t ? window.t("transcriber.ts_on", { slot }, `✓ Режим транскрибации TS${slot} включен`) : `✓ Режим транскрибации TS${slot} включен`, 2000, card || hid);
     const hasKey = Boolean(window.transcriberSettings && window.transcriberSettings.api_key);
     if (!hasKey) {
-      showToast(window.t ? window.t("transcriber.token_missing_toast", {}, "⚠️ Укажите токен Gemini API в Настройках ➔ AI Транскрибатор") : "⚠️ Укажите токен Gemini API в Настройках ➔ AI Транскрибатор", 4000);
+      showToast(window.t ? window.t("transcriber.token_missing_toast", {}, "⚠️ Укажите токен Gemini API в Настройках ➔ AI Транскрибатор") : "⚠️ Укажите токен Gemini API в Настройках ➔ AI Транскрибатор", 4000, card || hid);
       openHotspotSettings(null, "tab-transcriber");
     }
   } else {
@@ -4433,6 +4770,9 @@ function toggleSlotTranscribe(row, slot) {
       captionStream._lastCallKey = null;
       captionStream._lastCallId = null;
       captionStream._lastMsgTime = null;
+    }
+    if (captionStream) {
+      captionStream.scrollTop = 0;
     }
     if (captionBox) {
       captionBox.scrollTop = 0;
@@ -4471,7 +4811,7 @@ function toggleSlotTranscribe(row, slot) {
     // Synchronize TTS Solo mode (restores all channels muted by Solo mode)
     syncTtsSoloMode();
 
-    showToast(window.t ? window.t("transcriber.ts_off", { slot }, `✕ Режим транскрибации TS${slot} выключен`) : `✕ Режим транскрибации TS${slot} выключен`, 2000);
+    showToast(window.t ? window.t("transcriber.ts_off", { slot }, `✕ Режим транскрибации TS${slot} выключен`) : `✕ Режим транскрибации TS${slot} выключен`, 2000, card || hid);
   }
 
   if (card) {
@@ -4503,7 +4843,8 @@ function updateCardTranscribeLayout(card) {
       "transcribe-ts1-only",
       "transcribe-ts2-only",
       "transcribe-both",
-      "has-maximized-vfo"
+      "has-maximized-vfo",
+      "card-transcribe-maximized"
     );
     ts1Row.classList.remove("is-maximized", "vfo-hidden-by-max");
     ts2Row.classList.remove("is-maximized", "vfo-hidden-by-max");
@@ -4525,19 +4866,33 @@ function updateCardTranscribeLayout(card) {
     return;
   }
 
-  // Active transcribe mode: single slot expands to 100% height (216px), other is hidden
+  // Active transcribe mode: single slot expands, other is hidden
   card.classList.add("has-transcribe-mode");
+  const cid = resolveHotspotId(card.dataset.hotspotId || window.activeHotspotId);
+  const savedMaxSlot = localStorage.getItem(getMaximizedKey(cid));
 
   if (ts1Active) {
-    card.classList.remove("transcribe-ts2-only", "transcribe-both", "has-maximized-vfo");
+    const isMax = ts1Row.classList.contains("is-maximized") ||
+                  card.classList.contains("card-transcribe-maximized") ||
+                  (savedMaxSlot === "1");
+    card.classList.remove("transcribe-ts2-only", "transcribe-both");
     card.classList.add("transcribe-ts1-only");
-    ts1Row.classList.remove("is-maximized", "vfo-hidden-by-max");
+    card.classList.toggle("has-maximized-vfo", isMax);
+    card.classList.toggle("card-transcribe-maximized", isMax);
+    ts1Row.classList.toggle("is-maximized", isMax);
+    ts1Row.classList.remove("vfo-hidden-by-max");
     ts2Row.classList.remove("is-maximized");
     ts2Row.classList.add("vfo-hidden-by-max");
   } else if (ts2Active) {
-    card.classList.remove("transcribe-ts1-only", "transcribe-both", "has-maximized-vfo");
+    const isMax = ts2Row.classList.contains("is-maximized") ||
+                  card.classList.contains("card-transcribe-maximized") ||
+                  (savedMaxSlot === "2");
+    card.classList.remove("transcribe-ts1-only", "transcribe-both");
     card.classList.add("transcribe-ts2-only");
-    ts2Row.classList.remove("is-maximized", "vfo-hidden-by-max");
+    card.classList.toggle("has-maximized-vfo", isMax);
+    card.classList.toggle("card-transcribe-maximized", isMax);
+    ts2Row.classList.toggle("is-maximized", isMax);
+    ts2Row.classList.remove("vfo-hidden-by-max");
     ts1Row.classList.remove("is-maximized");
     ts1Row.classList.add("vfo-hidden-by-max");
   }
@@ -4564,14 +4919,16 @@ function setSlotMaximized(row, slot, isMax, savePref = true) {
   if (!card) return;
   const cid = resolveHotspotId(card.dataset.hotspotId || window.activeHotspotId);
 
+  row.classList.toggle("is-maximized", Boolean(isMax));
+  card.classList.toggle("has-maximized-vfo", Boolean(isMax));
+  card.classList.toggle("card-transcribe-maximized", Boolean(isMax));
+
   if (isMax) {
-    row.classList.add("is-maximized");
-    pushNavState("zoom", `ts${slot}`);
+    if (typeof pushNavState === "function") pushNavState("zoom", `ts${slot}`);
     if (savePref) {
       localStorage.setItem(getMaximizedKey(cid), slot.toString());
     }
   } else {
-    row.classList.remove("is-maximized");
     if (savePref) {
       const saved = localStorage.getItem(getMaximizedKey(cid));
       if (saved === slot.toString()) {
@@ -4587,38 +4944,197 @@ function setSlotMaximized(row, slot, isMax, savePref = true) {
   if (captionStream && captionBox) {
     requestAnimationFrame(() => {
       if (!captionBox._isUserScrolled) {
+        captionStream.scrollTop = captionStream.scrollHeight;
         captionBox.scrollTop = captionBox.scrollHeight;
       }
     });
   }
 }
 
+// ── Font Size & Caption Box Sizing Subsystem ──
+const LS_CAPTION_FONT_SIZE_KEY = "proxdmr_caption_font_size";
+const MIN_CAPTION_FONT_SIZE = 9;
+const MAX_CAPTION_FONT_SIZE = 19;
+const DEFAULT_CAPTION_FONT_SIZE = 11;
+
+function getCaptionFontSize() {
+  try {
+    const saved = localStorage.getItem(LS_CAPTION_FONT_SIZE_KEY);
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= MIN_CAPTION_FONT_SIZE && parsed <= MAX_CAPTION_FONT_SIZE) {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+  return DEFAULT_CAPTION_FONT_SIZE;
+}
+
+function setCaptionFontSize(size, showNotification = true) {
+  const clamped = Math.max(MIN_CAPTION_FONT_SIZE, Math.min(MAX_CAPTION_FONT_SIZE, Math.round(size)));
+  document.documentElement.style.setProperty("--caption-font-size", `${clamped}px`);
+  try {
+    localStorage.setItem(LS_CAPTION_FONT_SIZE_KEY, clamped.toString());
+  } catch (_) {}
+  updateCaptionFontValDisplays(clamped);
+  if (showNotification && typeof showToast === "function") {
+    showToast(window.t ? window.t("transcriber.font_size_toast", { size: clamped }, `Шрифт: ${clamped}px`) : `Шрифт: ${clamped}px`, 1200);
+  }
+}
+
+function changeCaptionFontSize(delta) {
+  const cur = getCaptionFontSize();
+  setCaptionFontSize(cur + delta, true);
+}
+
+function updateCaptionFontValDisplays(size) {
+  const cur = size || getCaptionFontSize();
+  document.querySelectorAll(".caption-font-val").forEach(el => {
+    el.textContent = cur;
+  });
+}
+
+function ensureCaptionFontControls(captionBox) {
+  if (!captionBox || captionBox.querySelector(".caption-font-ctrl")) return;
+  const ctrl = document.createElement("div");
+  ctrl.className = "caption-font-ctrl";
+  ctrl.setAttribute("role", "toolbar");
+  ctrl.setAttribute("aria-label", "Размер шрифта");
+  ctrl.innerHTML = `
+    <button type="button" class="btn-caption-font-down" title="Уменьшить шрифт (A−)">A−</button>
+    <span class="caption-font-val" title="Сбросить шрифт (11px)">${getCaptionFontSize()}</span>
+    <button type="button" class="btn-caption-font-up" title="Увеличить шрифт (A+)">A+</button>
+  `;
+
+  let activeTimer = null;
+  const activateCtrl = () => {
+    ctrl.classList.add("is-active");
+    clearTimeout(activeTimer);
+    activeTimer = setTimeout(() => ctrl.classList.remove("is-active"), 1500);
+  };
+
+  ctrl.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    activateCtrl();
+  });
+  ctrl.addEventListener("mousedown", e => e.stopPropagation());
+  ctrl.addEventListener("touchstart", (e) => {
+    e.stopPropagation();
+    activateCtrl();
+  }, { passive: true });
+  ctrl.addEventListener("click", e => e.stopPropagation());
+
+  const btnDown = ctrl.querySelector(".btn-caption-font-down");
+  const btnUp = ctrl.querySelector(".btn-caption-font-up");
+  const valSpan = ctrl.querySelector(".caption-font-val");
+
+  btnDown.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    changeCaptionFontSize(-1);
+  });
+
+  btnUp.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    changeCaptionFontSize(1);
+  });
+
+  valSpan.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCaptionFontSize(DEFAULT_CAPTION_FONT_SIZE, true);
+  });
+
+  captionBox.appendChild(ctrl);
+}
+
+function setupCaptionBoxPinchZoom(captionBox) {
+  if (!captionBox || captionBox._pinchZoomAttached) return;
+  captionBox._pinchZoomAttached = true;
+
+  let initialPinchDist = 0;
+  let initialFontSize = 11;
+  let isPinching = false;
+
+  captionBox.addEventListener("touchstart", (e) => {
+    if (e.touches && e.touches.length === 2) {
+      isPinching = true;
+      initialFontSize = getCaptionFontSize();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      initialPinchDist = Math.hypot(dx, dy);
+    }
+  }, { passive: true });
+
+  captionBox.addEventListener("touchmove", (e) => {
+    if (isPinching && e.touches && e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const currentDist = Math.hypot(dx, dy);
+      const diff = currentDist - initialPinchDist;
+
+      // Every 24px pinch delta changes font by 1px
+      const fontDelta = Math.round(diff / 24);
+      if (fontDelta !== 0) {
+        const targetSize = Math.max(MIN_CAPTION_FONT_SIZE, Math.min(MAX_CAPTION_FONT_SIZE, initialFontSize + fontDelta));
+        if (targetSize !== getCaptionFontSize()) {
+          setCaptionFontSize(targetSize, false);
+        }
+      }
+    }
+  }, { passive: true });
+
+  const endPinch = () => {
+    if (isPinching) {
+      isPinching = false;
+      const finalSize = getCaptionFontSize();
+      if (typeof showToast === "function") {
+        showToast(window.t ? window.t("transcriber.font_size_toast", { size: finalSize }, `Шрифт: ${finalSize}px`) : `Шрифт: ${finalSize}px`, 1200);
+      }
+    }
+  };
+
+  captionBox.addEventListener("touchend", endPinch, { passive: true });
+  captionBox.addEventListener("touchcancel", endPinch, { passive: true });
+
+  // Desktop Ctrl + MouseWheel zoom
+  captionBox.addEventListener("wheel", (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 1 : -1;
+      changeCaptionFontSize(delta);
+    }
+  }, { passive: false });
+}
+
 function setupCaptionBoxLongPress(row, slot) {
   if (!row) return;
   const captionBox = row.querySelector(".vfo-caption-box");
-  if (!captionBox || captionBox._longPressAttached) return;
+  if (!captionBox) return;
+
+  ensureCaptionFontControls(captionBox);
+  setupCaptionBoxPinchZoom(captionBox);
+
+  if (captionBox._longPressAttached) return;
   captionBox._longPressAttached = true;
   captionBox.title = (window.t ? window.t("transcriber.caption_expand_hint", {}, "AI Расшифровка речи (длительное удержание для увеличения)") : "AI Расшифровка речи (длительное удержание для увеличения)");
 
   // Track scroll position to allow user reading history without forced autoscroll
-  captionBox.addEventListener("scroll", () => {
-    const atBottom = captionBox.scrollHeight - captionBox.scrollTop - captionBox.clientHeight <= 10;
+  const captionStream = row.querySelector(".vfo-caption-stream");
+  const onCaptionScroll = () => {
+    const target = (captionStream && captionStream.scrollHeight > captionStream.clientHeight) ? captionStream : captionBox;
+    const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight <= 10;
     captionBox._isUserScrolled = !atBottom;
-  }, { passive: true });
-
-  captionBox.addEventListener("wheel", () => {
-    setTimeout(() => {
-      const atBottom = captionBox.scrollHeight - captionBox.scrollTop - captionBox.clientHeight <= 10;
-      captionBox._isUserScrolled = !atBottom;
-    }, 50);
-  }, { passive: true });
-
-  captionBox.addEventListener("touchend", () => {
-    setTimeout(() => {
-      const atBottom = captionBox.scrollHeight - captionBox.scrollTop - captionBox.clientHeight <= 10;
-      captionBox._isUserScrolled = !atBottom;
-    }, 50);
-  }, { passive: true });
+  };
+  if (captionStream) {
+    captionStream.addEventListener("scroll", onCaptionScroll, { passive: true });
+    captionStream.addEventListener("wheel", () => setTimeout(onCaptionScroll, 50), { passive: true });
+    captionStream.addEventListener("touchend", () => setTimeout(onCaptionScroll, 50), { passive: true });
+  }
+  captionBox.addEventListener("scroll", onCaptionScroll, { passive: true });
+  captionBox.addEventListener("wheel", () => setTimeout(onCaptionScroll, 50), { passive: true });
+  captionBox.addEventListener("touchend", () => setTimeout(onCaptionScroll, 50), { passive: true });
 
   let pressTimer = null;
   let startX = 0;
@@ -4646,7 +5162,9 @@ function setupCaptionBoxLongPress(row, slot) {
       if (navigator.vibrate) {
         try { navigator.vibrate(60); } catch (_) {}
       }
-      const isCurrentlyMax = row.classList.contains("is-maximized");
+      const card = row.closest(".radio-container");
+      const isCurrentlyMax = row.classList.contains("is-maximized") ||
+                            Boolean(card && card.classList.contains("card-transcribe-maximized"));
       const nextState = !isCurrentlyMax;
       setSlotMaximized(row, slot, nextState, true);
       if (nextState) {
@@ -4655,11 +5173,12 @@ function setupCaptionBoxLongPress(row, slot) {
         showToast(window.t ? window.t("transcriber.mode_standard", {}, "Стандартный режим TS1 / TS2") : "Стандартный режим TS1 / TS2", 1500);
       }
       row._suppressClickUntil = Date.now() + 500;
-    }, 500);
+    }, 480);
   };
 
   captionBox.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
+    if (e.target && e.target.closest && e.target.closest(".caption-font-ctrl")) return;
     startPress(e.clientX, e.clientY);
   });
 
@@ -4667,7 +5186,7 @@ function setupCaptionBoxLongPress(row, slot) {
     if (!pressTimer) return;
     const dx = Math.abs(e.clientX - startX);
     const dy = Math.abs(e.clientY - startY);
-    if (dx > 5 || dy > 5) {
+    if (dx > 14 || dy > 14) {
       clearTimer();
     }
   });
@@ -4677,7 +5196,7 @@ function setupCaptionBoxLongPress(row, slot) {
     if (e.touches && e.touches[0]) {
       const dx = Math.abs(e.touches[0].clientX - startX);
       const dy = Math.abs(e.touches[0].clientY - startY);
-      if (dx > 5 || dy > 5) {
+      if (dx > 14 || dy > 14) {
         clearTimer();
       }
     }
@@ -4703,9 +5222,9 @@ function setupCaptionBoxLongPress(row, slot) {
   });
 
   captionBox.addEventListener("click", (e) => {
-    e.stopPropagation();
     if (isTriggered) {
       e.preventDefault();
+      e.stopPropagation();
     }
   });
 }
@@ -4805,6 +5324,7 @@ function disableSlotTranscribe(row, slot, hid, silent = true, notifyWs = true) {
     captionStream._lastCallKey = null;
     captionStream._lastCallId = null;
     captionStream._lastMsgTime = null;
+    captionStream.scrollTop = 0;
   }
   if (captionBox) {
     captionBox.scrollTop = 0;
@@ -5046,6 +5566,7 @@ function syncCardSlotTranscribeUI(card, hid) {
 
     setupSlotTtsClick(row, slot);
     updateSlotTtsBadge(row, slot, isCardInTranscribeMode ? isSlotTtsActive(cid, slot) : false);
+    updateSlotPipelineVisibility(row, slot);
   });
 
   updateCardTranscribeLayout(card);
@@ -5101,69 +5622,459 @@ function initSlotTranscribeState() {
   } catch (_) {}
 }
 
-// ── Speech Recognition & Translation: dynamic keys and frame management ──
+// ── Multi-Key Management Popover & Frame Controls ──
+let activeApiKeysPopoverOverlay = null;
+
+export function closeApiKeysManagerPopover() {
+  if (activeApiKeysPopoverOverlay) {
+    const overlay = activeApiKeysPopoverOverlay;
+    activeApiKeysPopoverOverlay = null;
+    overlay.classList.add("closing");
+    setTimeout(() => {
+      if (overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+    }, 160);
+  }
+}
+
+export function openApiKeysManagerPopover(engine, anchorBtn) {
+  closeApiKeysManagerPopover();
+  closeTxtQuickSettingsPopover();
+  closeTtsQuickSettingsPopover();
+
+  const eng = (engine || "gemini").toLowerCase().trim();
+  const isGroq = eng === "groq";
+  const s = window.transcriberSettings || {};
+
+  const overlay = document.createElement("div");
+  overlay.className = "tts-quick-settings-overlay apikeys-popover-overlay";
+  overlay.style.zIndex = "10010";
+
+  const popup = document.createElement("div");
+  popup.className = "tts-quick-settings-popup apikeys-popover-popup";
+  popup.style.width = "420px";
+  popup.style.maxWidth = "calc(100vw - 20px)";
+  popup.style.position = "fixed";
+  popup.style.top = "50%";
+  popup.style.left = "50%";
+  popup.style.transform = "translate(-50%, -50%)";
+  popup.style.zIndex = "10011";
+
+  const titleText = isGroq ? "⚡ Ключи Groq Cloud API" : "🔑 Ключи Google Gemini API";
+  const consoleUrl = isGroq ? "https://console.groq.com/keys" : "https://aistudio.google.com/app/apikey";
+  const consoleName = isGroq ? "Groq Console ↗" : "Google AI Studio ↗";
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "tts-quick-header";
+  header.innerHTML = `
+    <div class="tts-quick-title">
+      <span class="tts-quick-icon">${isGroq ? "⚡" : "🔑"}</span>
+      <span>${titleText}</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <a href="${consoleUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.76rem; color: #38bdf8; text-decoration: none;">${consoleName}</a>
+      <button type="button" class="tts-quick-close" aria-label="Закрыть">&times;</button>
+    </div>
+  `;
+
+  // Body
+  const body = document.createElement("div");
+  body.className = "tts-quick-body";
+  body.style.padding = "12px 14px 10px";
+
+  const hintText = document.createElement("div");
+  hintText.style.fontSize = "0.78rem";
+  hintText.style.color = "var(--text-muted, #8b949e)";
+  hintText.style.marginBottom = "8px";
+  hintText.style.lineHeight = "1.4";
+  hintText.textContent = "Введите по одному ключу на строку. Если ключей несколько, система распределяет нагрузку (Round-Robin) и автоматически перебирает следующий при лимитах (429 / Quota):";
+  body.appendChild(hintText);
+
+  // Editor container
+  const editor = document.createElement("div");
+  editor.id = "popApiKeysEditor";
+  editor.contentEditable = "true";
+  editor.spellcheck = false;
+  editor.style.whiteSpace = "pre";
+  editor.style.overflowX = "auto";
+  editor.style.overflowY = "auto";
+  editor.style.wordBreak = "normal";
+  editor.style.overflowWrap = "normal";
+  editor.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+  editor.style.fontSize = "0.82rem";
+  editor.style.lineHeight = "1.6";
+  editor.style.minHeight = "120px";
+  editor.style.maxHeight = "200px";
+  editor.style.padding = "8px 10px";
+  editor.style.borderRadius = "6px";
+  editor.style.border = "1px solid var(--border-color, #30363d)";
+  editor.style.background = "rgba(0, 0, 0, 0.25)";
+  editor.style.color = "var(--text-primary, #ffffff)";
+  editor.style.outline = "none";
+  editor.style.boxSizing = "border-box";
+  editor.dataset.placeholder = isGroq ? "gsk_...\ngsk_..." : "AIzaSy...\nAIzaSy...";
+
+  // Load existing keys
+  const existingKeys = getEngineKeys(eng);
+  if (existingKeys.length > 0) {
+    existingKeys.forEach(k => {
+      const lineDiv = document.createElement("div");
+      lineDiv.style.whiteSpace = "pre";
+      lineDiv.textContent = k;
+      editor.appendChild(lineDiv);
+    });
+  }
+
+  // Prevent rich HTML paste
+  editor.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+    if (document.queryCommandSupported && document.queryCommandSupported("insertText")) {
+      document.execCommand("insertText", false, text);
+    } else {
+      const selection = window.getSelection();
+      if (!selection.rangeCount) return;
+      selection.deleteFromDocument();
+      selection.getRangeAt(0).insertNode(document.createTextNode(text));
+    }
+    updateEditorState();
+  });
+
+  body.appendChild(editor);
+
+  function getKeysFromEditor() {
+    if (editor.children && editor.children.length > 0) {
+      const keys = [];
+      for (let i = 0; i < editor.children.length; i++) {
+        const parts = (editor.children[i].textContent || "").split(/\r?\n/);
+        parts.forEach(p => {
+          const trimmed = p.trim();
+          if (trimmed && !trimmed.startsWith("#")) keys.push(trimmed);
+        });
+      }
+      if (keys.length > 0) return keys;
+    }
+    const raw = editor.innerText || editor.textContent || "";
+    return raw.split(/\r?\n/)
+      .map(k => k.trim())
+      .filter(k => k.length > 0 && !k.startsWith("#"));
+  }
+
+  // Row for single key checkbox ("Использовать только первый")
+  const rowUseFirst = document.createElement("div");
+  rowUseFirst.id = "popRowUseFirstOnly";
+  rowUseFirst.style.display = existingKeys.length > 1 ? "flex" : "none";
+  rowUseFirst.style.alignItems = "center";
+  rowUseFirst.style.gap = "8px";
+  rowUseFirst.style.marginTop = "8px";
+  rowUseFirst.style.fontSize = "0.82rem";
+  rowUseFirst.style.fontWeight = "600";
+  rowUseFirst.style.color = "var(--text-primary, #e6edf3)";
+  rowUseFirst.style.cursor = "pointer";
+  rowUseFirst.style.userSelect = "none";
+
+  const chkUseFirst = document.createElement("input");
+  chkUseFirst.type = "checkbox";
+  chkUseFirst.id = "popChkUseFirstOnly";
+  chkUseFirst.style.cursor = "pointer";
+  const curUseFirst = isGroq ? Boolean(s.groq_use_first_key_only) : Boolean(s.gemini_use_first_key_only);
+  chkUseFirst.checked = curUseFirst;
+
+  const lblUseFirst = document.createElement("label");
+  lblUseFirst.htmlFor = "popChkUseFirstOnly";
+  lblUseFirst.style.cursor = "pointer";
+  lblUseFirst.textContent = "Использовать только первый (платный ключ, без перебора)";
+
+  rowUseFirst.appendChild(chkUseFirst);
+  rowUseFirst.appendChild(lblUseFirst);
+  body.appendChild(rowUseFirst);
+
+  // Status text line
+  const statusEl = document.createElement("div");
+  statusEl.id = "popApiKeysStatus";
+  statusEl.style.fontSize = "0.76rem";
+  statusEl.style.minHeight = "18px";
+  statusEl.style.marginTop = "6px";
+  statusEl.style.color = "var(--text-muted, #8b949e)";
+  body.appendChild(statusEl);
+
+  function updateEditorState() {
+    const currentKeys = getKeysFromEditor();
+    rowUseFirst.style.display = currentKeys.length > 1 ? "flex" : "none";
+    statusEl.textContent = currentKeys.length > 0 
+      ? `Найдено ключей: ${currentKeys.length}`
+      : "Список пуст. Вставьте хотя бы один ключ.";
+  }
+
+  editor.addEventListener("input", () => {
+    updateEditorState();
+  });
+
+  updateEditorState();
+
+  // Footer action buttons
+  const footer = document.createElement("div");
+  footer.style.display = "flex";
+  footer.style.justifyContent = "space-between";
+  footer.style.alignItems = "center";
+  footer.style.marginTop = "8px";
+  footer.style.padding = "8px 12px";
+  footer.style.background = "rgba(0, 0, 0, 0.22)";
+  footer.style.borderTop = "1px solid var(--border-color, #30363d)";
+
+  const btnTest = document.createElement("button");
+  btnTest.type = "button";
+  btnTest.className = "btn-secondary";
+  btnTest.style.fontSize = "0.8rem";
+  btnTest.style.padding = "5px 12px";
+  btnTest.style.display = "inline-flex";
+  btnTest.style.alignItems = "center";
+  btnTest.style.gap = "5px";
+  btnTest.style.cursor = "pointer";
+  btnTest.innerHTML = `<span>🔄</span><span>Проверить</span>`;
+
+  const rightBtns = document.createElement("div");
+  rightBtns.style.display = "flex";
+  rightBtns.style.gap = "6px";
+
+  const btnCancel = document.createElement("button");
+  btnCancel.type = "button";
+  btnCancel.className = "btn-secondary";
+  btnCancel.style.fontSize = "0.8rem";
+  btnCancel.style.padding = "5px 12px";
+  btnCancel.style.cursor = "pointer";
+  btnCancel.textContent = "Отмена";
+
+  const btnSave = document.createElement("button");
+  btnSave.type = "button";
+  btnSave.className = "btn-primary btn-tts-quick-save";
+  btnSave.style.fontSize = "0.8rem";
+  btnSave.style.padding = "5px 16px";
+  btnSave.style.cursor = "pointer";
+  btnSave.textContent = "Сохранить";
+
+  rightBtns.appendChild(btnCancel);
+  rightBtns.appendChild(btnSave);
+
+  footer.appendChild(btnTest);
+  footer.appendChild(rightBtns);
+
+  popup.appendChild(header);
+  popup.appendChild(body);
+  popup.appendChild(footer);
+  overlay.appendChild(popup);
+  document.body.appendChild(overlay);
+  activeApiKeysPopoverOverlay = overlay;
+  updateEditorState();
+
+  // Close handlers
+  const closeBtn = header.querySelector(".tts-quick-close");
+  if (closeBtn) closeBtn.addEventListener("click", closeApiKeysManagerPopover);
+  btnCancel.addEventListener("click", closeApiKeysManagerPopover);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeApiKeysManagerPopover();
+  });
+
+  // Test button handler
+  btnTest.addEventListener("click", async () => {
+    const keysToTest = getKeysFromEditor();
+    if (!keysToTest || keysToTest.length === 0) {
+      statusEl.style.color = "#ef4444";
+      statusEl.textContent = "❌ Введите хотя бы один ключ для проверки";
+      return;
+    }
+
+    btnTest.disabled = true;
+    btnTest.innerHTML = `<span>⏳</span><span>Проверка...</span>`;
+    statusEl.style.color = "var(--text-muted)";
+    statusEl.textContent = `Проверка ${keysToTest.length} ключей...`;
+
+    try {
+      const resp = await fetch("/api/transcriber/test-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          engine: eng,
+          keys: keysToTest
+        })
+      });
+      const data = await resp.json();
+      if (data && data.status === "ok" && Array.isArray(data.results)) {
+        editor.innerHTML = "";
+        let validCount = 0;
+        let invalidCount = 0;
+        data.results.forEach(item => {
+          const lineDiv = document.createElement("div");
+          lineDiv.style.whiteSpace = "pre";
+          lineDiv.textContent = item.key;
+          if (item.valid) {
+            validCount++;
+            lineDiv.style.color = "#22c55e"; // Green
+            lineDiv.title = "OK: Ключ действителен";
+          } else {
+            invalidCount++;
+            lineDiv.style.color = "#ef4444"; // Red
+            lineDiv.title = item.error ? `Ошибка: ${item.error}` : "Недействителен";
+          }
+          editor.appendChild(lineDiv);
+        });
+
+        if (invalidCount === 0) {
+          statusEl.style.color = "#22c55e";
+          statusEl.textContent = `✅ Все ключи (${validCount}) проверены и работают!`;
+        } else {
+          statusEl.style.color = "#ef4444";
+          statusEl.textContent = `⚠️ ${validCount} активных, ${invalidCount} с ошибками (выделены красным).`;
+        }
+      } else {
+        statusEl.style.color = "#ef4444";
+        statusEl.textContent = "Ошибка при проверке ключей на сервере";
+      }
+    } catch (err) {
+      statusEl.style.color = "#ef4444";
+      statusEl.textContent = `Ошибка сети: ${err.message || err}`;
+    } finally {
+      btnTest.disabled = false;
+      btnTest.innerHTML = `<span>🔄</span><span>Проверить</span>`;
+    }
+  });
+
+  // Save button handler
+  btnSave.addEventListener("click", async () => {
+    const finalKeys = getKeysFromEditor();
+    const useFirst = Boolean(chkUseFirst.checked);
+
+    btnSave.disabled = true;
+    btnSave.textContent = "Сохранение...";
+
+    if (!window.transcriberSettings) window.transcriberSettings = {};
+    if (isGroq) {
+      window.transcriberSettings.groq_api_keys = finalKeys;
+      window.transcriberSettings.groq_api_key = finalKeys[0] || "";
+      window.transcriberSettings.groq_use_first_key_only = useFirst;
+      if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+      window.transcriberKeysCache.groq = finalKeys[0] || "";
+      try { localStorage.setItem("proxdmr_key_groq", finalKeys[0] || ""); } catch (_) {}
+    } else {
+      window.transcriberSettings.api_keys = finalKeys;
+      window.transcriberSettings.api_key = finalKeys[0] || "";
+      window.transcriberSettings.gemini_use_first_key_only = useFirst;
+      if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+      window.transcriberKeysCache.gemini = finalKeys[0] || "";
+      try { localStorage.setItem("proxdmr_key_gemini", finalKeys[0] || ""); } catch (_) {}
+    }
+
+    try {
+      const payload = {
+        api_key: window.transcriberSettings.api_key || "",
+        api_keys: window.transcriberSettings.api_keys || [],
+        gemini_use_first_key_only: Boolean(window.transcriberSettings.gemini_use_first_key_only),
+        groq_api_key: window.transcriberSettings.groq_api_key || "",
+        groq_api_keys: window.transcriberSettings.groq_api_keys || [],
+        groq_use_first_key_only: Boolean(window.transcriberSettings.groq_use_first_key_only)
+      };
+      await fetch("/api/transcriber/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.warn("[TRANSCRIBER] Failed to save keys to server:", err);
+    }
+
+    const optRecEng = document.getElementById("optTranscriberEngine");
+    const optTransEng = document.getElementById("optTranslationEngine");
+    if (typeof updateRecApiKeyUI === "function") updateRecApiKeyUI(optRecEng ? optRecEng.value : "gemini");
+    if (typeof updateTransApiKeyUI === "function") updateTransApiKeyUI(optTransEng ? optTransEng.value : "gemini");
+
+    if (typeof showToast === "function") {
+      showToast(`Ключи ${isGroq ? "Groq" : "Gemini"} сохранены (${finalKeys.length})`, 2500);
+    }
+    closeApiKeysManagerPopover();
+  });
+}
+
 function updateRecApiKeyUI(engine) {
   const lbl = document.getElementById("lblTranscriberRecApiKey");
-  const inp = document.getElementById("optTranscriberRecApiKey");
+  const btn = document.getElementById("btnManageRecApiKeys");
+  const btnText = document.getElementById("btnManageRecApiKeysText");
+  const btnIcon = document.getElementById("btnManageRecApiKeysIcon");
   const link = document.getElementById("linkTranscriberRecApiKey");
   const hint = document.getElementById("hintTranscriberRecApiKey");
   const subGemini = document.getElementById("subBlockGeminiRec");
-  if (!inp) return;
+  if (!btn) return;
 
+  const eng = (engine || "gemini").toLowerCase().trim();
   if (subGemini) {
-    subGemini.style.display = (engine === "gemini") ? "block" : "none";
+    subGemini.style.display = (eng === "gemini") ? "block" : "none";
   }
 
   const t = window.t || ((k, _, def) => def);
+  const keys = getEngineKeys(eng);
 
-  if (engine === "gemini") {
-    if (lbl) lbl.textContent = t("transcriber.rec_key_gemini_lbl", {}, "🔑 Ключ Gemini API (для распознавания):");
-    inp.placeholder = "AIzaSy...";
-    inp.value = getCachedTranscriberKey("gemini");
+  if (eng === "gemini") {
+    if (lbl) lbl.textContent = t("transcriber.rec_key_gemini_lbl", {}, "🔑 Ключ Gemini API:");
+    if (btnIcon) btnIcon.textContent = "🔑";
+    if (btnText) btnText.textContent = `Gemini API (${keys.length})`;
     if (link) {
       link.href = "https://aistudio.google.com/app/apikey";
       link.textContent = "Google AI Studio ↗";
     }
-    if (hint) hint.textContent = t("transcriber.rec_key_gemini_hint", {}, "Бесплатный ключ от Google AI Studio (aistudio.google.com).");
-  } else if (engine === "groq") {
-    if (lbl) lbl.textContent = t("transcriber.rec_key_groq_lbl", {}, "⚡ Ключ Groq Cloud API (для Whisper):");
-    inp.placeholder = "gsk_...";
-    inp.value = getCachedTranscriberKey("groq");
+    if (hint) hint.textContent = t("transcriber.rec_key_gemini_hint", {}, "Бесплатный ключ от Google AI Studio (aistudio.google.com). Нажмите для добавления и проверки.");
+  } else if (eng === "groq") {
+    if (lbl) lbl.textContent = t("transcriber.rec_key_groq_lbl", {}, "⚡ Ключи Groq Cloud API (для Whisper):");
+    if (btnIcon) btnIcon.textContent = "⚡";
+    if (btnText) btnText.textContent = `Groq API (${keys.length})`;
     if (link) {
       link.href = "https://console.groq.com/keys";
       link.textContent = "🔑 Получить ключ ↗";
     }
-    if (hint) hint.textContent = t("transcriber.rec_key_groq_hint", {}, "Бесплатный ключ на console.groq.com (до 2000 запросов/день). Обеспечивает сверхбыстрый Whisper Large-v3.");
+    if (hint) hint.textContent = t("transcriber.rec_key_groq_hint", {}, "Бесплатный ключ на console.groq.com (до 2000 запросов/день). Нажмите для добавления и проверки.");
   }
 }
 
 function updateTransApiKeyUI(engine) {
   const lbl = document.getElementById("lblTranscriberTransApiKey");
-  const inp = document.getElementById("optTranscriberTransApiKey");
+  const btn = document.getElementById("btnManageTransApiKeys");
+  const btnText = document.getElementById("btnManageTransApiKeysText");
+  const btnIcon = document.getElementById("btnManageTransApiKeysIcon");
   const link = document.getElementById("linkTranscriberTransApiKey");
   const hint = document.getElementById("hintTranscriberTransApiKey");
-  if (!inp) return;
+  const gKey = document.getElementById("groupTransApiKey");
+  if (!btn) return;
+
+  const eng = (engine || "gemini").toLowerCase().trim();
+  if (eng === "qwen") {
+    if (gKey) gKey.style.display = "none";
+    return;
+  }
+  const optNoTrEl = document.getElementById("optTranscriberNoTranslate");
+  const isNoTr = optNoTrEl && optNoTrEl.checked;
+  if (gKey && !isNoTr) gKey.style.display = "block";
 
   const t = window.t || ((k, _, def) => def);
+  const keys = getEngineKeys(eng);
 
-  if (engine === "gemini") {
-    if (lbl) lbl.textContent = t("transcriber.trans_key_gemini_lbl", {}, "🔑 Ключ Gemini API (для перевода):");
-    inp.placeholder = "AIzaSy...";
-    inp.value = getCachedTranscriberKey("gemini");
+  if (eng === "gemini") {
+    if (lbl) lbl.textContent = t("transcriber.trans_key_gemini_lbl", {}, "🔑 Ключи Gemini API (для перевода):");
+    if (btnIcon) btnIcon.textContent = "🔑";
+    if (btnText) btnText.textContent = `Gemini API (${keys.length})`;
     if (link) {
       link.href = "https://aistudio.google.com/app/apikey";
       link.textContent = "Google AI Studio ↗";
     }
-    if (hint) hint.textContent = t("transcriber.trans_key_gemini_hint", {}, "Используется для перевода текста через Gemini.");
-  } else if (engine === "groq") {
-    if (lbl) lbl.textContent = t("transcriber.trans_key_groq_lbl", {}, "⚡ Ключ Groq Cloud API (для перевода Llama 3.3):");
-    inp.placeholder = "gsk_...";
-    inp.value = getCachedTranscriberKey("groq");
+    if (hint) hint.textContent = t("transcriber.trans_key_gemini_hint", {}, "Используется для перевода текста через Gemini. Нажмите для добавления и проверки.");
+  } else if (eng === "groq") {
+    if (lbl) lbl.textContent = t("transcriber.trans_key_groq_lbl", {}, "⚡ Ключи Groq Cloud API (для перевода Llama 3.3):");
+    if (btnIcon) btnIcon.textContent = "⚡";
+    if (btnText) btnText.textContent = `Groq API (${keys.length})`;
     if (link) {
       link.href = "https://console.groq.com/keys";
       link.textContent = "🔑 Получить ключ ↗";
     }
-    if (hint) hint.textContent = t("transcriber.trans_key_groq_hint", {}, "Используется для сверхбыстрого перевода через модель Llama 3.3 70B.");
+    if (hint) hint.textContent = t("transcriber.trans_key_groq_hint", {}, "Используется для сверхбыстрого перевода через модель Llama 3.3 70B. Нажмите для добавления и проверки.");
   }
 }
 
@@ -5173,7 +6084,11 @@ function updateNoTranslateUI(isNoTranslate) {
   const gTarget = document.getElementById("groupTranscriberTargetLang");
   const disp = isNoTranslate ? "none" : "block";
   if (gEngine) gEngine.style.display = disp;
-  if (gKey) gKey.style.display = disp;
+  if (gKey) {
+    const optTlEng = document.getElementById("optTranslationEngine");
+    const isQwen = optTlEng && optTlEng.value === "qwen";
+    gKey.style.display = (isNoTranslate || isQwen) ? "none" : "block";
+  }
   if (gTarget) gTarget.style.display = disp;
 }
 
@@ -5189,25 +6104,27 @@ function initSpeechRecognitionFrame() {
     toggle.addEventListener('click', () => frame.classList.toggle('collapsed'));
   }
 
-  if (body) {
-    body.querySelectorAll('.apikey-eye-btn').forEach(btn => {
-      if (btn._wired) return;
-      btn._wired = true;
-      btn.addEventListener('click', () => {
-        const inp = document.getElementById(btn.dataset.target);
-        if (!inp) return;
-        const show = inp.type === 'password';
-        inp.type = show ? 'text' : 'password';
-        btn.textContent = show ? '🙈' : '👁️';
-      });
-    });
-  }
-
   const optRecEng = document.getElementById('optTranscriberEngine');
   const optTransEng = document.getElementById('optTranslationEngine');
   const optNoTrans = document.getElementById('optTranscriberNoTranslate');
-  const inpRecKey = document.getElementById('optTranscriberRecApiKey');
-  const inpTransKey = document.getElementById('optTranscriberTransApiKey');
+  const btnRecKeys = document.getElementById('btnManageRecApiKeys');
+  const btnTransKeys = document.getElementById('btnManageTransApiKeys');
+
+  if (btnRecKeys && !btnRecKeys._wired) {
+    btnRecKeys._wired = true;
+    btnRecKeys.addEventListener('click', () => {
+      const curEng = (optRecEng ? optRecEng.value : 'gemini').toLowerCase();
+      openApiKeysManagerPopover(curEng, btnRecKeys);
+    });
+  }
+
+  if (btnTransKeys && !btnTransKeys._wired) {
+    btnTransKeys._wired = true;
+    btnTransKeys.addEventListener('click', () => {
+      const curEng = (optTransEng ? optTransEng.value : 'gemini').toLowerCase();
+      openApiKeysManagerPopover(curEng, btnTransKeys);
+    });
+  }
 
   if (optRecEng && !optRecEng._wired) {
     optRecEng._wired = true;
@@ -5229,32 +6146,6 @@ function initSpeechRecognitionFrame() {
     optNoTrans._wired = true;
     optNoTrans.addEventListener('change', () => {
       updateNoTranslateUI(optNoTrans.checked);
-    });
-  }
-
-  if (inpRecKey && !inpRecKey._wired) {
-    inpRecKey._wired = true;
-    inpRecKey.addEventListener('input', () => {
-      const curRec = optRecEng ? optRecEng.value : 'gemini';
-      const curTrans = optTransEng ? optTransEng.value : 'gemini';
-      const val = inpRecKey.value.trim();
-      setTranscriberKey(curRec, val);
-      if (curRec === curTrans && inpTransKey) {
-        inpTransKey.value = val;
-      }
-    });
-  }
-
-  if (inpTransKey && !inpTransKey._wired) {
-    inpTransKey._wired = true;
-    inpTransKey.addEventListener('input', () => {
-      const curRec = optRecEng ? optRecEng.value : 'gemini';
-      const curTrans = optTransEng ? optTransEng.value : 'gemini';
-      const val = inpTransKey.value.trim();
-      setTranscriberKey(curTrans, val);
-      if (curRec === curTrans && inpRecKey) {
-        inpRecKey.value = val;
-      }
     });
   }
 }
@@ -5333,6 +6224,25 @@ function initGeminiTtsFrame() {
         if (checkRes.ok) {
           populateVoiceSelect(optVoi, "piper", effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
         }
+      } else if (optEngine.value === "silero") {
+        const checkSilero = await checkAndPromptSileroModel(effLang, async (fallbackEng) => {
+          optEngine.value = fallbackEng;
+          updateEngineUI();
+          if (fallbackEng === "piper") {
+            await checkAndPromptPiperModel(effLang, (newVoiceId) => {
+              populateVoiceSelect(optVoi, "piper", effLang, newVoiceId, hint);
+            }, (fb2) => {
+              optEngine.value = fb2;
+              updateEngineUI();
+              populateVoiceSelect(optVoi, fb2, effLang, null, hint);
+            });
+          } else {
+            populateVoiceSelect(optVoi, fallbackEng, effLang, null, hint);
+          }
+        });
+        if (checkSilero.ok) {
+          populateVoiceSelect(optVoi, "silero", effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
+        }
       } else {
         populateVoiceSelect(optVoi, optEngine.value, effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
       }
@@ -5388,9 +6298,28 @@ function initGeminiTtsFrame() {
         if (checkRes.ok) {
           populateVoiceSelect(optVoi, "piper", newLang, null, hint);
         }
+      } else if (curEng === "silero") {
+        const checkSilero = await checkAndPromptSileroModel(newLang, async (fallbackEng) => {
+          if (optEngine) optEngine.value = fallbackEng;
+          updateEngineUI();
+          if (fallbackEng === "piper") {
+            await checkAndPromptPiperModel(newLang, (newVoiceId) => {
+              populateVoiceSelect(optVoi, "piper", newLang, newVoiceId, hint);
+            }, (fb2) => {
+              if (optEngine) optEngine.value = fb2;
+              updateEngineUI();
+              populateVoiceSelect(optVoi, fb2, newLang, null, hint);
+            });
+          } else {
+            populateVoiceSelect(optVoi, fallbackEng, newLang, null, hint);
+          }
+        });
+        if (checkSilero.ok) {
+          populateVoiceSelect(optVoi, "silero", newLang, null, hint);
+        }
       } else if (curEng === "browser") {
         populateVoiceSelect(optVoi, "browser", newLang, null, hint);
-      } else if (curEng === "silero") {
+      } else {
         populateVoiceSelect(optVoi, curEng, newLang, null, hint);
       }
     });
@@ -5409,6 +6338,11 @@ function initGeminiTtsFrame() {
     const optTtsSpeed = document.getElementById('optTtsSpeed');
 
     const engine = optTtsEngine ? optTtsEngine.value : 'gemini';
+    const curTargetL = resolveCurrentTargetLang();
+    if (engine === 'silero' && curTargetL && !SILERO_SUPPORTED_LANGUAGES.includes(curTargetL.toLowerCase())) {
+      showToast(`⚠️ Язык [${curTargetL.toUpperCase()}] не поддерживается в Silero TTS. Выберите Piper TTS или Gemini API.`, 4000);
+      return;
+    }
     const model = optTtsModel ? optTtsModel.value : (engine === 'groq' ? 'canopylabs/orpheus-v1-english' : 'gemini-3.1-flash-tts-preview');
     const style = optTtsStyle ? optTtsStyle.value : 'radio';
     const voice = (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith('__download__')) ? optTtsVoice.value : (engine === 'groq' ? 'troy' : 'auto');
@@ -5838,6 +6772,17 @@ function initTranscriberSettings() {
       if (qAnnounce) qAnnounce.checked = isAnnounce;
     });
   }
+  const optTtsSkipShortCallsign = document.getElementById("optTtsSkipShortCallsign");
+  if (optTtsSkipShortCallsign) {
+    optTtsSkipShortCallsign.addEventListener("change", () => {
+      const isSkipShort = optTtsSkipShortCallsign.checked;
+      if (window.transcriberSettings) {
+        window.transcriberSettings.tts_skip_short_callsign = isSkipShort;
+      }
+      const qSkipShort = document.getElementById("ttsQuickSkipShortCallsign");
+      if (qSkipShort) qSkipShort.checked = isSkipShort;
+    });
+  }
 
   fetch("/api/transcriber/settings")
     .then(r => r.json())
@@ -5913,6 +6858,7 @@ function initTranscriberSettings() {
         }
         if (data.settings.tts_mute_others !== undefined && optTtsMuteOthers) optTtsMuteOthers.checked = Boolean(data.settings.tts_mute_others);
         if (data.settings.tts_announce_callsign !== undefined && optTtsAnnounceCallsign) optTtsAnnounceCallsign.checked = Boolean(data.settings.tts_announce_callsign);
+        if (data.settings.tts_skip_short_callsign !== undefined && optTtsSkipShortCallsign) optTtsSkipShortCallsign.checked = Boolean(data.settings.tts_skip_short_callsign);
         const optTtsSpeed = document.getElementById("optTtsSpeed");
         const speedValEl = document.getElementById("optTtsSpeedVal");
         if (data.settings.tts_speed !== undefined && optTtsSpeed) {
@@ -6081,6 +7027,12 @@ function initTranscriberSettings() {
       const isNoTrans = optNoTranslate ? optNoTranslate.checked : false;
       const targetLangVal = isNoTrans ? "none" : (optTargetLang && optTargetLang.value ? optTargetLang.value : "ru");
 
+      const chosenTtsEng = optTtsEngine ? optTtsEngine.value : "gemini";
+      if (chosenTtsEng === "silero" && targetLangVal !== "none" && !SILERO_SUPPORTED_LANGUAGES.includes(targetLangVal.toLowerCase())) {
+        showToast(`⚠️ Язык [${targetLangVal.toUpperCase()}] не поддерживается в Silero TTS. Выберите Piper TTS или Gemini API.`, 4500);
+        return;
+      }
+
       const recEng = document.getElementById("optTranscriberEngine") ? document.getElementById("optTranscriberEngine").value : "gemini";
       const transEng = document.getElementById("optTranslationEngine") ? document.getElementById("optTranslationEngine").value : "gemini";
       const recInp = document.getElementById("optTranscriberRecApiKey");
@@ -6096,10 +7048,15 @@ function initTranscriberSettings() {
         localStorage.setItem("proxdmr_trans_engine", transEng);
       } catch (_) {}
 
+      const sKeys = window.transcriberSettings || {};
       const payload = {
         enabled: true,
         api_key: getCachedTranscriberKey("gemini"),
+        api_keys: getEngineKeys("gemini"),
+        gemini_use_first_key_only: Boolean(sKeys.gemini_use_first_key_only),
         groq_api_key: getCachedTranscriberKey("groq"),
+        groq_api_keys: getEngineKeys("groq"),
+        groq_use_first_key_only: Boolean(sKeys.groq_use_first_key_only),
         deepgram_api_key: getCachedTranscriberKey("deepgram"),
         model: optModel ? optModel.value : "gemini-3.5-flash",
         transcriber_engine: recEng,
@@ -6113,6 +7070,7 @@ function initTranscriberSettings() {
         tts_pause_ducking_level: optTtsPauseDucking ? (Math.max(0, Math.min(100, parseFloat(optTtsPauseDucking.value) || 100)) / 100.0) : 1.0,
         tts_mute_others: optTtsMuteOthers ? optTtsMuteOthers.checked : true,
         tts_announce_callsign: (optTtsAnnounceCallsign ? optTtsAnnounceCallsign.checked : false),
+        tts_skip_short_callsign: (optTtsSkipShortCallsign ? optTtsSkipShortCallsign.checked : true),
         tts_style: (document.getElementById("optTtsStyle") ? document.getElementById("optTtsStyle").value : "radio")
       };
 
@@ -6132,6 +7090,10 @@ function initTranscriberSettings() {
           }
           const qAnnounce = document.getElementById("ttsQuickAnnounceCallsign");
           if (qAnnounce) qAnnounce.checked = Boolean(resJson.settings && resJson.settings.tts_announce_callsign);
+          const qSkipShort = document.getElementById("ttsQuickSkipShortCallsign");
+          if (qSkipShort && resJson.settings && resJson.settings.tts_skip_short_callsign !== undefined) {
+            qSkipShort.checked = Boolean(resJson.settings.tts_skip_short_callsign);
+          }
           const qSolo = document.getElementById("ttsQuickSolo");
           if (qSolo) qSolo.checked = Boolean(resJson.settings && resJson.settings.tts_mute_others);
           const qStyle = document.getElementById("ttsQuickStyle");
@@ -6218,6 +7180,9 @@ export {
   getGeminiTtsVoices,
   populateVoiceSelect,
   checkAndPromptPiperModel,
+  checkAndPromptSileroModel,
+  SILERO_SUPPORTED_LANGUAGES,
+  isStageLocalEngine,
   SUPPORTED_TARGET_LANGUAGES,
   renderTargetLangSelect,
   renderTranscriberModelOptions,
@@ -6227,11 +7192,24 @@ export {
   LANG_3LETTER_MAP,
   refreshAllSlotTtsBadges,
   syncTtsSoloMode,
+  ensurePipelineStage,
+  updateSlotPipelineVisibility,
+  setPipelineStageState,
+  handlePipelineStage,
+  getCaptionFontSize,
+  setCaptionFontSize,
+  changeCaptionFontSize,
   TRANSCRIBER_MODELS_META,
   TTS_MODELS_META
 };
 
 if (typeof window !== "undefined") {
+  try {
+    setCaptionFontSize(getCaptionFontSize(), false);
+  } catch (_) {}
+  window.getCaptionFontSize = getCaptionFontSize;
+  window.setCaptionFontSize = setCaptionFontSize;
+  window.changeCaptionFontSize = changeCaptionFontSize;
   window.handleCallTranscription = handleCallTranscription;
   window.handleTranscriptionError = handleTranscriptionError;
   window.handleTtsError = handleTtsError;
@@ -6271,6 +7249,9 @@ if (typeof window !== "undefined") {
   window.getGeminiTtsVoices = getGeminiTtsVoices;
   window.populateVoiceSelect = populateVoiceSelect;
   window.checkAndPromptPiperModel = checkAndPromptPiperModel;
+  window.checkAndPromptSileroModel = checkAndPromptSileroModel;
+  window.SILERO_SUPPORTED_LANGUAGES = SILERO_SUPPORTED_LANGUAGES;
+  window.isStageLocalEngine = isStageLocalEngine;
   window.SUPPORTED_TARGET_LANGUAGES = SUPPORTED_TARGET_LANGUAGES;
   window.renderTargetLangSelect = renderTargetLangSelect;
   window.renderTranscriberModelOptions = renderTranscriberModelOptions;
@@ -6280,6 +7261,9 @@ if (typeof window !== "undefined") {
   window.LANG_3LETTER_MAP = LANG_3LETTER_MAP;
   window.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
   window.syncTtsSoloMode = syncTtsSoloMode;
+  window.handlePipelineStage = handlePipelineStage;
+  window.setPipelineStageState = setPipelineStageState;
+  window.updateSlotPipelineVisibility = updateSlotPipelineVisibility;
   window.isAnySlotTtsActive = isAnySlotTtsActive;
 
   window.__proxdmr = window.__proxdmr || {};
@@ -6309,6 +7293,7 @@ if (typeof window !== "undefined") {
   window.__proxdmr.updateCardTranscribeLayout = updateCardTranscribeLayout;
   window.__proxdmr.populateVoiceSelect = populateVoiceSelect;
   window.__proxdmr.checkAndPromptPiperModel = checkAndPromptPiperModel;
+  window.__proxdmr.checkAndPromptSileroModel = checkAndPromptSileroModel;
   window.__proxdmr.renderTargetLangSelect = renderTargetLangSelect;
   window.__proxdmr.renderTranscriberModelOptions = renderTranscriberModelOptions;
   window.__proxdmr.renderTtsModelOptions = renderTtsModelOptions;

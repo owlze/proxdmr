@@ -30,7 +30,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.284">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.308&old=2.9.284">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -572,7 +572,35 @@
               <button type="button" id="btnPanTs1" class="vfo-pan-btn btn-pan-ts1 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
               <span id="vfoTs1LangBadge" class="vfo-lang-badge" role="button" tabindex="0" title="Транскрибатор TS1: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts1_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
               <span id="vfoTs1TtsBadge" class="vfo-tts-badge" role="button" tabindex="0" title="Озвучка речи TS1: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts1_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-              <button type="button" id="btnMuteTs1" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)">R</span></button>
+              <button type="button" id="btnMuteTs1" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+              <!-- AI Pipeline Stage Indicators -->
+              <div class="vfo-pipeline-stage">
+                <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+                    <line x1="9" y1="5" x2="15" y2="5"/>
+                    <line x1="9" y1="8" x2="15" y2="8"/>
+                    <path d="M5 10a7 7 0 0 0 14 0"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-trans" title="Перевод текста" data-i18n-title="vfo.pipeline_trans_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="17 1 21 5 17 9"/>
+                    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                    <polyline points="7 23 3 19 7 15"/>
+                    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  </svg>
+                </div>
+              </div>
               <div class="vfo-center-col">
                 <div class="vfo-caller-row">
                   <span id="vfoTs1CallerFlag" class="vfo-flag ts-caller-flag"><span class="flag-badge flag-global" title="Global"><svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span></span>
@@ -598,7 +626,35 @@
               <button type="button" id="btnPanTs2" class="vfo-pan-btn btn-pan-ts2 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
               <span id="vfoTs2LangBadge" class="vfo-lang-badge" role="button" tabindex="0" title="Транскрибатор TS2: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts2_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
               <span id="vfoTs2TtsBadge" class="vfo-tts-badge" role="button" tabindex="0" title="Озвучка речи TS2: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts2_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-              <button type="button" id="btnMuteTs2" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)">R</span></button>
+              <button type="button" id="btnMuteTs2" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+              <!-- AI Pipeline Stage Indicators -->
+              <div class="vfo-pipeline-stage">
+                <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+                    <line x1="9" y1="5" x2="15" y2="5"/>
+                    <line x1="9" y1="8" x2="15" y2="8"/>
+                    <path d="M5 10a7 7 0 0 0 14 0"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-trans" title="Перевод текста" data-i18n-title="vfo.pipeline_trans_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="17 1 21 5 17 9"/>
+                    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                    <polyline points="7 23 3 19 7 15"/>
+                    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  </svg>
+                </div>
+              </div>
               <div class="vfo-center-col">
                 <div class="vfo-caller-row">
                   <span id="vfoTs2CallerFlag" class="vfo-flag ts-caller-flag"></span>
@@ -1111,7 +1167,7 @@
           </button>
 
           <div class="brand-title">
-            <span class="brand-version hotspot-name-badge">Хотспот</span>
+            <span class="brand-version hotspot-name-badge" data-i18n="buttons.add_hotspot">Хотспот</span>
           </div>
 
           <!-- Hotspot Offline Transcribe Button (t) -->
@@ -1219,7 +1275,35 @@
             <button type="button" class="vfo-pan-btn btn-pan-ts1 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
             <span class="vfo-lang-badge vfo-hs-lang-ts1" role="button" tabindex="0" title="Транскрибатор TS1: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts1_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
             <span class="vfo-tts-badge vfo-hs-tts-ts1" role="button" tabindex="0" title="Озвучка речи TS1: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts1_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-            <button type="button" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)">R</span></button>
+            <button type="button" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+              <!-- AI Pipeline Stage Indicators -->
+              <div class="vfo-pipeline-stage">
+                <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+                    <line x1="9" y1="5" x2="15" y2="5"/>
+                    <line x1="9" y1="8" x2="15" y2="8"/>
+                    <path d="M5 10a7 7 0 0 0 14 0"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-trans" title="Перевод текста" data-i18n-title="vfo.pipeline_trans_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="17 1 21 5 17 9"/>
+                    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                    <polyline points="7 23 3 19 7 15"/>
+                    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  </svg>
+                </div>
+              </div>
             <div class="vfo-center-col">
               <div class="vfo-caller-row">
                 <span class="vfo-flag ts-caller-flag">🌐</span>
@@ -1244,7 +1328,35 @@
             <button type="button" class="vfo-pan-btn btn-pan-ts2 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
             <span class="vfo-lang-badge vfo-hs-lang-ts2" role="button" tabindex="0" title="Транскрибатор TS2: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts2_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
             <span class="vfo-tts-badge vfo-hs-tts-ts2" role="button" tabindex="0" title="Озвучка речи TS2: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts2_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-            <button type="button" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)">R</span></button>
+            <button type="button" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+              <!-- AI Pipeline Stage Indicators -->
+              <div class="vfo-pipeline-stage">
+                <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+                    <line x1="9" y1="5" x2="15" y2="5"/>
+                    <line x1="9" y1="8" x2="15" y2="8"/>
+                    <path d="M5 10a7 7 0 0 0 14 0"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-trans" title="Перевод текста" data-i18n-title="vfo.pipeline_trans_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="17 1 21 5 17 9"/>
+                    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                    <polyline points="7 23 3 19 7 15"/>
+                    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                  </svg>
+                </div>
+                <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+                  <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  </svg>
+                </div>
+              </div>
             <div class="vfo-center-col">
               <div class="vfo-caller-row">
                 <span class="vfo-flag ts-caller-flag">🌐</span>
@@ -1973,7 +2085,7 @@
                   <span style="color: var(--text-secondary, #8b949e);" data-i18n="android.haptic_duration">Длительность / сила вибры:</span>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <span id="hapticDurationVal" style="font-weight: 700; color: #58a6ff; font-family: monospace;">{{ haptic_duration | default(45) }} мс</span>
-                    <button type="button" id="btnTestHaptic" title="Проверить виброотклик" style="padding: 2px 8px; font-size: 0.78rem; border-radius: 4px; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
+                    <button type="button" id="btnTestHaptic" title="Проверить виброотклик" data-i18n-title="android.haptic_test_title" style="padding: 2px 8px; font-size: 0.78rem; border-radius: 4px; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
                   </div>
                 </div>
                 <div>
@@ -2235,8 +2347,15 @@
           </div>
         </div>
 
+        <!-- Save General Settings Footer Button -->
+        <div class="modal-footer" style="padding-top: 12px; margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: flex-end; align-items: center; gap: 10px;">
+          <button type="button" id="btnSaveGeneralSettings" class="btn-primary" data-i18n="buttons.save_settings">
+            Сохранить настройки
+          </button>
+        </div>
+
         <!-- Server Restart Block (admin/superadmin only) -->
-        <div id="serverRestartBlock" class="settings-action-block settings-server-block" style="display: {% if is_admin %}block{% else %}none{% endif %}; padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+        <div id="serverRestartBlock" class="settings-action-block settings-server-block" style="display: {% if is_admin %}block{% else %}none{% endif %}; padding-top: 10px; margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
           <div class="settings-server-title" style="font-size: 0.82rem; font-weight: 700; color: #e3b341; margin-bottom: 4px;" data-i18n="general.server_title">
             🖥️ Сервер ProxDMR
           </div>
@@ -2251,13 +2370,6 @@
             Перезапустит службу шлюза ProxDMR и восстановит все соединения
           </small>
         </div>
-
-        <!-- Save General Settings Footer Button -->
-        <div class="modal-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: flex-end; align-items: center; gap: 10px;">
-          <button type="button" id="btnSaveGeneralSettings" class="btn-primary" data-i18n="buttons.save_settings">
-            Сохранить настройки
-          </button>
-        </div>
       </div>
 
       <!-- Tab 5: AI Transcriber Settings (AI Транскрибатор) -->
@@ -2268,7 +2380,7 @@
                     <!-- Speech Recognition & Translation — collapsible frame -->
           <div class="apikeys-frame" id="speechRecognitionFrame" style="margin-bottom: 14px;">
             <div class="apikeys-frame-header" id="speechRecognitionToggle">
-              <span class="apikeys-frame-title" data-i18n="transcriber.speech_rec_title">🎙️ Распознавание и перевод речи</span>
+              <span class="apikeys-frame-title" data-i18n="transcriber.speech_rec_title">🎙️ Транскрибация и перевод речи</span>
               <span class="apikeys-frame-actions">
                 <span class="apikeys-chevron" id="speechRecognitionChevron">▼</span>
               </span>
@@ -2277,37 +2389,37 @@
               <!-- Item 1: Recognition Engine dropdown -->
               <div class="form-group" style="margin-bottom: 10px;">
                 <label for="optTranscriberEngine" data-i18n="transcriber.asr_engine_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
-                  🎙️ Движок распознавания речи:
+                  🎙️ Движок транскрибации речи:
                 </label>
                 <select id="optTranscriberEngine" class="form-input" style="cursor: pointer; width: 100%;">
-                  <option value="gemini" data-i18n="transcriber.engine_gemini">Gemini API</option>
-                  <option value="groq" selected data-i18n="transcriber.engine_groq">Groq Cloud API (Whisper Large-v3)</option>
+                  <option value="gemini" data-i18n="transcriber.engine_gemini">🌐 Gemini API</option>
+                  <option value="groq" selected data-i18n="transcriber.engine_groq">🌐 Groq Cloud API (Whisper Large-v3)</option>
                 </select>
               </div>
 
-              <!-- Item 2: Recognition API Key input -->
+              <!-- Item 2: Recognition API Key button -->
               <div class="form-group" id="groupRecApiKey" style="margin-bottom: 10px;">
-                <label id="lblTranscriberRecApiKey" for="optTranscriberRecApiKey" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
-                  🔑 Ключ Gemini API (для распознавания):
+                <label id="lblTranscriberRecApiKey" for="btnManageRecApiKeys" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🔑 Ключ Gemini API:
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <div class="apikey-input-wrap" style="flex: 1;">
-                    <input type="password" id="optTranscriberRecApiKey" class="form-input apikey-input" placeholder="AIzaSy..." autocomplete="off">
-                    <button type="button" class="apikey-eye-btn" data-target="optTranscriberRecApiKey" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                  </div>
+                  <button type="button" id="btnManageRecApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 6px;">
+                    <span id="btnManageRecApiKeysIcon">🔑</span>
+                    <span id="btnManageRecApiKeysText">Gemini API (0)</span>
+                  </button>
                   <a id="linkTranscriberRecApiKey" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center;">
                     Google AI Studio ↗
                   </a>
                 </div>
                 <small id="hintTranscriberRecApiKey" class="form-hint" style="margin-top: 4px; display: block;">
-                  Бесплатный ключ от Google AI Studio (aistudio.google.com).
+                  Бесплатный ключ от Google AI Studio (aistudio.google.com). Нажмите для добавления и проверки.
                 </small>
               </div>
 
               <!-- Item 3: Gemini Recognition Sub-block (Models query & selection) -->
               <div id="subBlockGeminiRec" style="margin-bottom: 12px; background: rgba(66, 133, 244, 0.05); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: 6px; padding: 10px;">
                 <label for="optTranscriberModel" data-i18n="transcriber.gemini_model_rec_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
-                  🤖 Модель Gemini для распознавания речи:
+                  🤖 Модель Gemini для транскрибации речи:
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
                   <select id="optTranscriberModel" class="form-input" style="flex: 1; cursor: pointer;"></select>
@@ -2323,30 +2435,31 @@
               <!-- Item 4: Translation Engine dropdown -->
               <div class="form-group" id="groupTranslationEngine" style="margin-bottom: 10px;">
                 <label for="optTranslationEngine" data-i18n="transcriber.translation_engine_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
-                  🌐 Движок перевода речи:
+                  🌐 Движок перевода:
                 </label>
                 <select id="optTranslationEngine" class="form-input" style="cursor: pointer; width: 100%;">
-                  <option value="gemini" data-i18n="transcriber.translation_engine_gemini">Gemini API</option>
-                  <option value="groq" selected data-i18n="transcriber.translation_engine_groq">Groq API (Llama 3.3 70B)</option>
+                  <option value="gemini" data-i18n="transcriber.translation_engine_gemini">🌐 Gemini API</option>
+                  <option value="groq" selected data-i18n="transcriber.translation_engine_groq">🌐 Groq API (Llama 3.3 70B)</option>
+                  <option value="qwen" data-i18n="transcriber.translation_engine_qwen">🏠 Qwen 2.5 1.5B</option>
                 </select>
               </div>
 
-              <!-- Item 5: Translation API Key input -->
+              <!-- Item 5: Translation API Key button -->
               <div class="form-group" id="groupTransApiKey" style="margin-bottom: 10px;">
-                <label id="lblTranscriberTransApiKey" for="optTranscriberTransApiKey" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
-                  🔑 Ключ Gemini API (для перевода):
+                <label id="lblTranscriberTransApiKey" for="btnManageTransApiKeys" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🔑 Ключи Gemini API (для перевода):
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <div class="apikey-input-wrap" style="flex: 1;">
-                    <input type="password" id="optTranscriberTransApiKey" class="form-input apikey-input" placeholder="AIzaSy..." autocomplete="off">
-                    <button type="button" class="apikey-eye-btn" data-target="optTranscriberTransApiKey" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
-                  </div>
+                  <button type="button" id="btnManageTransApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 6px;">
+                    <span id="btnManageTransApiKeysIcon">🔑</span>
+                    <span id="btnManageTransApiKeysText">Gemini API (0)</span>
+                  </button>
                   <a id="linkTranscriberTransApiKey" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center;">
                     Google AI Studio ↗
                   </a>
                 </div>
                 <small id="hintTranscriberTransApiKey" class="form-hint" style="margin-top: 4px; display: block;">
-                  Используется для перевода текста через Gemini.
+                  Используется для перевода текста через Gemini. Нажмите для добавления и проверки.
                 </small>
               </div>
 
@@ -2354,7 +2467,7 @@
               <div class="form-group" style="margin-bottom: 10px;">
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); user-select: none;">
                   <input type="checkbox" id="optTranscriberNoTranslate">
-                  <span data-i18n="transcriber.no_translate_lbl">Результат распознавания без перевода</span>
+                  <span data-i18n="transcriber.no_translate_lbl">Результат транскрибации без перевода</span>
                 </label>
               </div>
 
@@ -2392,11 +2505,11 @@
                   🎙️ Движок синтеза речи:
                 </label>
                 <select id="optTtsEngine" class="form-input" style="cursor: pointer; width: 100%;">
-                  <option value="piper" selected data-i18n="transcriber.tts_engine_piper">Piper TTS (local)</option>
-                  <option value="silero" data-i18n="transcriber.tts_engine_silero">Silero TTS v5 (local)</option>
-                  <option value="browser" data-i18n="transcriber.tts_engine_browser">System TTS (local)</option>
-                  <option value="gemini" data-i18n="transcriber.tts_engine_gemini">* Gemini API</option>
-                  <option value="groq" data-i18n="transcriber.tts_engine_groq">* Groq Cloud TTS</option>
+                  <option value="piper" selected data-i18n="transcriber.tts_engine_piper">🏠 Piper TTS (local)</option>
+                  <option value="silero" data-i18n="transcriber.tts_engine_silero">🏠 Silero TTS v5 (local)</option>
+                  <option value="browser" data-i18n="transcriber.tts_engine_browser">🏠 System TTS (local)</option>
+                  <option value="gemini" data-i18n="transcriber.tts_engine_gemini">🌐 Gemini API</option>
+                  <option value="groq" data-i18n="transcriber.tts_engine_groq">🌐 Groq Cloud TTS</option>
                 </select>
               </div>
 
@@ -2447,6 +2560,13 @@
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.83rem; font-weight: 500; color: var(--text-primary); user-select: none;">
                       <input type="checkbox" id="optTtsAnnounceCallsign">
                       <span data-i18n="transcriber.tts_announce_callsign">Проговаривать позывной</span>
+                    </label>
+                  </div>
+                  <!-- Skip short callsign checkbox -->
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.83rem; font-weight: 500; color: var(--text-primary); user-select: none;">
+                      <input type="checkbox" id="optTtsSkipShortCallsign" checked>
+                      <span data-i18n="transcriber.tts_skip_short_callsign">Не проговаривать Call sign для реплик короче 20 букв</span>
                     </label>
                   </div>
                   <!-- Speech playback speed slider -->
@@ -3356,7 +3476,7 @@
   </div>
 
   <!-- Modal: Direct Call / Routing Module -->
-  <div id="directCallModal" class="modal direct-call-modal-wrapper" style="z-index: 1065;">
+  <div id="directCallModal" class="modal direct-call-modal-wrapper" style="z-index: 1170;">
     <div class="modal-content direct-call-card">
       <div class="modal-header">
         <div class="modal-title-group">
@@ -3387,10 +3507,17 @@
             </div>
           </div>
         </div>
+        <label class="direct-call-solo-row" for="directCallSoloCheckbox">
+          <input type="checkbox" id="directCallSoloCheckbox" class="direct-call-solo-checkbox" />
+          <div class="direct-call-solo-text-wrap">
+            <span class="direct-call-solo-title" data-i18n="direct_call.solo_label">Соло</span>
+            <span class="direct-call-solo-desc" id="directCallSoloDesc" data-i18n="direct_call.solo_desc">Отключить вообще все остальные хотспоты, включая фоновую запись лога</span>
+          </div>
+        </label>
         <div class="direct-call-note">
           <span class="direct-call-note-icon">💡</span>
-          <span class="direct-call-note-text" data-i18n="direct_call.note_text">
-            Сворачивает остальные незакрепленные хотспоты, разворачивает выбранный, переключает слот, очищает динамику и подключает группу в статику BM.
+          <span class="direct-call-note-text" id="directCallNoteText" data-i18n="direct_call.note_text">
+            Закрывает неактивные хотспоты, сворачивает в фон с Mute хотспоты с записью лога, очищает статики/динамику на выбранном TS в BM и настраивает вызов.
           </span>
         </div>
       </div>
@@ -4331,7 +4458,7 @@
         <span class="system-update-banner-icon">🚀</span>
         <span id="systemBannerVerTitle" data-i18n="updates.banner_title">Доступно обновление ProxDMR</span>
       </div>
-      <button type="button" id="btnCloseUpdateBanner" class="system-update-banner-close" title="Закрыть" aria-label="Close">&times;</button>
+      <button type="button" id="btnCloseUpdateBanner" class="system-update-banner-close" title="Закрыть" data-i18n-title="buttons.close" aria-label="Close">&times;</button>
     </div>
     <div class="system-update-banner-body">
       <div class="system-update-banner-desc" id="systemBannerDesc" data-i18n="updates.banner_desc">
@@ -4582,16 +4709,16 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.285"></script>
+  <script src="/static/js/i18n.js?v=2.9.309"></script>
   <script src="/static/js/audio-player.js?v=2.9.172"></script>
-  <script src="/static/js/dialog.js?v=2.9.170"></script>
-  <script src="/static/js/auth.js?v=2.9.255"></script>
+  <script src="/static/js/dialog.js?v=2.9.308"></script>
+  <script src="/static/js/auth.js?v=2.9.309"></script>
   <style>
     .admin-act-btn{background:none;border:none;cursor:pointer;font-size:1em;padding:2px 4px;border-radius:4px;opacity:0.8;transition:opacity 0.15s;}
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.193"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.284"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.309"></script>
 </body>
 </html>
 

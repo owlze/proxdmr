@@ -20,6 +20,7 @@ except ImportError:
 
 from tts_normalizer import (
     strip_callsigns_for_tts,
+    clean_display_text,
     normalize_for_russian_tts,
     filter_hesitation_fillers,
 )
@@ -808,6 +809,13 @@ def prepare_text_for_tts(text: str, target_lang: str = "ru", callsign: str = "")
     elif target_lang in ("pl", "pol"):
         for pattern, replacement in RADIO_JARGON_PHONETIC_PL.items():
             clean = re.sub(pattern, replacement, clean, flags=re.IGNORECASE)
+
+    # Fully verbalize all remaining numbers, time expressions, currencies, percentages, and symbols in target language
+    from tts_normalizer import verbalize_symbols_and_numbers_multilang, transliterate_latin_to_cyrillic
+    clean = verbalize_symbols_and_numbers_multilang(clean, target_lang=l_code)
+    if l_code in ("ru", "uk"):
+        clean = transliterate_latin_to_cyrillic(clean)
+
     # Clean formatting and leading/trailing punctuation
     clean = re.sub(r"\s+", " ", clean).strip()
     clean = re.sub(r"\s+([,.:;!?])", r"\1", clean)
@@ -1058,10 +1066,14 @@ class GeminiTranscriberService:
         self.api_key: str = ""
         self.api_keys: List[str] = []
         self._key_index: int = 0
+        self.gemini_use_first_key_only: bool = False
         self.transcriber_engine: str = "gemini"
         self.model: str = "gemini-3.1-flash-lite"
         self.translation_engine: str = "gemini"
         self.groq_api_key: str = ""
+        self.groq_api_keys: List[str] = []
+        self._groq_key_index: int = 0
+        self.groq_use_first_key_only: bool = False
         self.deepgram_api_key: str = ""
         self.target_lang: str = "ru"
 
@@ -1075,6 +1087,7 @@ class GeminiTranscriberService:
         self.tts_pause_ducking_level: float = 1.0
         self.tts_mute_others: bool = True
         self.tts_announce_callsign: bool = False
+        self.tts_skip_short_callsign: bool = True
         self.tts_style: str = "radio"
         self._announced_call_ids: OrderedDict = OrderedDict()
         self._tts_enabled_slots: set = set()
@@ -1104,24 +1117,38 @@ class GeminiTranscriberService:
         tts_pause_ducking_level: float = 1.0,
         tts_mute_others: bool = True,
         tts_announce_callsign: bool = False,
+        tts_skip_short_callsign: bool = True,
         tts_style: str = "radio",
         transcriber_engine: str = "gemini",
         translation_engine: str = "gemini",
         groq_api_key: str = "",
-        deepgram_api_key: str = ""
+        groq_api_keys: Optional[List[str]] = None,
+        deepgram_api_key: str = "",
+        gemini_use_first_key_only: bool = False,
+        groq_use_first_key_only: bool = False
     ):
-        self.api_key = (api_key or "").strip()
+        self.api_keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
+        if not self.api_keys and api_key and api_key.strip():
+            self.api_keys = [api_key.strip()]
+        self.api_key = self.api_keys[0] if self.api_keys else (api_key or "").strip()
+        self.gemini_use_first_key_only = bool(gemini_use_first_key_only)
+
+        self.groq_api_keys = [k.strip() for k in (groq_api_keys or []) if k and k.strip()]
+        if not self.groq_api_keys and groq_api_key and groq_api_key.strip():
+            self.groq_api_keys = [groq_api_key.strip()]
+        self.groq_api_key = self.groq_api_keys[0] if self.groq_api_keys else (groq_api_key or "").strip()
+        self.groq_use_first_key_only = bool(groq_use_first_key_only)
+
         self.transcriber_engine = (transcriber_engine or "gemini").lower().strip()
         self.translation_engine = (translation_engine or "gemini").lower().strip()
-        self.groq_api_key = (groq_api_key or "").strip()
         self.deepgram_api_key = (deepgram_api_key or "").strip()
 
         if self.transcriber_engine == "groq":
-            self.enabled = bool(enabled and self.groq_api_key)
+            self.enabled = bool(enabled and (self.groq_api_keys or self.groq_api_key))
         elif self.transcriber_engine == "deepgram":
             self.enabled = bool(enabled and self.deepgram_api_key)
         else:
-            self.enabled = bool(enabled and self.api_key)
+            self.enabled = bool(enabled and (self.api_keys or self.api_key))
 
         m = model.strip() if model and model.strip() else "gemini-3.1-flash-lite"
         if any(dep in m.lower() for dep in ["gemini-2.5-", "gemini-2.0-", "gemini-1.5-"]):
@@ -1142,6 +1169,7 @@ class GeminiTranscriberService:
         self.tts_pause_ducking_level = float(tts_pause_ducking_level if tts_pause_ducking_level is not None else 1.0)
         self.tts_mute_others = bool(tts_mute_others)
         self.tts_announce_callsign = bool(tts_announce_callsign)
+        self.tts_skip_short_callsign = bool(tts_skip_short_callsign)
         self.tts_style = (tts_style or "radio").lower().strip()
 
         if self.tts_engine == "piper":
@@ -1167,7 +1195,7 @@ class GeminiTranscriberService:
         logger.info(
             f"[TRANSCRIBER] Configured: enabled={self.enabled}, engine={self.transcriber_engine}, "
             f"model={self.model}, trans_engine={self.translation_engine}, "
-            f"target_lang={self.target_lang}, keys={len(self.api_keys)}, "
+            f"target_lang={self.target_lang}, gemini_keys={len(self.api_keys)}, groq_keys={len(self.groq_api_keys)}, "
             f"tts={self.tts_enabled}/{self.tts_engine}/{self.tts_model}"
         )
 
@@ -1175,12 +1203,16 @@ class GeminiTranscriberService:
         if not self.enabled:
             return False
         if self.transcriber_engine == "groq":
-            return bool(self.groq_api_key)
+            return bool(self.groq_api_keys or self.groq_api_key)
         elif self.transcriber_engine == "deepgram":
             return bool(self.deepgram_api_key)
-        return bool(self.api_key)
+        return bool(self.api_keys or self.api_key)
 
     def get_all_keys(self) -> List[str]:
+        if self.gemini_use_first_key_only:
+            if self.api_keys:
+                return [self.api_keys[0]]
+            return [self.api_key] if self.api_key else []
         if self.api_keys:
             return list(self.api_keys)
         return [self.api_key] if self.api_key else []
@@ -1189,8 +1221,29 @@ class GeminiTranscriberService:
         keys = self.get_all_keys()
         if not keys:
             return ""
+        if self.gemini_use_first_key_only:
+            return keys[0]
         key = keys[self._key_index % len(keys)]
         self._key_index = (self._key_index + 1) % len(keys)
+        return key
+
+    def get_all_groq_keys(self) -> List[str]:
+        if self.groq_use_first_key_only:
+            if self.groq_api_keys:
+                return [self.groq_api_keys[0]]
+            return [self.groq_api_key] if self.groq_api_key else []
+        if self.groq_api_keys:
+            return list(self.groq_api_keys)
+        return [self.groq_api_key] if self.groq_api_key else []
+
+    def _get_next_groq_key(self) -> str:
+        keys = self.get_all_groq_keys()
+        if not keys:
+            return ""
+        if self.groq_use_first_key_only:
+            return keys[0]
+        key = keys[self._groq_key_index % len(keys)]
+        self._groq_key_index = (self._groq_key_index + 1) % len(keys)
         return key
 
     def set_slot_enabled(self, hid: str, slot: int, enabled: bool):
@@ -1476,6 +1529,9 @@ class GeminiTranscriberService:
             f"- Every single word, sentence, and clause MUST be fully translated into {target_lang_en}.\n"
             f"- It is STRICTLY FORBIDDEN to leave words, fragments, or phrases in the source language.\n"
             f"- Do NOT translate or output filler hesitation sounds like 'uh', 'um', 'er', 'ah', 'uh-huh' into 'э' or 'э-э'. Completely omit standalone filler hesitation sounds.\n"
+            f"- Spoken radio callsigns and NATO phonetic letter spellings (e.g. 'Nine Henry One Golf Yankee', '9 Hotel 1 GY', 'Alpha Bravo Charlie'):\n"
+            f"  * MUST be assembled into standard alphanumeric callsign format and wrapped in <call>...</call> (e.g. <call>9H1GY</call>, <call>VU2DPN</call>).\n"
+            f"  * NEVER translate NATO phonetic alphabet words or spelled-out letter names literally into words of {target_lang_en} (e.g. do NOT translate 'Henry' into 'Генри', 'Hotel' into 'Отель', 'Golf' into 'Гольф/Голдшанки' when spelling a callsign)!\n"
             f"- The ONLY elements permitted in Latin characters in the output are:\n"
             f"  1) Radio callsigns wrapped in <call>...</call> (e.g. <call>K9CJD</call>, <call>KR4ELD</call>). KEEP CALLSIGNS UNCHANGED.\n"
             f"  2) Standard international radio Q-codes (QTH, QSO, QSL, 73, CQ, Roger) and RST reports (59, 599, 58, 59+20, etc.).\n"
@@ -1485,17 +1541,65 @@ class GeminiTranscriberService:
             f'{{"text": "fully translated text in {target_lang_en} with callsigns in <call>...</call>"}}'
         )
 
+    def _post_multipart_groq_asr_with_retry(self, wav_bytes: bytes) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        keys = self.get_all_groq_keys()
+        if not keys:
+            return None, "Не указан API ключ Groq"
+        attempts = 1 if self.groq_use_first_key_only else min(len(keys), 5)
+        last_err = None
+        for _ in range(attempts):
+            key = self._get_next_groq_key()
+            res, err = self._post_multipart_groq_asr(wav_bytes, key)
+            if not err and res:
+                return res, None
+            last_err = err
+            if not self.groq_use_first_key_only and err and any(term in str(err).lower() for term in ["429", "quota", "rate_limit", "too many requests"]):
+                logger.warning(f"[TRANSCRIBER] Groq ASR key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
+                continue
+            else:
+                break
+        return None, last_err
+
+    def _post_groq_translate_with_retry(self, text: str, source_lang: str, target_lang: str) -> Tuple[Optional[str], Optional[str]]:
+        keys = self.get_all_groq_keys()
+        if not keys:
+            return None, "Не указан API ключ Groq"
+        attempts = 1 if self.groq_use_first_key_only else min(len(keys), 5)
+        last_err = None
+        for _ in range(attempts):
+            key = self._get_next_groq_key()
+            res, err = self._post_groq_translate(text, source_lang, target_lang, key)
+            if not err and res:
+                return res, None
+            last_err = err
+            if not self.groq_use_first_key_only and err and any(term in str(err).lower() for term in ["429", "quota", "rate_limit", "too many requests"]):
+                logger.warning(f"[TRANSCRIBER] Groq Translate key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
+                continue
+            else:
+                break
+        return None, last_err
+
     def _http_post_json_with_retry(
         self, endpoint: str, payload: Dict[str, Any]
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        key = (self.api_key or "").strip()
-        if not key:
+        keys = self.get_all_keys()
+        if not keys:
             return None, "Не указан API ключ Gemini"
-        url = f"https://generativelanguage.googleapis.com/v1beta/{endpoint}?key={key}"
-        result_json, err = self._http_post_json(url, payload)
-        if not err and result_json:
-            return result_json, None
-        return None, err
+        attempts = 1 if self.gemini_use_first_key_only else min(len(keys), 5)
+        last_err = None
+        for _ in range(attempts):
+            key = self._get_next_key()
+            url = f"https://generativelanguage.googleapis.com/v1beta/{endpoint}?key={key}"
+            result_json, err = self._http_post_json(url, payload)
+            if not err and result_json:
+                return result_json, None
+            last_err = err
+            if not self.gemini_use_first_key_only and err and any(term in str(err).lower() for term in ["429", "quota", "resource_exhausted", "limit"]):
+                logger.warning(f"[TRANSCRIBER] Gemini key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
+                continue
+            else:
+                break
+        return None, last_err
 
     async def synthesize_speech(
         self,
@@ -1510,7 +1614,8 @@ class GeminiTranscriberService:
         speed: Optional[float] = None,
         callsign: str = "",
         announce_callsign: bool = False,
-        style: Optional[str] = None
+        style: Optional[str] = None,
+        raw_phrase: bool = False
     ) -> Tuple[Optional[bytes], Optional[str]]:
         """
         Synthesizes text to speech using Piper TTS or Gemini TTS model.
@@ -1538,6 +1643,16 @@ class GeminiTranscriberService:
                 logger.warning(f"[TRANSCRIBER] Piper TTS not ready for language '{effective_lang}': {reason}")
                 return None, f"Модель речи для языка '{effective_lang.upper()}' не готова ({reason})"
 
+            if raw_phrase:
+                wav_bytes, sample_rate, err = await piper_srv.synthesize_async(
+                    text=text,
+                    voice_id=voice_id,
+                    speed=speed or 0.9,
+                    noise_scale=0.7,
+                    noise_w=0.8
+                )
+                return wav_bytes, err
+
             call_announcement_wav = None
             if announce_callsign and callsign:
                 call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="piper")
@@ -1553,8 +1668,8 @@ class GeminiTranscriberService:
                         call_announcement_wav = c_wav
 
             speech_text = strip_callsigns_for_tts(text, callsign=callsign)
-            if effective_lang == "ru":
-                speech_text = normalize_for_russian_tts(speech_text, strip_callsigns=True, callsign=callsign)
+            from tts_normalizer import normalize_text_for_tts
+            speech_text = normalize_text_for_tts(speech_text, target_lang=effective_lang, strip_callsigns=True, callsign=callsign)
 
             try:
                 from tts_normalizer import filter_piper_text_by_language
@@ -1586,6 +1701,16 @@ class GeminiTranscriberService:
             silero_srv = SileroService.get_instance()
             actual_voice = silero_srv.resolve_voice(voice, lang=effective_lang, gender=gender)
 
+            if raw_phrase:
+                wav_bytes, err = await silero_srv.synthesize_async(
+                    text=text,
+                    voice=actual_voice,
+                    lang=effective_lang,
+                    speed=speed or 0.9,
+                    gender=gender
+                )
+                return wav_bytes, err
+
             call_announcement_wav = None
             if announce_callsign and callsign:
                 call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="silero")
@@ -1601,8 +1726,8 @@ class GeminiTranscriberService:
                         call_announcement_wav = c_wav
 
             speech_text = strip_callsigns_for_tts(text, callsign=callsign)
-            if effective_lang == "ru":
-                speech_text = normalize_for_russian_tts(speech_text, strip_callsigns=True, callsign=callsign)
+            from tts_normalizer import prepare_text_for_silero
+            speech_text = prepare_text_for_silero(speech_text, lang=effective_lang)
 
             if not speech_text or not speech_text.strip():
                 if call_announcement_wav:
@@ -1621,17 +1746,20 @@ class GeminiTranscriberService:
                 return comb or wav_bytes, err
             return wav_bytes or call_announcement_wav, err
 
-        from callsign_phonetic import get_callsign_announcement
-        call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine=eff_engine) if (announce_callsign and callsign) else ""
-        clean_text = prepare_text_for_tts(text, effective_lang, callsign=callsign)
-        if call_phrase:
-            clean_text = f"{call_phrase} {clean_text}".strip() if clean_text else call_phrase
+        if raw_phrase:
+            clean_text = (text or "").strip()
+        else:
+            from callsign_phonetic import get_callsign_announcement
+            call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine=eff_engine) if (announce_callsign and callsign) else ""
+            clean_text = prepare_text_for_tts(text, effective_lang, callsign=callsign)
+            if call_phrase:
+                clean_text = f"{call_phrase} {clean_text}".strip() if clean_text else call_phrase
         if not clean_text or not clean_text.strip():
             return None, "Пустой текст для озвучки"
 
         if eff_engine == "groq":
-            groq_key = (api_key or self.groq_api_key or "").strip()
-            if not groq_key:
+            groq_keys = [api_key.strip()] if (api_key and api_key.strip()) else self.get_all_groq_keys()
+            if not groq_keys:
                 return None, "Не указан API ключ Groq для синтеза речи"
 
             groq_model = (model or "canopylabs/orpheus-v1-english").strip()
@@ -1643,11 +1771,6 @@ class GeminiTranscriberService:
                 groq_voice = "troy" if gender != "female" else "hannah"
 
             url = "https://api.groq.com/openai/v1/audio/speech"
-            headers = {
-                "Authorization": f"Bearer {groq_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxDMR/1.0"
-            }
             body = {
                 "model": groq_model,
                 "input": clean_text,
@@ -1657,21 +1780,34 @@ class GeminiTranscriberService:
             if speed and speed != 1.0:
                 body["speed"] = max(0.5, min(2.0, float(speed)))
 
-            try:
-                data_bytes = json.dumps(body).encode("utf-8")
-                req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    wav_data = resp.read()
-                    if wav_data and len(wav_data) > 44:
-                        return wav_data, None
-                    return None, "Groq TTS вернул пустые аудиоданные"
-            except urllib.error.HTTPError as e:
-                err_body = e.read().decode("utf-8", errors="replace")
-                logger.warning(f"[TRANSCRIBER] Groq TTS HTTP {e.code}: {err_body}")
-                return None, f"Ошибка Groq TTS {e.code}: {err_body[:200]}"
-            except Exception as e:
-                logger.warning(f"[TRANSCRIBER] Groq TTS error: {e}")
-                return None, f"Ошибка Groq TTS: {e}"
+            data_bytes = json.dumps(body).encode("utf-8")
+            attempts = 1 if (api_key or self.groq_use_first_key_only) else min(len(groq_keys), 5)
+            last_err = None
+            for _ in range(attempts):
+                groq_key = groq_keys[0] if (api_key or self.groq_use_first_key_only) else self._get_next_groq_key()
+                headers = {
+                    "Authorization": f"Bearer {groq_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxDMR/1.0"
+                }
+                try:
+                    req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        wav_data = resp.read()
+                        if wav_data and len(wav_data) > 44:
+                            return wav_data, None
+                        return None, "Groq TTS вернул пустые аудиоданные"
+                except urllib.error.HTTPError as e:
+                    err_body = e.read().decode("utf-8", errors="replace")
+                    last_err = f"Ошибка Groq TTS {e.code}: {err_body[:200]}"
+                    if not api_key and not self.groq_use_first_key_only and e.code == 429:
+                        logger.warning(f"[TRANSCRIBER] Groq TTS key ...{groq_key[-6:] if len(groq_key)>6 else groq_key} rate limited (429). Switching key...")
+                        continue
+                    return None, last_err
+                except Exception as e:
+                    last_err = f"Ошибка Groq TTS: {e}"
+                    return None, last_err
+            return None, last_err
 
         if eff_engine == "deepgram":
             dg_key = (api_key or self.deepgram_api_key or "").strip()
@@ -1780,22 +1916,219 @@ class GeminiTranscriberService:
         except Exception as e:
             return None, f"Ошибка декодирования аудио TTS: {e}"
 
-    async def _notify_error(self, hid: str, slot: int, error_text: str):
+    async def _notify_error(self, hid: str, slot: int, error_text: str, stage: str = "asr"):
         if self.broadcast_fn:
+            try:
+                eng = self.translation_engine if stage == "translate" else self.transcriber_engine
+                await self.broadcast_fn({
+                    "type": "pipeline_stage",
+                    "hotspot_id": hid,
+                    "slot": slot,
+                    "stage": stage,
+                    "status": "error",
+                    "engine": eng
+                })
+            except Exception:
+                pass
             try:
                 await self.broadcast_fn({
                     "type": "transcription_error",
                     "hotspot_id": hid,
                     "slot": slot,
+                    "stage": stage,
                     "error": error_text
                 })
             except Exception as e:
                 logger.debug(f"[TRANSCRIBER] Failed to broadcast error: {e}")
 
+    async def _announce_callsign_early(
+        self,
+        hid: str,
+        slot: int,
+        callsign: str,
+        call_id: str,
+        eff_lang: str,
+        gender: str = "male",
+        pitch: str = "medium"
+    ):
+        """
+        Synthesizes and broadcasts the standalone callsign announcement
+        immediately after ASR succeeds (before/during translation).
+        Never passes through strip_callsigns_for_tts or speech body normalizers.
+        """
+        try:
+            from callsign_phonetic import get_callsign_announcement
+            eff_engine = (self.tts_engine or "gemini").lower().strip()
+            call_phrase = get_callsign_announcement(callsign, lang=eff_lang, engine=eff_engine)
+            if not call_phrase or not call_phrase.strip():
+                return
+
+            if eff_engine == "browser":
+                if self.broadcast_fn:
+                    actual_voice = resolve_tts_voice(self.tts_voice, gender=gender, pitch=pitch)
+                    logger.info(
+                        f"[TRANSCRIBER] TS{slot} Early callsign announcement (browser) [{callsign}] ({eff_lang}): '{call_phrase}'"
+                    )
+                    await self.broadcast_fn({
+                        "type": "tts_speech",
+                        "hotspot_id": hid,
+                        "slot": slot,
+                        "text": call_phrase,
+                        "call_id": call_id,
+                        "engine": "browser",
+                        "voice": actual_voice,
+                        "gender": gender,
+                        "pitch": pitch,
+                        "speed": 1.0,
+                        "is_callsign_announcement": True,
+                        "ducking_level": self.tts_ducking_level,
+                        "pause_ducking_level": self.tts_pause_ducking_level,
+                        "mute_others": self.tts_mute_others
+                    })
+                return
+
+            if eff_engine == "piper":
+                from piper_service import PiperService
+                piper_srv = PiperService.get_instance()
+                ready, voice_id, reason = piper_srv.is_voice_ready_for_lang(eff_lang, self.tts_voice)
+                if not ready or not voice_id:
+                    return
+                if not piper_srv.is_voice_loaded(voice_id):
+                    try:
+                        loaded_ok = await asyncio.wait_for(piper_srv.preload_voice_async(voice_id), timeout=3.5)
+                        if not loaded_ok:
+                            return
+                    except Exception:
+                        return
+                logger.info(
+                    f"[TRANSCRIBER] TS{slot} Early callsign announcement (piper) [{callsign}] ({eff_lang}): '{call_phrase}' at 0.9x"
+                )
+                c_wav, _, c_err = await piper_srv.synthesize_async(
+                    text=call_phrase,
+                    voice_id=voice_id,
+                    speed=0.9,
+                    noise_scale=0.7,
+                    noise_w=0.8
+                )
+                if c_wav and self.broadcast_fn:
+                    b64_wav = base64.b64encode(c_wav).decode("ascii")
+                    await self.broadcast_fn({
+                        "type": "tts_speech",
+                        "hotspot_id": hid,
+                        "slot": slot,
+                        "audio_base64": b64_wav,
+                        "text": call_phrase,
+                        "call_id": call_id,
+                        "engine": "piper",
+                        "voice": voice_id,
+                        "gender": gender,
+                        "pitch": pitch,
+                        "speed": 1.0,
+                        "is_callsign_announcement": True,
+                        "ducking_level": self.tts_ducking_level,
+                        "pause_ducking_level": self.tts_pause_ducking_level,
+                        "mute_others": self.tts_mute_others
+                    })
+                elif c_err:
+                    logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign Piper synthesis failed: {c_err}")
+                return
+
+            if eff_engine == "silero":
+                from silero_service import SileroService
+                silero_srv = SileroService.get_instance()
+                if not silero_srv.is_lang_supported(eff_lang):
+                    return
+                actual_voice = silero_srv.resolve_voice(self.tts_voice, lang=eff_lang, gender=gender)
+                logger.info(
+                    f"[TRANSCRIBER] TS{slot} Early callsign announcement (silero) [{callsign}] ({eff_lang}): '{call_phrase}' at 0.95x"
+                )
+                c_wav, c_err = await silero_srv.synthesize_async(
+                    text=call_phrase,
+                    voice=actual_voice,
+                    lang=eff_lang,
+                    speed=0.95,
+                    gender=gender
+                )
+                if c_wav and self.broadcast_fn:
+                    b64_wav = base64.b64encode(c_wav).decode("ascii")
+                    await self.broadcast_fn({
+                        "type": "tts_speech",
+                        "hotspot_id": hid,
+                        "slot": slot,
+                        "audio_base64": b64_wav,
+                        "text": call_phrase,
+                        "call_id": call_id,
+                        "engine": "silero",
+                        "voice": actual_voice,
+                        "gender": gender,
+                        "pitch": pitch,
+                        "speed": 0.95,
+                        "is_callsign_announcement": True,
+                        "ducking_level": self.tts_ducking_level,
+                        "pause_ducking_level": self.tts_pause_ducking_level,
+                        "mute_others": self.tts_mute_others
+                    })
+                elif c_err:
+                    logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign Silero synthesis failed: {c_err}")
+                return
+
+            actual_voice = resolve_tts_voice(self.tts_voice, gender=gender, pitch=pitch)
+            logger.info(
+                f"[TRANSCRIBER] TS{slot} Early callsign announcement ({eff_engine}) [{callsign}] ({eff_lang}): '{call_phrase}'"
+            )
+            c_wav, c_err = await self.synthesize_speech(
+                call_phrase,
+                voice=actual_voice,
+                gender=gender,
+                pitch=pitch,
+                target_lang=eff_lang,
+                engine=eff_engine,
+                speed=1.0,
+                style=self.tts_style,
+                raw_phrase=True
+            )
+            if c_wav and self.broadcast_fn:
+                b64_wav = base64.b64encode(c_wav).decode("ascii")
+                await self.broadcast_fn({
+                    "type": "tts_speech",
+                    "hotspot_id": hid,
+                    "slot": slot,
+                    "audio_base64": b64_wav,
+                    "text": call_phrase,
+                    "call_id": call_id,
+                    "engine": eff_engine,
+                    "voice": actual_voice,
+                    "gender": gender,
+                    "pitch": pitch,
+                    "speed": 1.0,
+                    "style": self.tts_style,
+                    "is_callsign_announcement": True,
+                    "ducking_level": self.tts_ducking_level,
+                    "pause_ducking_level": self.tts_pause_ducking_level,
+                    "mute_others": self.tts_mute_others
+                })
+            elif c_err:
+                logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign {eff_engine} synthesis failed: {c_err}")
+        except Exception as e:
+            logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign announcement exception: {e}")
+
     async def _process_chunk(
         self, hid: str, slot: int, src_id: int, callsign: str, pcm_bytes: bytes, is_final: bool, call_id: str = ""
     ):
         try:
+            if self.broadcast_fn:
+                try:
+                    await self.broadcast_fn({
+                        "type": "pipeline_stage",
+                        "hotspot_id": hid,
+                        "slot": slot,
+                        "stage": "asr",
+                        "status": "request",
+                        "engine": self.transcriber_engine
+                    })
+                except Exception:
+                    pass
+
             wav_bytes = self._pcm_to_wav(pcm_bytes)
 
             if self.transcriber_engine == "groq":
@@ -1804,7 +2137,7 @@ class GeminiTranscriberService:
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
-                res, err = await asyncio.to_thread(self._post_multipart_groq_asr, wav_bytes, self.groq_api_key)
+                res, err = await asyncio.to_thread(self._post_multipart_groq_asr_with_retry, wav_bytes)
                 if err or not res:
                     error_text = err or "Ошибка распознавания Groq Cloud API"
                     logger.warning(f"[TRANSCRIBER] TS{slot} Groq ASR error: {error_text}")
@@ -1938,12 +2271,80 @@ class GeminiTranscriberService:
                         return
                 except Exception as e:
                     logger.error(f"[TRANSCRIBER] TS{slot} Gemini ASR exception: {e}")
+                    await self._notify_error(hid, slot, f"Gemini ASR exception: {e}", stage="asr")
                     return
 
-            # --- STAGE 2: TRANSLATION ---
+            # Validate ASR content before proceeding to callsign announcement or translation
+            asr_filtered = filter_hesitation_fillers(original_text)
+            asr_display_check = clean_display_text(asr_filtered, callsign=callsign)
+            if not asr_display_check or not asr_display_check.strip():
+                logger.info(
+                    f"[TRANSCRIBER] TS{slot} [{detected_lang}] Ignored hesitation-only ASR utterance from {callsign or src_id}."
+                )
+                return
+
+            if self.broadcast_fn:
+                try:
+                    await self.broadcast_fn({
+                        "type": "pipeline_stage",
+                        "hotspot_id": hid,
+                        "slot": slot,
+                        "stage": "asr",
+                        "status": "result",
+                        "engine": self.transcriber_engine,
+                        "lang": detected_lang
+                    })
+                except Exception:
+                    pass
+
             target_lang_code = self.target_lang.lower().strip()
             is_direct = target_lang_code == "none"
 
+            # --- STANDALONE CALLSIGN ANNOUNCEMENT (after ASR, before translation starts) ---
+            callsign_tts_task = None
+            effective_callsign = (callsign or "").strip()
+            call_seg_id = call_id or f"{hid}_{slot}_{src_id}"
+            if (
+                self.is_slot_tts_enabled(hid, slot)
+                and self.tts_announce_callsign
+                and effective_callsign
+                and call_seg_id not in self._announced_call_ids
+            ):
+                asr_speech_only = strip_callsigns_for_tts(asr_display_check, callsign=callsign)
+                clean_asr_replica = (asr_speech_only or "").strip()
+                is_short_replica = self.tts_skip_short_callsign and (len(clean_asr_replica) <= 20)
+                if not clean_asr_replica:
+                    logger.info(
+                        f"[TRANSCRIBER] TS{slot} Skipping callsign announcement: ASR text only contained callsign/empty."
+                    )
+                elif is_short_replica:
+                    logger.info(
+                        f"[TRANSCRIBER] TS{slot} Skipping callsign announcement: short replica "
+                        f"(<= 20 chars, len={len(clean_asr_replica)}): '{clean_asr_replica}'"
+                    )
+                else:
+                    self._announced_call_ids[call_seg_id] = True
+                    if len(self._announced_call_ids) > 500:
+                        self._announced_call_ids.popitem(last=False)
+                    eff_call_lang = (detected_lang if is_direct else self.target_lang) or "ru"
+                    eff_call_lang = eff_call_lang.lower().strip()
+                    if eff_call_lang == "none":
+                        eff_call_lang = (detected_lang or "ru").lower().strip()
+
+                    callsign_tts_task = asyncio.create_task(
+                        self._announce_callsign_early(
+                            hid=hid,
+                            slot=slot,
+                            callsign=effective_callsign,
+                            call_id=call_id,
+                            eff_lang=eff_call_lang,
+                            gender=detected_gender,
+                            pitch=detected_pitch
+                        )
+                    )
+                    await asyncio.sleep(0)
+
+            # --- STAGE 2: TRANSLATION ---
             is_same_lang = False
             d_lower = detected_lang.lower()
             if target_lang_code in (d_lower, d_lower[:2]):
@@ -1955,26 +2356,61 @@ class GeminiTranscriberService:
             elif target_lang_code == "en" and d_lower in ("eng", "en"):
                 is_same_lang = True
 
+            translation_failed = False
             if is_direct or is_same_lang:
                 translated_text = original_text
             else:
-                if self.translation_engine == "groq":
-                    if not self.groq_api_key:
+                if self.broadcast_fn:
+                    try:
+                        await self.broadcast_fn({
+                            "type": "pipeline_stage",
+                            "hotspot_id": hid,
+                            "slot": slot,
+                            "stage": "translate",
+                            "status": "request",
+                            "engine": self.translation_engine
+                        })
+                    except Exception:
+                        pass
+                if self.translation_engine == "qwen":
+                    try:
+                        from translation_service import TranslationService
+                        tr_res, tr_err = await TranslationService.get_instance().translate_async(
+                            original_text,
+                            engine=self.translation_engine,
+                            target_lang=target_lang_code,
+                            source_lang=d_lower[:2]
+                        )
+                        if tr_res:
+                            translated_text = clean_transcription_text(tr_res)
+                        else:
+                            logger.warning(f"[TRANSCRIBER] TS{slot} {self.translation_engine.upper()} translation failed: {tr_err}. Falling back to original.")
+                            translated_text = original_text
+                            translation_failed = True
+                    except Exception as e:
+                        logger.error(f"[TRANSCRIBER] TS{slot} Local translation exception: {e}")
+                        translated_text = original_text
+                        translation_failed = True
+                elif self.translation_engine == "groq":
+                    if not self.groq_api_key and not self.groq_api_keys:
                         logger.warning(f"[TRANSCRIBER] TS{slot}: Groq API key missing for translation. Keeping original.")
                         translated_text = original_text
+                        translation_failed = True
                     else:
                         tr_res, tr_err = await asyncio.to_thread(
-                            self._post_groq_translate, original_text, d_lower[:2], target_lang_code, self.groq_api_key
+                            self._post_groq_translate_with_retry, original_text, d_lower[:2], target_lang_code
                         )
                         if tr_res:
                             translated_text = clean_transcription_text(tr_res)
                         else:
                             logger.warning(f"[TRANSCRIBER] TS{slot} Groq translation failed: {tr_err}. Falling back to original.")
                             translated_text = original_text
+                            translation_failed = True
                 elif self.translation_engine == "gemini":
                     if not self.api_key and not self.api_keys:
                         logger.warning(f"[TRANSCRIBER] TS{slot}: Gemini API key missing for translation. Keeping original.")
                         translated_text = original_text
+                        translation_failed = True
                     else:
                         model_name = self.model
                         if model_name.startswith("models/"):
@@ -2017,16 +2453,32 @@ class GeminiTranscriberService:
                                 translated_text = clean_transcription_text(parsed2.get("text", "").strip())
                             else:
                                 translated_text = original_text
+                                translation_failed = True
                         else:
                             logger.warning(f"[TRANSCRIBER] TS{slot} Stage 2 translation failed: {err2}. Falling back to original.")
                             translated_text = original_text
+                            translation_failed = True
                 else:
                     translated_text = original_text
+
+            if not is_direct and not is_same_lang:
+                if self.broadcast_fn:
+                    try:
+                        await self.broadcast_fn({
+                            "type": "pipeline_stage",
+                            "hotspot_id": hid,
+                            "slot": slot,
+                            "stage": "translate",
+                            "status": "error" if translation_failed else "result",
+                            "engine": self.translation_engine
+                        })
+                    except Exception:
+                        pass
 
             final_text = original_text if is_direct else translated_text
             if not is_direct:
                 final_text = filter_hesitation_fillers(final_text)
-            display_text = final_text
+            display_text = clean_display_text(final_text, callsign=callsign)
 
             if not display_text or not display_text.strip():
                 logger.info(
@@ -2056,11 +2508,61 @@ class GeminiTranscriberService:
                 })
 
             # --- STAGE 3: SPEECH SYNTHESIS (TTS) ---
+            if callsign_tts_task is not None:
+                try:
+                    await callsign_tts_task
+                except Exception as ce:
+                    logger.debug(f"[TRANSCRIBER] Early callsign task await error: {ce}")
+
             if self.is_slot_tts_enabled(hid, slot):
+                if self.broadcast_fn:
+                    try:
+                        await self.broadcast_fn({
+                            "type": "pipeline_stage",
+                            "hotspot_id": hid,
+                            "slot": slot,
+                            "stage": "tts",
+                            "status": "request",
+                            "engine": self.tts_engine
+                        })
+                    except Exception:
+                        pass
                 eff_l_choice = (detected_lang if is_direct else self.target_lang) or "ru"
+                eff_l_choice = eff_l_choice.lower().strip()
+                if eff_l_choice == "none":
+                    eff_l_choice = (detected_lang or "ru").lower().strip()
+
                 if self.tts_engine == "silero":
                     from silero_service import SileroService
-                    actual_voice = SileroService.get_instance().resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
+                    silero_srv = SileroService.get_instance()
+                    if not silero_srv.is_lang_supported(eff_l_choice):
+                        logger.warning(
+                            f"[TRANSCRIBER] TS{slot} Silero TTS does not support language '{eff_l_choice}'. "
+                            f"Skipping speech synthesis. User should switch to Piper TTS or Gemini API."
+                        )
+                        if self.broadcast_fn:
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "pipeline_stage",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "stage": "tts",
+                                    "status": "error",
+                                    "engine": "silero"
+                                })
+                            except Exception:
+                                pass
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "tts_error",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "error": f"⚠️ Silero TTS не поддерживает язык [{eff_l_choice.upper()}]. Выберите Piper TTS или Gemini API в настройках."
+                                })
+                            except Exception:
+                                pass
+                        return
+                    actual_voice = silero_srv.resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
                 else:
                     actual_voice = resolve_tts_voice(self.tts_voice, gender=detected_gender, pitch=detected_pitch)
                 if self.tts_engine == "piper":
@@ -2121,11 +2623,10 @@ class GeminiTranscriberService:
                                 logger.warning(f"[TRANSCRIBER] TS{slot} Failed to load voice '{voice_id}'. Skipping utterance.")
                                 return
 
-                        # Strip all callsigns completely from TTS text first to evaluate utterance length
+                        # Strip all callsigns completely from TTS text
                         speech_text = strip_callsigns_for_tts(final_text, callsign=callsign)
-
-                        if eff_lang == "ru":
-                            speech_text = normalize_for_russian_tts(speech_text, strip_callsigns=True, callsign=callsign)
+                        from tts_normalizer import normalize_text_for_tts
+                        speech_text = normalize_text_for_tts(speech_text, target_lang=eff_lang, strip_callsigns=True, callsign=callsign)
 
                         try:
                             from tts_normalizer import filter_piper_text_by_language
@@ -2133,67 +2634,30 @@ class GeminiTranscriberService:
                         except Exception as e:
                             logger.warning(f"[TRANSCRIBER] TS{slot} Failed to filter foreign text for Piper: {e}")
 
-                        clean_replica = (speech_text or "").strip()
-                        is_short_replica = len(clean_replica) <= 20
-
-                        effective_callsign = (callsign or "").strip()
-                        call_seg_id = call_id or f"{hid}_{slot}_{src_id}"
-                        call_announcement_wav = None
-                        announced_phrase = ""
-
-                        if self.tts_announce_callsign and effective_callsign and is_short_replica:
-                            logger.info(
-                                f"[TRANSCRIBER] TS{slot} Skipping callsign announcement: short replica "
-                                f"(<= 20 chars, len={len(clean_replica)}): '{clean_replica}'"
-                            )
-
-                        if self.tts_announce_callsign and effective_callsign and not is_short_replica and call_seg_id not in self._announced_call_ids:
-                            self._announced_call_ids[call_seg_id] = True
-                            if len(self._announced_call_ids) > 500:
-                                self._announced_call_ids.popitem(last=False)
-                            from callsign_phonetic import get_callsign_announcement
-                            announced_phrase = get_callsign_announcement(effective_callsign, lang=eff_lang, engine="piper")
-                            if announced_phrase:
-                                logger.info(
-                                    f"[TRANSCRIBER] TS{slot} Announcing callsign [{effective_callsign}] ({eff_lang}): "
-                                    f"'{announced_phrase}' at 0.9x"
-                                )
-                                c_wav, _, c_err = await piper_srv.synthesize_async(
-                                    text=announced_phrase,
-                                    voice_id=voice_id,
-                                    speed=0.9,
-                                    noise_scale=0.7,
-                                    noise_w=0.8
-                                )
-                                if c_wav:
-                                    call_announcement_wav = c_wav
-                                elif c_err:
-                                    logger.warning(f"[TRANSCRIBER] TS{slot} Callsign announcement synthesis failed: {c_err}")
-
                         if not speech_text or not speech_text.strip():
-                            if call_announcement_wav:
-                                wav_bytes = call_announcement_wav
-                                speech_text = announced_phrase
-                            else:
-                                logger.info(f"[TRANSCRIBER] TS{slot} Piper TTS skipped: text empty after foreign filter / callsign strip.")
-                                return
-                        else:
-                            wav_bytes, sample_rate, tts_err = await piper_srv.synthesize_async(
-                                text=speech_text,
-                                voice_id=voice_id,
-                                speed=self.tts_speed,
-                                noise_scale=0.7,
-                                noise_w=0.8
-                            )
-                            if call_announcement_wav and wav_bytes:
-                                from callsign_phonetic import concatenate_wavs
-                                comb_wav, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=200)
-                                if comb_wav:
-                                    wav_bytes = comb_wav
-                            elif call_announcement_wav and not wav_bytes:
-                                wav_bytes = call_announcement_wav
+                            logger.info(f"[TRANSCRIBER] TS{slot} Piper TTS skipped: text empty after foreign filter / callsign strip.")
+                            return
+
+                        wav_bytes, sample_rate, tts_err = await piper_srv.synthesize_async(
+                            text=speech_text,
+                            voice_id=voice_id,
+                            speed=self.tts_speed,
+                            noise_scale=0.7,
+                            noise_w=0.8
+                        )
                         if wav_bytes and self.broadcast_fn:
                             b64_wav = base64.b64encode(wav_bytes).decode("ascii")
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "pipeline_stage",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "stage": "tts",
+                                    "status": "result",
+                                    "engine": "piper"
+                                })
+                            except Exception:
+                                pass
                             await self.broadcast_fn({
                                 "type": "tts_speech",
                                 "hotspot_id": hid,
@@ -2215,6 +2679,17 @@ class GeminiTranscriberService:
                             if self.broadcast_fn:
                                 try:
                                     await self.broadcast_fn({
+                                        "type": "pipeline_stage",
+                                        "hotspot_id": hid,
+                                        "slot": slot,
+                                        "stage": "tts",
+                                        "status": "error",
+                                        "engine": "piper"
+                                    })
+                                except Exception:
+                                    pass
+                                try:
+                                    await self.broadcast_fn({
                                         "type": "tts_error",
                                         "hotspot_id": hid,
                                         "slot": slot,
@@ -2224,30 +2699,22 @@ class GeminiTranscriberService:
                                     pass
                     except Exception as e:
                         logger.warning(f"[TRANSCRIBER] Piper TTS exception TS{slot}: {e}")
+                        if self.broadcast_fn:
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "pipeline_stage",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "stage": "tts",
+                                    "status": "error",
+                                    "engine": "piper"
+                                })
+                            except Exception:
+                                pass
                 elif self.tts_engine in ("gemini", "groq", "deepgram", "silero"):
                     try:
                         clean_text = strip_callsigns_for_tts(display_text, callsign=callsign)
-                        effective_callsign = (callsign or "").strip()
-                        call_seg_id = call_id or f"{hid}_{slot}_{src_id}"
                         eff_l = (detected_lang if is_direct else self.target_lang) or "ru"
-                        clean_replica = (clean_text or "").strip()
-                        is_short_replica = len(clean_replica) <= 20
-
-                        if self.tts_announce_callsign and effective_callsign and is_short_replica:
-                            logger.info(
-                                f"[TRANSCRIBER] TS{slot} Skipping callsign announcement ({self.tts_engine}): short replica "
-                                f"(<= 20 chars, len={len(clean_replica)}): '{clean_replica}'"
-                            )
-
-                        if self.tts_announce_callsign and effective_callsign and not is_short_replica and call_seg_id not in self._announced_call_ids:
-                            self._announced_call_ids[call_seg_id] = True
-                            if len(self._announced_call_ids) > 500:
-                                self._announced_call_ids.popitem(last=False)
-                            from callsign_phonetic import get_callsign_announcement
-                            call_phrase = get_callsign_announcement(effective_callsign, lang=eff_l, engine=self.tts_engine)
-                            if call_phrase:
-                                logger.info(f"[TRANSCRIBER] TS{slot} Announcing callsign [{effective_callsign}] ({eff_l}): '{call_phrase}'")
-                                clean_text = f"{call_phrase} {clean_text}".strip() if clean_text else call_phrase
                         if not clean_text or not clean_text.strip():
                             logger.info(f"[TRANSCRIBER] TS{slot} {self.tts_engine} TTS skipped: text empty after callsign strip.")
                         else:
@@ -2256,10 +2723,22 @@ class GeminiTranscriberService:
                                 voice=actual_voice,
                                 gender=detected_gender,
                                 pitch=detected_pitch,
-                                callsign=callsign
+                                callsign=callsign,
+                                target_lang=eff_l
                             )
                             if wav_bytes and self.broadcast_fn:
                                 b64_wav = base64.b64encode(wav_bytes).decode("ascii")
+                                try:
+                                    await self.broadcast_fn({
+                                        "type": "pipeline_stage",
+                                        "hotspot_id": hid,
+                                        "slot": slot,
+                                        "stage": "tts",
+                                        "status": "result",
+                                        "engine": self.tts_engine
+                                    })
+                                except Exception:
+                                    pass
                                 await self.broadcast_fn({
                                     "type": "tts_speech",
                                     "hotspot_id": hid,
@@ -2282,6 +2761,17 @@ class GeminiTranscriberService:
                                 if self.broadcast_fn:
                                     try:
                                         await self.broadcast_fn({
+                                            "type": "pipeline_stage",
+                                            "hotspot_id": hid,
+                                            "slot": slot,
+                                            "stage": "tts",
+                                            "status": "error",
+                                            "engine": self.tts_engine
+                                        })
+                                    except Exception:
+                                        pass
+                                    try:
+                                        await self.broadcast_fn({
                                             "type": "tts_error",
                                             "hotspot_id": hid,
                                             "slot": slot,
@@ -2291,6 +2781,18 @@ class GeminiTranscriberService:
                                         logger.debug(f"[TRANSCRIBER] Failed to broadcast tts_error: {be}")
                     except Exception as e:
                         logger.warning(f"[TRANSCRIBER] TTS exception TS{slot}: {e}")
+                        if self.broadcast_fn:
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "pipeline_stage",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "stage": "tts",
+                                    "status": "error",
+                                    "engine": self.tts_engine
+                                })
+                            except Exception:
+                                pass
                 elif self.tts_engine == "browser":
                     if self.broadcast_fn:
                         clean_speech = strip_callsigns_for_tts(display_text, callsign=callsign)
@@ -2444,9 +2946,9 @@ class GeminiTranscriberService:
                 if parsed2 and parsed2.get("text"):
                     translated_text = clean_transcription_text(parsed2.get("text", "").strip())
                     translated_text = filter_hesitation_fillers(translated_text)
-                    return translated_text, detected_lang, None
+                    return clean_display_text(translated_text, callsign=src_callsign), detected_lang, None
 
-            return original_text, detected_lang, None
+            return clean_display_text(original_text, callsign=src_callsign), detected_lang, None
         except Exception as e:
             logger.warning(f"[TRANSCRIBER] Offline transcription exception: {e}")
             return None, None, str(e)
@@ -2463,6 +2965,37 @@ class GeminiTranscriberService:
         target_code = (target_lang or "ru").lower().strip()
         if target_code == "none":
             return text, None
+
+        if self.translation_engine == "qwen":
+            try:
+                from translation_service import TranslationService
+                tr_res, tr_err = await TranslationService.get_instance().translate_async(
+                    text,
+                    engine=self.translation_engine,
+                    target_lang=target_code,
+                    source_lang=source_lang
+                )
+                if tr_res:
+                    tr_clean = clean_transcription_text(tr_res.strip())
+                    tr_clean = filter_hesitation_fillers(tr_clean)
+                    return tr_clean, None
+                return text, tr_err
+            except Exception as e:
+                logger.error(f"[TRANSCRIBER] Local translation exception ({self.translation_engine}): {e}")
+                return text, str(e)
+
+        if self.translation_engine == "groq":
+            if not self.groq_api_key and not self.groq_api_keys:
+                return text, "Groq API key missing"
+            tr_res, tr_err = await asyncio.to_thread(
+                self._post_groq_translate_with_retry, text, (source_lang or "")[:2], target_code
+            )
+            if tr_res:
+                tr_clean = clean_transcription_text(tr_res.strip())
+                tr_clean = filter_hesitation_fillers(tr_clean)
+                return tr_clean, None
+            return text, tr_err
+
         target_lang_en = LANG_NAMES_EN.get(target_code, target_code)
         source_lang_en = LANG_NAMES_EN.get((source_lang or "").lower()[:2], "any language")
         stage2_instruction = self._build_stage2_translation_instruction(source_lang_en, target_lang_en)

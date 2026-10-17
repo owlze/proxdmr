@@ -87,16 +87,24 @@ class SileroService:
     def is_available(self) -> bool:
         return HAVE_TORCH
 
+    def is_lang_supported(self, lang: Optional[str] = None) -> bool:
+        clean_lang = (lang or "ru").lower().strip()
+        if clean_lang == "ua":
+            clean_lang = "uk"
+        return clean_lang in SILERO_VOICES_BY_LANG
+
     def get_voices_for_lang(self, lang: Optional[str] = None) -> List[Dict[str, Any]]:
         clean_lang = (lang or "ru").lower().strip()
         if clean_lang == "ua":
             clean_lang = "uk"
-        return SILERO_VOICES_BY_LANG.get(clean_lang, SILERO_VOICES_BY_LANG["ru"])
+        return SILERO_VOICES_BY_LANG.get(clean_lang, [])
 
     def resolve_voice(self, requested_voice: Optional[str], lang: str = "ru", gender: str = "male") -> str:
         clean_lang = (lang or "ru").lower().strip()
         if clean_lang == "ua":
             clean_lang = "uk"
+        if not self.is_lang_supported(clean_lang):
+            return ""
         if requested_voice and requested_voice != "auto":
             return requested_voice
         voices = self.get_voices_for_lang(clean_lang)
@@ -111,6 +119,10 @@ class SileroService:
         clean_lang = (lang or "ru").lower().strip()
         if clean_lang == "ua":
             clean_lang = "uk"
+
+        if clean_lang not in SILERO_VOICES_BY_LANG:
+            supported = ", ".join(SILERO_VOICES_BY_LANG.keys()).upper()
+            raise ValueError(f"Язык '{lang}' не поддерживается в Silero TTS (доступны: {supported})")
 
         with self._lock:
             if clean_lang in self._models:
@@ -139,14 +151,32 @@ class SileroService:
         sample_rate: int = 24000
     ) -> Tuple[Optional[bytes], Optional[str]]:
         try:
+            clean_lang = (lang or "ru").lower().strip()
+            if clean_lang == "ua":
+                clean_lang = "uk"
+
+            if clean_lang not in SILERO_VOICES_BY_LANG:
+                return None, f"Язык '{lang}' не поддерживается в Silero TTS. Выберите Piper TTS или Gemini API."
+
             model = self._get_or_load_model(lang)
+
+            # Pre-normalize and verbalize text to prevent Silero from dropping digits/@/symbols or raising ValueError
+            try:
+                from tts_normalizer import prepare_text_for_silero
+                text = prepare_text_for_silero(text, lang=clean_lang)
+            except Exception as pe:
+                logger.debug(f"[SILERO] Pre-normalization warning: {pe}")
+
+            if not text or not text.strip():
+                return None, "Пустой текст после нормализации для Silero TTS"
+
             with self._lock:
                 audio = model.apply_tts(
                     text=text,
                     speaker=speaker,
                     sample_rate=sample_rate,
-                    put_accent=(lang == "ru"),
-                    put_yo=(lang == "ru")
+                    put_accent=(clean_lang == "ru"),
+                    put_yo=(clean_lang == "ru")
                 )
             audio_np = (audio.numpy() * 32767).clip(-32768, 32767).astype(np.int16)
             bio = io.BytesIO()
@@ -175,8 +205,11 @@ class SileroService:
         if not clean_text:
             return None, "Пустой текст для озвучки"
 
-        actual_voice = self.resolve_voice(voice, lang=lang, gender=gender)
-        clean_lang = "uk" if lang in ("ua", "uk") else lang
+        clean_lang = "uk" if lang in ("ua", "uk") else (lang or "ru").lower().strip()
+        if not self.is_lang_supported(clean_lang):
+            return None, f"Язык '{clean_lang.upper()}' не поддерживается в Silero TTS. Рекомендуется использовать Piper TTS или Gemini API."
+
+        actual_voice = self.resolve_voice(voice, lang=clean_lang, gender=gender)
 
         wav_bytes, err = await asyncio.to_thread(
             self._synthesize_sync,

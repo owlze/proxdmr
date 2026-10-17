@@ -21,7 +21,7 @@
   ];
 
   // Cache-busting version — bump when locales JSON changes
-  const LOCALES_VER = "2.9.285";
+  const LOCALES_VER = "2.9.309";
   const LOCALES_BASE = "/static/locales/";
   const FALLBACK_LANG = "en";
 
@@ -130,6 +130,12 @@
         const val = this.t(key);
         if (val && val !== key) el.setAttribute("aria-label", val);
       });
+
+      if (typeof root.querySelectorAll === "function") {
+        root.querySelectorAll("template").forEach(tpl => {
+          if (tpl.content) this.apply(tpl.content);
+        });
+      }
     }
 
     // ── Set language (async, called from ws.js / language.js) ─────────────────

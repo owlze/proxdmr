@@ -339,6 +339,23 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
     cid = String(hid);
   }
 
+  // Target hotspot card resolution (for PC positioning over the card)
+  let targetCard = null;
+  if (anchorEl) {
+    targetCard = (typeof anchorEl.closest === "function") ? anchorEl.closest(".radio-container") : null;
+  }
+  if (!targetCard && cid && cid !== "default") {
+    targetCard = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+  }
+  if (!targetCard && typeof window !== "undefined" && window.activeHotspotId) {
+    targetCard = document.querySelector(`.radio-container[data-hotspot-id="${window.activeHotspotId}"]`);
+  }
+  if (!targetCard && typeof document !== "undefined") {
+    targetCard = document.querySelector(".radio-container.active-hotspot") ||
+                 document.querySelector(".radio-container:not(.collapsed)") ||
+                 document.querySelector(".radio-container");
+  }
+
   const currentTot = getHotspotTot(cid);
   const currentMode = getHotspotPttMode(cid);
 
@@ -475,6 +492,57 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
   document.body.appendChild(overlay);
   activeTotModalOverlay = overlay;
 
+  const updatePosition = () => {
+    if (!activeTotModalOverlay || !popup) return;
+    const isDesktop = window.innerWidth > 768;
+    if (!isDesktop || !targetCard) {
+      overlay.classList.remove("tot-card-anchored");
+      overlay.style.display = "flex";
+      popup.style.position = "";
+      popup.style.left = "";
+      popup.style.top = "";
+      popup.style.margin = "";
+      return;
+    }
+
+    overlay.classList.add("tot-card-anchored");
+    overlay.style.display = "block";
+    popup.style.position = "fixed";
+    popup.style.margin = "0";
+
+    const cardRect = targetCard.getBoundingClientRect();
+    const popupW = popup.offsetWidth || 320;
+    const popupH = popup.offsetHeight || 380;
+
+    // Center horizontally over the target hotspot card
+    let left = cardRect.left + (cardRect.width - popupW) / 2;
+    left = Math.max(12, Math.min(window.innerWidth - popupW - 12, left));
+
+    // Center vertically over the visible area of the target card, clamped to viewport
+    const visibleTop = Math.max(12, cardRect.top);
+    const visibleBottom = Math.min(window.innerHeight - 12, cardRect.bottom);
+    const visibleHeight = visibleBottom - visibleTop;
+
+    let top;
+    if (visibleHeight >= popupH) {
+      top = visibleTop + (visibleHeight - popupH) / 2;
+    } else {
+      top = cardRect.top + (cardRect.height - popupH) / 2;
+    }
+    top = Math.max(16, Math.min(window.innerHeight - popupH - 16, top));
+
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+  };
+
+  updatePosition();
+  requestAnimationFrame(updatePosition);
+
+  const onReposition = () => updatePosition();
+  window.addEventListener("resize", onReposition);
+  window.addEventListener("scroll", onReposition, true);
+  overlay._repositionHandler = onReposition;
+
   const rangeInput = popup.querySelector("#totRangeInput");
   const valueDisplay = popup.querySelector("#totValueDisplay");
   const chkHold = popup.querySelector("#chkPttHold");
@@ -553,7 +621,8 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
         window.t
           ? window.t("ptt.params_saved_toast", { tot: formattedTot, mode: modeStr }, `✓ Параметры PTT сохранены (TOT: ${formattedTot}, ${modeStr})`)
           : `✓ Параметры PTT сохранены (TOT: ${formattedTot}, ${modeStr})`,
-        2500
+        2500,
+        cid
       );
     }
   };
@@ -595,6 +664,10 @@ export function closeTotConfigModal() {
   if (activeTotModalOverlay) {
     if (activeTotModalOverlay._keydownHandler) {
       window.removeEventListener("keydown", activeTotModalOverlay._keydownHandler);
+    }
+    if (activeTotModalOverlay._repositionHandler) {
+      window.removeEventListener("resize", activeTotModalOverlay._repositionHandler);
+      window.removeEventListener("scroll", activeTotModalOverlay._repositionHandler, true);
     }
     activeTotModalOverlay.classList.add("closing");
     const el = activeTotModalOverlay;

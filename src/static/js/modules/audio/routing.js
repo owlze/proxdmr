@@ -160,14 +160,33 @@ export function setHotspotMute(hid, slot, muted, isTemporary = false) {
       ap.updateSlotMute(cid, s, muted);
       if (isPrimary) ap.updateSlotMute("default", s, muted);
     }
-    if (!muted && typeof ap.setSlotDucking === "function") {
+  }
+
+  // Coordinate ducking and TTS volume on mute state change
+  const ttsMgr = (typeof window !== "undefined" && (window.ttsAudioQueueManager || (window.__proxdmr && window.__proxdmr.ttsAudioQueueManager))) || null;
+  const isSlotTts = (typeof window !== "undefined" && typeof window.isSlotTtsActive === "function")
+    ? window.isSlotTtsActive(cid, s)
+    : false;
+
+  if (!muted) {
+    if (ttsMgr && ttsMgr.isPlaying) {
+      if (typeof ttsMgr.updateLiveDucking === "function") {
+        ttsMgr.updateLiveDucking();
+      }
+    } else if (isSlotTts && ttsMgr && typeof ttsMgr.syncIdleDucking === "function") {
+      ttsMgr.syncIdleDucking(0.12);
+    } else if (ap && typeof ap.setSlotDucking === "function") {
       ap.setSlotDucking(cid, s, false, 1.0, 0.05);
       if (isPrimary) ap.setSlotDucking("default", s, false, 1.0, 0.05);
     }
+  } else {
+    if (ttsMgr && typeof ttsMgr.syncIdleDucking === "function") {
+      ttsMgr.syncIdleDucking(0.12);
+    }
   }
 
-  if (typeof window !== "undefined" && window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.syncCurrentVolume === "function") {
-    window.ttsAudioQueueManager.syncCurrentVolume();
+  if (ttsMgr && typeof ttsMgr.syncCurrentVolume === "function") {
+    ttsMgr.syncCurrentVolume();
   }
 
   if (!isTemporary) {

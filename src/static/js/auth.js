@@ -360,7 +360,7 @@
         }
         if (login.length < 3) {
           if (errBox2) {
-            errBox2.textContent = 'Логин должен содержать минимум 3 символа';
+            errBox2.textContent = window.t ? window.t('auth.err_login_min3', {}, 'Логин должен содержать минимум 3 символа') : 'Логин должен содержать минимум 3 символа';
             errBox2.style.display = 'block';
           }
           return;
@@ -442,7 +442,7 @@
             showOnboarding(false);
             window.location.reload();
           } else {
-            const err = data.detail || 'Ошибка регистрации';
+            const err = data.detail || (window.t ? window.t('auth.err_register', {}, 'Ошибка регистрации') : 'Ошибка регистрации');
             if (errBox3) {
               errBox3.textContent = err;
               errBox3.style.display = 'block';
@@ -452,7 +452,7 @@
           }
         } catch (e) {
           if (errBox3) {
-            errBox3.textContent = 'Ошибка подключения к серверу';
+            errBox3.textContent = window.t ? window.t('auth.err_server_conn', {}, 'Ошибка подключения к серверу') : 'Ошибка подключения к серверу';
             errBox3.style.display = 'block';
           }
           btnFinish.disabled = false;
@@ -643,7 +643,7 @@
     if (currentUser.role === 'superadmin') {
       const msg = t('account.superadmin_delete_disabled', {}, '🛡️ Аккаунт суперадминистратора защищен от удаления');
       if (window.showAppAlert) {
-        await window.showAppAlert(msg, { title: 'Защищено', icon: '🛡️' });
+        await window.showAppAlert(msg, { title: t('auth.protected_title', {}, 'Защищено'), icon: '🛡️' });
       }
       return;
     }
@@ -669,7 +669,7 @@
     });
     if (!typed || typed.trim().toLowerCase() !== login.toLowerCase()) {
       if (typed !== null) {
-        await showAppAlert(t('account.delete_mismatch', {}, 'Введен неверный логин. Удаление аккаунта отменено.'), { title: 'Отмена удаления', icon: 'ℹ️' });
+        await showAppAlert(t('account.delete_mismatch', {}, 'Введен неверный логин. Удаление аккаунта отменено.'), { title: t('auth.delete_cancelled_title', {}, 'Отмена удаления'), icon: 'ℹ️' });
       }
       return;
     }
@@ -689,7 +689,7 @@
           localStorage.removeItem('proxdmr_auth_login');
         } catch (e) {}
         clearLocalUserData();
-        await showAppAlert(data.message || t('account.delete_success', {}, 'Аккаунт успешно удален'), { title: 'Удалено', icon: '✅' });
+        await showAppAlert(data.message || t('account.delete_success', {}, 'Аккаунт успешно удален'), { title: t('auth.deleted_title', {}, 'Удалено'), icon: '✅' });
         isAuthenticated = false;
         currentUser = null;
         location.reload();
@@ -730,7 +730,7 @@
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        await showAppAlert(data.detail || t('account.export_error', {}, 'Ошибка экспорта'), { title: 'Ошибка экспорта', icon: '⚠️' });
+        await showAppAlert(data.detail || t('account.export_error', {}, 'Ошибка экспорта'), { title: t('account.export_error', {}, 'Ошибка экспорта'), icon: '⚠️' });
         return;
       }
       const blob = await resp.blob();
@@ -744,7 +744,7 @@
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     } catch (e) {
-      await showAppAlert(t('account.export_conn_error', {}, 'Ошибка при экспорте настроек'), { title: 'Ошибка связи', icon: '⚠️' });
+      await showAppAlert(t('account.export_conn_error', {}, 'Ошибка при экспорте настроек'), { title: t('auth.err_conn_title', {}, 'Ошибка связи'), icon: '⚠️' });
     }
   }
 
@@ -809,7 +809,9 @@
 
       const users = (meta && Array.isArray(meta.users)) ? meta.users : [];
       if (subtitleEl && meta.superadmin_login) {
-        subtitleEl.textContent = `Архив суперадмина (${meta.superadmin_login}), пользователей в архиве: ${users.length}`;
+        subtitleEl.textContent = window.t
+          ? window.t('account.import_superadmin_subtitle', { login: meta.superadmin_login, count: users.length }, `Архив суперадмина (${meta.superadmin_login}), пользователей в архиве: ${users.length}`)
+          : `Архив суперадмина (${meta.superadmin_login}), пользователей в архиве: ${users.length}`;
       }
 
       // Reset radio to default option 1
@@ -822,7 +824,8 @@
       if (usersListEl) {
         usersListEl.innerHTML = '';
         if (users.length === 0) {
-          usersListEl.innerHTML = '<div style="font-size:0.8rem;color:var(--text-muted);padding:4px;">В архиве нет других пользователей</div>';
+          const noUsersMsg = window.t ? window.t('account.import_no_other_users', {}, 'В архиве нет других пользователей') : 'В архиве нет других пользователей';
+          usersListEl.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:4px;">${escapeHtml(noUsersMsg)}</div>`;
         } else {
           users.forEach(u => {
             const row = document.createElement('label');
