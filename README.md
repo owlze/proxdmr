@@ -1,6 +1,6 @@
 # ProxDMR
 
-ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to the **BrandMeister** amateur radio network via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
+ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to amateur radio networks — **BrandMeister**, **TGIF**, **FreeDMR**, **DMR+ / IPSC2**, and **XLX Reflectors** (D-Star / DMR Gateway) via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
 
 <p align="center">
   <a href="docs/images/01.jpg" target="_blank">
@@ -18,7 +18,8 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
 </p>
 
 ### Features:
-* **No physical radio, MMDVM modem, or hardware USB vocoder (DVStick) is required to operate on DMR** — Voice encoding and decoding are performed entirely on the server via a software AMBE+2 vocoder..
+* **Multi-Network DMR Support** — Connect to **BrandMeister**, **TGIF**, **FreeDMR**, **DMR+ / IPSC2**, and **XLX Reflectors** (D-Star / DMR Gateway). Run multiple independent virtual hotspots across different networks simultaneously on one screen.
+* **No physical radio, MMDVM modem, or hardware USB vocoder (DVStick) is required to operate on DMR** — Voice encoding and decoding are performed entirely on the server via a software AMBE+2 vocoder.
 * **Access via any modern web browser** (PC, laptop, tablet) or through a dedicated Android application (APK).
 * **Multi-Hotspot Architecture** — Run multiple independent virtual hotspots simultaneously on one screen, listening to different timeslots (TS1 and TS2) and talkgroups.
 * **Ultra-low latency audio** — Voice streams are transmitted to the client in compressed form (Opus, WebRTC, WebSocket) with low latency of just tens of milliseconds.
@@ -26,7 +27,9 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
 * **Network PTT transmission using Push-to-Talk** (PTT button on the screen or Space key on PC).
 * **Support for two timeslots (TS1 and TS2)**, dynamic and static talkgroups.
 * **Automatic transmission time limit** (Time-Out Timer).
-* **BrandMeister API v2 integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, drop active/hung calls).
+* **Server Probe & Multi-Network Benchmark** — Live server latency probing, jitter/ping benchmarking, and automated recommendations for the fastest connection.
+* **Contacts & Address Book** — Manage talkgroups, private call contacts, and XLX reflector modules with network-specific bindings.
+* **BrandMeister & TGIF API integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, drop active/hung calls).
 * **Real-time network diagnostics** — Live monitoring of connection status and ping to the master server with an interactive latency chart.
 * **Microphone Automatic Gain Control (AGC)**.
 * **Built-in RadioID callsign database** with automatic local synchronization (312,000+ radio amateurs).
@@ -48,7 +51,7 @@ ProxDMR is a client-server application that turns an ordinary web browser or sma
    * [E. Manual Start via Docker Compose (Any OS)](#e-manual-start-via-docker-compose-any-os)
    * [F. Run via Pre-Built Docker Image](#f-run-via-pre-built-docker-image)
 4. [First Launch and Sign In](#4-first-launch-and-sign-in)
-5. [BrandMeister Hotspot Configuration](#5-brandmeister-hotspot-configuration)
+5. [DMR Hotspot & Multi-Network Configuration](#5-dmr-hotspot--multi-network-configuration)
 6. [Piper Speech Synthesis (TTS) Voices](#6-piper-speech-synthesis-tts-voices)
 7. [Android Application](#7-android-application)
 8. [Data Persistence & Storage](#8-data-persistence--storage)
@@ -80,9 +83,9 @@ Two release archives are provided with **identical contents**:
 | Port | Protocol | Purpose |
 |---|---|---|
 | `8266` | TCP | Web interface and Android app (HTTPS/WSS) |
-| `62031` | UDP | HomeBrew protocol exchange with BrandMeister master server |
+| `62031` | UDP | HomeBrew protocol exchange with master server (BM, TGIF, FreeDMR, DMR+, XLX) |
 
-* **BrandMeister Account** and amateur radio credentials: Callsign, DMR ID, and Hotspot Security Password (from your profile on brandmeister.network).
+* **Amateur Radio Credentials**: Callsign, DMR ID (registered via radioid.net), and Hotspot Security Passwords / keys for your preferred networks (BrandMeister, TGIF, FreeDMR, DMR+, XLX).
 
 ---
 
@@ -219,18 +222,28 @@ docker run -d \
 
 ---
 
-## 5. BrandMeister Hotspot Configuration
+## 5. DMR Hotspot & Multi-Network Configuration
 
-In the web interface, open hotspot settings and configure:
+In the web interface, open hotspot settings and configure your virtual hotspots for any supported network:
 
+| Network | Supported Features & Connection Type |
+|---|---|
+| **BrandMeister** | Full HomeBrew protocol with API v2 support, dynamic/static TG management, master server latency probe |
+| **TGIF Network** | HomeBrew protocol with TGIF API integration, dynamic PTT TG routing (4000 disconnect), server probe |
+| **FreeDMR** | HomeBrew protocol with RPTO options support (`TS1=...;TS2=...;DIAL=...`), server probe |
+| **DMR+ / IPSC2** | HomeBrew protocol with reflector linking (`StartRef=...`), server probe |
+| **XLX Reflectors** | Multiprotocol reflector gateway (D-Star / DMR), module selection (A–Z) on TS2 |
+
+Basic hotspot fields:
 | Field | Description |
 |---|---|
+| **Network Type** | Select BrandMeister, TGIF, FreeDMR, DMR+, or XLX |
 | **Callsign** | Your licensed amateur radio callsign |
 | **DMR ID** | Your DMR ID (registered via radioid.net) |
-| **BM Password** | *Hotspot Security Password* from your brandmeister.network profile |
-| **BM Master Host** | Closest master server (default `2322.master.brandmeister.network`) |
+| **Hotspot Password** | *Hotspot Security Password* for the selected network |
+| **Master Host & Port** | Closest master server (use the built-in **Server Probe** to benchmark and pick the fastest server) |
 
-Click **Save** — the gateway will connect to BrandMeister. Multiple virtual hotspots can be configured simultaneously.
+Click **Save** — the gateway will connect to the selected network. Multiple virtual hotspots across different networks can run simultaneously.
 
 ---
 
