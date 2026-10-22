@@ -5,7 +5,7 @@
  * contact creation/editing modals, JSON import/export, and gateway settings.
  */
 
-import { escapeHtml, attachTgLivePreview } from '../core/formatters.js?v=2.9.284';
+import { escapeHtml, attachTgLivePreview } from '../core/formatters.js?v=2.9.310';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 import { resolveHotspotId } from '../core/state.js';
@@ -113,6 +113,12 @@ let contactEditCity = typeof document !== "undefined" ? document.getElementById(
 let contactEditParentSelect = typeof document !== "undefined" ? document.getElementById("contactEditParentSelect") : null;
 let contactEditSlot = typeof document !== "undefined" ? document.getElementById("contactEditSlot") : null;
 let contactEditComment = typeof document !== "undefined" ? document.getElementById("contactEditComment") : null;
+let contactEditNetwork = typeof document !== "undefined" ? document.getElementById("contactEditNetwork") : null;
+let contactEditXlxModuleGroup = typeof document !== "undefined" ? document.getElementById("contactEditXlxModuleGroup") : null;
+let contactEditXlxModule = typeof document !== "undefined" ? document.getElementById("contactEditXlxModule") : null;
+let contactEditIdHint = typeof document !== "undefined" ? document.getElementById("contactEditIdHint") : null;
+let contactEditTgHint = typeof document !== "undefined" ? document.getElementById("contactEditTgHint") : null;
+let contactEditSlotHint = typeof document !== "undefined" ? document.getElementById("contactEditSlotHint") : null;
 
 // Call Proposal Modal Elements
 let contactCallProposalModal = typeof document !== "undefined" ? document.getElementById("contactCallProposalModal") : null;
@@ -169,6 +175,12 @@ function ensureElements() {
   if (!contactEditParentSelect) contactEditParentSelect = document.getElementById("contactEditParentSelect");
   if (!contactEditSlot) contactEditSlot = document.getElementById("contactEditSlot");
   if (!contactEditComment) contactEditComment = document.getElementById("contactEditComment");
+  if (!contactEditNetwork) contactEditNetwork = document.getElementById("contactEditNetwork");
+  if (!contactEditXlxModuleGroup) contactEditXlxModuleGroup = document.getElementById("contactEditXlxModuleGroup");
+  if (!contactEditXlxModule) contactEditXlxModule = document.getElementById("contactEditXlxModule");
+  if (!contactEditIdHint) contactEditIdHint = document.getElementById("contactEditIdHint");
+  if (!contactEditTgHint) contactEditTgHint = document.getElementById("contactEditTgHint");
+  if (!contactEditSlotHint) contactEditSlotHint = document.getElementById("contactEditSlotHint");
 
   if (!contactCallProposalModal) contactCallProposalModal = document.getElementById("contactCallProposalModal");
   if (!closeCallProposalModalBtn) closeCallProposalModalBtn = document.getElementById("closeCallProposalModalBtn");
@@ -665,6 +677,12 @@ export function renderContactsTree(filterText = "") {
                   <span class="tree-contact-name">${escapeHtml(localizedTitle)}</span>
                   ${node.city ? `<span class="tree-contact-city">${escapeHtml(node.city)}</span>` : ''}
                   ${node.slot_override ? `<span class="tree-contact-slot-pill">TS${node.slot_override}</span>` : ''}
+                  ${(() => {
+                    const net = (node.network_type || "").toLowerCase();
+                    if (!net) return "";
+                    const netLabels = { bm: "BM", freedmr: "FreeDMR", tgif: "TGIF", xlx: "XLX", dmrplus: "DMR+", custom: "ANY" };
+                    return `<span class="contact-net-badge net-${net}">${netLabels[net] || net.toUpperCase()}</span>`;
+                  })()}
                 </div>
               </div>
               <div class="tree-row-actions">
@@ -768,6 +786,27 @@ export function openContactEditModal(nodeToEdit = null, parentId = null, forcedT
     if (contactEditSlot) contactEditSlot.value = nodeToEdit ? (nodeToEdit.slot_override || 0) : 0;
     if (contactEditComment) contactEditComment.value = nodeToEdit ? (nodeToEdit.comment || "") : "";
 
+    // Set network selector: autofill from active hotspot when creating new
+    if (contactEditNetwork) {
+      if (nodeToEdit && nodeToEdit.network_type) {
+        contactEditNetwork.value = nodeToEdit.network_type.toLowerCase();
+      } else if (!nodeToEdit) {
+        const allHs = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const activeHsId = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+        const activeHs = allHs.find(h => h.id === activeHsId) || allHs[0];
+        const defaultNet = (activeHs && activeHs.network_type) ? activeHs.network_type.toLowerCase() : "bm";
+        contactEditNetwork.value = defaultNet;
+      }
+    }
+
+    if (contactEditXlxModule) {
+      if (nodeToEdit && nodeToEdit.network_type === "xlx" && nodeToEdit.type === "tg" && nodeToEdit.tg) {
+        contactEditXlxModule.value = String(nodeToEdit.tg);
+      } else {
+        contactEditXlxModule.value = "4004";
+      }
+    }
+
     updateContactFormFieldsVisibility(activeType);
 
     if (contactEditModal) {
@@ -791,13 +830,79 @@ export function updateContactFormFieldsVisibility(type) {
     const cityGroup = document.getElementById("contactEditCityGroup");
     const slotGroup = document.getElementById("contactEditSlotGroup");
     const commentGroup = document.getElementById("contactEditCommentGroup");
+    const netGroup = document.getElementById("contactEditNetworkGroup");
 
+    if (netGroup) netGroup.style.display = isFolder ? "none" : "block";
     if (callGroup) callGroup.style.display = (isPerson || isRepeater) ? "block" : "none";
     if (idGroup) idGroup.style.display = (isPerson || isRepeater) ? "block" : "none";
     if (tgGroup) tgGroup.style.display = isTg ? "block" : "none";
     if (cityGroup) cityGroup.style.display = isFolder ? "none" : "block";
     if (slotGroup) slotGroup.style.display = isFolder ? "none" : "block";
     if (commentGroup) commentGroup.style.display = isFolder ? "none" : "block";
+
+    const curNet = contactEditNetwork ? (contactEditNetwork.value || "bm").toLowerCase() : "bm";
+    const isXlx = (curNet === "xlx");
+    const isTgif = (curNet === "tgif");
+    const isDmrPlus = (curNet === "dmrplus");
+
+    // XLX Module select visibility
+    if (contactEditXlxModuleGroup) {
+      contactEditXlxModuleGroup.style.display = (!isFolder && isXlx && isTg) ? "block" : "none";
+    }
+
+    // Slot field adaptation
+    if (contactEditSlot) {
+      if (!isFolder && isXlx) {
+        contactEditSlot.value = "2";
+        contactEditSlot.disabled = true;
+      } else {
+        contactEditSlot.disabled = false;
+      }
+    }
+
+    if (contactEditSlotHint) {
+      if (!isFolder && isXlx) {
+        contactEditSlotHint.textContent = window.t
+          ? window.t("contacts.xlx_slot_locked_note", {}, "(в XLX только TS2)")
+          : "(в XLX только TS2)";
+        contactEditSlotHint.style.display = "block";
+      } else {
+        contactEditSlotHint.style.display = "none";
+      }
+    }
+
+    // ID Hint adaptation
+    if (contactEditIdHint) {
+      if (!isFolder && isXlx && (isPerson || isRepeater)) {
+        contactEditIdHint.textContent = window.t
+          ? window.t("contacts.xlx_id_hint", {}, "7-значный DMR ID радиолюбителя для валидации в XLX")
+          : "7-значный DMR ID радиолюбителя для валидации в XLX";
+        contactEditIdHint.style.display = "block";
+      } else {
+        contactEditIdHint.style.display = "none";
+      }
+    }
+
+    // TG Hint adaptation
+    if (contactEditTgHint) {
+      if (!isFolder && isTg) {
+        if (isTgif) {
+          contactEditTgHint.textContent = window.t
+            ? window.t("contacts.tgif_hint", {}, "В TGIF слот по умолчанию TS2. Отключение динамической группы — TG 4000.")
+            : "В TGIF слот по умолчанию TS2. Отключение динамической группы — TG 4000.";
+          contactEditTgHint.style.display = "block";
+        } else if (isDmrPlus) {
+          contactEditTgHint.textContent = window.t
+            ? window.t("dmrplus.ts2_voice_hint", {}, "Голос на TS2 всегда в TG 9")
+            : "Голос на TS2 всегда в TG 9";
+          contactEditTgHint.style.display = "block";
+        } else {
+          contactEditTgHint.style.display = "none";
+        }
+      } else {
+        contactEditTgHint.style.display = "none";
+      }
+    }
   }
 
 export function closeContactEditModal() {
@@ -836,6 +941,10 @@ export function saveContactFromForm() {
     let cityVal = contactEditCity ? contactEditCity.value.trim() : "";
     let commentVal = contactEditComment ? contactEditComment.value.trim() : "";
     let slotVal = contactEditSlot ? parseInt(contactEditSlot.value, 10) : 0;
+    const netVal = contactEditNetwork ? (contactEditNetwork.value || "bm").toLowerCase() : "bm";
+    if (netVal === "xlx") {
+      slotVal = 2;
+    }
 
     if (type === "tg") {
       tgVal = contactEditTg ? parseInt(contactEditTg.value.trim(), 10) : null;
@@ -883,6 +992,7 @@ export function saveContactFromForm() {
         node.city = cityVal;
         node.comment = commentVal;
         node.slot_override = slotVal;
+        node.network_type = netVal;
 
         const oldParent = findParentNodeInTree(contactsTree, editingNodeId);
         const oldParentId = oldParent ? oldParent.id : "";
@@ -908,7 +1018,8 @@ export function saveContactFromForm() {
         name: name,
         city: cityVal,
         comment: commentVal,
-        slot_override: slotVal
+        slot_override: slotVal,
+        network_type: netVal
       };
 
       if (type === "folder") {
@@ -983,10 +1094,24 @@ export function openContactCallProposal(node) {
     const targetVal = isTg ? parseInt(node.tg || node.dmr_id, 10) : parseInt(node.dmr_id || node.tg, 10);
     if (!targetVal || targetVal <= 0) return;
 
-    const targetSlot = (node.slot_override === 1 || node.slot_override === 2)
+    let targetSlot = (node.slot_override === 1 || node.slot_override === 2)
       ? node.slot_override
       : (contactsGateway && (contactsGateway.slot === 1 || contactsGateway.slot === 2) ? contactsGateway.slot : undefined);
-    const targetHid = (contactsGateway && contactsGateway.hotspot_id) || window.activeHotspotId || "default";
+    let targetHid = (contactsGateway && contactsGateway.hotspot_id) || window.activeHotspotId || "default";
+
+    // Auto-select hotspot of matching network if specified in contact
+    if (node.network_type && typeof window !== "undefined" && Array.isArray(window.currentHotspots) && window.currentHotspots.length) {
+      const matchHs = window.currentHotspots.find(h => (h.network_type || "bm").toLowerCase() === node.network_type.toLowerCase() && isHotspotFullyOnline(h))
+                   || window.currentHotspots.find(h => (h.network_type || "bm").toLowerCase() === node.network_type.toLowerCase());
+      if (matchHs) {
+        targetHid = matchHs.id;
+      }
+    }
+    if (node.network_type === "xlx") {
+      targetSlot = 2;
+    } else if (node.network_type === "dmrplus" && (node.slot_override === 2 || (node.type === "tg" && node.tg >= 4000 && node.tg <= 5000))) {
+      targetSlot = 2;
+    }
 
     const displayName = getLocalizedContactName(node) || node.name || "";
     const targetObj = {
@@ -1207,6 +1332,38 @@ export function initContactsManager() {
         if (r.checked) updateContactFormFieldsVisibility(r.value);
       });
     });
+
+    if (contactEditNetwork) {
+      contactEditNetwork.addEventListener("change", () => {
+        const typeRadio = document.querySelector('input[name="contactNodeType"]:checked');
+        const curType = typeRadio ? typeRadio.value : (isEditingFolder ? "folder" : "person");
+        if (contactEditNetwork.value === "xlx" && contactEditSlot) {
+          contactEditSlot.value = "2";
+        }
+        updateContactFormFieldsVisibility(curType);
+      });
+    }
+
+    if (contactEditXlxModule) {
+      contactEditXlxModule.addEventListener("change", () => {
+        if (contactEditNetwork && contactEditNetwork.value === "xlx" && contactEditTg) {
+          contactEditTg.value = contactEditXlxModule.value;
+          contactEditTg.dispatchEvent(new Event("input"));
+        }
+      });
+    }
+
+    if (contactEditTg) {
+      contactEditTg.addEventListener("input", () => {
+        if (contactEditNetwork && contactEditNetwork.value === "xlx" && contactEditXlxModule) {
+          const val = contactEditTg.value.trim();
+          if (val) {
+            const hasOpt = Array.from(contactEditXlxModule.options).some(o => o.value === val);
+            if (hasOpt) contactEditXlxModule.value = val;
+          }
+        }
+      });
+    }
 
     // Live TG / DMR ID preview quote popup in Contact Edit Modal
     if (contactEditTg) {

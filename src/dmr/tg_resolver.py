@@ -18,6 +18,31 @@ logger = logging.getLogger("proxdmr.tg_resolver")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 TG_CACHE_FILE = DATA_DIR / "tg_names_cache.json"
+TGIF_CACHE_FILE = DATA_DIR / "tgif_tg_names_cache.json"
+FREEDMR_CACHE_FILE = DATA_DIR / "freedmr_tg_names_cache.json"
+FREEDMR_CATALOG_URL = "http://downloads.freedmr.uk/downloads/talkgroup_ids.json"
+
+SEED_TGIF_TALKGROUPS = {
+    777: "TGIF Multi-Lang",
+    31665: "TGIF The Mothership",
+    2501: "Russia",
+    250: "CCARS",
+    91: "World-Wide",
+    9990: "Parrot (Эхо-тест)",
+    4000: "Unlink (Отключение)",
+}
+
+SEED_FREEDMR_TALKGROUPS = {
+    91: "Worldwide",
+    92: "Europe",
+    250: "Russia",
+    2501: "Russia 1",
+    2502: "Russia 2",
+    2503: "Russia 3",
+    2505: "Russia South",
+    4000: "Unlink (Отключение)",
+    9990: "Parrot (Эхо-тест)",
+}
 
 # ITU / Mobile Country Code (MCC) DMR 3-digit prefixes to Country Names
 MCC_COUNTRIES = {
@@ -479,13 +504,17 @@ class TGResolver:
 
     def __init__(self):
         self.cache: Dict[int, str] = dict(SEED_TALKGROUPS)
+        self.tgif_cache: Dict[int, str] = dict(SEED_TGIF_TALKGROUPS)
+        self.freedmr_cache: Dict[int, str] = dict(SEED_FREEDMR_TALKGROUPS)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._load_cache()
+        self._load_tgif_cache()
+        self._load_freedmr_cache()
         # Seed MCC country names if not already present
         for mcc, cname in MCC_COUNTRIES.items():
             if mcc not in self.cache:
                 self.cache[mcc] = cname
-        self._last_check_time = time.time() if len(self.cache) > 100 else 0
+        self._last_check_time = time.time() if (len(self.cache) > 100 and len(self.tgif_cache) > 50 and len(self.freedmr_cache) > 5) else 0
 
     def _load_cache(self):
         if TG_CACHE_FILE.exists():
@@ -501,6 +530,20 @@ class TGResolver:
             except Exception as e:
                 logger.warning(f"[TG_RESOLVER] Could not read cache file: {e}")
 
+    def _load_tgif_cache(self):
+        if TGIF_CACHE_FILE.exists():
+            try:
+                with open(TGIF_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        try:
+                            self.tgif_cache[int(k)] = str(v).strip()
+                        except (ValueError, TypeError):
+                            pass
+                logger.info(f"[TG_RESOLVER] Loaded {len(self.tgif_cache)} cached TGIF TG names from {TGIF_CACHE_FILE}")
+            except Exception as e:
+                logger.warning(f"[TG_RESOLVER] Could not read TGIF cache file: {e}")
+
     def save_cache(self):
         try:
             temp_file = TG_CACHE_FILE.with_suffix(".tmp")
@@ -512,11 +555,221 @@ class TGResolver:
         except Exception as e:
             logger.error(f"[TG_RESOLVER] Failed to save cache: {e}")
 
-    def get_name(self, tg: int) -> str:
+    def save_tgif_cache(self):
+        try:
+            temp_file = TGIF_CACHE_FILE.with_suffix(".tmp")
+            out_data = {str(k): v for k, v in sorted(self.tgif_cache.items())}
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(out_data, f, ensure_ascii=False, indent=2)
+            temp_file.replace(TGIF_CACHE_FILE)
+            logger.info(f"[TG_RESOLVER] Saved {len(self.tgif_cache)} TGIF TG names to {TGIF_CACHE_FILE}")
+        except Exception as e:
+            logger.error(f"[TG_RESOLVER] Failed to save TGIF cache: {e}")
+
+    async def fetch_tgif_catalog(self) -> int:
         """
-        Returns the resolved name for a talkgroup synchronously.
-        If unknown, uses intelligent ITU/MCC prefix resolution.
+        Downloads all talkgroups from TGIF API (https://api.tgif.network/dmr/talkgroups/json
+        with fallback to https://api.tgif.network/dmr/talkgroups/csv) and saves to local cache.
         """
+        def _fetch():
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            headers = {
+                "User-Agent": "ProxDMR/0.1",
+                "Accept": "application/json, text/plain, */*"
+            }
+            try:
+                req = urllib.request.Request("https://api.tgif.network/dmr/talkgroups/json", headers=headers)
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    data = json.loads(raw)
+                    if isinstance(data, list):
+                        parsed = {}
+                        for item in data:
+                            if isinstance(item, dict) and "id" in item and "name" in item:
+                                try:
+                                    tg_id = int(str(item["id"]).strip())
+                                    name = str(item["name"]).strip()
+                                    if tg_id > 0 and name:
+                                        parsed[tg_id] = name
+                                except (ValueError, TypeError):
+                                    continue
+                        if parsed:
+                            return parsed
+            except Exception as e:
+                logger.warning(f"[TG_RESOLVER] TGIF JSON catalog fetch failed, trying CSV: {e}")
+
+            try:
+                req_csv = urllib.request.Request("https://api.tgif.network/dmr/talkgroups/csv", headers=headers)
+                with urllib.request.urlopen(req_csv, context=ctx, timeout=10) as resp:
+                    raw_csv = resp.read().decode("utf-8", errors="replace")
+                    parsed = {}
+                    for line in raw_csv.splitlines():
+                        parts = line.strip().split(",", 2)
+                        if len(parts) >= 2:
+                            try:
+                                tg_id = int(parts[0].strip())
+                                name = parts[1].strip()
+                                if tg_id > 0 and name:
+                                    parsed[tg_id] = name
+                            except (ValueError, TypeError):
+                                continue
+                    return parsed
+            except Exception as e:
+                logger.warning(f"[TG_RESOLVER] Failed to download TGIF CSV catalog: {e}")
+                return None
+
+        parsed_map = await asyncio.to_thread(_fetch)
+        if not parsed_map or not isinstance(parsed_map, dict):
+            return 0
+
+        updated_count = 0
+        for tg_id, name in parsed_map.items():
+            if name and self.tgif_cache.get(tg_id) != name:
+                self.tgif_cache[tg_id] = name
+                updated_count += 1
+
+        if updated_count > 0 or not TGIF_CACHE_FILE.exists():
+            self.save_tgif_cache()
+            logger.info(f"[TG_RESOLVER] Synchronized {len(self.tgif_cache)} talkgroups from TGIF catalog ({updated_count} updated)")
+        return len(self.tgif_cache)
+
+    def _load_freedmr_cache(self):
+        if FREEDMR_CACHE_FILE.exists():
+            try:
+                with open(FREEDMR_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        try:
+                            self.freedmr_cache[int(k)] = str(v).strip()
+                        except (ValueError, TypeError):
+                            pass
+                logger.info(f"[TG_RESOLVER] Loaded {len(self.freedmr_cache)} cached FreeDMR TG names from {FREEDMR_CACHE_FILE}")
+            except Exception as e:
+                logger.warning(f"[TG_RESOLVER] Could not read FreeDMR cache file: {e}")
+
+    def save_freedmr_cache(self):
+        try:
+            temp_file = FREEDMR_CACHE_FILE.with_suffix(".tmp")
+            out_data = {str(k): v for k, v in sorted(self.freedmr_cache.items())}
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(out_data, f, ensure_ascii=False, indent=2)
+            temp_file.replace(FREEDMR_CACHE_FILE)
+            logger.info(f"[TG_RESOLVER] Saved {len(self.freedmr_cache)} FreeDMR TG names to {FREEDMR_CACHE_FILE}")
+        except Exception as e:
+            logger.error(f"[TG_RESOLVER] Failed to save FreeDMR cache: {e}")
+
+    async def fetch_freedmr_catalog(self) -> int:
+        """Downloads all talkgroups from FreeDMR JSON catalog (http://downloads.freedmr.uk/downloads/talkgroup_ids.json)."""
+        req = urllib.request.Request(
+            FREEDMR_CATALOG_URL,
+            headers={"User-Agent": "ProxDMR/1.1", "Accept": "application/json"}
+        )
+
+        def _fetch():
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    data = json.loads(raw)
+                    items = data.get("results", []) if isinstance(data, dict) else data
+                    parsed = {}
+                    if isinstance(items, list):
+                        for item in items:
+                            try:
+                                tg_id = int(item.get("tgid") or item.get("id") or 0)
+                                name = str(item.get("callsign") or item.get("name") or "").strip()
+                                if tg_id > 0 and name:
+                                    parsed[tg_id] = name
+                            except (ValueError, TypeError):
+                                continue
+                    return parsed
+            except Exception as e:
+                logger.warning(f"[TG_RESOLVER] Failed to download FreeDMR JSON catalog: {e}")
+                return None
+
+        parsed_map = await asyncio.to_thread(_fetch)
+        if not parsed_map or not isinstance(parsed_map, dict):
+            return 0
+
+        updated_count = 0
+        for tg_id, name in parsed_map.items():
+            if name and self.freedmr_cache.get(tg_id) != name:
+                self.freedmr_cache[tg_id] = name
+                updated_count += 1
+
+        if updated_count > 0 or not FREEDMR_CACHE_FILE.exists():
+            self.save_freedmr_cache()
+            logger.info(f"[TG_RESOLVER] Synchronized {len(self.freedmr_cache)} talkgroups from FreeDMR catalog ({updated_count} updated)")
+        return len(self.freedmr_cache)
+
+    def get_name(self, tg: int, network_type: str = "bm") -> str:
+        """
+        Returns the resolved name for a talkgroup synchronously according to network_type.
+        """
+        net = (network_type or "bm").strip().lower()
+        if net == "tgif":
+            if tg in self.tgif_cache and self.tgif_cache[tg]:
+                return self.tgif_cache[tg]
+            if tg == 4000:
+                return "Unlink (Отключение)"
+            if tg == 9990:
+                return "Parrot (Эхо-тест)"
+            return f"TG {tg}"
+
+        if net == "freedmr":
+            if tg in self.freedmr_cache and self.freedmr_cache[tg]:
+                return self.freedmr_cache[tg]
+            if tg == 4000:
+                return "Unlink (Отключение)"
+            if tg == 9990:
+                return "Parrot (Эхо-тест)"
+            if tg in self.cache and self.cache[tg]:
+                return self.cache[tg]
+            return self._resolve_by_mcc(tg) or f"TG {tg}"
+
+        if net == "xlx":
+            if 4001 <= tg <= 4026:
+                return f"Module {chr(65 + tg - 4001)}"
+            if tg == 4000:
+                return "Unlink (Отключение)"
+            if tg == 9:
+                return "Reflector Call (TS2)"
+            if tg == 9990:
+                return "Parrot (Эхо-тест)"
+            return f"TG {tg}"
+
+        if net == "dmrplus":
+            dmrplus_dict = {
+                4000: "Unlink (Отключение)",
+                5000: "Status (Проверка статуса)",
+                4530: "Reflector 4530 RU (Россия / СНГ)",
+                4001: "Reflector 4001 DL (Германия общий)",
+                4030: "Reflector 4030 OE (Австрия)",
+                4020: "Reflector 4020 HB (Швейцария)",
+                4400: "Reflector 4400 UK (Великобритания)",
+                4500: "Reflector 4500 EA (Испания)",
+                4700: "Reflector 4700 US (Северная Америка)",
+                4800: "Reflector 4800 PT (Бразилия)",
+                1: "Worldwide",
+                2: "Europe",
+                13: "Worldwide English",
+                20: "DACH (DE/AT/CH)",
+                250: "Russia",
+                262: "Germany",
+                208: "France",
+                222: "Italy",
+                235: "United Kingdom",
+                8: "Regional Net",
+                9: "Local (Voice / Reflector)",
+            }
+            if tg in dmrplus_dict:
+                return dmrplus_dict[tg]
+            if 4001 <= tg <= 4999:
+                return f"Reflector {tg}"
+            return f"TG {tg}"
+
         if tg in self.cache and self.cache[tg]:
             return self.cache[tg]
 
@@ -638,12 +891,22 @@ class TGResolver:
             return self.cache[tg]
         return None
 
-    async def resolve_many(self, tgs: List[int]) -> Dict[int, str]:
+    async def resolve_many(self, tgs: List[int], network_type: str = "bm") -> Dict[int, str]:
         """
-        Resolves a list of TalkGroups.
-        First checks local cache; for missing items, queries BM API or uses MCC rule.
-        Saves updated cache to disk.
+        Resolves a list of TalkGroups according to network_type.
         """
+        net = (network_type or "bm").strip().lower()
+        if net == "tgif":
+            if len(self.tgif_cache) < 50:
+                await self.fetch_tgif_catalog()
+            return {tg: self.get_name(tg, "tgif") for tg in tgs}
+        if net == "freedmr":
+            if len(self.freedmr_cache) < 50:
+                await self.fetch_freedmr_catalog()
+            return {tg: self.get_name(tg, "freedmr") for tg in tgs}
+        if net in ("xlx", "dmrplus"):
+            return {tg: self.get_name(tg, net) for tg in tgs}
+
         results = {}
         missing = []
         for tg in tgs:
@@ -676,19 +939,198 @@ class TGResolver:
 
         return results
 
-    def get_all_names(self) -> Dict[str, str]:
+    def get_all_names(self, network_type: str = "bm") -> Dict[str, str]:
         """Returns all cached TalkGroup mappings as string keys for JSON serialization."""
+        net = (network_type or "bm").strip().lower()
+        if net == "tgif":
+            return {str(k): v for k, v in self.tgif_cache.items()}
+        if net == "freedmr":
+            return {str(k): v for k, v in self.freedmr_cache.items()}
+        if net == "xlx":
+            xlx_map = {str(4001 + i): f"Module {chr(65 + i)}" for i in range(26)}
+            xlx_map["9"] = "Reflector Call (TS2)"
+            xlx_map["4000"] = "Unlink (Отключение)"
+            xlx_map["9990"] = "Parrot (Эхо-тест)"
+            return xlx_map
         return {str(k): v for k, v in self.cache.items()}
 
-
-
-    def search_talkgroups(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def search_talkgroups(self, query: str, limit: int = 50, network_type: str = "bm") -> List[Dict[str, Any]]:
         """
         Searches TalkGroups by TG number, Russian/English name, country, city or alias.
-        Returns ranked list of matching items:
-        [{"tg": int, "name": str, "country": str, "details": str}, ...]
+        Adapts catalog to network_type ('bm', 'tgif', 'xlx', 'dmrplus', 'freedmr').
         """
+        net = (network_type or "bm").strip().lower()
         q = query.strip().lower()
+
+        if net == "tgif":
+            if not q:
+                top_tgs = [31665, 777, 2501, 250, 91, 9990, 4000]
+                return [
+                    {
+                        "tg": tg,
+                        "name": self.get_name(tg, "tgif"),
+                        "country": "TGIF Network",
+                        "is_direct": True
+                    }
+                    for tg in top_tgs
+                ]
+            exact_m, prefix_m, contains_m = [], [], []
+            seen = set()
+            if q.isdigit():
+                q_num = int(q)
+                if q_num in self.tgif_cache:
+                    exact_m.append(q_num)
+                    seen.add(q_num)
+                for tg in self.tgif_cache:
+                    if tg in seen:
+                        continue
+                    s_tg = str(tg)
+                    if s_tg.startswith(q):
+                        prefix_m.append(tg)
+                        seen.add(tg)
+                    elif q in s_tg:
+                        contains_m.append(tg)
+                        seen.add(tg)
+            for tg, name in self.tgif_cache.items():
+                if tg in seen:
+                    continue
+                nl = name.lower()
+                if q == nl:
+                    exact_m.append(tg)
+                    seen.add(tg)
+                elif nl.startswith(q):
+                    prefix_m.append(tg)
+                    seen.add(tg)
+                elif q in nl:
+                    contains_m.append(tg)
+                    seen.add(tg)
+            matched = exact_m + prefix_m + contains_m
+            return [
+                {
+                    "tg": tg,
+                    "name": self.get_name(tg, "tgif"),
+                    "country": "TGIF Network",
+                    "is_direct": True
+                }
+                for tg in matched[:limit]
+            ]
+
+        if net == "freedmr":
+            if not q:
+                top_tgs = [91, 92, 250, 2501, 2502, 2503, 2505, 4000, 9990]
+                return [
+                    {
+                        "tg": tg,
+                        "name": self.get_name(tg, "freedmr"),
+                        "country": "FreeDMR Network",
+                        "is_direct": True
+                    }
+                    for tg in top_tgs
+                ]
+            exact_m, prefix_m, contains_m = [], [], []
+            seen = set()
+            if q.isdigit():
+                q_num = int(q)
+                if q_num in self.freedmr_cache:
+                    exact_m.append(q_num)
+                    seen.add(q_num)
+                for tg in self.freedmr_cache:
+                    if tg in seen:
+                        continue
+                    s_tg = str(tg)
+                    if s_tg.startswith(q):
+                        prefix_m.append(tg)
+                        seen.add(tg)
+                    elif q in s_tg:
+                        contains_m.append(tg)
+                        seen.add(tg)
+            for tg, name in self.freedmr_cache.items():
+                if tg in seen:
+                    continue
+                nl = name.lower()
+                if q == nl:
+                    exact_m.append(tg)
+                    seen.add(tg)
+                elif nl.startswith(q):
+                    prefix_m.append(tg)
+                    seen.add(tg)
+                elif q in nl:
+                    contains_m.append(tg)
+                    seen.add(tg)
+            matched = exact_m + prefix_m + contains_m
+            return [
+                {
+                    "tg": tg,
+                    "name": self.get_name(tg, "freedmr"),
+                    "country": "FreeDMR Network",
+                    "is_direct": True
+                }
+                for tg in matched[:limit]
+            ]
+
+        if net == "xlx":
+            xlx_items = [(9, "Reflector Call (TS2)"), (4000, "Unlink (Отключение)")] + [
+                (4001 + i, f"Module {chr(65 + i)}") for i in range(26)
+            ]
+            results = []
+            for tg, name in xlx_items:
+                if not q or q in str(tg) or q in name.lower():
+                    results.append({
+                        "tg": tg,
+                        "name": name,
+                        "country": "XLX Reflector",
+                        "is_direct": True
+                    })
+            return results[:limit]
+
+        if net == "dmrplus":
+            dmrplus_items = [
+                # Reflectors TS2
+                (4530, "Reflector 4530 RU (Россия / СНГ)", "DMR+ Reflector TS2"),
+                (4001, "Reflector 4001 DL (Германия общий)", "DMR+ Reflector TS2"),
+                (4030, "Reflector 4030 OE (Австрия)", "DMR+ Reflector TS2"),
+                (4020, "Reflector 4020 HB (Швейцария)", "DMR+ Reflector TS2"),
+                (4400, "Reflector 4400 UK (Великобритания)", "DMR+ Reflector TS2"),
+                (4500, "Reflector 4500 EA (Испания)", "DMR+ Reflector TS2"),
+                (4700, "Reflector 4700 US (Северная Америка)", "DMR+ Reflector TS2"),
+                (4800, "Reflector 4800 PT (Бразилия)", "DMR+ Reflector TS2"),
+                (4000, "Unlink (Отключение рефлектора)", "DMR+ Reflector TS2"),
+                (5000, "Status (Проверка статуса)", "DMR+ Reflector TS2"),
+                # Common TalkGroups TS1
+                (1, "Worldwide", "DMR+ TS1"),
+                (2, "Europe", "DMR+ TS1"),
+                (13, "Worldwide English", "DMR+ TS1"),
+                (20, "DACH (Германия/Австрия/Швейцария)", "DMR+ TS1"),
+                (250, "Russia (Национальная группа)", "DMR+ TS1"),
+                (262, "Germany", "DMR+ TS1"),
+                (208, "France", "DMR+ TS1"),
+                (222, "Italy", "DMR+ TS1"),
+                (235, "United Kingdom", "DMR+ TS1"),
+                (8, "Regional Net", "DMR+ TS1"),
+                (9, "Local (Voice TS2 / Local TS1)", "DMR+ Local"),
+            ]
+            results = []
+            for tg, name, cat in dmrplus_items:
+                if not q or q in str(tg) or q in name.lower():
+                    results.append({
+                        "tg": tg,
+                        "name": name,
+                        "country": cat,
+                        "is_direct": True
+                    })
+            if q and q.isdigit():
+                q_num = int(q)
+                if not any(r["tg"] == q_num for r in results):
+                    res_name = self.get_name(q_num, "dmrplus")
+                    cat = "DMR+ Reflector TS2" if 4001 <= q_num <= 4999 else "DMR+ Network"
+                    results.insert(0, {
+                        "tg": q_num,
+                        "name": res_name,
+                        "country": cat,
+                        "is_direct": True
+                    })
+            return results[:limit]
+
         if not q:
             # Return popular top talkgroups if empty query
             top_tgs = [91, 92, 250, 2501, 2502, 2503, 246, 247, 248, 255, 257, 401, 9990]
@@ -791,24 +1233,62 @@ class TGResolver:
 
     async def check_and_update(self, interval_seconds: int = 10800) -> bool:
         """
-        Periodically (every 3 hours / 10800s) checks and refreshes the BrandMeister catalog.
+        Periodically (every 3 hours / 10800s) checks and refreshes BrandMeister, TGIF and FreeDMR catalogs.
         """
         now = time.time()
         if not hasattr(self, "_last_check_time"):
             self._last_check_time = 0
-        if (now - self._last_check_time) >= interval_seconds:
-            logger.info("[TG_RESOLVER] Performing scheduled 3-hour check of BrandMeister catalog...")
+        if (now - self._last_check_time) >= interval_seconds or len(self.tgif_cache) < 50 or len(self.freedmr_cache) < 50:
+            logger.info("[TG_RESOLVER] Performing scheduled check of BrandMeister, TGIF and FreeDMR catalogs...")
             try:
-                count = await self.fetch_master_catalog()
+                count_bm = await self.fetch_master_catalog()
+                count_tgif = await self.fetch_tgif_catalog()
+                count_freedmr = await self.fetch_freedmr_catalog()
                 self._last_check_time = now
-                return count > 0
+                return (count_bm + count_tgif + count_freedmr) > 0
             except Exception as e:
                 logger.error(f"[TG_RESOLVER] Failed scheduled check: {e}")
                 self._last_check_time = now
                 return False
         return False
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self, network_type: str = "bm") -> Dict[str, Any]:
+        net = (network_type or "bm").strip().lower()
+        if net == "xlx":
+            return {
+                "count": 28,
+                "network": "xlx",
+                "updated_ts": time.time(),
+                "updated_str": "Модули XLX A–Z (4001–4026)"
+            }
+        if net == "freedmr":
+            count = len(self.freedmr_cache)
+            updated_ts = 0.0
+            if FREEDMR_CACHE_FILE.exists():
+                try:
+                    updated_ts = FREEDMR_CACHE_FILE.stat().st_mtime
+                except Exception:
+                    pass
+            return {
+                "count": count,
+                "network": "freedmr",
+                "updated_ts": updated_ts,
+                "updated_str": time.strftime("%d.%m.%Y %H:%M", time.localtime(updated_ts)) if updated_ts else "База FreeDMR"
+            }
+        if net == "tgif":
+            count = len(self.tgif_cache)
+            updated_ts = 0.0
+            if TGIF_CACHE_FILE.exists():
+                try:
+                    updated_ts = TGIF_CACHE_FILE.stat().st_mtime
+                except Exception:
+                    pass
+            return {
+                "count": count,
+                "network": "tgif",
+                "updated_ts": updated_ts,
+                "updated_str": time.strftime("%d.%m.%Y %H:%M", time.localtime(updated_ts)) if updated_ts else "База TGIF"
+            }
         count = len(self.cache)
         updated_ts = 0.0
         if TG_CACHE_FILE.exists():
@@ -818,6 +1298,7 @@ class TGResolver:
                 pass
         return {
             "count": count,
+            "network": net,
             "updated_ts": updated_ts,
             "updated_str": time.strftime("%d.%m.%Y %H:%M", time.localtime(updated_ts)) if updated_ts else "Встроенная база"
         }

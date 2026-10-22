@@ -327,6 +327,7 @@ function _isVolumeDownPttEnabled() {
     }
 
     isTransmissionStarting = true;
+    window.isTransmissionStarting = true;
     cancelTransmissionStart = false;
 
     // Ensure audio pipeline and microphone worklet are active BEFORE activating PTT!
@@ -400,10 +401,19 @@ function _isVolumeDownPttEnabled() {
           window.setHotspotSlot(targetSlotParam);
         }
       }
-      const targetSlot = (targetSlotParam === 1 || targetSlotParam === 2) ? targetSlotParam : _getHotspotSlot(hid);
+      let targetSlot = (targetSlotParam === 1 || targetSlotParam === 2) ? targetSlotParam : _getHotspotSlot(hid);
       const pttTarget = _getHotspotPttTarget(hid, targetSlot);
       const isCallerTarget = Boolean(pttTarget && (pttTarget.type === "CALLER" || pttTarget.type === "ID"));
-      const targetTg = isCallerTarget ? pttTarget.id : _getHotspotTg(hid, targetSlot);
+      let targetTg = isCallerTarget ? pttTarget.id : _getHotspotTg(hid, targetSlot);
+
+      const hs = (window.currentHotspots || []).find(h => h.id === hid);
+      const net = (hs && hs.network_type ? hs.network_type : "").toLowerCase();
+      if (net === "xlx") {
+        targetSlot = 2;
+        if (!isCallerTarget) targetTg = 9;
+      } else if (net === "dmrplus" && targetSlot === 2 && !isCallerTarget) {
+        targetTg = 9;
+      }
 
       const updateTxBadgeCountdown = (sec) => {
         const curHid = window.activeTxHotspotId || hid;
@@ -525,22 +535,27 @@ function _isVolumeDownPttEnabled() {
       }
     } finally {
       isTransmissionStarting = false;
+      window.isTransmissionStarting = false;
     }
   }
 
-  function finalizeTransmissionRelease(hid = null) {
-    if (pttReleaseTimer) {
-      clearTimeout(pttReleaseTimer);
-      pttReleaseTimer = null;
-    }
-    isPttReleasing = false;
-    window.isPttReleasing = false;
-    window.isPttPressed = false;
+  function clearTxIndicationUI(hid = null) {
     const targetHid = hid || window.activeTxHotspotId || window.activeHotspotId;
+    window.isPttPressed = false;
     window.activeTxHotspotId = null;
-    updateAllHotspotRecUI();
 
-    document.querySelectorAll(".ptt-button").forEach(b => b.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2"));
+    if (totCountdownInterval) {
+      clearInterval(totCountdownInterval);
+      totCountdownInterval = null;
+    }
+    totRemainingSeconds = null;
+
+    document.querySelectorAll(".ptt-button").forEach(b => {
+      b.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
+    });
+    document.querySelectorAll(".vfo-row").forEach(r => r.classList.remove("vfo-tx-active"));
+    document.querySelectorAll(".vfo-tx-tag").forEach(t => t.classList.remove("active"));
+
     document.querySelectorAll(".radio-container").forEach(card => {
       if (typeof window.updateCardModeBadge === "function") {
         window.updateCardModeBadge(card);
@@ -551,16 +566,19 @@ function _isVolumeDownPttEnabled() {
           b.textContent = "STANDBY";
         }
       }
+      if (typeof window.updateCardPttHint === "function") {
+        window.updateCardPttHint(card);
+      }
     });
-    // Fallback if not inside a .radio-container
+
     const fallbackMb = document.getElementById("modeBadge");
     if (fallbackMb && !fallbackMb.closest(".radio-container")) {
       fallbackMb.className = "mode-badge mode-standby";
       fallbackMb.textContent = "STANDBY";
     }
-    document.querySelectorAll(".vfo-row").forEach(r => r.classList.remove("vfo-tx-active"));
-    document.querySelectorAll(".vfo-tx-tag").forEach(t => t.classList.remove("active"));
-    const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`);
+
+    const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(targetHid)}"]`) ||
+                       document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`);
     if (activeCard) {
       _updateCardTgDisplay(activeCard);
     }
@@ -573,6 +591,8 @@ function _isVolumeDownPttEnabled() {
     st.target = 0;
     ensureVuMeterLoop();
 
+    updateAllHotspotRecUI();
+
     if (window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function") {
       try {
         window.AndroidBridge.updateRadioStatus(window.t ? window.t("gw.standby_status", {}, "Дежурный прием (Standby)") : "Дежурный прием (Standby)");
@@ -582,28 +602,41 @@ function _isVolumeDownPttEnabled() {
     }
   }
 
-  function stopTransmission() {
+  function finalizeTransmissionRelease(hid = null) {
+    if (pttReleaseTimer) {
+      clearTimeout(pttReleaseTimer);
+      pttReleaseTimer = null;
+    }
+    isPttReleasing = false;
+    window.isPttReleasing = false;
+    clearTxIndicationUI(hid);
+  }
+
+  function stopTransmission(options = {}) {
     window.stopTransmission = stopTransmission;
+    const hid = window.activeTxHotspotId || window.activeHotspotId;
+    const silentCancel = Boolean(options && options.silentCancel);
+
     if (isTransmissionStarting) {
       cancelTransmissionStart = true;
+      window.isTransmissionStarting = false;
+      clearTxIndicationUI(hid);
     }
     stopTxSilenceFallback();
-    if (!window.isPttPressed || isPttReleasing) return;
-
-    const hid = window.activeTxHotspotId || window.activeHotspotId;
-
-    if (totCountdownInterval) {
-      clearInterval(totCountdownInterval);
-      totCountdownInterval = null;
+    if (!window.isPttPressed) {
+      clearTxIndicationUI(hid);
+      return;
     }
-    totRemainingSeconds = null;
 
-    // Immediately stop microphone capture so room audio is not transmitted
+    // 1. FIRST: Instantly turn off all TX visual indicators (red PTT button, red TS row, TX badge, VU meter)
+    clearTxIndicationUI(hid);
+
+    // 2. Immediately stop microphone capture so room audio is not transmitted
     if (window.workletNode && window.workletNode.port) {
       window.workletNode.port.postMessage({ command: "set_active", active: false });
     }
 
-    // PTT Mute release (+1s tail): Keep muted during transmission + 1 second after release
+    // 3. AFTER TX indication is cleared: run post-release actions (mute tail, haptics, Roger Beep, server release)
     if (_isMuteOnPttEnabled() && window.isPttMuteActive) {
       if (window.pttMuteReleaseTimer) {
         clearTimeout(window.pttMuteReleaseTimer);
@@ -618,12 +651,13 @@ function _isVolumeDownPttEnabled() {
       }, 1000);
     }
 
-    triggerTactileVibrate([25, 25, 25]);
+    if (!silentCancel) {
+      triggerTactileVibrate([25, 25, 25]);
+    }
 
-    const rogerBeep = getHotspotRogerBeep(hid);
-    const rogerBeepPattern = rogerBeep ? getHotspotRogerBeepPattern(hid) : "";
+    const rogerBeep = silentCancel ? false : getHotspotRogerBeep(hid);
+    const rogerBeepPattern = (rogerBeep && !silentCancel) ? getHotspotRogerBeepPattern(hid) : "";
 
-    // Send ptt_release WebSocket message immediately so server begins roger beep + 0.5s tail transmission
     if (window.ws && window.ws.readyState === WebSocket.OPEN) {
       window.ws.send(JSON.stringify({
         type: "ptt_release",
@@ -633,31 +667,118 @@ function _isVolumeDownPttEnabled() {
       }));
     }
 
-    if (rogerBeep) {
+    if (rogerBeep && !silentCancel) {
       isPttReleasing = true;
       window.isPttReleasing = true;
       playLocalRogerBeep(rogerBeepPattern);
       const beepDur = (typeof getRogerBeepDurationMs === "function")
         ? getRogerBeepDurationMs(rogerBeepPattern)
         : 160;
-      // Requirement: prolong transmission by Roger Beep duration + 1.0s (1000ms) tail
       const totalExtensionMs = beepDur + 1000;
 
-      // Update mode badge to indicate transmitting Roger Beep tail
-      const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(hid)}"]`);
-      const mb = activeCard ? activeCard.querySelector(".mode-badge") : document.getElementById("modeBadge");
-      if (mb) {
-        const slot = _getHotspotSlot(hid) || 1;
-        mb.textContent = `TX TS${slot}`;
-      }
-
-      // Safety timeout: finalize release after extension (+150ms grace) if server state_change wasn't received
       if (pttReleaseTimer) clearTimeout(pttReleaseTimer);
       pttReleaseTimer = setTimeout(() => {
-        finalizeTransmissionRelease(hid);
+        isPttReleasing = false;
+        window.isPttReleasing = false;
+        pttReleaseTimer = null;
       }, totalExtensionMs + 150);
     } else {
-      finalizeTransmissionRelease(hid);
+      isPttReleasing = false;
+      window.isPttReleasing = false;
+    }
+  }
+
+  async function triggerQuickUnlink4000(targetHotspotId = null, targetSlotParam = null) {
+    const hid = _resolveHotspotId(targetHotspotId || window.activeHotspotId || "default");
+
+    // Если шла или начиналась передача от первого тапа — тихо отменяем её без Roger Beep
+    if (window.isPttPressed || isTransmissionStarting) {
+      stopTransmission({ silentCancel: true });
+    }
+
+    if (window.isSwl) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          window.t ? window.t("ptt.swl_denied_toast", {}, "Режим SWL: передача запрещена (только приём)") : "Режим SWL: передача запрещена (только приём)",
+          2500
+        );
+      }
+      return false;
+    }
+
+    const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+    const pttBtn = targetCard ? targetCard.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+
+    if (isPttLocked(hid)) {
+      blinkPttLocked(pttBtn);
+      return false;
+    }
+
+    const conn = checkPttConnectionStatus(hid);
+    if (!conn.ok) {
+      notifyPttConnectionBlocked(conn, pttBtn);
+      return false;
+    }
+
+    const hs = (window.currentHotspots || []).find(h => h.id === hid);
+    const netType = (hs?.network_type || "bm").toLowerCase();
+    const hsName = hs?.name || hs?.callsign || hid;
+    const slot = (netType === "xlx")
+      ? 2
+      : ((targetSlotParam === 1 || targetSlotParam === 2) ? targetSlotParam : (_getHotspotSlot(hid) || 2));
+
+    // 1. Тактильный отклик и короткая визуальная вспышка (350 мс) на кнопке PTT и бейдже режима
+    triggerTactileVibrate([30, 40, 30]);
+    if (pttBtn) {
+      pttBtn.classList.add("active", `tx-slot-${slot}`);
+    }
+    const modeBadge = targetCard ? targetCard.querySelector(".mode-badge") : null;
+    if (modeBadge) {
+      modeBadge.className = "mode-badge mode-tx";
+      modeBadge.textContent = `TX TS${slot} → 4000`;
+    }
+    setTimeout(() => {
+      if (!window.isPttPressed) {
+        if (pttBtn) pttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2");
+        if (targetCard && typeof window.updateCardModeBadge === "function") {
+          window.updateCardModeBadge(targetCard);
+        } else if (modeBadge) {
+          modeBadge.className = "mode-badge mode-standby";
+          modeBadge.textContent = "STANDBY";
+        }
+      }
+    }, 380);
+
+    // 2. Параллельно сразу выводим короткое сообщение в центре экрана
+    if (typeof window.showToast === "function") {
+      const toastText = (typeof window.t === "function")
+        ? window.t("ptt.quick_unlink_4000_toast", { name: hsName, slot }, `${hsName}: TS${slot} → TG 4000 (Сброс)`)
+        : `${hsName}: TS${slot} → TG 4000 (Сброс)`;
+      window.showToast(toastText, 1000, targetCard || hid);
+    }
+
+    // 3. Отправляем запрос короткого посыла в TG 4000 на бэкенд
+    try {
+      const resp = await fetch("/api/bm/drop-dynamic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: hid,
+          slot: slot,
+          quick_ptt_unlink: true
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data && data.status === "error" && data.detail) {
+        if (typeof window.showToast === "function") {
+          window.showToast(`${hsName}: ${data.detail}`, 2800);
+        }
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn("[PTT] Quick TG 4000 unlink failed:", err);
+      return false;
     }
   }
 
@@ -672,37 +793,43 @@ function _isVolumeDownPttEnabled() {
   window.stopTransmission = stopTransmission;
   window.triggerHardwarePtt = function(isDown) {
     const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
-    if (isPttLocked(hid)) {
+    const mode = getHotspotPttMode(hid);
+    if (mode === "toggle") {
       if (isDown) {
-        blinkPttLocked();
+        if (window.isPttPressed || isTransmissionStarting) {
+          stopTransmission();
+          return;
+        }
+        if (isPttLocked(hid)) {
+          blinkPttLocked();
+          return;
+        }
+        if (isPttReleasing) finalizeTransmissionRelease(hid);
+        const conn = checkPttConnectionStatus(hid);
+        if (!conn.ok) {
+          notifyPttConnectionBlocked(conn);
+          return;
+        }
+        startTransmission(hid);
       }
       return;
     }
     if (isDown) {
+      if (isPttLocked(hid)) {
+        blinkPttLocked();
+        return;
+      }
       if (isPttReleasing) finalizeTransmissionRelease(hid);
       const conn = checkPttConnectionStatus(hid);
       if (!conn.ok) {
         notifyPttConnectionBlocked(conn);
         return;
       }
-    }
-    const mode = getHotspotPttMode(hid);
-    if (mode === "toggle") {
-      if (isDown) {
-        if (window.isPttPressed) {
-          stopTransmission();
-        } else {
-          startTransmission(hid);
-        }
-      }
-      return;
-    }
-    if (isDown) {
       if (!window.isPttPressed) {
         startTransmission(hid);
       }
     } else {
-      if (window.isPttPressed) {
+      if (window.isPttPressed || isTransmissionStarting) {
         stopTransmission();
       }
     }
@@ -722,6 +849,13 @@ export function initPttEngine() {
     if (e.code === "Space" && !e.repeat && e.target.tagName !== "INPUT" && !document.querySelector(".modal.active")) {
       e.preventDefault();
       const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+      const mode = getHotspotPttMode(hid);
+      if (mode === "toggle") {
+        if (window.isPttPressed || isTransmissionStarting) {
+          stopTransmission();
+          return;
+        }
+      }
       if (isPttLocked(hid)) {
         blinkPttLocked();
         return;
@@ -729,15 +863,6 @@ export function initPttEngine() {
       const conn = checkPttConnectionStatus(hid);
       if (!conn.ok) {
         notifyPttConnectionBlocked(conn);
-        return;
-      }
-      const mode = getHotspotPttMode(hid);
-      if (mode === "toggle") {
-        if (window.isPttPressed) {
-          stopTransmission();
-        } else {
-          startTransmission(hid);
-        }
         return;
       }
       startTransmission(hid);
@@ -777,6 +902,7 @@ export {
   closeTotConfigModal,
   startTransmission,
   stopTransmission,
+  triggerQuickUnlink4000,
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
 };
@@ -798,6 +924,7 @@ if (typeof window !== "undefined") {
   window.closeTotConfigModal = closeTotConfigModal;
   window.startTransmission = startTransmission;
   window.stopTransmission = stopTransmission;
+  window.triggerQuickUnlink4000 = triggerQuickUnlink4000;
   window.isCheckMicOnTxEnabled = isCheckMicOnTxEnabled;
   window.setCheckMicOnTxEnabled = setCheckMicOnTxEnabled;
   window.ensureTxSilenceFallback = ensureTxSilenceFallback;
@@ -807,6 +934,7 @@ if (typeof window !== "undefined") {
   window.__proxdmr = window.__proxdmr || {};
   window.__proxdmr.startTransmission = startTransmission;
   window.__proxdmr.stopTransmission = stopTransmission;
+  window.__proxdmr.triggerQuickUnlink4000 = triggerQuickUnlink4000;
   window.__proxdmr.isCheckMicOnTxEnabled = isCheckMicOnTxEnabled;
   window.__proxdmr.setCheckMicOnTxEnabled = setCheckMicOnTxEnabled;
   window.__proxdmr.triggerHardwarePtt = window.triggerHardwarePtt;
@@ -833,6 +961,7 @@ if (typeof window !== "undefined") {
     closeTotConfigModal,
     startTransmission,
     stopTransmission,
+    triggerQuickUnlink4000,
     checkPttConnectionStatus,
     notifyPttConnectionBlocked,
     initPttEngine

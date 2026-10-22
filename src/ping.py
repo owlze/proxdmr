@@ -409,10 +409,21 @@ class BMPingService:
 
     @staticmethod
     def _sort_benchmark_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        reachable = [it for it in items if it.get("avg_ping") is not None]
-        unreachable = [it for it in items if it.get("avg_ping") is None]
+        def _is_accessible(it: Dict[str, Any]) -> bool:
+            if it.get("udp_ok") is not None:
+                return bool(it.get("udp_ok"))
+            if it.get("state") == "online":
+                return True
+            return it.get("avg_ping") is not None and it.get("state") not in ("no_reply", "refused", "dns_fail")
 
-        reachable.sort(key=lambda x: (x.get("avg_ping", 9999), x.get("loss_pct", 0), x.get("country_name", "")))
+        reachable = [it for it in items if _is_accessible(it)]
+        unreachable = [it for it in items if not _is_accessible(it)]
+
+        reachable.sort(key=lambda x: (
+            x.get("udp_ms") if x.get("udp_ms") is not None else (x.get("avg_ping") if x.get("avg_ping") is not None else 9999),
+            x.get("loss_pct", 0),
+            x.get("country_name", "")
+        ))
         unreachable.sort(key=lambda x: x.get("country_name", ""))
 
         result = []
@@ -530,6 +541,29 @@ class BMPingService:
                 packet_callback=_on_packet
             )
 
+            # Additional UDP handshake probe (3 packets) to verify master is listening
+            udp_ok = None
+            udp_ms = None
+            udp_state = None
+            try:
+                from dmr.server_probe import probe_hb_server
+                u_res = await asyncio.to_thread(
+                    probe_hb_server,
+                    host,
+                    int(srv.get("port") or 62031),
+                    123456799,
+                    3,
+                    1.0,
+                    self._benchmark_cancel_event.is_set,
+                    "bm",
+                    False
+                )
+                udp_state = u_res.get("state")
+                udp_ok = (udp_state == "online")
+                udp_ms = u_res.get("udp_ms")
+            except Exception:
+                pass
+
             res_item = {
                 "id": srv_id,
                 "country_code": c_code,
@@ -538,6 +572,9 @@ class BMPingService:
                 "host": host,
                 "name": display_name,
                 "avg_ping": probe_stats["avg_ping"],
+                "udp_ms": udp_ms,
+                "udp_ok": udp_ok,
+                "state": udp_state if udp_state else ("online" if probe_stats["avg_ping"] is not None else "no_reply"),
                 "loss_pct": probe_stats["loss_pct"],
                 "packets_sent": probe_stats["packets_sent"],
                 "packets_recv": probe_stats["packets_recv"],
@@ -553,6 +590,21 @@ class BMPingService:
         sorted_results = self._sort_benchmark_results(tested_results)
         self.cached_benchmark_results = sorted_results
         self._save_benchmark_results()
+        try:
+            from dmr.server_probe import server_probe_service
+            now_ts = int(time.time())
+            res_map = {}
+            for r in sorted_results:
+                h = (r.get("host") or "").lower()
+                res_map[h] = r
+            server_probe_service._cache["bm"] = {
+                "checked_at": now_ts,
+                "results": sorted_results,
+                "results_map": res_map,
+            }
+            server_probe_service._save_cache()
+        except Exception as e:
+            logger.debug(f"[PING] Error syncing BM benchmark to server_probe cache: {e}")
 
         is_cancelled = self._benchmark_cancel_event.is_set()
         logger.info(f"[PING] BM Benchmark completed (tested {len(tested_results)}/{total}, cancelled={is_cancelled})")

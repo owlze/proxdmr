@@ -8,6 +8,8 @@ import {
   getCountryInfo,
   updateFlagElement,
   getCleanTgDesc,
+  getHotspotNetworkType,
+  getNetworkRawTgName,
   adjustPttDescFontSize,
   renderTgTextHtml,
   formatCallerLocation
@@ -307,10 +309,17 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
   if (!card) return;
   const activeHid = getActiveHotspotId();
   const cid = card.dataset.hotspotId || activeHid;
-  const effectiveSlot = (targetSlot === 1 || targetSlot === 2) ? targetSlot : (card._activeSlot || getHotspotSlot(cid) || 2);
+  const netType = getHotspotNetworkType(cid);
+  let effectiveSlot = (targetSlot === 1 || targetSlot === 2) ? targetSlot : (card._activeSlot || getHotspotSlot(cid) || 2);
+  if (netType === "xlx") {
+    effectiveSlot = 2;
+  }
   const pttTarget = getHotspotPttTarget(cid, effectiveSlot);
-  const curTg = pttTarget.id;
+  let curTg = pttTarget.id;
   const isCallerId = (pttTarget.type === "CALLER" || pttTarget.type === "ID");
+  if (netType === "xlx" && !isCallerId) {
+    curTg = 9;
+  }
 
   const ts1El = card.querySelector(".ptt-slot-ts1");
   const ts2El = card.querySelector(".ptt-slot-ts2");
@@ -330,11 +339,13 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
     const name = (u?.name || "").trim();
     const full = `${call} ${name}`.trim();
     descText = getCleanTgDesc(curTg, full);
+  } else if (netType === "xlx") {
+    targetText = `TG 9`;
+    descText = "Local / Reflector";
   } else {
     targetText = `TG ${curTg}`;
-    const tgNamesMap = getTgNamesMap();
-    const rawName = tgNamesMap[curTg] ? String(tgNamesMap[curTg]).trim() : (curTg === 9990 ? "Parrot / Echo (Эхо-тест)" : "");
-    descText = getCleanTgDesc(curTg, rawName);
+    const rawName = getNetworkRawTgName(curTg, netType) || (curTg === 9990 ? "Parrot / Echo (Эхо-тест)" : "");
+    descText = getCleanTgDesc(curTg, rawName, null, netType);
   }
 
   // Highlight active slot badge on PTT button
@@ -429,6 +440,8 @@ export function updateCardTgDisplay(card) {
   const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
     ? window.resolveHotspotId(rawCid)
     : (rawCid || "default");
+  const netType = getHotspotNetworkType(cid);
+  const isNonMccNet = (netType === "tgif" || netType === "xlx");
   const tg1 = getHotspotTg(cid, 1);
   const tg2 = getHotspotTg(cid, 2);
   const now = Date.now() / 1000;
@@ -449,7 +462,10 @@ export function updateCardTgDisplay(card) {
     const vuSt = (typeof window !== "undefined" && typeof window.getVuState === "function")
       ? window.getVuState(cid, s)
       : null;
-    const isAudioActive = Boolean(vuSt && vuSt.mode === "RX" && (perfNow - vuSt.lastRxTime < 1800));
+    const isAudioActive = Boolean(
+      (vuSt && (perfNow - vuSt.lastRxTime < 2200)) ||
+      (card._lastRx && card._lastRx[s] && ((now - (card._lastRx[s].lastAudioTime || 0)) < 2.2))
+    );
 
     // Authoritative slot call: card._lastRx[s] first, or persistent storage, or most recent from heardCalls (RX only)
     let rxData = card._lastRx && card._lastRx[s];
@@ -575,10 +591,12 @@ export function updateCardTgDisplay(card) {
       }
 
       // Bottom row: destination TG of the RECEIVED call
-      const tgNamesMap = getTgNamesMap();
-      const rawTgName = tgNamesMap[rxData.dst_id] || rxData.dst_name || (rxData.dst_id === 9990 ? "Parrot / Echo" : "");
+      const rawTgName = getNetworkRawTgName(rxData.dst_id, netType) || rxData.dst_name || (rxData.dst_id === 9990 ? "Parrot / Echo" : "");
       if (tgFlagEl) {
-        updateFlagElement(tgFlagEl, getCountryInfo(rxData.dst_id), rxData.dst_id === 9990);
+        const tgCountryInfo = (rxData.call_type === "GROUP" && isNonMccNet)
+          ? { name: netType.toUpperCase(), name_en: netType.toUpperCase(), flag: "🌐" }
+          : getCountryInfo(rxData.dst_id);
+        updateFlagElement(tgFlagEl, tgCountryInfo, rxData.dst_id === 9990);
         tgFlagEl.style.filter = "none";
       }
       if (tgTextEl) {
@@ -586,7 +604,7 @@ export function updateCardTgDisplay(card) {
         const tgTitle = (typeof window !== "undefined" && window.t)
           ? window.t("vfo.set_tg_tx_title", { tg: rxData.dst_id })
           : `Задать TG ${rxData.dst_id} для передачи на этом хотспоте`;
-        tgTextEl.innerHTML = renderTgTextHtml(rxData.dst_id, tgPrefix, rawTgName, tgTitle);
+        tgTextEl.innerHTML = renderTgTextHtml(rxData.dst_id, tgPrefix, rawTgName, tgTitle, rxData.call_type === "GROUP" ? netType : null);
         tgTextEl.dataset.tgId = rxData.dst_id;
         tgTextEl.style.filter = "none";
         tgTextEl.title = tgTitle;

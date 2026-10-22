@@ -1,0 +1,304 @@
+{
+  "status": "ok",
+  "generated_at": 1792341869,
+  "count": 33,
+  "servers": [
+    {
+      "id": "FDMR-5052",
+      "country": "AU",
+      "country_name": "Australia-OZ-DMR",
+      "name": "FreeDMR Australia-OZ-DMR (5052)",
+      "host": "australia.oz-dmr.network",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-5053",
+      "country": "AU",
+      "country_name": "Australia-3",
+      "name": "FreeDMR Australia-3 (5053)",
+      "host": "hot.vkfreedmr.org",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-5054",
+      "country": "AU",
+      "country_name": "Australia-VK44",
+      "name": "FreeDMR Australia-VK44 (5054)",
+      "host": "srv-dmr1.vk44.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2841",
+      "country": "BG",
+      "country_name": "Bulgaria",
+      "name": "FreeDMR Bulgaria (2841)",
+      "host": "fdmrbg.ddns.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-7242",
+      "country": "BR",
+      "country_name": "Brasil",
+      "name": "FreeDMR Brasil (7242)",
+      "host": "freedmr.network365.com.br",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2349",
+      "country": "EU",
+      "country_name": "EU",
+      "name": "FreeDMR EU (2349)",
+      "host": "freedmreu.gb7fr.org.uk",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2082",
+      "country": "FR",
+      "country_name": "France",
+      "name": "FreeDMR France (2082)",
+      "host": "alpes-grenoble.ovh",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2621",
+      "country": "DE",
+      "country_name": "Germany",
+      "name": "FreeDMR Germany (2621)",
+      "host": "178.254.30.151",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2021",
+      "country": "GR",
+      "country_name": "Greece",
+      "name": "FreeDMR Greece (2021)",
+      "host": "dmr.freedmr.gr",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2221",
+      "country": "IT",
+      "country_name": "Italy",
+      "name": "FreeDMR Italy (2221)",
+      "host": "hotspots.freedmr.it",
+      "port": 62031,
+      "password": "PASSWORD"
+    },
+    {
+      "id": "FDMR-2226",
+      "country": "IT",
+      "country_name": "Italy-Calabria",
+      "name": "FreeDMR Italy-Calabria (2226)",
+      "host": "freedmr.italynetwork.org",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2223",
+      "country": "IT",
+      "country_name": "Italy-Sicily-1",
+      "name": "FreeDMR Italy-Sicily-1 (2223)",
+      "host": "freedmrsicily1.duckdns.org",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2941",
+      "country": "MK",
+      "country_name": "Macedonia",
+      "name": "FreeDMR Macedonia (2941)",
+      "host": "free.dmr.net.mk",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-6041",
+      "country": "MA",
+      "country_name": "Maroc",
+      "name": "FreeDMR Maroc (6041)",
+      "host": "free.dmr-maroc.com",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3343",
+      "country": "MX",
+      "country_name": "Mexico",
+      "name": "FreeDMR Mexico (3343)",
+      "host": "freedmr.xe1e.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-5301",
+      "country": "NZ",
+      "country_name": "New Zealand",
+      "name": "FreeDMR New Zealand (5301)",
+      "host": "freedmr.dvnz.nz",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-7102",
+      "country": "NI",
+      "country_name": "Nicaragua",
+      "name": "FreeDMR Nicaragua (7102)",
+      "host": "bridge.gremnic.org",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2421",
+      "country": "NO",
+      "country_name": "Norway",
+      "name": "FreeDMR Norway (2421)",
+      "host": "norway.freedmr.no",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-6472",
+      "country": "EU",
+      "country_name": "Reunion Island",
+      "name": "FreeDMR Reunion Island (6472)",
+      "host": "vmi946983.contaboserver.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2224",
+      "country": "IT",
+      "country_name": "Sardinia",
+      "name": "FreeDMR Sardinia (2224)",
+      "host": "freedmr-sardegna.ns0.it",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2401",
+      "country": "SE",
+      "country_name": "Sweden",
+      "name": "FreeDMR Sweden (2401)",
+      "host": "2401.freedmrsweden.se",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2861",
+      "country": "TR",
+      "country_name": "Turkey",
+      "name": "FreeDMR Turkey (2861)",
+      "host": "dashboard.tracadana.org.tr",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2341",
+      "country": "GB",
+      "country_name": "United Kingdom",
+      "name": "FreeDMR United Kingdom (2341)",
+      "host": "hotspot.uk.freedmr.link",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2342",
+      "country": "GB",
+      "country_name": "United Kingdom-CYMRU",
+      "name": "FreeDMR United Kingdom-CYMRU (2342)",
+      "host": "cy.freedmr.cymru",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2343",
+      "country": "GB",
+      "country_name": "United Kingdom-OZ-DMR",
+      "name": "FreeDMR United Kingdom-OZ-DMR (2343)",
+      "host": "england.oz-dmr.network",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-2345",
+      "country": "GB",
+      "country_name": "United Kingdom-Scotland",
+      "name": "FreeDMR United Kingdom-Scotland (2345)",
+      "host": "freedmr.m0xfn.radio",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3103",
+      "country": "US",
+      "country_name": "USA-San Francisco",
+      "name": "FreeDMR USA-San Francisco (3103)",
+      "host": "us-sf.freedmr.cc",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3102",
+      "country": "US",
+      "country_name": "USA-New England",
+      "name": "FreeDMR USA-New England (3102)",
+      "host": "155.138.154.33",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3104",
+      "country": "US",
+      "country_name": "USA-South East",
+      "name": "FreeDMR USA-South East (3104)",
+      "host": "usasoutheast.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3105",
+      "country": "US",
+      "country_name": "USA-Central",
+      "name": "FreeDMR USA-Central (3105)",
+      "host": "usacentral.ddns.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3107",
+      "country": "US",
+      "country_name": "USA-Los Angeles",
+      "name": "FreeDMR USA-Los Angeles (3107)",
+      "host": "socal-freedmr.ddns.net",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "FDMR-3109",
+      "country": "US",
+      "country_name": "USA-Florida",
+      "name": "FreeDMR USA-Florida (3109)",
+      "host": "freedmr.dvswitch.org",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "ADN-GL",
+      "country": "GLOBAL",
+      "country_name": "ADN Systems",
+      "name": "ADN Global Router",
+      "host": "master.adn.systems",
+      "port": 62031,
+      "password": "passw0rd"
+    }
+  ]
+}

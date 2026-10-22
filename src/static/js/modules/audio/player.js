@@ -686,7 +686,7 @@ export   class RecordingsManager {
         this.openBtn.classList.toggle("active", Boolean(isOpen));
         const img = this.openBtn.querySelector("img");
         if (img) {
-          img.src = isOpen ? "/static/img/Player_On.png?v=2.9.83" : "/static/img/Player_Off.png?v=2.9.83";
+          img.src = isOpen ? "/static/img/Player_On.png?v=2.9.310" : "/static/img/Player_Off.png?v=2.9.310";
           img.alt = isOpen ? (window.t ? window.t("player.active_alt", {}, "Плеер включен") : "Плеер включен") : (window.t ? window.t("player.archive_alt", {}, "Архив записей") : "Архив записей");
         }
       }

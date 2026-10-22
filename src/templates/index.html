@@ -30,7 +30,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.308&old=2.9.284">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.353">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -448,6 +448,7 @@
                 <img src="/static/img/Logo_dark.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-light">
               </div>
               <span class="brand-version hotspot-name-badge">Main 📻</span>
+              <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
             </div>
 
             <!-- Day / Night Theme Switcher (Click/tap to toggle) -->
@@ -532,7 +533,7 @@
               <circle class="sparkline-dot" cx="-10" cy="-10" r="2.2" fill="#2ecc71"></circle>
             </svg>
             <span class="bm-ping-scale-badge" title="Масштаб (двойной тап для смены)" data-i18n-title="ping.scale_badge_title">1h</span>
-            <span class="bm-ping-mode-badge mode-bm" title="Режим: BM. Кликните по графику для смены на Client ↔ ProxDMR" data-i18n-title="ping.mode_bm_tooltip">BM</span>
+            <span class="bm-ping-mode-badge mode-bm" title="Режим пинга">BM</span>
             <div class="bm-ping-tooltip"></div>
           </div>
           <span id="bmBannerPing" class="bm-banner-ping" title="Пинг и потери пакетов" data-i18n-title="ping.banner_title"><span class="ping-val-row"><span class="ping-ms">-- ms</span></span><span class="loss-val-row"><span class="loss-pct">0.0%</span></span></span>
@@ -877,7 +878,7 @@
     </div>
 
   <!-- Right Column: BM Live Activity Monitor (Integrated Realtime Dashboard) -->
-  <section id="liveMonitorPanel" class="live-monitor-container">
+  <section id="liveMonitorPanel" class="live-monitor-container hidden">
     <div class="live-monitor-header">
       <div class="live-monitor-title">
         <span class="live-pulse-dot"></span>
@@ -1168,6 +1169,7 @@
 
           <div class="brand-title">
             <span class="brand-version hotspot-name-badge" data-i18n="buttons.add_hotspot">Хотспот</span>
+            <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
           </div>
 
           <!-- Hotspot Offline Transcribe Button (t) -->
@@ -1239,7 +1241,7 @@
             <circle class="sparkline-dot" cx="-10" cy="-10" r="2.2" fill="#2ecc71"></circle>
           </svg>
           <span class="bm-ping-scale-badge" title="Масштаб (двойной тап для смены)" data-i18n-title="ping.scale_badge_title">1h</span>
-          <span class="bm-ping-mode-badge mode-bm" title="Режим: BM. Кликните по графику для смены на Client ↔ ProxDMR" data-i18n-title="ping.mode_bm_tooltip">BM</span>
+          <span class="bm-ping-mode-badge mode-bm" title="Режим пинга">BM</span>
           <div class="bm-ping-tooltip"></div>
         </div>
         <span class="bm-banner-ping" title="Пинг и потери пакетов" data-i18n-title="ping.banner_title"><span class="ping-val-row"><span class="ping-ms">-- ms</span></span><span class="loss-val-row"><span class="loss-pct">0.0%</span></span></span>
@@ -1583,7 +1585,7 @@
         <div class="modal-tabs">
           <button type="button" class="tab-btn" data-tab="tab-general" data-i18n="nav.tab_general">Общие</button>
           <button type="button" class="tab-btn active" data-tab="tab-account" data-i18n="nav.tab_account">👤 Аккаунт</button>
-          <button type="button" class="tab-btn" data-tab="tab-edit-hs" data-i18n="nav.tab_params">BM Net</button>
+          <button type="button" class="tab-btn" data-tab="tab-edit-hs" data-i18n="nav.tab_params">DMR Net</button>
           <button type="button" class="tab-btn" data-tab="tab-transcriber" data-i18n="nav.tab_transcriber">AI перевод</button>
         </div>
         <button id="closeSettingsBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
@@ -1807,7 +1809,7 @@
               </button>
             </div>
             <div style="flex: 1; min-width: 220px; display: flex; align-items: center; gap: 6px;">
-              <select id="editHsSelect" class="form-input" style="flex: 1; min-width: 130px; box-sizing: border-box; font-size: 0.85rem; padding: 6px 8px; cursor: pointer; font-weight: 600;">
+              <select id="editHsSelect" class="form-input" style="flex: 1; min-width: 130px; box-sizing: border-box; font-size: 0.73rem; padding: 6px 8px; cursor: pointer; font-weight: 600;">
                 <!-- Populated dynamically -->
               </select>
               <div class="hs-order-quick-btns" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;">
@@ -1819,8 +1821,29 @@
           </div>
         </div>
 
-        <form id="hotspotEditForm">
+        <form id="hotspotEditForm" class="hs-edit-dynamic-panel hs-net-theme-bm">
           <input type="hidden" id="editHsId" value="{{ cfg.id if cfg else 'default' }}">
+          <div class="form-group hs-network-type-group" id="editHsNetworkTypeGroup" style="display: none; margin-bottom: 10px;">
+            <label for="editHsNetworkType" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px;">
+              <span data-i18n="hs_edit.network_type">🌐 Цифровая сеть DMR (выбирается при создании):</span>
+              <span id="editHsNetworkTypePill" class="hotspot-network-badge net-type-bm" data-network-type="bm"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
+            </label>
+            <select id="editHsNetworkType" class="form-input" style="cursor: pointer; font-weight: 600;">
+              <option value="bm" data-i18n="hs_edit.net_bm">🟠 BrandMeister (BM) — глобальная сеть + API v2</option>
+              <option value="tgif" data-i18n="hs_edit.net_tgif">🩵 TGIF Network — 30 000+ тематических TalkGroups</option>
+              <option value="freedmr" data-i18n="hs_edit.net_freedmr">🟢 FreeDMR / ADN Systems — открытая сеть (RPTO)</option>
+              <option value="dmrplus" data-i18n="hs_edit.net_dmrplus">🟣 DMR+ / IPSC2 — рефлекторы и региональные TG (RPTO)</option>
+              <option value="xlx" data-i18n="hs_edit.net_xlx">🟡 XLX Reflector — мультипротокольные модули A–Z</option>
+              <option value="custom" data-i18n="hs_edit.net_custom">⚙️ Другой сервер HomeBrew / HBlink3 (Custom MMDVM)</option>
+            </select>
+          </div>
+          <div class="hs-existing-net-header" id="editHsExistingNetHeader">
+            <div class="hs-existing-net-left">
+              <span id="editHsExistingNetPill" class="hotspot-network-badge net-type-bm" data-network-type="bm"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
+              <span id="editHsExistingNetTitle" class="hs-existing-net-title">BrandMeister DMR</span>
+            </div>
+            <span id="editHsExistingNetDesc" class="hs-existing-net-desc">🔒 Сеть HS • MMDVM + API v2</span>
+          </div>
           <div class="form-group-row">
             <div class="form-group" style="flex: 1;">
               <label for="editHsName" data-i18n="hs_edit.name">Название профиля</label>
@@ -1844,37 +1867,39 @@
               <input type="number" id="editHsDmrId" class="form-input" required value="{{ cfg.dmr_id if cfg else '' }}" placeholder="1234567" data-i18n-placeholder="hs_edit.dmr_id_placeholder">
             </div>
             <div class="form-group" style="flex: 1;">
-              <label for="editHsSsid" data-i18n="hs_edit.ssid">SSID</label>
+              <label for="editHsSsid" id="editHsSsidLabel" data-i18n="hs_edit.ssid">SSID</label>
               <input type="number" id="editHsSsid" class="form-input" min="1" max="99" value="{{ cfg.bm_ssid if (cfg and cfg.bm_ssid >= 1) else 1 }}" placeholder="01" title="Добавляется к 7-значному ID (получается 9-значный, от 1 до 99)" data-i18n-title="hs_edit.ssid_title">
             </div>
           </div>
-          <div class="form-group">
-            <label for="editHsPassword" data-i18n="hs_edit.password">Пароль хотспота (BM SelfCare)</label>
+          <div class="form-group" id="editHsPasswordGroup">
+            <label for="editHsPassword" id="editHsPasswordLabel" data-i18n="hs_edit.password">Пароль хотспота (BM SelfCare)</label>
             <div style="position: relative; display: flex; align-items: center; width: 100%;">
               <input type="password" id="editHsPassword" class="form-input" style="width: 100%; box-sizing: border-box; padding-right: 42px;" value="{{ cfg.bm_password if cfg else '' }}" placeholder="Пароль безопасности хотспота" data-i18n-placeholder="hs_edit.password_placeholder">
               <button type="button" id="btnToggleHsPassword" style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); padding: 4px;" title="Показать/скрыть пароль" data-i18n-title="hs_edit.password_toggle_title">👁️</button>
             </div>
           </div>
-          <div class="form-group">
-            <label for="editHsApiKey" data-i18n="hs_edit.api_key">BM API Key (v2)</label>
+          <div class="form-group" id="editHsApiKeyGroup">
+            <label for="editHsApiKey" id="editHsApiKeyLabel" data-i18n="hs_edit.api_key">BM API Key (v2)</label>
             <div style="position: relative; display: flex; align-items: center; width: 100%;">
               <input type="password" id="editHsApiKey" class="form-input" style="width: 100%; box-sizing: border-box; padding-right: 42px;" value="{{ cfg.bm_api_key if cfg else '' }}" placeholder="Вставьте JWT-токен из профиля BM..." data-i18n-placeholder="hs_edit.api_key_placeholder">
               <button type="button" id="btnToggleHsApiKey" style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); padding: 4px;" title="Показать/скрыть API-ключ" data-i18n-title="hs_edit.api_key_toggle_title">👁️</button>
             </div>
             <div class="form-hint-row">
-              <small class="form-hint" data-i18n="hs_edit.api_key_hint">Необходим для удаленного управления TalkGroups и сброса динамических групп на стороне BM</small>
-              <button type="button" id="btnBmApiHelp" class="btn-help-inline" title="Инструкция: как получить API-ключ в личном кабинете BM" data-i18n-title="hs_edit.btn_help_title">
-                <span data-i18n="hs_edit.btn_help">❓ Инструкция BM</span>
+              <small class="form-hint" id="editHsApiKeyHint" data-i18n="hs_edit.api_key_hint">Необходим для удаленного управления TalkGroups и сброса динамических групп на стороне BM</small>
+              <button type="button" id="btnBmApiHelp" class="btn-help-inline" title="Инструкция: как получить API-ключ в личном кабинете" data-i18n-title="hs_edit.btn_help_title">
+                <span id="btnBmApiHelpText" data-i18n="hs_edit.btn_help">❓ Инструкция BM</span>
               </button>
             </div>
 
             <!-- Collapsible MD Instructions Card -->
             <div id="bmApiHelpCard" class="bm-help-card hidden">
               <div class="bm-help-header">
-                <strong data-i18n="hs_edit.help_header">🔑 Как получить API v2 Key в BM:</strong>
+                <strong id="bmApiHelpHeaderTitle" data-i18n="hs_edit.help_header">🔑 Как получить API v2 Key в BM:</strong>
                 <button type="button" id="btnCloseBmApiHelp" class="btn-close-help" title="Закрыть" data-i18n-title="buttons.close">✕</button>
               </div>
-              <div class="bm-help-body">
+
+              <!-- Вариант 1: Инструкция для BrandMeister -->
+              <div id="bmApiHelpContentBm" class="bm-help-body">
                 <ol>
                   <li data-i18n-html="hs_edit.help_step1">Откройте <a href="https://brandmeister.network/" target="_blank" rel="noopener noreferrer" class="bm-help-link">brandmeister.network ↗</a> и авторизуйтесь.</li>
                   <li data-i18n-html="hs_edit.help_step2">Нажмите на свой <strong>позывной / круглую аватарку в правом верхнем углу</strong> сайта (выпадающее меню профиля пользователя).</li>
@@ -1891,15 +1916,108 @@
                   💡 <strong>Зачем это нужно:</strong> Позволит веб-трансиверу ProxDMR привязывать/отвязывать статические TalkGroups (TG) и мгновенно сбрасывать зависшие динамические группы (TG 4000) прямо из интерфейса.
                 </div>
               </div>
+
+              <!-- Вариант 2: Инструкция для TGIF Network -->
+              <div id="bmApiHelpContentTgif" class="bm-help-body hidden">
+                <ol>
+                  <li data-i18n-html="hs_edit.tgif_help_step1">Откройте вкладку токенов в личном кабинете TGIF: <a href="https://tgif.network/profile.php?tab=StaticTokens" target="_blank" rel="noopener noreferrer" class="bm-help-link">tgif.network/profile.php?tab=StaticTokens ↗</a> и авторизуйтесь.</li>
+                  <li data-i18n-html="hs_edit.tgif_help_step2">Убедитесь, что для вашего хотспота настроен персональный <strong>Hotspot Security Key</strong> (API статических групп требует защищённого подключения и не работает со стандартным паролем <code>passw0rd</code>).</li>
+                  <li data-i18n-html="hs_edit.tgif_help_step3">На вкладке <strong>«Static Tokens»</strong> выберите или укажите ваш хотспот (полный ID с учётом SSID, например <code>250xxxx01</code>).</li>
+                  <li data-i18n-html="hs_edit.tgif_help_step4">Сгенерируйте <strong>Static TG API Token</strong> для этого устройства.</li>
+                  <li data-i18n-html="hs_edit.tgif_help_step5">Скопируйте полученный токен, вставьте его в поле выше и сохраните настройки хотспота.</li>
+                </ol>
+                <div class="bm-help-note" style="margin-top: 10px; background: rgba(234, 179, 8, 0.08); border-left: 3px solid #eab308; padding: 6px 8px;" data-i18n-html="hs_edit.tgif_help_nuance">
+                  ⚠️ <strong>Важный нюанс TGIF:</strong> каждый API-токен привязывается к конкретному ID хотспота (DMR ID + SSID). Сервер TGIF позволяет назначить до 5 статических групп на устройство, а служебные группы (<code>9</code>, <code>777</code>, <code>4000</code>, <code>9990</code>, <code>31000</code>) вызываются только динамически через PTT.
+                </div>
+                <div class="bm-help-note" data-i18n-html="hs_edit.tgif_help_why">
+                  💡 <strong>Зачем это нужно:</strong> Позволит ProxDMR управлять статическими TalkGroups (TS1 / TS2) на стороне TGIF Network через Менеджер TG и автоматически настраивать группу при быстром вызове.
+                </div>
+              </div>
             </div>
           </div>
-          <div class="form-group">
-            <label for="editHsMasterSelect" data-i18n="hs_edit.master_select">Сервер BM (Master) — выбор по странам</label>
+          <div class="form-group-row" id="editHsDmrPlusGroup" style="display: none;">
+            <div class="form-group" style="flex: 1;">
+              <label for="editHsDmrPlusRef">Стартовый рефлектор (StartRef)</label>
+              <input type="number" id="editHsDmrPlusRef" class="form-input" min="4000" max="4999" value="4530" placeholder="4530">
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label for="editHsDmrPlusRelink">Таймаут релинковки (RelinkTime, мин)</label>
+              <input type="number" id="editHsDmrPlusRelink" class="form-input" min="5" max="999" value="60" placeholder="60">
+            </div>
+          </div>
+          <div class="form-group" id="editHsRptoGroup" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="editHsRptoOptions" id="editHsRptoLabel" data-i18n="hs_edit.rpto_label" style="margin-bottom: 0;">Опции HomeBrew (RPTO) — статические TG и рефлекторы</label>
+              <button type="button" onclick="const h = document.getElementById('freedmrHelpBox'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="background:none; border:none; color:#34d399; font-size:0.75rem; cursor:pointer; text-decoration:underline; padding:0;" data-i18n="freedmr_help_toggle">❓ Инструкция FreeDMR</button>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <input type="text" id="editHsRptoOptions" class="form-input" maxlength="255" style="flex: 1;" value="{{ cfg.rpto_options if cfg and cfg.rpto_options is defined else '' }}" placeholder="TS1=2501;TS2=250,2505;DIAL=0;" data-i18n-placeholder="hs_edit.rpto_placeholder">
+              <button type="button" id="btnBuildRptoFromTg" class="btn-secondary" style="padding: 7px 10px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; cursor: pointer;" title="Автоматически сформировать строку RPTO из указанных полей TS1 / TS2 / StartRef">🔄 Из TS1/TS2</button>
+              <button type="button" id="btnSendRptoNow" class="btn-secondary" style="padding: 7px 11px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; cursor: pointer; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(16, 185, 129, 0.1);" title="Отправить RPTO пакет мастер-серверу без переподключения" data-i18n-title="hs_edit.btn_send_rpto_title" data-i18n="hs_edit.btn_send_rpto">⚡ Применить RPTO</button>
+            </div>
+            <small class="form-hint" id="editHsRptoHint" data-i18n="hs_edit.rpto_hint">Передаётся в пакете RPTO сразу после подключения (например FreeDMR: TS1=2501;TS2=250;DIAL=0; или DMR+: StartRef=4370;RelinkTime=60;)</small>
+            <div id="freedmrHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #10b981; border-radius:4px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+                <div style="font-weight:700; color:#34d399; margin-bottom:4px;" data-i18n="freedmr_help_title">Настройка хотспота в сети FreeDMR:</div>
+                <ul style="margin:0; padding-left:16px;">
+                    <li data-i18n="freedmr_help_step1"><b>Пароль хотспота:</b> по умолчанию большинство серверов используют <code>passw0rd</code>, либо ваш персональный пароль из портала <a href="https://www.freedmr.uk/" target="_blank" rel="noopener noreferrer" style="color:#34d399; text-decoration:underline;">FreeDMR Portal</a>.</li>
+                    <li data-i18n="freedmr_help_step2"><b>Статические группы (TS1 / TS2):</b> можно редактировать вручную в строке выше ИЛИ через визуальный менеджер по кнопке <b>«⚡ Управление TG»</b> на карточке хотспота.</li>
+                    <li data-i18n="freedmr_help_step3"><b>Дополнительные параметры RPTO:</b> <code>TIMER=10</code> (таймаут динамических TG в мин.), <code>SINGLE=1</code> (режим одной активной TG), <code>VOICE=0/1</code> (голосовые подсказки), <code>DIAL=0</code> (TG по умолчанию).</li>
+                    <li data-i18n="freedmr_help_step4"><b>Сброс динамических TG:</b> отправка вызова на <code>TG 4000</code> или кнопка сброса в менеджере TG.</li>
+                    <li data-i18n="freedmr_help_step5"><b>Голосовой маяк:</b> <code>VOICE=0</code> отключает 15-минутную голосовую идентификацию сервера и озвучку переключений (рекомендуется для ProxDMR, чтобы не засорять запись и транскрипцию). Для тональной отбивки без голоса можно указать <code>LANG=CW</code>.</li>
+                </ul>
+            </div>
+          </div>
+          <div class="form-group" id="editHsXlxGroup" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="editHsXlxModule" data-i18n="hs_edit.xlx_module_label" style="margin-bottom: 0;">Модуль рефлектора XLX (A–Z)</label>
+              <button type="button" onclick="const h = document.getElementById('xlxHelpBox'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="background:none; border:none; color:#fbbf24; font-size:0.75rem; cursor:pointer; text-decoration:underline; padding:0;" data-i18n="xlx_help_toggle">❓ Инструкция XLX</button>
+            </div>
+            <select id="editHsXlxModule" class="form-input" style="cursor: pointer; font-weight: 600;">
+              <option value="A">Module A (TG 4001 на TS2)</option>
+              <option value="B">Module B (TG 4002 на TS2)</option>
+              <option value="C">Module C (TG 4003 на TS2)</option>
+              <option value="D" selected>Module D (TG 4004 на TS2)</option>
+              <option value="E">Module E (TG 4005 на TS2)</option>
+              <option value="F">Module F (TG 4006 на TS2)</option>
+              <option value="G">Module G (TG 4007 на TS2)</option>
+              <option value="H">Module H (TG 4008 на TS2)</option>
+              <option value="I">Module I (TG 4009 на TS2)</option>
+              <option value="J">Module J (TG 4010 на TS2)</option>
+              <option value="K">Module K (TG 4011 на TS2)</option>
+              <option value="L">Module L (TG 4012 на TS2)</option>
+              <option value="M">Module M (TG 4013 на TS2)</option>
+              <option value="N">Module N (TG 4014 на TS2)</option>
+              <option value="O">Module O (TG 4015 на TS2)</option>
+              <option value="P">Module P (TG 4016 на TS2)</option>
+              <option value="Q">Module Q (TG 4017 на TS2)</option>
+              <option value="R">Module R (TG 4018 на TS2)</option>
+              <option value="S">Module S (TG 4019 на TS2)</option>
+              <option value="T">Module T (TG 4020 на TS2)</option>
+              <option value="U">Module U (TG 4021 на TS2)</option>
+              <option value="V">Module V (TG 4022 на TS2)</option>
+              <option value="W">Module W (TG 4023 на TS2)</option>
+              <option value="X">Module X (TG 4024 на TS2)</option>
+              <option value="Y">Module Y (TG 4025 на TS2)</option>
+              <option value="Z">Module Z (TG 4026 на TS2)</option>
+            </select>
+            <small class="form-hint" data-i18n="hs_edit.xlx_module_hint">На рефлекторах XLX голосовая работа ведётся в TS2: выбранный модуль A–Z автоматически привязывается к TG 4001–4026 (пароль стандартный: passw0rd)</small>
+            <div id="xlxHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #f59e0b; border-radius:4px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+                <div style="font-weight:700; color:#fbbf24; margin-bottom:4px;" data-i18n="xlx_help_title">Как работает связь с рефлектором XLX:</div>
+                <ul style="margin:0; padding-left:16px;">
+                    <li data-i18n="xlx_help_step1"><b>Порт и пароль:</b> стандартный порт MMDVM для XLX — <code>62030</code>, пароль — <code>passw0rd</code>.</li>
+                    <li data-i18n="xlx_help_step2"><b>Таймслот 2 (TS2):</b> протокол XLX MMDVM работает <b>только на TS2</b>. ProxDMR автоматически направляет команды и голос в TS2.</li>
+                    <li data-i18n="xlx_help_step3"><b>Модули A–Z (TG 4001–4026):</b> модуль <b>A = TG 4001</b>, <b>B = TG 4002</b>, ..., <b>Z = TG 4026</b>. Отключение от модуля — <b>TG 4000</b>.</li>
+                    <li data-i18n="xlx_help_step4"><b>Голосовой вызов (TG 9):</b> после привязки к модулю весь голосовой обмен в рефлекторе идёт в группе <b>TG 9</b> на TS2. Переключать модули на лету можно через кнопку <b>«⚡ Управление модулями XLX»</b> на карточке хотспота.</li>
+                </ul>
+            </div>
+          </div>
+          <div class="form-group" id="editHsMasterSelectGroup">
+            <label for="editHsMasterSelect" id="editHsMasterSelectLabel" data-i18n="hs_edit.master_select">Сервер BM (Master) — выбор по странам</label>
             <select id="editHsMasterSelect" class="form-input bm-country-select" style="cursor: pointer; font-weight: 500;">
               <option value="" data-i18n="hs_edit.master_loading">-- Загрузка списка серверов BM... --</option>
             </select>
           </div>
-          <div class="form-group-row">
+          <div class="form-group-row" id="editHsHostPortRow">
             <div class="form-group" style="flex: 3;">
               <label for="editHsHost" data-i18n="hs_edit.host">Адрес сервера (домен или IP)</label>
               <input type="text" id="editHsHost" class="form-input" required value="{{ cfg.bm_master_host if cfg else '2322.master.brandmeister.network' }}" placeholder="2322.master.brandmeister.network" data-i18n-placeholder="hs_edit.host_placeholder">
@@ -1909,16 +2027,16 @@
               <input type="number" id="editHsPort" class="form-input" value="{{ cfg.bm_master_port if cfg else 62031 }}">
             </div>
           </div>
-          <div class="form-group-row bm-tg-test-row" style="align-items: flex-end;">
-            <div class="form-group" style="flex: 1;">
-              <label for="editHsTgTs1" data-i18n="hs_edit.tg_ts1">Стартовая TG (Слот 1)</label>
+          <div class="form-group-row bm-tg-test-row" id="editHsTgRow" style="align-items: flex-end;">
+            <div class="form-group" id="editHsTgTs1Group" style="flex: 1;">
+              <label for="editHsTgTs1" id="editHsTgTs1Label" data-i18n="hs_edit.tg_ts1">Стартовая TG (Слот 1)</label>
               <input type="number" id="editHsTgTs1" class="form-input" value="{{ cfg.default_tg_ts1 if cfg else 4010018 }}">
             </div>
-            <div class="form-group" style="flex: 1;">
-              <label for="editHsTgTs2" data-i18n="hs_edit.tg_ts2">Стартовая TG (Слот 2)</label>
+            <div class="form-group" id="editHsTgTs2Group" style="flex: 1;">
+              <label for="editHsTgTs2" id="editHsTgTs2Label" data-i18n="hs_edit.tg_ts2">Стартовая TG (Слот 2)</label>
               <input type="number" id="editHsTgTs2" class="form-input" value="{{ cfg.default_tg_ts2 if cfg else 2502059 }}">
             </div>
-            <div class="form-group" style="flex: 1; min-width: 140px;">
+            <div class="form-group" id="editHsTestServersCol" style="flex: 1; min-width: 140px;">
               <button type="button" id="btnTestBmServers" class="btn-bm-benchmark" title="Тестирование пинга всех серверов BrandMeister" data-i18n-title="bm_bench.btn_test_title">
                 <span class="btn-icon">⚡</span>
                 <span data-i18n="bm_bench.btn_test">Тест серверов</span>
@@ -1930,9 +2048,9 @@
               <input type="checkbox" id="editHsAutoconnect" {% if not cfg or cfg.autoconnect %}checked{% endif %}> <span data-i18n="hs_edit.autoconnect">Автоподключение при старте</span>
             </label>
           </div>
-          <div class="form-group-checkbox">
+          <div class="form-group-checkbox" id="editHsAutoTgBmGroup">
             <label>
-              <input type="checkbox" id="editHsAutoTgBm" {% if not cfg or cfg.auto_tg_bm %}checked{% endif %}> <span data-i18n="hs_edit.auto_tg_bm">Автонастройка TG BM</span>
+              <input type="checkbox" id="editHsAutoTgBm" {% if not cfg or cfg.auto_tg_bm %}checked{% endif %}> <span id="editHsAutoTgBmText" data-i18n="hs_edit.auto_tg_bm">Автонастройка TG BM</span>
             </label>
           </div>
           <div class="modal-footer" style="padding-top: 10px;">
@@ -2647,7 +2765,7 @@
     <div class="modal-content bm-tg-modal-content">
       <div class="modal-header">
         <div class="bm-modal-title-wrap">
-          <div class="bm-modal-title" data-i18n="bmtg.title">⚡ Управление TalkGroups BM</div>
+          <div class="bm-modal-title" id="bmModalTitleText" data-i18n="bmtg.title">⚡ Управление TalkGroups BM</div>
           <div class="bm-modal-subtitle">
             <span id="bmModalDeviceBadge" class="bm-device-badge">ID: ---</span>
             <button type="button" id="btnRefreshBmTg" class="btn-icon-subtle" title="Синхронизировать с BM API" data-i18n-title="bmtg_static.refresh_title">🔄</button>
@@ -2707,7 +2825,7 @@
 
       <div id="bmTgModalLoading" class="bm-modal-loading hidden">
         <div class="bm-spinner"></div>
-        <span data-i18n="bmtg_static.loading">Загрузка данных BM API...</span>
+        <span id="bmTgModalLoadingText" data-i18n="bmtg_static.loading">Загрузка данных BM API...</span>
       </div>
 
       <div id="bmTgModalAlert" class="bm-modal-alert hidden"></div>
@@ -2932,7 +3050,7 @@
             <h3 data-i18n="bm_bench.modal_title">Тестирование серверов BrandMeister</h3>
             <span id="bmBenchStatusBadge" class="badge-status-pill badge-idle" data-i18n="bm_bench.idle">Ожидание</span>
           </div>
-          <span class="modal-subtitle" data-i18n="bm_bench.modal_subtitle">Пинг-тест всех мастеров (до 10 пакетов или 7 секунд на сервер) для выбора наилучшего</span>
+          <span id="bmBenchmarkModalSubtitle" class="modal-subtitle" data-i18n="bm_bench.modal_subtitle">Пинг-тест всех мастеров (до 10 пакетов или 7 секунд на сервер) для выбора наилучшего</span>
         </div>
         <button type="button" id="closeBmBenchmarkModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
       </div>
@@ -3248,6 +3366,19 @@
             </div>
           </div>
 
+          <!-- DMR Network Selector -->
+          <div class="form-group" id="contactEditNetworkGroup">
+            <label for="contactEditNetwork" class="form-label" data-i18n="contacts.network_label">Цифровая сеть DMR:</label>
+            <select id="contactEditNetwork" class="form-select">
+              <option value="bm">BrandMeister</option>
+              <option value="freedmr">FreeDMR</option>
+              <option value="tgif">TGIF Network</option>
+              <option value="xlx">XLX Reflector</option>
+              <option value="dmrplus">DMR+ (IPSC2)</option>
+              <option value="custom" data-i18n="contacts.net_universal">Универсальный / Любая сеть</option>
+            </select>
+          </div>
+
           <!-- Common Field: Name / Folder Name -->
           <div class="form-group">
             <label for="contactEditName" class="form-label" id="contactEditNameLabel"><span data-i18n="contacts.name_label">Имя / Название</span> <span class="req-star">*</span>:</label>
@@ -3264,12 +3395,52 @@
           <div class="form-group" id="contactEditDmrIdGroup">
             <label for="contactEditDmrId" class="form-label" data-i18n="contacts.dmr_id_label">Личный DMR ID:</label>
             <input type="number" id="contactEditDmrId" class="form-input" placeholder="7-значный ID (например: 1234567)" data-i18n-placeholder="contacts.dmr_id_placeholder" min="1" max="9999999" autocomplete="off">
+            <small id="contactEditIdHint" class="form-hint" style="display:none;color:#58a6ff;"></small>
           </div>
 
           <!-- Field: TalkGroup Number (for TG) -->
           <div class="form-group" id="contactEditTgGroup" style="display:none;">
             <label for="contactEditTg" class="form-label"><span data-i18n="contacts.tg_label">Номер TalkGroup (TG)</span> <span class="req-star">*</span>:</label>
             <input type="number" id="contactEditTg" class="form-input" placeholder="Например: 2501, 9990, 91" data-i18n-placeholder="contacts.tg_placeholder" min="1" max="99999999" autocomplete="off">
+            <small id="contactEditTgHint" class="form-hint" style="display:none;color:#58a6ff;"></small>
+          </div>
+
+          <!-- Field: XLX Module Select (for XLX TG) -->
+          <div class="form-group" id="contactEditXlxModuleGroup" style="display:none;">
+            <label for="contactEditXlxModule" class="form-label" data-i18n="contacts.xlx_module_select_label">Модуль рефлектора XLX:</label>
+            <select id="contactEditXlxModule" class="form-select">
+              <option value="9">🗣️ TG 9 — Общий голосовой вызов</option>
+              <option value="4000">🔌 TG 4000 — Отключение модуля (Unlink)</option>
+              <option value="9990">🦜 TG 9990 — Parrot (Эхо-тест)</option>
+              <optgroup label="Модули A–Z (TG 4001–4026)">
+                <option value="4001">Модуль A (TG 4001)</option>
+                <option value="4002">Модуль B (TG 4002)</option>
+                <option value="4003">Модуль C (TG 4003)</option>
+                <option value="4004" selected>Модуль D (TG 4004)</option>
+                <option value="4005">Модуль E (TG 4005)</option>
+                <option value="4006">Модуль F (TG 4006)</option>
+                <option value="4007">Модуль G (TG 4007)</option>
+                <option value="4008">Модуль H (TG 4008)</option>
+                <option value="4009">Модуль I (TG 4009)</option>
+                <option value="4010">Модуль J (TG 4010)</option>
+                <option value="4011">Модуль K (TG 4011)</option>
+                <option value="4012">Модуль L (TG 4012)</option>
+                <option value="4013">Модуль M (TG 4013)</option>
+                <option value="4014">Модуль N (TG 4014)</option>
+                <option value="4015">Модуль O (TG 4015)</option>
+                <option value="4016">Модуль P (TG 4016)</option>
+                <option value="4017">Модуль Q (TG 4017)</option>
+                <option value="4018">Модуль R (TG 4018)</option>
+                <option value="4019">Модуль S (TG 4019)</option>
+                <option value="4020">Модуль T (TG 4020)</option>
+                <option value="4021">Модуль U (TG 4021)</option>
+                <option value="4022">Модуль V (TG 4022)</option>
+                <option value="4023">Модуль W (TG 4023)</option>
+                <option value="4024">Модуль X (TG 4024)</option>
+                <option value="4025">Модуль Y (TG 4025)</option>
+                <option value="4026">Модуль Z (TG 4026)</option>
+              </optgroup>
+            </select>
           </div>
 
           <!-- Field: City / QTH / Region -->
@@ -3297,6 +3468,7 @@
               <option value="1" data-i18n="contacts.slot_ts1">Слот 1 (TS1)</option>
               <option value="2" data-i18n="contacts.slot_ts2">Слот 2 (TS2)</option>
             </select>
+            <small id="contactEditSlotHint" class="form-hint" style="display:none;color:#e5c05b;"></small>
           </div>
 
           <!-- Field: Comment / Note -->
@@ -4709,7 +4881,7 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.309"></script>
+  <script src="/static/js/i18n.js?v=2.9.313"></script>
   <script src="/static/js/audio-player.js?v=2.9.172"></script>
   <script src="/static/js/dialog.js?v=2.9.308"></script>
   <script src="/static/js/auth.js?v=2.9.309"></script>
@@ -4718,7 +4890,7 @@
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.193"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.309"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.353"></script>
 </body>
 </html>
 

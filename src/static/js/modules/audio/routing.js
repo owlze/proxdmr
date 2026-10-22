@@ -76,14 +76,10 @@ export function getHotspotMute(hid, slot) {
   const s = parseInt(slot, 10) || 1;
   const cid = _resolveHotspotId(hid);
 
-  // If hotspot mode is "doubl", never let soloSet mute slots! In doubl mode, user expects dual reception
-  const mode = (typeof getHotspotTsAudioMode === "function") ? getHotspotTsAudioMode(cid) : "doubl";
-  if (mode !== "doubl") {
-    // If slot is temporarily muted by live TTS Solo mode, effective state is true
-    const soloSet = getSoloMutedSet();
-    if (soloSet && (soloSet.has(`${cid}_ts${s}`) || (cid === "default" && soloSet.has(`default_ts${s}`)))) {
-      return true;
-    }
+  // If slot is temporarily muted by live TTS Solo mode, effective state is true
+  const soloSet = getSoloMutedSet();
+  if (soloSet && (soloSet.has(`${cid}_ts${s}`) || (cid === "default" && soloSet.has(`default_ts${s}`)))) {
+    return true;
   }
 
   return getPersistentHotspotMute(hid, slot);
@@ -196,8 +192,37 @@ export function setHotspotMute(hid, slot, muted, isTemporary = false) {
 
 // --- TS Audio Mode (Solo / Doubl / Auto) Subsystem ---
 
+export function isXlxHotspot(hid, card = null) {
+  const cid = _resolveHotspotId(hid);
+  if (card) {
+    const cardNet = (card.dataset && card.dataset.networkType ? card.dataset.networkType : "").toLowerCase();
+    if (cardNet === "xlx" || card.classList.contains("card-net-xlx")) return true;
+  }
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  let hs = null;
+  if (cid === "default") {
+    hs = hsList[0] || null;
+  } else {
+    hs = hsList.find(h => String(h.id) === String(cid));
+  }
+  if (hs && ((hs.network_type || "").toLowerCase() === "xlx")) {
+    return true;
+  }
+  if (typeof document !== "undefined") {
+    const el = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || (cid === "default" ? document.getElementById("radioContainer") : null);
+    if (el) {
+      const net = (el.dataset && el.dataset.networkType ? el.dataset.networkType : "").toLowerCase();
+      if (net === "xlx" || el.classList.contains("card-net-xlx")) return true;
+    }
+  }
+  return false;
+}
+
 export function getHotspotTsAudioMode(hid) {
   const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    return "solo";
+  }
   const v = localStorage.getItem(`proxdmr_ts_mode_${cid}`);
   if (v && ["solo", "doubl", "auto"].includes(v)) return v;
 
@@ -213,8 +238,13 @@ export function getHotspotTsAudioMode(hid) {
 }
 
 export function setHotspotTsAudioMode(hid, mode) {
-  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
   const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    enforceSoloTsMute(cid);
+    updateHotspotTsAudioModeUI(cid);
+    return;
+  }
+  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
   localStorage.setItem(`proxdmr_ts_mode_${cid}`, safeMode);
 
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
@@ -236,6 +266,12 @@ export function setHotspotTsAudioMode(hid, mode) {
 
 export function cycleHotspotTsAudioMode(hid) {
   const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    _triggerHaptic(20);
+    const msg = _getTranslation("ts_mode.xlx_locked_toast", {}, "В сети XLX используется только TS2 (режим Solo зафиксирован)");
+    showToast(msg, 2000);
+    return;
+  }
   const cur = getHotspotTsAudioMode(cid);
   const order = ["solo", "doubl", "auto"];
   const nextIdx = (order.indexOf(cur) + 1) % order.length;
@@ -254,6 +290,11 @@ export function cycleHotspotTsAudioMode(hid) {
 
 export function enforceSoloTsMute(hid) {
   const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    setHotspotMute(cid, 2, false);
+    setHotspotMute(cid, 1, true);
+    return;
+  }
   const m1 = getHotspotMute(cid, 1);
   const m2 = getHotspotMute(cid, 2);
   // In solo mode, m1 and m2 must be strictly opposite: m1 !== m2
@@ -447,14 +488,16 @@ function _isSlotReceivingNow(cid, slot) {
 
 function _applyAutoSlotAudio(cid, activeSlot) {
   const otherSlot = (activeSlot === 1) ? 2 : 1;
+  const soloSet = getSoloMutedSet();
+  const soloActiveMuted = Boolean(soloSet && (soloSet.has(`${cid}_ts${activeSlot}`) || (cid === "default" && soloSet.has(`default_ts${activeSlot}`))));
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
   if (ap) {
     if (typeof ap.setSlotMute === "function") {
-      ap.setSlotMute(cid, activeSlot, false);
+      ap.setSlotMute(cid, activeSlot, soloActiveMuted);
       ap.setSlotMute(cid, otherSlot, true);
     }
     if (typeof ap.updateSlotMute === "function") {
-      ap.updateSlotMute(cid, activeSlot, false);
+      ap.updateSlotMute(cid, activeSlot, soloActiveMuted);
       ap.updateSlotMute(cid, otherSlot, true);
     }
   }
@@ -462,40 +505,66 @@ function _applyAutoSlotAudio(cid, activeSlot) {
 }
 
 function _resetAutoSlotAudio(cid) {
+  const soloSet = getSoloMutedSet();
+  const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
+  const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
   if (ap) {
     if (typeof ap.setSlotMute === "function") {
-      ap.setSlotMute(cid, 1, false);
-      ap.setSlotMute(cid, 2, false);
+      ap.setSlotMute(cid, 1, solo1);
+      ap.setSlotMute(cid, 2, solo2);
     }
     if (typeof ap.updateSlotMute === "function") {
-      ap.updateSlotMute(cid, 1, false);
-      ap.updateSlotMute(cid, 2, false);
+      ap.updateSlotMute(cid, 1, solo1);
+      ap.updateSlotMute(cid, 2, solo2);
     }
   }
   _renderAutoCardMuteVisuals(cid, 0, 0);
 }
 
 function _renderAutoCardMuteVisuals(cid, activeSlot, mutedSlot) {
+  const soloSet = getSoloMutedSet();
+  const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
+  const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
   const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
   cards.forEach(card => {
     const btn1 = card.querySelector(".btn-mute-ts1");
     const btn2 = card.querySelector(".btn-mute-ts2");
     if (activeSlot === 0) {
-      if (btn1) renderMutePanBtnContent(btn1, false, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, false, getHotspotPan(cid, 2), 2);
+      if (btn1) renderMutePanBtnContent(btn1, solo1, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, solo2, getHotspotPan(cid, 2), 2);
     } else {
-      if (btn1) renderMutePanBtnContent(btn1, activeSlot !== 1, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, activeSlot !== 2, getHotspotPan(cid, 2), 2);
+      if (btn1) renderMutePanBtnContent(btn1, solo1 || activeSlot !== 1, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, solo2 || activeSlot !== 2, getHotspotPan(cid, 2), 2);
     }
   });
 }
 
 // --- TS Audio Mode Button UI Wiring and Rendering ---
-export function renderTsAudioModeBtnContent(btn, mode) {
+export function renderTsAudioModeBtnContent(btn, mode, isXlx = false) {
   if (!btn) return;
   const badge = btn.querySelector(".ts-audio-mode-badge");
   if (!badge) return;
+
+  const card = btn.closest(".radio-container");
+  const isLockedXlx = Boolean(isXlx) || (card && ((card.dataset.networkType || "").toLowerCase() === "xlx" || card.classList.contains("card-net-xlx")));
+
+  if (isLockedXlx) {
+    badge.classList.remove("ts-mode-doubl", "ts-mode-auto");
+    badge.classList.add("ts-mode-solo");
+    badge.textContent = "TS1/2 Solo";
+    const titleKey = "ts_mode.xlx_locked_title";
+    const fallbackTitle = "Режим: Solo (зафиксирован для сети XLX, доступен только TS2)";
+    const titleText = _getTranslation(titleKey, {}, fallbackTitle);
+    btn.title = titleText;
+    btn.setAttribute("data-i18n-title", titleKey);
+    btn.classList.add("ts-mode-locked");
+    btn.style.cursor = "not-allowed";
+    return;
+  }
+
+  btn.classList.remove("ts-mode-locked");
+  btn.style.cursor = "";
 
   const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
   badge.classList.remove("ts-mode-solo", "ts-mode-doubl", "ts-mode-auto");
@@ -527,8 +596,9 @@ export function updateCardTsAudioModeUI(card, hid) {
   const btn = card.querySelector(".ts-audio-mode-btn");
   if (!btn) return;
   setupTsAudioModeButton(btn, card, cid);
-  const mode = getHotspotTsAudioMode(cid);
-  renderTsAudioModeBtnContent(btn, mode);
+  const isXlx = isXlxHotspot(cid, card);
+  const mode = isXlx ? "solo" : getHotspotTsAudioMode(cid);
+  renderTsAudioModeBtnContent(btn, mode, isXlx);
 }
 
 export function updateHotspotTsAudioModeUI(hid) {
@@ -803,14 +873,17 @@ export function updateCardMuteUI(card, hid) {
 
   const mode = getHotspotTsAudioMode(cid);
   if (mode === "auto") {
+    const soloSet = getSoloMutedSet();
+    const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
+    const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
     const st = _getAutoState(cid);
     const activeSlot = st.flag || 0;
     if (activeSlot === 0) {
-      if (btn1) renderMutePanBtnContent(btn1, false, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, false, getHotspotPan(cid, 2), 2);
+      if (btn1) renderMutePanBtnContent(btn1, solo1, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, solo2, getHotspotPan(cid, 2), 2);
     } else {
-      if (btn1) renderMutePanBtnContent(btn1, activeSlot !== 1, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, activeSlot !== 2, getHotspotPan(cid, 2), 2);
+      if (btn1) renderMutePanBtnContent(btn1, solo1 || activeSlot !== 1, getHotspotPan(cid, 1), 1);
+      if (btn2) renderMutePanBtnContent(btn2, solo2 || activeSlot !== 2, getHotspotPan(cid, 2), 2);
     }
     return;
   }
@@ -1208,6 +1281,7 @@ if (typeof window !== "undefined") {
   window.toggleHotspotMute = toggleHotspotMute;
   window.enforceSingleTsMute = enforceSingleTsMute;
   window.enforceSoloTsMute = enforceSoloTsMute;
+  window.isXlxHotspot = isXlxHotspot;
   window.getHotspotTsAudioMode = getHotspotTsAudioMode;
   window.setHotspotTsAudioMode = setHotspotTsAudioMode;
   window.cycleHotspotTsAudioMode = cycleHotspotTsAudioMode;

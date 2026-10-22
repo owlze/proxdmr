@@ -6,6 +6,7 @@
  */
 
 import { safeEscapeHtml } from '../core/formatters.js';
+import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 
 // Safe window helper bridges
@@ -140,7 +141,10 @@ export function updateTgDbStatsDisplay(stats) {
 
 export async function loadTgDbStats() {
     try {
-      const res = await fetch("/api/tg/stats");
+      const netType = (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+        ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+        : "bm";
+      const res = await fetch(`/api/tg/stats?network=${encodeURIComponent(netType)}`);
       const data = await res.json();
       if (data && data.status === "ok" && data.stats) {
         updateTgDbStatsDisplay(data.stats);
@@ -295,6 +299,9 @@ export async function performTgSearch(query) {
     ensureElements();
     if (tgSearchSpinner) tgSearchSpinner.classList.remove("hidden");
     const q = (query || "").trim();
+    const netType = (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+      ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+      : "bm";
 
     // Check custom numeric TG card
     if (tgCustomCard && tgCustomNumber) {
@@ -307,7 +314,7 @@ export async function performTgSearch(query) {
     }
 
     try {
-      const res = await fetch(`/api/tg/search?q=${encodeURIComponent(q)}&limit=50`);
+      const res = await fetch(`/api/tg/search?q=${encodeURIComponent(q)}&limit=50&network=${encodeURIComponent(netType)}`);
       const data = await res.json();
       if (tgSearchSpinner) tgSearchSpinner.classList.add("hidden");
       if (data && data.stats) {
@@ -330,6 +337,117 @@ export async function performTgSearch(query) {
     }
   }
 
+
+function _triggerHapticSearch(ms = 30) {
+  if (typeof window !== "undefined" && typeof window.triggerHaptic === "function") {
+    try { window.triggerHaptic(ms); } catch (_) {}
+  } else if (typeof navigator !== "undefined" && navigator.vibrate) {
+    try { navigator.vibrate(ms); } catch (_) {}
+  }
+}
+
+async function handleTgAddTs1(tg, name, btnEl) {
+  const hid = currentModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : "default") || "default";
+  const curHsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+  const hs = curHsList.find(h => h && h.id === hid) || curHsList[0];
+  const hsName = hs ? hs.name : hid;
+
+  if (name && tg) {
+    if (!window.TG_NAMES) window.TG_NAMES = {};
+    window.TG_NAMES[tg] = name;
+    if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+    window.TGIF_TG_NAMES[tg] = name;
+    try {
+      localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES));
+    } catch (_) {}
+  }
+
+  if (typeof window.setHotspotTg === "function") {
+    window.setHotspotTg(hid, 1, tg, true);
+  }
+  if (typeof window.updateAllHotspotsTgDisplay === "function") {
+    window.updateAllHotspotsTgDisplay();
+  }
+
+  _triggerHapticSearch(30);
+
+  const origText = btnEl.textContent;
+  btnEl.textContent = "✓ TS1";
+  btnEl.classList.add("btn-tg-added");
+  setTimeout(() => {
+    btnEl.textContent = origText;
+    btnEl.classList.remove("btn-tg-added");
+  }, 1600);
+
+  const msg = window.t
+    ? window.t("tgtx.toast_ts1_set", { hs: hsName, tg }, `✅ [${hsName}] TS1: установлена TG ${tg}`)
+    : `✅ [${hsName}] TS1: установлена TG ${tg}`;
+  showToast(msg, 2500);
+}
+
+async function handleTgAddTs2(tg, name, btnEl) {
+  const hid = currentModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : "default") || "default";
+  const curHsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+  const hs = curHsList.find(h => h && h.id === hid) || curHsList[0];
+  const hsName = hs ? hs.name : hid;
+
+  if (name && tg) {
+    if (!window.TG_NAMES) window.TG_NAMES = {};
+    window.TG_NAMES[tg] = name;
+    if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+    window.TGIF_TG_NAMES[tg] = name;
+    try {
+      localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES));
+    } catch (_) {}
+  }
+
+  _triggerHapticSearch(30);
+
+  const origText = btnEl.textContent;
+  btnEl.textContent = "⏳...";
+  btnEl.disabled = true;
+
+  try {
+    const resp = await fetch("/api/bm/static-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: hid,
+        slot: 2,
+        talkgroups: [tg]
+      })
+    });
+    const data = await resp.json();
+    if (data && data.status === "ok") {
+      btnEl.textContent = "✓ TS2";
+      btnEl.classList.add("btn-tg-added");
+      setTimeout(() => {
+        btnEl.textContent = origText;
+        btnEl.disabled = false;
+        btnEl.classList.remove("btn-tg-added");
+      }, 1800);
+
+      const msg = window.t
+        ? window.t("tgtx.toast_ts2_static_added", { hs: hsName, tg }, `✅ [${hsName}] TS2: TG ${tg} добавлена в статику`)
+        : `✅ [${hsName}] TS2: TG ${tg} добавлена в статику`;
+      showToast(msg, 3500);
+
+      if (typeof window.loadBmTgStaticGroups === "function") {
+        try { window.loadBmTgStaticGroups(hid); } catch (_) {}
+      }
+    } else {
+      btnEl.textContent = origText;
+      btnEl.disabled = false;
+      const err = data?.detail || data?.errors?.join("; ") || "Ошибка добавления";
+      showToast(`⚠️ [${hsName}] TS2: ${err}`, 4500);
+    }
+  } catch (err) {
+    btnEl.textContent = origText;
+    btnEl.disabled = false;
+    showToast(`❌ [${hsName}] TS2: ${err.message || err}`, 4500);
+  }
+}
+
 export function renderTgSearchResults(items) {
     ensureElements();
     if (!tgSearchResultsList) return;
@@ -338,6 +456,15 @@ export function renderTgSearchResults(items) {
       tgSearchResultsList.innerHTML = `<div style="padding: 24px; text-align: center; color: #8b949e; font-size: 0.88rem;">${noResMsg}</div>`;
       return;
     }
+
+    const curHsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+    const curHs = curHsList.find(h => h && h.id === currentModalHotspotId) || curHsList[0];
+    const netType = (curHs && curHs.network_type)
+      ? curHs.network_type.toLowerCase()
+      : ((typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+          ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+          : "bm");
+    const isXlx = netType === "xlx";
 
     tgSearchResultsList.innerHTML = items.map(item => `
       <div class="search-result-card" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(item.name || '')}">
@@ -348,19 +475,51 @@ export function renderTgSearchResults(items) {
             <span class="card-secondary-details">${safeEscapeHtml(item.country || 'BM')}</span>
           </div>
         </div>
-        <div class="card-select-action">
-          <span>${window.t ? window.t("tgtx.btn_select") : "Выбрать"}</span> ➔
+        <div class="card-actions-group">
+          ${!isXlx ? `
+            <button type="button" class="btn-tg-slot-add btn-tg-add-ts1" data-slot="1" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(item.name || '')}" title="${window.t ? window.t('tgtx.title_add_ts1', { tg: item.tg }, `Установить TG ${item.tg} на TS1 хотспота`) : `Установить TG ${item.tg} на TS1 хотспота`}">+ in TS1</button>
+            <button type="button" class="btn-tg-slot-add btn-tg-add-ts2" data-slot="2" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(item.name || '')}" title="${window.t ? window.t('tgtx.title_add_ts2', { tg: item.tg }, `Добавить TG ${item.tg} в статические группы TS2`) : `Добавить TG ${item.tg} в статические группы TS2`}">+ in TS2</button>
+          ` : ''}
+          <div class="card-select-action">
+            <span>${window.t ? window.t("tgtx.btn_select") : "Выбрать"}</span> ➔
+          </div>
         </div>
       </div>
     `).join("");
 
+    tgSearchResultsList.querySelectorAll(".btn-tg-add-ts1").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const tg = parseInt(btn.dataset.tg, 10);
+        const name = btn.dataset.name || `TG ${tg}`;
+        handleTgAddTs1(tg, name, btn);
+      });
+    });
+
+    tgSearchResultsList.querySelectorAll(".btn-tg-add-ts2").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const tg = parseInt(btn.dataset.tg, 10);
+        const name = btn.dataset.name || `TG ${tg}`;
+        handleTgAddTs2(tg, name, btn);
+      });
+    });
+
     tgSearchResultsList.querySelectorAll(".search-result-card").forEach(card => {
-      card.addEventListener("click", () => {
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".btn-tg-slot-add")) return;
         const tg = parseInt(card.dataset.tg, 10);
         const name = card.dataset.name;
         if (name && tg) {
-          if (!window.TG_NAMES) window.TG_NAMES = {};
-          window.TG_NAMES[tg] = name;
+          if (netType === "tgif") {
+            if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+            window.TGIF_TG_NAMES[tg] = name;
+          } else {
+            if (!window.TG_NAMES) window.TG_NAMES = {};
+            window.TG_NAMES[tg] = name;
+          }
         }
         openTgIdActionMenu({
           type: "TG",

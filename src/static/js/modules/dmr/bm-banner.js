@@ -14,7 +14,7 @@ import {
   calculateClientPacketLoss,
   calculateCardPacketLoss,
   updatePingElement
-} from "../network/ping-sparklines.js?v=2.9.257";
+} from "../network/ping-sparklines.js?v=2.9.326";
 import { openBmBenchmarkModal } from "./bm-benchmark.js";
 import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js";
 import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js";
@@ -62,6 +62,369 @@ export const KNOWN_BM_MASTERS = [
   { id: 3341, country: "MX", country_name: "Мексика", host: "3341.master.brandmeister.network", ip: "72.1.241.232" }
 ];
 
+export const KNOWN_TGIF_SERVERS = [
+  { id: "TGIF-US", country: "US", country_name: "США", name: "TGIF Primary", host: "tgif.network", port: 62031 }
+];
+
+export const KNOWN_FREEDMR_SERVERS = [
+  { id: "FDMR-EU", country: "EU", country_name: "Европа (Хаб)", name: "FreeDMR Europe (Main Hub)", host: "freedmreu.gb7fr.org.uk", port: 62031, password: "passw0rd" },
+  { id: "FDMR-DE", country: "DE", country_name: "Германия", name: "FreeDMR Германия (2621)", host: "178.254.30.151", port: 62031, password: "passw0rd" },
+  { id: "FDMR-UK", country: "GB", country_name: "Великобритания", name: "FreeDMR UK (2341)", host: "hotspot.uk.freedmr.link", port: 62031, password: "passw0rd" },
+  { id: "FDMR-SCT", country: "GB", country_name: "Шотландия", name: "FreeDMR Scotland (2345)", host: "freedmr.m0xfn.radio", port: 62031, password: "passw0rd" },
+  { id: "FDMR-BG", country: "BG", country_name: "Болгария", name: "FreeDMR Болгария (2841)", host: "fdmrbg.ddns.net", port: 62031, password: "passw0rd" },
+  { id: "FDMR-GR", country: "GR", country_name: "Греция", name: "FreeDMR Греция (2021)", host: "dmr.freedmr.gr", port: 62031, password: "passw0rd" },
+  { id: "FDMR-SE", country: "SE", country_name: "Швеция", name: "FreeDMR Швеция (2401)", host: "2401.freedmrsweden.se", port: 62031, password: "passw0rd" },
+  { id: "FDMR-NO", country: "NO", country_name: "Норвегия", name: "FreeDMR Норвегия (2421)", host: "norway.freedmr.no", port: 62031, password: "passw0rd" },
+  { id: "FDMR-FR", country: "FR", country_name: "Франция", name: "FreeDMR Франция (2082)", host: "alpes-grenoble.ovh", port: 62031, password: "passw0rd" },
+  { id: "FDMR-IT", country: "IT", country_name: "Италия", name: "FreeDMR Италия (2221)", host: "hotspots.freedmr.it", port: 62031, password: "PASSWORD" },
+  { id: "FDMR-US-FL", country: "US", country_name: "США (Флорида)", name: "FreeDMR USA Florida (3109)", host: "freedmr.dvswitch.org", port: 62031, password: "passw0rd" },
+  { id: "FDMR-US-SF", country: "US", country_name: "США (Сан-Франциско)", name: "FreeDMR USA West (3103)", host: "us-sf.freedmr.cc", port: 62031, password: "passw0rd" },
+  { id: "FDMR-BR", country: "BR", country_name: "Бразилия", name: "FreeDMR Бразилия (7242)", host: "freedmr.network365.com.br", port: 62031, password: "passw0rd" },
+  { id: "ADN-GL", country: "GLOBAL", country_name: "ADN Systems", name: "ADN Global Router", host: "master.adn.systems", port: 62031, password: "passw0rd" }
+];
+
+export const KNOWN_DMRPLUS_SERVERS = [
+  { id: "IPSC2-DMR-DL", country: "DE", country_name: "Германия", name: "IPSC2-DMR-DL DE", host: "5.28.41.138", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-DL-HOTSPOT", country: "DE", country_name: "Германия", name: "IPSC2-DL-HOTSPOT DE", host: "91.132.144.235", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-Austria", country: "AT", country_name: "Австрия", name: "IPSC2-Austria AT", host: "89.185.97.234", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-Italia", country: "IT", country_name: "Италия", name: "IPSC2-Italia IT", host: "85.10.203.242", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-RU", country: "RU", country_name: "Россия", name: "IPSC2-RU", host: "ipsc2.ru", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-QuadNet", country: "US", country_name: "США", name: "IPSC2-QuadNet US", host: "ipsc2.openquad.net", port: 55555, password: "PASSWORD" }
+];
+
+export const KNOWN_XLX_SERVERS = [
+  { id: "XLX270", country: "LU", country_name: "Люксембург", name: "XLX270 LU", host: "158.64.26.132", port: 62030 },
+  { id: "XLX250", country: "RU", country_name: "Россия", name: "XLX250 US/RU", host: "23.130.172.11", port: 62030 },
+  { id: "XLX777", country: "RU", country_name: "Россия", name: "XLX777 CIS", host: "194.182.80.219", port: 62030 },
+  { id: "XLX002", country: "DE", country_name: "Германия", name: "XLX002 DE", host: "223.95.197.217", port: 62030 },
+  { id: "XLX020", country: "US", country_name: "США", name: "XLX020 US", host: "66.175.215.217", port: 62030 },
+  { id: "XLX950", country: "GB", country_name: "Великобритания", name: "XLX950 UK", host: "158.64.26.134", port: 62030 }
+];
+
+export const DMR_NETWORK_PROFILES = {
+  bm: {
+    id: "bm",
+    shortLabel: "BM",
+    badgePrefix: "BM",
+    fullName: "BrandMeister",
+    defaultHost: "2502.master.brandmeister.network",
+    defaultPort: 62031,
+    defaultPassword: "",
+    defaultTgTs1: 91,
+    defaultTgTs2: 2501,
+    hasBmApi: true,
+    hasRpto: false,
+    hasXlxModule: false,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>`
+  },
+  tgif: {
+    id: "tgif",
+    shortLabel: "TGIF",
+    badgePrefix: "TGIF",
+    fullName: "TGIF Network",
+    defaultHost: "tgif.network",
+    defaultPort: 62031,
+    defaultPassword: "passw0rd",
+    defaultTgTs1: 9990,
+    defaultTgTs2: 777,
+    hasBmApi: true,
+    hasRpto: false,
+    hasXlxModule: false,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
+  },
+  freedmr: {
+    id: "freedmr",
+    shortLabel: "FDMR",
+    badgePrefix: "FDMR",
+    fullName: "FreeDMR / ADN",
+    defaultHost: "178.254.30.151",
+    defaultPort: 62031,
+    defaultPassword: "passw0rd",
+    defaultTgTs1: 91,
+    defaultTgTs2: 2501,
+    hasBmApi: false,
+    hasRpto: true,
+    hasXlxModule: false,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>`
+  },
+  dmrplus: {
+    id: "dmrplus",
+    shortLabel: "DMR+",
+    badgePrefix: "DMR+",
+    fullName: "DMR+ / IPSC2",
+    defaultHost: "5.28.41.138",
+    defaultPort: 55555,
+    defaultPassword: "PASSWORD",
+    defaultTgTs1: 1,
+    defaultTgTs2: 9,
+    hasBmApi: false,
+    hasRpto: true,
+    hasXlxModule: false,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`
+  },
+  xlx: {
+    id: "xlx",
+    shortLabel: "XLX",
+    badgePrefix: "XLX",
+    fullName: "XLX Reflector",
+    defaultHost: "xlx250.ru",
+    defaultPort: 62030,
+    defaultPassword: "passw0rd",
+    defaultTgTs1: 9,
+    defaultTgTs2: 4004,
+    hasBmApi: false,
+    hasRpto: false,
+    hasXlxModule: true,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.5" y1="8.5" x2="15.5" y2="15.5"/><line x1="15.5" y1="8.5" x2="8.5" y2="15.5"/></svg>`
+  },
+  custom: {
+    id: "custom",
+    shortLabel: "HBP",
+    badgePrefix: "HBP",
+    fullName: "HomeBrew / HBlink3",
+    defaultHost: "",
+    defaultPort: 62031,
+    defaultPassword: "passw0rd",
+    defaultTgTs1: 1,
+    defaultTgTs2: 9,
+    hasBmApi: false,
+    hasRpto: true,
+    hasXlxModule: false,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>`
+  }
+};
+
+export function getDmrNetworkProfile(netType) {
+  const key = String(netType || "bm").trim().toLowerCase();
+  return DMR_NETWORK_PROFILES[key] || DMR_NETWORK_PROFILES.bm;
+}
+
+export function sortServersForDropdown(servers) {
+  if (!Array.isArray(servers) || !servers.length) return [];
+  const online = [];
+  const untested = [];
+  const dead = [];
+
+  servers.forEach(s => {
+    if (!s) return;
+    const st = (s.state || "").toLowerCase();
+    const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
+                   (s.udp_ok === false && s.avg_ping == null && s.udp_ms == null) ||
+                   (s.loss_pct !== undefined && s.loss_pct >= 100);
+    const hasPing = (s.udp_ms !== undefined && s.udp_ms !== null) ||
+                    (s.avg_ping !== undefined && s.avg_ping !== null);
+
+    if (isDead) {
+      dead.push(s);
+    } else if (st === "online" || hasPing) {
+      online.push(s);
+    } else {
+      untested.push(s);
+    }
+  });
+
+  online.sort((a, b) => {
+    const pingA = a.udp_ms != null ? a.udp_ms : (a.avg_ping != null ? a.avg_ping : 9999);
+    const pingB = b.udp_ms != null ? b.udp_ms : (b.avg_ping != null ? b.avg_ping : 9999);
+    return pingA - pingB;
+  });
+
+  return [...online, ...untested, ...dead];
+}
+
+export function getNetworkServersList(netType) {
+  const key = String(netType || "bm").trim().toLowerCase();
+  if (typeof window !== "undefined" && window._dmrServersCache && Array.isArray(window._dmrServersCache[key]) && window._dmrServersCache[key].length > 0) {
+    return window._dmrServersCache[key];
+  }
+  if (key === "tgif") return KNOWN_TGIF_SERVERS;
+  if (key === "freedmr") return KNOWN_FREEDMR_SERVERS;
+  if (key === "dmrplus") {
+    if (typeof window !== "undefined" && (!window._dmrServersCache || !window._dmrServersCache["dmrplus"])) {
+      refreshDmrPlusServers();
+    }
+    return (typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["dmrplus"]) || KNOWN_DMRPLUS_SERVERS;
+  }
+  if (key === "xlx") {
+    if (typeof window !== "undefined" && (!window._dmrServersCache || !window._dmrServersCache["xlx"])) {
+      refreshXlxServers();
+    }
+    return (typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["xlx"]) || KNOWN_XLX_SERVERS;
+  }
+  if (key === "custom") return [];
+  const bmMastersList = (typeof window !== "undefined" && window.bmMastersList) || [];
+  return bmMastersList.length ? bmMastersList : KNOWN_BM_MASTERS;
+}
+
+let _freedmrRefreshPromise = null;
+
+let _dmrplusRefreshPromise = null;
+
+export async function refreshDmrPlusServers() {
+  if (_dmrplusRefreshPromise) return _dmrplusRefreshPromise;
+  _dmrplusRefreshPromise = (async () => {
+    try {
+      const resp = await fetch("/api/dmrplus/hosts");
+      if (!resp.ok) return KNOWN_DMRPLUS_SERVERS;
+      const data = await resp.json().catch(() => ({}));
+      if (data && Array.isArray(data.servers) && data.servers.length >= 3) {
+        KNOWN_DMRPLUS_SERVERS.splice(0, KNOWN_DMRPLUS_SERVERS.length, ...data.servers);
+        if (typeof window !== "undefined") {
+          window._dmrServersCache = window._dmrServersCache || {};
+          window._dmrServersCache["dmrplus"] = data.servers;
+          window._dmrServersCacheVer = Date.now();
+          if (typeof window.renderRadiosGrid === "function") {
+            window.renderRadiosGrid();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[BM-BANNER] Failed to refresh DMR+ servers:", e);
+    } finally {
+      _dmrplusRefreshPromise = null;
+    }
+    return KNOWN_DMRPLUS_SERVERS;
+  })();
+  return _dmrplusRefreshPromise;
+}
+
+let _xlxRefreshPromise = null;
+
+export async function refreshXlxServers() {
+  if (_xlxRefreshPromise) return _xlxRefreshPromise;
+  _xlxRefreshPromise = (async () => {
+    try {
+      const resp = await fetch("/api/xlx/hosts");
+      if (!resp.ok) return KNOWN_XLX_SERVERS;
+      const data = await resp.json().catch(() => ({}));
+      if (data && Array.isArray(data.servers) && data.servers.length >= 6) {
+        KNOWN_XLX_SERVERS.splice(0, KNOWN_XLX_SERVERS.length, ...data.servers);
+        if (typeof window !== "undefined") {
+          window._dmrServersCache = window._dmrServersCache || {};
+          window._dmrServersCache["xlx"] = data.servers;
+          window._dmrServersCacheVer = Date.now();
+          if (typeof window.renderRadiosGrid === "function") {
+            window.renderRadiosGrid();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[BM-BANNER] Failed to refresh XLX reflectors:", e);
+    } finally {
+      _xlxRefreshPromise = null;
+    }
+    return KNOWN_XLX_SERVERS;
+  })();
+  return _xlxRefreshPromise;
+}
+
+export async function refreshFreeDmrServers() {
+  if (_freedmrRefreshPromise) return _freedmrRefreshPromise;
+  _freedmrRefreshPromise = (async () => {
+    try {
+      const resp = await fetch("/api/freedmr/hosts");
+      if (!resp.ok) return KNOWN_FREEDMR_SERVERS;
+      const data = await resp.json().catch(() => ({}));
+      if (data && Array.isArray(data.servers) && data.servers.length >= 3) {
+        KNOWN_FREEDMR_SERVERS.splice(0, KNOWN_FREEDMR_SERVERS.length, ...data.servers);
+        if (!KNOWN_FREEDMR_SERVERS.some(s => (s.host || "").toLowerCase() === "master.adn.systems")) {
+          KNOWN_FREEDMR_SERVERS.push({
+            id: "ADN-GL",
+            country: "GLOBAL",
+            country_name: "ADN Systems",
+            name: "ADN Global Router",
+            host: "master.adn.systems",
+            port: 62031,
+            password: "passw0rd"
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[BM-BANNER] Failed to refresh FreeDMR servers:", e);
+    } finally {
+      _freedmrRefreshPromise = null;
+    }
+    return KNOWN_FREEDMR_SERVERS;
+  })();
+  return _freedmrRefreshPromise;
+}
+
+export function renderNetworkBadgeElement(badgeEl, netType, xlxModule = "") {
+  if (!badgeEl) return;
+  const profile = getDmrNetworkProfile(netType);
+  badgeEl.className = `hotspot-network-badge net-type-${profile.id}`;
+  badgeEl.dataset.networkType = profile.id;
+
+  let labelText = profile.shortLabel;
+  if (profile.id === "xlx" && xlxModule) {
+    labelText = `XLX-${String(xlxModule).trim().toUpperCase().slice(0, 1)}`;
+  }
+
+  const iconWrap = badgeEl.querySelector(".net-badge-icon");
+  const labelWrap = badgeEl.querySelector(".net-badge-label");
+  const iconHtml = profile.customIconUrl
+    ? `<img src="${profile.customIconUrl}" alt="${profile.shortLabel}" class="net-badge-custom-img">`
+    : profile.svgIcon;
+
+  if (iconWrap && labelWrap) {
+    iconWrap.innerHTML = iconHtml;
+    labelWrap.textContent = labelText;
+  } else {
+    badgeEl.innerHTML = `<span class="net-badge-icon" aria-hidden="true">${iconHtml}</span><span class="net-badge-label">${labelText}</span>`;
+  }
+
+  const titlePrefix = (typeof window !== "undefined" && window.t)
+    ? window.t("hotspots.net_badge_prefix", {}, "Сеть")
+    : "Сеть";
+  const clickHint = (typeof window !== "undefined" && window.t)
+    ? window.t("hotspots.net_badge_click_hint", {}, "клик — параметры подключения")
+    : "клик — параметры подключения";
+  badgeEl.title = `${titlePrefix}: ${profile.fullName} (${clickHint})`;
+}
+
+export function updateCardNetworkBadge(card, hs) {
+  if (!card) return;
+  let netBadge = card.querySelector(".hotspot-network-badge");
+  if (!netBadge) {
+    const brandTitle = card.querySelector(".brand-title");
+    if (brandTitle) {
+      netBadge = document.createElement("span");
+      netBadge.className = "hotspot-network-badge net-type-bm";
+      netBadge.setAttribute("role", "button");
+      netBadge.setAttribute("tabindex", "0");
+      brandTitle.appendChild(netBadge);
+    }
+  }
+  if (!netBadge) return;
+
+  const netType = (hs && hs.network_type) ? hs.network_type : "bm";
+  const xlxMod = (hs && hs.xlx_module) ? hs.xlx_module : "D";
+  renderNetworkBadgeElement(netBadge, netType, xlxMod);
+
+  if (!netBadge._clickWired) {
+    netBadge._clickWired = true;
+    netBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const rawHid = card.dataset.hotspotId || (hs && hs.id) || "default";
+      const cid = resolveHotspotId(rawHid);
+      const allHs = getCurrentHotspots();
+      const targetHs = allHs.find(h => h.id === cid || h.id === rawHid) || hs || allHs[0];
+      if (typeof window !== "undefined" && typeof window.switchActiveHotspot === "function") {
+        window.switchActiveHotspot(cid);
+      }
+      if (typeof window !== "undefined" && typeof window.openHotspotSettings === "function") {
+        window.openHotspotSettings(targetHs, "tab-edit-hs");
+      }
+    });
+  }
+}
+
 function getCurrentHotspots() {
   return (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
 }
@@ -79,18 +442,19 @@ export function getBmFlagBadgeHtml(isoCode, countryName) {
   if (iso && iso !== "global") {
     return `<span class="flag-badge flag-${iso}" title="${countryName || iso.toUpperCase()}"><img src="/static/flags/${iso}.svg" alt="${countryName || iso.toUpperCase()}" class="flag-svg flag-img" /></span>`;
   }
-  return `<span class="flag-badge flag-global" title="BM"><svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>`;
+  return `<span class="flag-badge flag-global" title="${countryName || 'DMR'}"><svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>`;
 }
 
-export function getBmServerInfo(hostVal) {
+export function getBmServerInfo(hostVal, networkType = "bm") {
   const raw = (hostVal || "").trim();
   const clean = raw.toLowerCase();
-  const bmMastersList = (typeof window !== "undefined" && window.bmMastersList) || [];
-  const list = bmMastersList.length ? bmMastersList : KNOWN_BM_MASTERS;
+  const netKey = String(networkType || "bm").trim().toLowerCase();
+  const profile = getDmrNetworkProfile(netKey);
+  const list = getNetworkServersList(netKey);
 
-  let match = list.find(m => (m.host && m.host.toLowerCase() === clean) || m.ip === clean || (clean && clean.includes(String(m.id))));
+  let match = list.find(m => (m.host && m.host.toLowerCase() === clean) || (m.ip && m.ip === clean) || (clean && m.id && clean.includes(String(m.id).toLowerCase())));
 
-  if (!match) {
+  if (!match && netKey === "bm") {
     const idMatch = clean.match(/^(\d{4})/);
     if (idMatch) {
       const idNum = parseInt(idMatch[1], 10);
@@ -99,14 +463,14 @@ export function getBmServerInfo(hostVal) {
   }
 
   if (match) {
-    const cCode = (match.country_code || match.country || "RU").toUpperCase();
+    const cCode = (match.country_code || match.country || "GLOBAL").toUpperCase();
     const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
-    const cName = getLocalizedCountryName(cCode, match.country_name || match.country || cCode, curLang);
+    const cName = cCode !== "GLOBAL" ? getLocalizedCountryName(cCode, match.country_name || match.country || cCode, curLang) : (match.country_name || profile.shortLabel);
 
     const countryMasters = list.filter(m => {
       const cc = (m.country_code || m.country || "").toUpperCase();
       return cc === cCode;
-    }).sort((a, b) => (a.id || 0) - (b.id || 0));
+    }).sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
 
     let displayName = cName;
     if (match.name && match.name.trim()) {
@@ -127,54 +491,92 @@ export function getBmServerInfo(hostVal) {
   }
 
   // Fallback for custom / unknown servers
+  const shortHost = raw ? raw.replace(/^master\./i, "").split(".")[0].toUpperCase() : profile.shortLabel;
   return {
     countryCode: "GLOBAL",
-    countryName: "BM",
-    displayName: "BM",
-    host: raw || "master.brandmeister.network",
-    flagHtml: getBmFlagBadgeHtml("global", "BM")
+    countryName: profile.shortLabel,
+    displayName: netKey === "bm" ? "BM" : `${profile.shortLabel} ${shortHost !== profile.shortLabel ? shortHost : ""}`.trim(),
+    host: raw || profile.defaultHost || "master.brandmeister.network",
+    flagHtml: getBmFlagBadgeHtml("global", profile.fullName)
   };
 }
 
-export function populateBmServerSelect(select, currentHost) {
+
+export const resolveCardMasterInfo = getBmServerInfo;
+
+export function populateBmServerSelect(select, currentHost, networkType = "bm") {
   if (!select) return;
   const cleanCurrent = (currentHost || "").trim().toLowerCase();
-
-  const bmMastersList = (typeof window !== "undefined" && window.bmMastersList) || [];
-  const masters = bmMastersList.length ? bmMastersList : KNOWN_BM_MASTERS;
+  const netKey = String(networkType || "bm").trim().toLowerCase();
+  const profile = getDmrNetworkProfile(netKey);
+  const rawMasters = getNetworkServersList(netKey);
+  const masters = typeof sortServersByCriteria === "function" ? sortServersByCriteria(rawMasters, "ping", "asc", netKey) : (typeof sortServersForDropdown === "function" ? sortServersForDropdown(rawMasters) : rawMasters);
   const targetCount = masters.length;
   const currentCount = parseInt(select.dataset.masterCount || "0", 10);
+  const lastNet = select.dataset.networkType || "";
   const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
   const lastLang = select.dataset.lang || "";
+  const lastCacheVer = select.dataset.cacheVer || "";
+  const curCacheVer = String((typeof window !== "undefined" && window._dmrServersCacheVer) || 0);
+  const pinnedList = getPinnedServers(netKey);
+  const pinnedStr = pinnedList.join(",");
+  const lastPinned = select.dataset.pinned || "";
 
-  if (targetCount > 0 && (currentCount !== targetCount || lastLang !== curLang)) {
+  if (currentCount !== targetCount || lastLang !== curLang || lastNet !== netKey || lastCacheVer !== curCacheVer || lastPinned !== pinnedStr) {
     select.innerHTML = "";
     select.dataset.masterCount = String(targetCount);
     select.dataset.lang = curLang;
+    select.dataset.networkType = netKey;
+    select.dataset.cacheVer = curCacheVer;
+    select.dataset.pinned = pinnedStr;
 
-    const benchOpt = document.createElement("option");
-    benchOpt.value = "__TEST_SERVERS__";
-    benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
-    select.appendChild(benchOpt);
+    if (netKey !== "custom") {
+      const benchOpt = document.createElement("option");
+      benchOpt.value = "__TEST_SERVERS__";
+      benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
+      select.appendChild(benchOpt);
+    }
 
     const recTag = window.t ? window.t("bm.master_recommended", {}, "⭐ [Рекомендуется]") : "⭐ [Рекомендуется]";
 
     masters.forEach(m => {
       const opt = document.createElement("option");
       opt.value = m.host || "";
-      const cCode = (m.country_code || m.country || "").toUpperCase();
-      const countryName = getLocalizedCountryName(cCode, m.country_name || m.country || "BM", curLang);
-      const flag = m.flag || isoToEmoji(cCode);
+      const cCode = (m.country_code || m.country || "GLOBAL").toUpperCase();
+      const countryName = cCode !== "GLOBAL" ? getLocalizedCountryName(cCode, m.country_name || m.country || profile.shortLabel, curLang) : (m.country_name || profile.shortLabel);
+      const flag = m.flag || (cCode !== "GLOBAL" ? isoToEmoji(cCode) : "🌐");
       const recSuffix = m.recommended ? ` ${recTag}` : "";
-      opt.textContent = `${flag} ${countryName} — BM ${m.id || ""} (${m.host || ""})${recSuffix}`;
+      const labelMid = netKey === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || profile.shortLabel);
+
+      const st = (m.state || "").toLowerCase();
+      const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
+                     (m.udp_ok === false && m.avg_ping == null && m.udp_ms == null) ||
+                     (m.loss_pct !== undefined && m.loss_pct >= 100);
+      const pingVal = (m.udp_ms !== undefined && m.udp_ms !== null) ? m.udp_ms : ((m.avg_ping !== undefined && m.avg_ping !== null) ? m.avg_ping : null);
+
+      const srvKey = String(m.id || m.host || "").trim();
+      const isPinned = Boolean(srvKey && pinnedList.includes(srvKey));
+      const pinPrefix = isPinned ? "📌 " : "";
+
+      if (isDead) {
+        opt.textContent = `${pinPrefix}🔴 НЕ ОТВЕЧАЕТ · ${flag} ${countryName} — ${labelMid} (${m.host || ""})`;
+        opt.style.color = "#ef4444";
+        opt.dataset.dead = "1";
+      } else if (pingVal !== null && !isNaN(pingVal)) {
+        opt.textContent = `${pinPrefix}⚡ ${Math.round(pingVal)} мс · ${flag} ${countryName} — ${labelMid} (${m.host || ""})${recSuffix}`;
+        opt.dataset.ping = String(Math.round(pingVal));
+      } else {
+        opt.textContent = `${pinPrefix}${flag} ${countryName} — ${labelMid} (${m.host || ""})${recSuffix}`;
+      }
+
       select.appendChild(opt);
     });
   } else if (targetCount === 0 && !select.options.length) {
-    const info = getBmServerInfo(currentHost);
+    const info = getBmServerInfo(currentHost, netKey);
     const opt = document.createElement("option");
-    opt.value = currentHost || "2322.master.brandmeister.network";
+    opt.value = currentHost || profile.defaultHost || "";
     const flag = info.countryCode !== "GLOBAL" ? isoToEmoji(info.countryCode) : "🌐";
-    opt.textContent = `${flag} BM ${info.displayName || "BM"}`;
+    opt.textContent = `${flag} ${info.displayName || profile.shortLabel} (${opt.value})`;
     opt.selected = true;
     select.appendChild(opt);
   }
@@ -194,7 +596,7 @@ export function populateBmServerSelect(select, currentHost) {
   if (!matched && cleanCurrent) {
     let customOpt = Array.from(select.options).find(o => o.value.toLowerCase() === cleanCurrent);
     if (!customOpt) {
-      const info = getBmServerInfo(currentHost);
+      const info = getBmServerInfo(currentHost, netKey);
       customOpt = document.createElement("option");
       customOpt.value = currentHost;
       const flag = info.countryCode !== "GLOBAL" ? isoToEmoji(info.countryCode) : "🌐";
@@ -203,46 +605,54 @@ export function populateBmServerSelect(select, currentHost) {
     }
     customOpt.selected = true;
   }
+
+  // Initialize / synchronize search & sort combobox
+  if (typeof setupServerCombobox === "function") {
+    setupServerCombobox(select, currentHost, netKey);
+  }
 }
 
 export function isHotspotFullyOnline(arg) {
   const ws = getWs();
-  const isManualGwDisconnect = typeof window !== "undefined" && Boolean(window.isManualGwDisconnect);
-  const isGwOnline = Boolean(ws && ws.readyState === WebSocket.OPEN && !isManualGwDisconnect);
-  if (!isGwOnline) return false;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   if (!arg) return false;
 
-  const targetId = (typeof arg === "string") ? arg : (arg && arg.id);
-  if (targetId && typeof window !== "undefined" && typeof window.isHotspotGwDisconnected === "function" && window.isHotspotGwDisconnected(targetId)) {
-    return false;
+  const isStatusKeyword = typeof arg === "string" && ["ONLINE", "OFFLINE", "CONNECTING", "AUTHENTICATING", "CONFIGURING", "ERROR", "DISCONNECTED", "AUTH_FAILED"].includes(arg.toUpperCase());
+  const rawTargetId = (typeof arg === "object" && arg.id) ? arg.id : (!isStatusKeyword && typeof arg === "string" ? arg : null);
+  const targetId = rawTargetId ? resolveHotspotId(rawTargetId) : null;
+
+  if (targetId && typeof window !== "undefined" && typeof window.isHotspotGwDisconnected === "function") {
+    if (window.isHotspotGwDisconnected(targetId)) return false;
+  } else {
+    const isManualGwDisconnect = typeof window !== "undefined" && Boolean(window.isManualGwDisconnect);
+    if (isManualGwDisconnect) return false;
   }
 
   const currentHotspots = getCurrentHotspots();
   if (typeof arg === "string") {
-    const isLive = (typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(arg)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(arg));
-    if (isHotspotCollapsed(arg) && !isLive) return false;
-    if (arg === "ONLINE") return true;
-    if (arg === "OFFLINE" || arg === "CONNECTING" || arg === "ERROR" || arg === "DISCONNECTED" || arg === "AUTH_FAILED") return false;
-    const target = currentHotspots.find(h => h.id === arg);
+    const upper = arg.toUpperCase();
+    if (upper === "ONLINE") return true;
+    if (isStatusKeyword) return false;
+    const cid = resolveHotspotId(arg);
+    const isLive = (typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(cid)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(cid));
+    if (isHotspotCollapsed(cid) && !isLive) return false;
+    const target = currentHotspots.find(h => h.id === cid || h.id === arg);
     const targetLive = target ? ((typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(target.id)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(target.id))) : false;
     if (!target || (isHotspotCollapsed(target.id) && !targetLive)) return false;
-    return Boolean(target && target.status === "ONLINE");
+    return String(target.status || "").toUpperCase() === "ONLINE";
   }
   if (typeof arg === "object") {
-    const isLive = arg.id ? ((typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(arg.id)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(arg.id))) : false;
-    if (arg.id && isHotspotCollapsed(arg.id) && !isLive) return false;
-    return arg.status === "ONLINE";
+    const cid = arg.id ? resolveHotspotId(arg.id) : null;
+    const isLive = cid ? ((typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(cid)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(cid))) : false;
+    if (cid && isHotspotCollapsed(cid) && !isLive) return false;
+    return String(arg.status || "").toUpperCase() === "ONLINE";
   }
   return false;
 }
 
 export function updateCardBmBanner(card, hs) {
   if (!card) return;
-  const banner = card.querySelector(".bm-info-banner");
-  if (!banner) return;
-
   const currentHotspots = getCurrentHotspots();
-  const activeHotspotId = getActiveHotspotId();
 
   if (!hs) {
     const hid = card.dataset.hotspotId || "default";
@@ -252,8 +662,17 @@ export function updateCardBmBanner(card, hs) {
       : null;
   }
 
-  const hostVal = (hs && hs.bm_master_host) ? hs.bm_master_host : "2502.master.brandmeister.network";
-  const info = getBmServerInfo(hostVal);
+  // Always update the top header network identity badge
+  updateCardNetworkBadge(card, hs);
+
+  const banner = card.querySelector(".bm-info-banner");
+  if (!banner) return;
+
+  const netType = (hs && hs.network_type) ? hs.network_type : (card.dataset.networkType || "bm");
+  const profile = getDmrNetworkProfile(netType);
+  card.dataset.networkType = profile.id;
+  const hostVal = (hs && hs.bm_master_host) ? hs.bm_master_host : profile.defaultHost || "2502.master.brandmeister.network";
+  const info = getBmServerInfo(hostVal, netType);
 
   // Update Flag & Short Display Name
   const flagEl = banner.querySelector(".bm-server-flag");
@@ -263,14 +682,27 @@ export function updateCardBmBanner(card, hs) {
 
   const nameEl = banner.querySelector(".bm-server-name");
   if (nameEl) {
-    const shortName = info.displayName || info.countryName || "BM";
-    nameEl.textContent = shortName.startsWith("BM") ? shortName : `BM ${shortName}`;
-    nameEl.title = `${info.countryName || info.displayName} — ${hostVal}`;
+    const shortName = info.displayName || info.countryName || profile.shortLabel;
+    const prefix = profile.shortLabel;
+    nameEl.textContent = shortName.toUpperCase().startsWith(prefix.toUpperCase()) ? shortName : `${prefix} ${shortName}`;
+    nameEl.title = `${profile.fullName}: ${info.countryName || info.displayName} — ${hostVal}`;
+  }
+
+  const modeBadge = banner.querySelector(".bm-ping-mode-badge");
+  if (modeBadge && !modeBadge.classList.contains("mode-client")) {
+    modeBadge.textContent = profile.shortLabel;
+    modeBadge.className = `bm-ping-mode-badge mode-server net-mode-${profile.id} mode-${profile.id === "bm" ? "bm" : profile.id}`;
+    modeBadge.dataset.networkType = profile.id;
+    modeBadge.title = ((typeof window !== "undefined" && window.t)
+      ? (window.t("ping.mode_server_tooltip", { network: profile.shortLabel }) !== "ping.mode_server_tooltip"
+          ? window.t("ping.mode_server_tooltip", { network: profile.shortLabel })
+          : window.t("ping.mode_bm_tooltip", { network: profile.shortLabel }))
+      : `Режим: ${profile.shortLabel}. Кликните по графику для смены на Client ↔ ProxDMR`);
   }
 
   let select = banner.querySelector(".bm-server-select");
-  if (select && (document.activeElement !== select || !select.options.length)) {
-    populateBmServerSelect(select, hostVal);
+  if (select && (document.activeElement !== select || !select.options.length || select.dataset.networkType !== netType)) {
+    populateBmServerSelect(select, hostVal, netType);
   }
 
   if (select && !select._selectWired) {
@@ -283,7 +715,8 @@ export function updateCardBmBanner(card, hs) {
                        (rawId === "default" ? allHotspots[0] : null) ||
                        allHotspots[0];
       const currHost = (targetHs && targetHs.bm_master_host) || select.value || hostVal;
-      populateBmServerSelect(select, currHost);
+      const currNet = (targetHs && targetHs.network_type) || "bm";
+      populateBmServerSelect(select, currHost, currNet);
     });
     select.addEventListener("click", (e) => e.stopPropagation());
     select.addEventListener("change", async (e) => {
@@ -297,13 +730,14 @@ export function updateCardBmBanner(card, hs) {
       const targetHs = allHotspots.find(h => h.id === cid || h.id === rawId) ||
                        (rawId === "default" ? allHotspots[0] : null) ||
                        allHotspots[0];
+      const currNet = (targetHs && targetHs.network_type) || "bm";
 
       if (newHost === "__TEST_SERVERS__") {
         const currHost = (targetHs && targetHs.bm_master_host) || "";
-        populateBmServerSelect(select, currHost);
+        populateBmServerSelect(select, currHost, currNet);
         const targetId = (targetHs && targetHs.id) ? targetHs.id : cid;
         if (typeof openBmBenchmarkModal === "function") {
-          openBmBenchmarkModal(targetId);
+          openBmBenchmarkModal(targetId, currNet);
         }
         return;
       }
@@ -318,6 +752,9 @@ export function updateCardBmBanner(card, hs) {
       const targetId = targetHs.id || cid;
 
       targetHs.bm_master_host = newHost;
+      if (typeof window !== "undefined" && typeof window.updateCardXlxPanel === "function") {
+        window.updateCardXlxPanel(card, targetHs);
+      }
       if (typeof window !== "undefined" && typeof window.updateBmStatus === "function") {
         window.updateBmStatus("connecting", `Подключение к ${newHost}...`, targetId);
       }
@@ -367,11 +804,11 @@ export function updateCardBmBanner(card, hs) {
             if (editHsMasterSelect) editHsMasterSelect.value = newHost;
           }
         } else {
-          console.error(`[BM-BANNER] Ошибка смены сервера BM: HTTP ${resp.status}`);
+          console.error(`[BM-BANNER] Ошибка смены сервера: HTTP ${resp.status}`);
           targetHs.bm_master_host = prevHost;
         }
       } catch (err) {
-        console.error("[BM-BANNER] Ошибка смены сервера BM:", err);
+        console.error("[BM-BANNER] Ошибка смены сервера:", err);
         targetHs.bm_master_host = prevHost;
       }
       updateCardBmBanner(card, targetHs);
@@ -477,16 +914,20 @@ export function updateCardBmBanner(card, hs) {
         }
       }
       const clientLossData = calculateClientPacketLoss(cid);
-      updatePingElement(pingEl, isWsOpen ? clientPing : null, clientLossData, "client");
+      updatePingElement(pingEl, isWsOpen ? clientPing : null, clientLossData, "client", profile.shortLabel);
     } else {
       const isOfflineCard = isCollapsed || (!isOnline && !isPrimary);
       const lossData = isOfflineCard ? { lossPercent: 0, isOffline: true } : calculateCardPacketLoss(cid, hostVal);
-      updatePingElement(pingEl, isOfflineCard ? null : pingMs, lossData, "bm");
+      updatePingElement(pingEl, isOfflineCard ? null : pingMs, lossData, "server", profile.shortLabel);
     }
   }
 
   // Render SVG Ping Sparkline
   renderCardPingSparkline(card, hostVal);
+
+  if (typeof window !== "undefined" && typeof window.updateCardXlxPanel === "function") {
+    window.updateCardXlxPanel(card, hs);
+  }
 }
 
 export function refreshAllCardsBmBanner() {
@@ -506,9 +947,629 @@ export function updateRxBannerFreshness() {}
 export function updateCardRxLiveBanner(card, data) {}
 export function updateRxLiveBanner(data) {}
 
+
+/* ==========================================================================
+   Pinned Servers Management Subsystem
+   ========================================================================== */
+
+export function getPinnedServers(netKey) {
+  try {
+    const raw = localStorage.getItem(`pinnedServers_${netKey}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function togglePinServer(netKey, serverKey) {
+  if (!serverKey) return [];
+  const pinned = getPinnedServers(netKey);
+  const idx = pinned.indexOf(serverKey);
+  if (idx >= 0) {
+    pinned.splice(idx, 1);
+  } else {
+    pinned.push(serverKey);
+  }
+  try {
+    localStorage.setItem(`pinnedServers_${netKey}`, JSON.stringify(pinned));
+  } catch (e) {}
+  return pinned;
+}
+
+/* ==========================================================================
+   Server Search & Sort Combobox Subsystem (.srv-combo)
+   ========================================================================== */
+
+export function isSearchComboEnabled(netType) {
+  const k = String(netType || "bm").trim().toLowerCase();
+  return k === "xlx" || k === "dmrplus";
+}
+
+export function extractServerNumber(s) {
+  if (!s) return 999999;
+  const idStr = String(s.id || s.name || "").trim().toUpperCase();
+
+  // 1. Standard numeric XLX000..XLX999
+  const mXlxNum = idStr.match(/^XLX(\d{3})$/);
+  if (mXlxNum) {
+    return parseInt(mXlxNum[1], 10);
+  }
+
+  // 2. Hex XLX like XLX00A..XLX00F (placed after XLX009)
+  const mXlxHex = idStr.match(/^XLX([0-9A-F]{3})$/);
+  if (mXlxHex) {
+    const hexPart = mXlxHex[1];
+    if (/^\d{2}/.test(hexPart)) {
+      const prefixNum = parseInt(hexPart.slice(0, 2), 10);
+      const offset = hexPart.charCodeAt(2) - 64; // 'A' -> 1
+      return prefixNum * 10 + 9 + (offset * 0.01);
+    }
+  }
+
+  // 3. BrandMeister 4-5 digit master numbers (e.g. 2502)
+  const mBm = idStr.match(/^(?:BM\s*)?(\d{4,5})$/);
+  if (mBm) {
+    return parseInt(mBm[1], 10);
+  }
+
+  // 4. Fallback standalone word-bounded number
+  const mAny = idStr.match(/\b\d+\b/);
+  if (mAny) {
+    return parseInt(mAny[0], 10);
+  }
+
+  return 999999;
+}
+
+export function sortServersByCriteria(servers, mode = "ping", dir = "asc", netKey = "xlx") {
+  if (!Array.isArray(servers) || !servers.length) return [];
+  const pinnedList = getPinnedServers(netKey);
+  const isPinned = (s) => {
+    if (!s) return false;
+    const k = String(s.id || s.host || "").trim();
+    return Boolean(k && pinnedList.includes(k));
+  };
+
+  const sortSubset = (subset) => {
+    if (!subset.length) return [];
+    const copy = [...subset];
+
+    if (mode === "ping") {
+      const sorted = typeof sortServersForDropdown === "function" ? sortServersForDropdown(copy) : copy;
+      if (dir === "desc") {
+        const alive = [];
+        const dead = [];
+        sorted.forEach(s => {
+          if (!s) return;
+          const st = (s.state || "").toLowerCase();
+          const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
+                         (s.udp_ok === false && s.avg_ping == null && s.udp_ms == null) ||
+                         (s.loss_pct !== undefined && s.loss_pct >= 100);
+          if (isDead) dead.push(s);
+          else alive.push(s);
+        });
+        alive.reverse();
+        return [...alive, ...dead];
+      }
+      return sorted;
+    }
+
+    copy.sort((a, b) => {
+      if (!a && !b) return 0;
+      if (!a) return 1;
+      if (!b) return -1;
+
+      const stA = (a.state || "").toLowerCase();
+      const isDeadA = ["no_reply", "refused", "dns_fail"].includes(stA) || (a.loss_pct !== undefined && a.loss_pct >= 100);
+      const stB = (b.state || "").toLowerCase();
+      const isDeadB = ["no_reply", "refused", "dns_fail"].includes(stB) || (b.loss_pct !== undefined && b.loss_pct >= 100);
+      if (isDeadA !== isDeadB) {
+        return isDeadA ? 1 : -1;
+      }
+
+      let res = 0;
+      if (mode === "number") {
+        const numA = extractServerNumber(a);
+        const numB = extractServerNumber(b);
+        res = numA - numB;
+        if (res === 0) {
+          res = String(a.id || "").localeCompare(String(b.id || ""));
+        }
+      } else if (mode === "name") {
+        const nameA = String(a.name || a.id || "").toLowerCase();
+        const nameB = String(b.name || b.id || "").toLowerCase();
+        res = nameA.localeCompare(nameB);
+      } else if (mode === "address") {
+        const addrA = String(a.host || a.ip || "").toLowerCase();
+        const addrB = String(b.host || b.ip || "").toLowerCase();
+        res = addrA.localeCompare(addrB);
+      } else if (mode === "country") {
+        const cA = String(a.country_name || a.country || "").toLowerCase();
+        const cB = String(b.country_name || b.country || "").toLowerCase();
+        res = cA.localeCompare(cB);
+        if (res === 0) {
+          res = extractServerNumber(a) - extractServerNumber(b);
+        }
+      }
+
+      return dir === "desc" ? -res : res;
+    });
+
+    return copy;
+  };
+
+  const pinned = [];
+  const unpinned = [];
+  servers.forEach(s => {
+    if (isPinned(s)) pinned.push(s);
+    else unpinned.push(s);
+  });
+
+  return [...sortSubset(pinned), ...sortSubset(unpinned)];
+}
+
+function escapeComboRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function escapeComboHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+export function highlightComboMatches(text, tokens) {
+  const safe = escapeComboHtml(text);
+  if (!tokens || !tokens.length) return safe;
+  const validTokens = tokens.filter(t => t.length > 0).sort((a, b) => b.length - a.length);
+  if (!validTokens.length) return safe;
+  const regex = new RegExp(`(${validTokens.map(escapeComboRegExp).join("|")})`, "gi");
+  return safe.replace(regex, '<mark class="srv-combo-mark">$1</mark>');
+}
+
+export function filterServersList(servers, query, curLang = "ru") {
+  if (!Array.isArray(servers) || !servers.length) return [];
+  const trimmed = (query || "").trim().toLowerCase();
+  if (!trimmed) return servers;
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return servers;
+
+  return servers.filter(s => {
+    if (!s) return false;
+    const cCode = (s.country_code || s.country || "").toUpperCase();
+    const locCountry = cCode ? getLocalizedCountryName(cCode, s.country_name || s.country, curLang) : "";
+    const haystack = [
+      s.id,
+      s.name,
+      s.host,
+      s.ip,
+      s.country,
+      s.country_name,
+      locCountry,
+      s.comment
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    return tokens.every(tok => haystack.includes(tok));
+  });
+}
+
+function getDefaultSortMode(netKey, servers) {
+  const hasTestedPing = Array.isArray(servers) && servers.some(s => s && (s.udp_ms != null || s.avg_ping != null));
+  if (hasTestedPing) return "ping";
+  if (netKey === "xlx") return "number";
+  if (netKey === "dmrplus") return "ping";
+  return "ping";
+}
+
+function updateSortButtonsUi(panel, activeMode, activeDir) {
+  const btns = panel.querySelectorAll(".srv-sort-btn");
+  btns.forEach(btn => {
+    const isAct = btn.dataset.mode === activeMode;
+    btn.classList.toggle("active", isAct);
+    const arrow = btn.querySelector(".srv-sort-arrow");
+    if (arrow) {
+      arrow.textContent = isAct ? (activeDir === "asc" ? " ▲" : " ▼") : "";
+    }
+  });
+}
+
+export function closeAllServerComboboxes(exceptCombo = null) {
+  document.querySelectorAll(".srv-combo-panel").forEach(p => {
+    if (exceptCombo && p === exceptCombo.panel) return;
+    p.style.display = "none";
+    const banner = p.closest(".bm-info-banner");
+    if (banner && banner._srvCombo) {
+      banner._srvCombo.isOpen = false;
+      banner._srvCombo.highlightedIndex = -1;
+    }
+  });
+}
+
+function moveComboHighlight(combo, delta) {
+  const items = combo.listEl.querySelectorAll(".srv-combo-item");
+  if (!items.length) return;
+  let idx = combo.highlightedIndex + delta;
+  if (idx < 0) idx = items.length - 1;
+  if (idx >= items.length) idx = 0;
+  combo.highlightedIndex = idx;
+  items.forEach((it, i) => {
+    const isHigh = i === idx;
+    it.classList.toggle("is-highlighted", isHigh);
+    if (isHigh) {
+      it.scrollIntoView({ block: "nearest" });
+    }
+  });
+}
+
+function selectHighlightedItem(combo, select) {
+  const items = combo.listEl.querySelectorAll(".srv-combo-item");
+  if (!items.length) return;
+  const idx = combo.highlightedIndex >= 0 ? combo.highlightedIndex : 0;
+  const targetItem = items[idx];
+  if (targetItem && targetItem.dataset.host) {
+    targetItem.click();
+  }
+}
+
+function renderComboboxList(select) {
+  const banner = select.closest(".bm-info-banner");
+  if (!banner || !banner._srvCombo) return;
+  const combo = banner._srvCombo;
+  const netKey = (select.dataset.networkType || "xlx").toLowerCase();
+  const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+  const rawMasters = getNetworkServersList(netKey);
+  const profile = getDmrNetworkProfile(netKey);
+  const currentVal = (select.value || "").trim().toLowerCase();
+
+  const query = combo.query || "";
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = filterServersList(rawMasters, query, curLang);
+  const sorted = sortServersByCriteria(filtered, combo.mode, combo.dir, netKey);
+
+  // Update counter
+  const foundCount = filtered.length;
+  const totalCount = rawMasters.length;
+  if (combo.counterEl) {
+    combo.counterEl.textContent = (window.t ? window.t("servers.found_n_of_m", { found: foundCount, total: totalCount }) : `Найдено: ${foundCount} из ${totalCount}`);
+  }
+
+  // Update Sort buttons
+  updateSortButtonsUi(combo.panel, combo.mode, combo.dir);
+
+  // Render list items (capped at 100)
+  const listEl = combo.listEl;
+  listEl.innerHTML = "";
+  combo.highlightedIndex = -1;
+
+  if (sorted.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "srv-combo-empty";
+    empty.textContent = window.t ? window.t("servers.nothing_found", {}, "Ничего не найдено") : "Ничего не найдено";
+    listEl.appendChild(empty);
+    return;
+  }
+
+  const renderLimit = 100;
+  const toRender = sorted.slice(0, renderLimit);
+  const excess = sorted.length - renderLimit;
+
+  let selectedElem = null;
+
+  toRender.forEach((m, idx) => {
+    const li = document.createElement("li");
+    li.className = "srv-combo-item";
+    li.dataset.host = m.host || "";
+    li.dataset.index = String(idx);
+
+    const cCode = (m.country_code || m.country || "GLOBAL").toUpperCase();
+    const countryName = cCode !== "GLOBAL" ? getLocalizedCountryName(cCode, m.country_name || m.country || profile.shortLabel, curLang) : (m.country_name || profile.shortLabel);
+    const flag = m.flag || (cCode !== "GLOBAL" ? isoToEmoji(cCode) : "🌐");
+    const labelMid = netKey === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || profile.shortLabel);
+
+    const st = (m.state || "").toLowerCase();
+    const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
+                   (m.udp_ok === false && m.avg_ping == null && m.udp_ms == null) ||
+                   (m.loss_pct !== undefined && m.loss_pct >= 100);
+    const pingVal = (m.udp_ms !== undefined && m.udp_ms !== null) ? m.udp_ms : ((m.avg_ping !== undefined && m.avg_ping !== null) ? m.avg_ping : null);
+
+    if (isDead) {
+      li.classList.add("is-dead");
+    }
+
+    const mHost = m.host || "";
+    const isSelected = currentVal && (currentVal === mHost.toLowerCase() || currentVal === mHost.toLowerCase().split(":")[0]);
+    if (isSelected) {
+      li.classList.add("is-selected");
+      selectedElem = li;
+    }
+
+    const srvKey = String(m.id || m.host || "").trim();
+    const pinnedList = getPinnedServers(netKey);
+    const isPinned = Boolean(srvKey && pinnedList.includes(srvKey));
+    if (isPinned) {
+      li.classList.add("is-pinned");
+    }
+
+    const pinTooltip = isPinned
+      ? (window.t ? window.t("servers.unpin_tooltip", {}, "Открепить сервер") : "Открепить сервер")
+      : (window.t ? window.t("servers.pin_tooltip", {}, "Закрепить сервер сверху") : "Закрепить сервер сверху");
+
+    const hlLabel = highlightComboMatches(labelMid, tokens);
+    const hlCountry = highlightComboMatches(countryName, tokens);
+    const hlHost = mHost && mHost !== labelMid ? highlightComboMatches(`(${mHost})`, tokens) : "";
+
+    let pingHtml = "";
+    if (isDead) {
+      pingHtml = `<span class="srv-item-ping">🔴 НЕ ОТВЕЧАЕТ</span>`;
+    } else if (pingVal !== null && !isNaN(pingVal)) {
+      pingHtml = `<span class="srv-item-ping">⚡ ${Math.round(pingVal)} мс</span>`;
+    }
+
+    li.innerHTML = `
+      <div class="srv-item-left">
+        <span class="srv-item-flag">${flag}</span>
+        <span class="srv-item-title"><strong>${hlLabel}</strong> · ${hlCountry} <small>${hlHost}</small></span>
+      </div>
+      <div class="srv-item-right">
+        ${pingHtml}
+        <button type="button" class="srv-pin-btn ${isPinned ? 'is-active' : ''}" title="${pinTooltip}" data-key="${srvKey}">📌</button>
+      </div>
+    `;
+
+    const pinBtn = li.querySelector(".srv-pin-btn");
+    if (pinBtn) {
+      pinBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        togglePinServer(netKey, srvKey);
+        renderComboboxList(select);
+        populateBmServerSelect(select, select.value, netKey);
+      });
+    }
+
+    li.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeAllServerComboboxes();
+      if (select.value !== mHost) {
+        select.value = mHost;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    listEl.appendChild(li);
+  });
+
+  if (excess > 0) {
+    const more = document.createElement("div");
+    more.className = "srv-combo-more";
+    more.textContent = window.t ? window.t("servers.more_items", { count: excess }, `...и ещё ${excess} серверов (уточните запрос)`) : `...и ещё ${excess} серверов (уточните запрос)`;
+    listEl.appendChild(more);
+  }
+
+  // Scroll to selected element on initial open if not query-filtering
+  if (!query && selectedElem) {
+    setTimeout(() => {
+      selectedElem.scrollIntoView({ block: "center" });
+    }, 10);
+  }
+}
+
+export function setupServerCombobox(select, currentHost, networkType = "xlx") {
+  if (!select) return;
+  const netKey = String(networkType || "xlx").trim().toLowerCase();
+  const wrap = select.closest(".bm-server-label-wrap");
+  const banner = select.closest(".bm-info-banner");
+  if (!wrap || !banner) return;
+
+  const enabled = isSearchComboEnabled(netKey);
+  wrap.classList.toggle("srv-combo-active", enabled);
+
+  if (!enabled) {
+    if (banner._srvCombo && banner._srvCombo.panel) {
+      banner._srvCombo.panel.style.display = "none";
+      banner._srvCombo.isOpen = false;
+    }
+    return;
+  }
+
+  // Global document listeners (only wired once)
+  if (typeof window !== "undefined" && !window._srvComboGlobalWired) {
+    window._srvComboGlobalWired = true;
+    document.addEventListener("click", (e) => {
+      if (e.target.closest(".srv-combo-panel") || e.target.closest(".bm-server-label-wrap.srv-combo-active")) {
+        return;
+      }
+      closeAllServerComboboxes();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closeAllServerComboboxes();
+      }
+    });
+  }
+
+  // Wire label wrap click trigger
+  if (!wrap._srvComboWired) {
+    wrap._srvComboWired = true;
+    wrap.addEventListener("click", (e) => {
+      const net = (select.dataset.networkType || "").toLowerCase();
+      if (!isSearchComboEnabled(net)) return;
+      e.stopPropagation();
+      e.preventDefault();
+
+      if (banner._srvCombo && banner._srvCombo.isOpen) {
+        closeAllServerComboboxes();
+      } else {
+        closeAllServerComboboxes();
+        if (banner._srvCombo) {
+          banner._srvCombo.panel.style.display = "flex";
+          banner._srvCombo.isOpen = true;
+          banner._srvCombo.input.value = "";
+          banner._srvCombo.clearBtn.style.display = "none";
+          banner._srvCombo.query = "";
+          renderComboboxList(select);
+          banner._srvCombo.input.focus();
+        }
+      }
+    });
+  }
+
+  // Create panel if not already created
+  if (!banner._srvCombo) {
+    const panel = document.createElement("div");
+    panel.className = "srv-combo-panel";
+    panel.style.display = "none";
+
+    const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+    const placeholder = window.t ? window.t("servers.search_placeholder", {}, "Поиск сервера...") : "Поиск сервера...";
+    const clearTitle = window.t ? window.t("servers.clear_search", {}, "Очистить поиск") : "Очистить поиск";
+    const testTitle = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
+
+    panel.innerHTML = `
+      <div class="srv-combo-header">
+        <div class="srv-combo-search-row">
+          <span class="srv-combo-search-icon">🔍</span>
+          <input type="text" class="srv-combo-input" placeholder="${escapeComboHtml(placeholder)}" autocomplete="off" spellcheck="false">
+          <button type="button" class="srv-combo-clear" title="${escapeComboHtml(clearTitle)}" style="display: none;">✕</button>
+        </div>
+        <div class="srv-combo-status-row">
+          <span class="srv-combo-counter"></span>
+        </div>
+        <div class="srv-combo-sort-bar">
+          <button type="button" class="srv-sort-btn" data-mode="ping" title="${window.t ? window.t("servers.sort_ping_title", {}, "По пингу") : "По пингу"}">⚡ <span class="srv-sort-lbl">${window.t ? window.t("servers.sort_ping", {}, "Пинг") : "Пинг"}</span><span class="srv-sort-arrow"></span></button>
+          <button type="button" class="srv-sort-btn" data-mode="number" title="${window.t ? window.t("servers.sort_number_title", {}, "По номеру") : "По номеру"}">№ <span class="srv-sort-lbl">${window.t ? window.t("servers.sort_number", {}, "Номер") : "Номер"}</span><span class="srv-sort-arrow"></span></button>
+          <button type="button" class="srv-sort-btn" data-mode="name" title="${window.t ? window.t("servers.sort_name_title", {}, "По названию") : "По названию"}">А–Я <span class="srv-sort-lbl">${window.t ? window.t("servers.sort_name", {}, "Имя") : "Имя"}</span><span class="srv-sort-arrow"></span></button>
+          <button type="button" class="srv-sort-btn" data-mode="address" title="${window.t ? window.t("servers.sort_address_title", {}, "По адресу") : "По адресу"}">🌐 <span class="srv-sort-lbl">${window.t ? window.t("servers.sort_address", {}, "Адрес") : "Адрес"}</span><span class="srv-sort-arrow"></span></button>
+          <button type="button" class="srv-sort-btn" data-mode="country" title="${window.t ? window.t("servers.sort_country_title", {}, "По стране") : "По стране"}">🏳 <span class="srv-sort-lbl">${window.t ? window.t("servers.sort_country", {}, "Страна") : "Страна"}</span><span class="srv-sort-arrow"></span></button>
+        </div>
+      </div>
+      <div class="srv-combo-test-row" title="${escapeComboHtml(testTitle)}">
+        <span>⚡</span>
+        <span class="srv-combo-test-lbl">${escapeComboHtml(testTitle)}</span>
+      </div>
+      <ul class="srv-combo-list"></ul>
+    `;
+
+    banner.appendChild(panel);
+
+    const input = panel.querySelector(".srv-combo-input");
+    const clearBtn = panel.querySelector(".srv-combo-clear");
+    const counterEl = panel.querySelector(".srv-combo-counter");
+    const listEl = panel.querySelector(".srv-combo-list");
+    const testRow = panel.querySelector(".srv-combo-test-row");
+
+    const rawMasters = getNetworkServersList(netKey);
+    let savedMode = null;
+    let savedDir = "asc";
+    try {
+      savedMode = localStorage.getItem(`srvSortMode_${netKey}`);
+      savedDir = localStorage.getItem(`srvSortDir_${netKey}`) || "asc";
+    } catch (_) {}
+
+    banner._srvCombo = {
+      panel,
+      input,
+      clearBtn,
+      counterEl,
+      listEl,
+      testRow,
+      isOpen: false,
+      query: "",
+      mode: savedMode || getDefaultSortMode(netKey, rawMasters),
+      dir: savedDir,
+      highlightedIndex: -1
+    };
+
+    // Prevent clicks inside panel from closing it
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    // Search input debounced
+    let debounceTimer = null;
+    input.addEventListener("input", () => {
+      clearBtn.style.display = input.value.trim() ? "flex" : "none";
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        banner._srvCombo.query = input.value.trim();
+        banner._srvCombo.highlightedIndex = -1;
+        renderComboboxList(select);
+      }, 80);
+    });
+
+    clearBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      input.value = "";
+      clearBtn.style.display = "none";
+      banner._srvCombo.query = "";
+      banner._srvCombo.highlightedIndex = -1;
+      renderComboboxList(select);
+      input.focus();
+    });
+
+    // Keyboard navigation
+    panel.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveComboHighlight(banner._srvCombo, 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveComboHighlight(banner._srvCombo, -1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        selectHighlightedItem(banner._srvCombo, select);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeAllServerComboboxes();
+      }
+    });
+
+    // Sort buttons
+    const sortBtns = panel.querySelectorAll(".srv-sort-btn");
+    sortBtns.forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const mode = btn.dataset.mode;
+        const curNet = (select.dataset.networkType || "xlx").toLowerCase();
+        if (banner._srvCombo.mode === mode) {
+          banner._srvCombo.dir = banner._srvCombo.dir === "asc" ? "desc" : "asc";
+        } else {
+          banner._srvCombo.mode = mode;
+          banner._srvCombo.dir = "asc";
+        }
+        try {
+          localStorage.setItem(`srvSortMode_${curNet}`, banner._srvCombo.mode);
+          localStorage.setItem(`srvSortDir_${curNet}`, banner._srvCombo.dir);
+        } catch (_) {}
+        renderComboboxList(select);
+      });
+    });
+
+    // Test Servers Row
+    testRow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeAllServerComboboxes();
+      select.value = "__TEST_SERVERS__";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  // Update localized text if open
+  if (banner._srvCombo && banner._srvCombo.isOpen) {
+    renderComboboxList(select);
+  }
+}
+
 // Window & __proxdmr bridge for backward compatibility
 if (typeof window !== "undefined") {
   window.KNOWN_BM_MASTERS = KNOWN_BM_MASTERS;
+  window.DMR_NETWORK_PROFILES = DMR_NETWORK_PROFILES;
+  window.getDmrNetworkProfile = getDmrNetworkProfile;
+  window.getNetworkServersList = getNetworkServersList;
+  window.renderNetworkBadgeElement = renderNetworkBadgeElement;
+  window.updateCardNetworkBadge = updateCardNetworkBadge;
   window.getBmFlagBadgeHtml = getBmFlagBadgeHtml;
   window.getBmServerInfo = getBmServerInfo;
   window.populateBmServerSelect = populateBmServerSelect;
@@ -518,10 +1579,24 @@ if (typeof window !== "undefined") {
   window.updateRxBannerFreshness = updateRxBannerFreshness;
   window.updateCardRxLiveBanner = updateCardRxLiveBanner;
   window.updateRxLiveBanner = updateRxLiveBanner;
+  window.refreshXlxServers = refreshXlxServers;
+  window.refreshDmrPlusServers = refreshDmrPlusServers;
+  window.getPinnedServers = getPinnedServers;
+  window.togglePinServer = togglePinServer;
+  window.isSearchComboEnabled = isSearchComboEnabled;
+  window.sortServersByCriteria = sortServersByCriteria;
+  window.filterServersList = filterServersList;
+  window.setupServerCombobox = setupServerCombobox;
+  window.closeAllServerComboboxes = closeAllServerComboboxes;
 
   window.__proxdmr = window.__proxdmr || {};
   Object.assign(window.__proxdmr, {
     KNOWN_BM_MASTERS,
+    DMR_NETWORK_PROFILES,
+    getDmrNetworkProfile,
+    getNetworkServersList,
+    renderNetworkBadgeElement,
+    updateCardNetworkBadge,
     getBmFlagBadgeHtml,
     getBmServerInfo,
     populateBmServerSelect,
@@ -530,7 +1605,16 @@ if (typeof window !== "undefined") {
     refreshAllCardsBmBanner,
     updateRxBannerFreshness,
     updateCardRxLiveBanner,
-    updateRxLiveBanner
+    updateRxLiveBanner,
+    refreshXlxServers,
+    refreshDmrPlusServers,
+    getPinnedServers,
+    togglePinServer,
+    isSearchComboEnabled,
+    sortServersByCriteria,
+    filterServersList,
+    setupServerCombobox,
+    closeAllServerComboboxes
   });
 
   window.addEventListener("languageChanged", () => {
@@ -543,7 +1627,8 @@ if (typeof window !== "undefined") {
         ? (getCurrentHotspots().find(h => h.id === cid) || getCurrentHotspots().find(h => h.id === hid) || getCurrentHotspots()[0])
         : null;
       const host = hs ? hs.bm_master_host : "";
-      populateBmServerSelect(sel, host);
+      const netType = hs ? (hs.network_type || "bm") : "bm";
+      populateBmServerSelect(sel, host, netType);
     });
     refreshAllCardsBmBanner();
   });

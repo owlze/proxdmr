@@ -1,6 +1,6 @@
 // Toast and HUD Notifications
 
-export function showCenterHudToast(text, duration = 2000) {
+export function showCenterHudToast(text, duration = 1000) {
   const old = document.getElementById("proxdmrCenterHudToast");
   if (old) old.remove();
 
@@ -12,10 +12,11 @@ export function showCenterHudToast(text, duration = 2000) {
     "left: 50%;",
     "transform: translate(-50%, -50%) scale(0.85);",
     "z-index: 100000;",
-    "background: rgba(18, 22, 30, 0.94);",
-    "border: 1.5px solid rgba(255, 255, 255, 0.22);",
-    "box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 20px rgba(0,0,0,0.3);",
-    "color: #ffffff;",
+    "background: #00ff66;",
+    "border: 1.5px solid rgba(0, 0, 0, 0.25);",
+    "box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), 0 0 18px rgba(0, 255, 102, 0.45);",
+    "color: #042410;",
+    "text-shadow: none;",
     "padding: 16px 28px;",
     "border-radius: 16px;",
     "font-size: 1.25rem;",
@@ -62,28 +63,25 @@ export function stripToastEmojis(text) {
 }
 
 /**
- * Show a short toast notification.
- * On PC (>768px): Anchored at the bottom of the HotSpot card to which it belongs.
- * On smartphone (<=768px): Centered at the bottom of the screen.
+ * Show a short toast notification centered on the target Hotspot card (or screen center if global)
+ * with #00ff66 background and 1 second pause.
  *
  * @param {string} msg Message text
- * @param {number} duration Duration in ms (default: 3500)
+ * @param {number} duration Duration in ms (default: 1000)
  * @param {HTMLElement|string|null} targetCardOrId Optional target card element or hotspot id
  */
-export function showToast(msg, duration = 3500, targetCardOrId = null) {
-  let dur = (typeof duration === "number" && !isNaN(duration)) ? duration : 3500;
+export function showToast(msg, duration = 1000, targetCardOrId = null) {
+  let dur = (typeof duration === "number" && !isNaN(duration) && duration > 4500) ? duration : 1000;
   if (typeof duration !== "number" && !targetCardOrId) {
     if (typeof duration === "string" && (duration.startsWith("hs") || (typeof document !== "undefined" && document.querySelector(`.radio-container[data-hotspot-id="${duration}"]`)))) {
       targetCardOrId = duration;
-      dur = 3500;
+      dur = 1000;
     }
   }
 
-  const isMobile = (typeof window !== "undefined") && window.innerWidth <= 768;
-
-  // Resolve target hotspot card
+  // 1. Resolve target hotspot card
   let targetCard = null;
-  if (!isMobile && typeof document !== "undefined") {
+  if (typeof document !== "undefined") {
     if (targetCardOrId) {
       if (targetCardOrId instanceof Element) {
         targetCard = (typeof targetCardOrId.closest === "function") ? targetCardOrId.closest(".radio-container") : targetCardOrId;
@@ -97,18 +95,53 @@ export function showToast(msg, duration = 3500, targetCardOrId = null) {
         targetCard = activeEl.closest(".radio-container");
       }
     }
+    // Also try to extract hotspot name/callsign/id from msg if formatted as [Name] or [callsign]
+    if (!targetCard && typeof msg === "string") {
+      const match = msg.match(/^\[(.*?)\]/);
+      if (match && match[1]) {
+        const hsKey = match[1].trim().toLowerCase();
+        const allCards = document.querySelectorAll(".radio-container");
+        for (const c of allCards) {
+          const hid = (c.dataset.hotspotId || "").toLowerCase();
+          const hsObj = (window.currentHotspots || []).find(h => (h.id || "").toLowerCase() === hid);
+          const name = (hsObj?.name || "").toLowerCase();
+          const call = (hsObj?.callsign || "").toLowerCase();
+          if (name === hsKey || call === hsKey || hid === hsKey) {
+            targetCard = c;
+            break;
+          }
+        }
+      }
+    }
+    // Also check if message starts with "Name: TS..." (e.g. from triggerQuickUnlink4000)
+    if (!targetCard && typeof msg === "string") {
+      const matchColon = msg.match(/^([^:\n]+):\s*TS[12]/);
+      if (matchColon && matchColon[1]) {
+        const hsKey = matchColon[1].trim().toLowerCase();
+        const allCards = document.querySelectorAll(".radio-container");
+        for (const c of allCards) {
+          const hid = (c.dataset.hotspotId || "").toLowerCase();
+          const hsObj = (window.currentHotspots || []).find(h => (h.id || "").toLowerCase() === hid);
+          const name = (hsObj?.name || "").toLowerCase();
+          const call = (hsObj?.callsign || "").toLowerCase();
+          if (name === hsKey || call === hsKey || hid === hsKey) {
+            targetCard = c;
+            break;
+          }
+        }
+      }
+    }
     if (!targetCard && typeof window !== "undefined" && window.activeHotspotId) {
       targetCard = document.querySelector(`.radio-container[data-hotspot-id="${window.activeHotspotId}"]`);
     }
-    if (!targetCard) {
+    if (!targetCard && typeof document !== "undefined") {
       targetCard = document.querySelector(".radio-container.active-hotspot") ||
-                   document.querySelector(".radio-container:not(.collapsed)") ||
-                   document.querySelector(".radio-container");
+                   document.querySelector(".radio-container:not(.collapsed)");
     }
   }
 
-  // Determine container ID
-  const containerId = (targetCard && !isMobile)
+  // 2. Container setup (per hotspot card or global)
+  const containerId = targetCard
     ? ("toastContainer_hs_" + (targetCard.dataset.hotspotId || "default"))
     : "toastContainer";
 
@@ -120,51 +153,52 @@ export function showToast(msg, duration = 3500, targetCardOrId = null) {
     document.body.appendChild(container);
   }
 
-  // Update container position
+  // 3. Position update: centered in targetCard, or centered in viewport
   const updateContainerPosition = () => {
-    if (isMobile || !targetCard) {
-      container.style.cssText = [
-        "position: fixed;",
-        "bottom: 24px;",
-        "left: 50%;",
-        "transform: translateX(-50%);",
-        "z-index: 99999;",
-        "pointer-events: none;",
-        "display: flex;",
-        "flex-direction: column;",
-        "gap: 8px;",
-        "align-items: center;",
-        "width: max-content;",
-        "max-width: 90vw;"
-      ].join("");
-    } else {
+    if (targetCard && targetCard.isConnected) {
       const rect = targetCard.getBoundingClientRect();
       const centerX = Math.round(rect.left + rect.width / 2);
-      const effectiveBottom = Math.min(window.innerHeight - 14, rect.bottom);
-      const bottomOffset = Math.max(14, Math.round(window.innerHeight - effectiveBottom + 12));
-      const maxW = Math.max(260, Math.round(rect.width - 24));
+      const centerY = Math.round(rect.top + rect.height / 2);
+      const maxW = Math.max(220, Math.round(rect.width - 24));
 
       container.style.cssText = [
         "position: fixed;",
-        `bottom: ${bottomOffset}px;`,
+        `top: ${centerY}px;`,
         `left: ${centerX}px;`,
-        "transform: translateX(-50%);",
+        "transform: translate(-50%, -50%);",
         "z-index: 99999;",
         "pointer-events: none;",
         "display: flex;",
         "flex-direction: column;",
         "gap: 8px;",
         "align-items: center;",
+        "justify-content: center;",
         "width: max-content;",
         `max-width: ${maxW}px;`
+      ].join("");
+    } else {
+      container.style.cssText = [
+        "position: fixed;",
+        "top: 50%;",
+        "left: 50%;",
+        "transform: translate(-50%, -50%);",
+        "z-index: 99999;",
+        "pointer-events: none;",
+        "display: flex;",
+        "flex-direction: column;",
+        "gap: 8px;",
+        "align-items: center;",
+        "justify-content: center;",
+        "width: max-content;",
+        "max-width: min(90vw, 480px);"
       ].join("");
     }
   };
 
   updateContainerPosition();
 
-  // Keep position in sync during scrolls/resizes while toasts are visible
-  if (!container._hasPositionWatcher && !isMobile && targetCard) {
+  // Keep position pinned to card center during scrolls / window resizing
+  if (!container._hasPositionWatcher && targetCard) {
     container._hasPositionWatcher = true;
     const reposHandler = () => {
       if (document.getElementById(containerId)) {
@@ -179,53 +213,62 @@ export function showToast(msg, duration = 3500, targetCardOrId = null) {
     container._reposHandler = reposHandler;
   }
 
-  // Create toast element
+  const cleanMsg = stripToastEmojis(msg);
+  // Deduplicate: if an identical toast message is already active in this container, ignore duplicate call
+  const existingToasts = container.querySelectorAll(".proxdmr-toast-item");
+  for (const t of existingToasts) {
+    if (t.textContent === cleanMsg) {
+      return;
+    }
+  }
+
+  // 4. Create toast item
   const toast = document.createElement("div");
   toast.className = "proxdmr-toast-item";
   toast.style.cssText = [
-    "background: #ff6b2b;",
-    "border: 1px solid rgba(0, 0, 0, 0.15);",
-    "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(255, 107, 43, 0.25);",
-    "color: #ffffff;",
-    "text-shadow: 1.5px 1.5px 1px rgba(0, 0, 0, 0.75);",
-    "padding: 5px 14px;",
-    "border-radius: 6px;",
-    "font-size: 0.84rem;",
-    "font-weight: 600;",
-    "line-height: 1.25;",
+    "background: #00ff66;",
+    "border: 1px solid rgba(0, 0, 0, 0.25);",
+    "box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 255, 102, 0.4);",
+    "color: #042410;",
+    "text-shadow: none;",
+    "padding: 7px 16px;",
+    "border-radius: 8px;",
+    "font-size: 0.86rem;",
+    "font-weight: 700;",
+    "line-height: 1.3;",
     "text-align: center;",
-    "backdrop-filter: blur(8px);",
-    "-webkit-backdrop-filter: blur(8px);",
-    "transition: opacity 0.25s ease, transform 0.25s ease;",
+    "backdrop-filter: blur(10px);",
+    "-webkit-backdrop-filter: blur(10px);",
+    "transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);",
     "opacity: 0;",
-    "transform: translateY(8px);",
+    "transform: scale(0.92);",
     "pointer-events: auto;",
     "max-width: 100%;",
     "word-break: break-word;",
     "box-sizing: border-box;"
   ].join("");
 
-  toast.textContent = stripToastEmojis(msg);
+  toast.textContent = cleanMsg;
   container.appendChild(toast);
 
   requestAnimationFrame(() => {
     toast.style.opacity = "1";
-    toast.style.transform = "translateY(0)";
+    toast.style.transform = "scale(1)";
   });
 
   setTimeout(() => {
     toast.style.opacity = "0";
-    toast.style.transform = "translateY(8px)";
+    toast.style.transform = "scale(0.92)";
     setTimeout(() => {
       toast.remove();
-      if (container && container.childNodes.length === 0 && container.id !== "toastContainer") {
+      if (container && container.childNodes.length === 0) {
         if (container._reposHandler) {
           window.removeEventListener("scroll", container._reposHandler, true);
           window.removeEventListener("resize", container._reposHandler);
         }
         container.remove();
       }
-    }, 250);
+    }, 230);
   }, dur);
 }
 

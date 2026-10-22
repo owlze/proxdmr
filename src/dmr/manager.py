@@ -26,6 +26,7 @@ try:
     from dmr.tx_dsp import ServerTxDsp
     from dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
     from dmr.tg_resolver import tg_resolver
+    from dmr.constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES, FREEDMR_DEFAULT_OPTS
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings, CONFIG_DIR
     from src.dmr.homebrew import BMState, DMRFrame, HomeBrewClient
@@ -39,10 +40,24 @@ except ImportError:
     from src.dmr.tx_dsp import ServerTxDsp
     from src.dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
     from src.dmr.tg_resolver import tg_resolver
+    from src.dmr.constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES, FREEDMR_DEFAULT_OPTS
 
 CALLS_HISTORY_FILE = CONFIG_DIR / "calls_history.json"
 CALL_HISTORY_RETENTION_SEC = 86400.0  # 24 hours
 CALL_HISTORY_MAX_ENTRIES = 10000     # Safety maximum
+
+DEAD_FREEDMR_HOSTS = {
+    "ru.freedmr.uk",
+    "nl.freedmr.uk",
+    "fr.freedmr.uk",
+    "it.freedmr.uk",
+    "es.freedmr.uk",
+    "us-east.freedmr.uk",
+    "br.freedmr.uk",
+    "freedmr.cymru",
+    "freedmr.ham-digital.org",
+}
+DEFAULT_LIVE_FREEDMR_HOST = "178.254.30.151"
 
 logger = logging.getLogger("proxdmr.manager")
 
@@ -115,6 +130,10 @@ class HotspotRuntime:
             "bm_master_host": self.config.bm_master_host,
             "bm_master_port": self.config.bm_master_port,
             "bm_password": self.config.bm_password,
+            "network_type": getattr(self.config, "network_type", "bm") or "bm",
+            "rpto_options": getattr(self.config, "rpto_options", "") or "",
+            "xlx_module": getattr(self.config, "xlx_module", "D") or "D",
+            "dmrplus_reflector": getattr(self.config, "dmrplus_reflector", "4530") or "4530",
             "duplex": self.config.duplex,
             "default_tg_ts1": self.config.default_tg_ts1,
             "default_tg_ts2": self.config.default_tg_ts2,
@@ -124,6 +143,7 @@ class HotspotRuntime:
             "send_talker_alias": getattr(self.config, "send_talker_alias", True),
             "status": self.status.value,
             "detail": self.detail,
+            "failed_cycles": getattr(self.client, "failed_cycles", 0) if self.client else 0,
             "collapsed": getattr(self.config, "collapsed", False),
             "auto_tg_bm": getattr(self.config, "auto_tg_bm", True),
             "auto_record": getattr(self.config, "auto_record", False),
@@ -755,6 +775,28 @@ class HotspotManager:
             )
 
     def _init_runtime(self, cfg: HotspotConfig, user_id: int = 1) -> HotspotRuntime:
+        net_lower = (getattr(cfg, "network_type", "bm") or "bm").lower()
+        if net_lower == "tgif" and (cfg.bm_master_host or "").strip().lower() == "eu.tgif.network":
+            cfg.bm_master_host = "tgif.network"
+            try:
+                user_sett = self.user_settings.get(user_id, self.settings)
+                if user_id == 1:
+                    save_app_settings(user_sett)
+            except Exception:
+                pass
+        elif net_lower == "freedmr":
+            cur_host = (cfg.bm_master_host or "").strip().lower()
+            if cur_host in DEAD_FREEDMR_HOSTS:
+                logger.warning(
+                    f"[HOTSPOT] Auto-migrated dead FreeDMR host '{cfg.bm_master_host}' to {DEFAULT_LIVE_FREEDMR_HOST}"
+                )
+                cfg.bm_master_host = DEFAULT_LIVE_FREEDMR_HOST
+                try:
+                    user_sett = self.user_settings.get(user_id, self.settings)
+                    if user_id == 1:
+                        save_app_settings(user_sett)
+                except Exception:
+                    pass
         runtime = HotspotRuntime(config=cfg, user_id=user_id)
 
         def make_status_cb(hid: str, uid: int):
@@ -778,6 +820,9 @@ class HotspotManager:
             rx_freq=cfg.rx_freq,
             tx_freq=cfg.tx_freq,
             color_code=cfg.color_code,
+            network_type=getattr(cfg, "network_type", "bm") or "bm",
+            rpto_options=getattr(cfg, "rpto_options", "") or "",
+            xlx_module=getattr(cfg, "xlx_module", "D") or "D",
             on_status_change=make_status_cb(cfg.id, user_id),
             on_dmr_frame=make_frame_cb(cfg.id, user_id),
         )
@@ -976,15 +1021,22 @@ class HotspotManager:
         if not rt:
             return False
         hotspot_id = rt.config.id
+        was_collapsed = bool(getattr(rt.config, "collapsed", False))
+        is_client_conn = bool(rt.client and rt.client.is_connected)
+        if was_collapsed == bool(collapsed):
+            if collapsed and not is_client_conn:
+                return True
+            if not collapsed and is_client_conn:
+                return True
+
         rt.config.collapsed = collapsed
         settings = self.user_settings.get(uid, self.settings)
         for hs_cfg in settings.hotspots:
             if hs_cfg.id == hotspot_id:
                 hs_cfg.collapsed = collapsed
                 break
-        if uid == 1:
+        if uid == 1 and was_collapsed != bool(collapsed):
             save_app_settings(settings)
-        self._notify_async({"type": "hotspot_collapse", "hotspot_id": hotspot_id, "collapsed": collapsed, "user_id": uid}, user_id=uid)
         self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
         if collapsed:
             logger.info(f"[MANAGER] Hotspot '{rt.config.name}' (ID {hotspot_id}, user {uid}) collapsed -> disconnecting BM & disabling transcriber...")
@@ -1117,6 +1169,62 @@ class HotspotManager:
         self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
         return True
 
+    async def set_hotspot_rpto(
+        self,
+        hotspot_id: str,
+        rpto_options: Optional[str] = None,
+        xlx_module: Optional[str] = None,
+        dmrplus_reflector: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> Optional[dict]:
+        uid = user_id if user_id is not None else self.active_user_id
+        rt = self.get_runtime(uid, hotspot_id)
+        if not rt and (hotspot_id in ("default", "active")):
+            rt = self.get_active_runtime(uid)
+            if rt:
+                hotspot_id = rt.config.id
+        if not rt:
+            return None
+        hotspot_id = rt.config.id
+        if rpto_options is not None:
+            clean_str = str(rpto_options).strip()
+            if (getattr(rt.config, "network_type", "bm") or "bm").lower() == "freedmr":
+                parsed = parse_freedmr_rpto(clean_str)
+                clean_str = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"])
+            rt.config.rpto_options = clean_str
+            if rt.client:
+                rt.client.rpto_options = rt.config.rpto_options
+        if xlx_module is not None:
+            mod_clean = str(xlx_module).strip().upper()[:1]
+            if not mod_clean or ("A" <= mod_clean <= "Z"):
+                rt.config.xlx_module = mod_clean
+                if rt.client:
+                    rt.client.xlx_module = mod_clean
+        if dmrplus_reflector is not None:
+            ref_clean = str(dmrplus_reflector).strip()
+            rt.config.dmrplus_reflector = ref_clean
+        settings = self.user_settings.get(uid, self.settings)
+        for hs_cfg in settings.hotspots:
+            if hs_cfg.id == hotspot_id or hs_cfg.id == rt.config.id:
+                if rpto_options is not None:
+                    hs_cfg.rpto_options = rt.config.rpto_options
+                if xlx_module is not None:
+                    hs_cfg.xlx_module = rt.config.xlx_module
+                if dmrplus_reflector is not None:
+                    hs_cfg.dmrplus_reflector = rt.config.dmrplus_reflector
+                break
+        if uid == 1:
+            save_app_settings(settings)
+        sent = False
+        if rt.client and rt.client.is_connected and rt.config.rpto_options and getattr(rt.config, "network_type", "bm") != "xlx":
+            sent = rt.client.send_options(rt.config.rpto_options)
+        if xlx_module is not None and getattr(rt.config, "network_type", "bm") == "xlx" and getattr(rt, "status", None) == BMState.ONLINE:
+            await self.send_xlx_module_link_dmr(hotspot_id, rt.config.xlx_module, user_id=uid)
+        if dmrplus_reflector is not None and getattr(rt.config, "network_type", "bm") == "dmrplus" and getattr(rt, "status", None) == BMState.ONLINE:
+            await self.send_dmrplus_reflector_link_dmr(hotspot_id, rt.config.dmrplus_reflector, user_id=uid)
+        self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
+        return {"hotspot": rt.to_dict(), "rpto_sent": sent}
+
     async def update_hotspot(self, cfg: HotspotConfig, user_id: Optional[int] = None, auto_connect: Optional[bool] = None) -> Optional[HotspotRuntime]:
         uid = user_id if user_id is not None else self.active_user_id
         hs_map = self.user_runtimes.get(uid, {})
@@ -1127,7 +1235,7 @@ class HotspotManager:
         was_connected = (old_rt.status in (BMState.ONLINE, BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING))
         if old_rt.client:
             try:
-                await old_rt.client.disconnect(is_retry=True)
+                await old_rt.client.disconnect(is_retry=False)
             except Exception as e:
                 logger.warning(f"[MANAGER] Error disconnecting old client for {cfg.id} (user {uid}): {e}")
 
@@ -1230,6 +1338,161 @@ class HotspotManager:
             if s in rt.dynamic_tgs:
                 rt.dynamic_tgs[s].clear()
 
+    def send_silent_unlink_dmr(self, hid: str, slot: int, user_id: Optional[int] = None) -> bool:
+        """Отправляет короткий DMR Group Call на TG 4000 (Header + Terminator) для сброса динамических групп на сервере (TGIF и др.)."""
+        uid = user_id if user_id is not None else self.active_user_id
+        rt = self.get_runtime(uid, hid)
+        if not rt or not rt.client or getattr(rt, "status", None) != BMState.ONLINE:
+            return False
+        if slot not in (1, 2):
+            return False
+        try:
+            src_id = rt.config.dmr_id or 0
+            dst_id = 4000
+            stream_id = random.randint(1, 0xFFFFFFFE)
+            seq_no = 0
+            header_payload = self.tx_framer.create_header(
+                src_id=src_id,
+                dst_id=dst_id,
+                slot=slot,
+                call_type="GROUP",
+                color_code=rt.client.color_code,
+            )
+            for _ in range(3):
+                rt.client.send_dmrd(
+                    slot=slot,
+                    call_type="GROUP",
+                    frame_type=1,
+                    stream_id=stream_id,
+                    seq_no=seq_no,
+                    payload=header_payload,
+                    src_id=src_id,
+                    dst_id=dst_id,
+                )
+                seq_no = (seq_no + 1) % 256
+
+            term_payload = self.tx_framer.create_terminator(
+                src_id=src_id,
+                dst_id=dst_id,
+                slot=slot,
+                call_type="GROUP",
+                color_code=rt.client.color_code,
+            )
+            for _ in range(2):
+                rt.client.send_dmrd(
+                    slot=slot,
+                    call_type="GROUP",
+                    frame_type=2,
+                    stream_id=stream_id,
+                    seq_no=seq_no,
+                    payload=term_payload,
+                    src_id=src_id,
+                    dst_id=dst_id,
+                )
+                seq_no = (seq_no + 1) % 256
+            return True
+        except Exception as e:
+            logger.warning(f"[DMR] Failed to send silent unlink 4000 on {hid} TS{slot}: {e}")
+            return False
+
+    def _send_dmr_cmd_burst(self, rt: HotspotRuntime, dst_id: int, slot: int = 2, call_type: str = "PRIVATE") -> bool:
+        """
+        Отправляет короткую управляющую DMR-посылку (3 Voice Header + 2 Terminator).
+        Важно для XLX: src_id обязан быть 7-значным DMR ID оператора (для прохождения
+        валидации CCallsign::IsValid() по dmrid.dat в xlxd).
+        """
+        if not rt or not rt.client or getattr(rt, "status", None) != BMState.ONLINE:
+            return False
+        raw_dmr = str(rt.config.dmr_id or rt.config.repeater_id or "").strip()
+        src_id = int(raw_dmr[:7]) if (raw_dmr.isdigit() and len(raw_dmr) >= 7) else (rt.config.dmr_id or 0)
+        stream_id = random.randint(1, 0xFFFFFFFE)
+        seq_no = 0
+        header_payload = self.tx_framer.create_header(
+            src_id=src_id,
+            dst_id=dst_id,
+            slot=slot,
+            call_type=call_type,
+            color_code=rt.client.color_code,
+        )
+        for _ in range(3):
+            rt.client.send_dmrd(
+                slot=slot,
+                call_type=call_type,
+                frame_type=1,
+                stream_id=stream_id,
+                seq_no=seq_no,
+                payload=header_payload,
+                src_id=src_id,
+                dst_id=dst_id,
+            )
+            seq_no = (seq_no + 1) % 256
+
+        term_payload = self.tx_framer.create_terminator(
+            src_id=src_id,
+            dst_id=dst_id,
+            slot=slot,
+            call_type=call_type,
+            color_code=rt.client.color_code,
+        )
+        for _ in range(2):
+            rt.client.send_dmrd(
+                slot=slot,
+                call_type=call_type,
+                frame_type=2,
+                stream_id=stream_id,
+                seq_no=seq_no,
+                payload=term_payload,
+                src_id=src_id,
+                dst_id=dst_id,
+            )
+            seq_no = (seq_no + 1) % 256
+        return True
+
+    async def send_xlx_module_link_dmr(self, hid: str, module: Optional[str] = None, user_id: Optional[int] = None) -> bool:
+        """
+        Переключает или привязывает хотспот XLX к модулю A..Z (TG 4001..4026) на TS2.
+        Если module пустой — отправляет только UNLINK (TG 4000) на TS2.
+        По спецификации xlxd (cdmrmmdvmprotocol.cpp:382-415) и эталону hblink.py (send_xlxmaster):
+        1) Сначала отправляется посылка на 4000 (CMD_UNLINK) на TS2;
+        2) Через 150 мс отправляется посылка на 4001..4026 (CMD_LINK) на TS2.
+        """
+        from .constants import xlx_module_to_tg
+        uid = user_id if user_id is not None else self.active_user_id
+        rt = self.get_runtime(uid, hid)
+        if not rt or not rt.client or getattr(rt, "status", None) != BMState.ONLINE:
+            return False
+
+        mod_clean = (module or "").strip().upper()[:1]
+        target_tg = xlx_module_to_tg(mod_clean)
+
+        try:
+            # Шаг 1: Отправляем UNLINK (4000) на TS2 (PRIVATE, как в hblink.py send_xlxmaster)
+            self._send_dmr_cmd_burst(rt, dst_id=4000, slot=2, call_type="PRIVATE")
+            self.clear_dynamic_tgs(rt.config.id, slot=2, user_id=uid)
+
+            if target_tg == 4000:
+                rt.config.xlx_module = ""
+                if rt.client:
+                    rt.client.xlx_module = ""
+                logger.info(f"[XLX] Unlinked module (TG 4000) on hotspot '{rt.config.name}' (TS2)")
+                self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
+                return True
+
+            # Шаг 2: Пауза 150 мс и отправка LINK (4001..4026) на TS2
+            await asyncio.sleep(0.15)
+            self._send_dmr_cmd_burst(rt, dst_id=target_tg, slot=2, call_type="PRIVATE")
+
+            rt.config.xlx_module = mod_clean
+            if rt.client:
+                rt.client.xlx_module = mod_clean
+            self.register_dynamic_tg(rt.config.id, slot=2, tg=target_tg, user_id=uid)
+            logger.info(f"[XLX] Linked hotspot '{rt.config.name}' to Module {mod_clean} (TG {target_tg}) on TS2")
+            self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
+            return True
+        except Exception as e:
+            logger.warning(f"[XLX] Failed to link module {mod_clean} on {hid}: {e}")
+            return False
+
     def get_dynamic_tgs(self, hid: str, max_age_sec: float = 900.0, user_id: Optional[int] = None) -> Dict[int, Dict[int, float]]:
         now = time.time()
         rt = self.get_runtime(user_id, hid)
@@ -1270,6 +1533,18 @@ class HotspotManager:
             return
         rt.status = state
         rt.detail = detail
+        if state == BMState.ONLINE and getattr(rt.config, "network_type", "bm") == "xlx" and getattr(rt.config, "xlx_module", ""):
+            async def _auto_link_xlx():
+                await asyncio.sleep(0.5)
+                if getattr(rt, "status", None) == BMState.ONLINE:
+                    await self.send_xlx_module_link_dmr(rt.config.id, rt.config.xlx_module, user_id=uid)
+            asyncio.create_task(_auto_link_xlx())
+        if state == BMState.ONLINE and getattr(rt.config, "network_type", "bm") == "dmrplus" and getattr(rt.config, "dmrplus_reflector", ""):
+            async def _auto_link_dmrplus():
+                await asyncio.sleep(0.5)
+                if getattr(rt, "status", None) == BMState.ONLINE:
+                    await self.send_dmrplus_reflector_link_dmr(rt.config.id, rt.config.dmrplus_reflector, user_id=uid)
+            asyncio.create_task(_auto_link_dmrplus())
         self._notify_async({
             "type": "bm_status",
             "hotspot_id": hid,
@@ -1453,7 +1728,8 @@ class HotspotManager:
 
             cached_city = cached_info.get("city", "") if cached_info else ""
             cached_country = cached_info.get("country", "") if cached_info else ""
-            dst_name = tg_resolver.get_name(frame.dst_id) if frame.dst_id else ""
+            net_type = (getattr(rt.config, "network_type", "bm") or "bm").lower()
+            dst_name = tg_resolver.get_name(frame.dst_id, network_type=net_type) if frame.dst_id else ""
 
             call_id = f"{int(time.time() * 1000)}_{frame.src_id}_{frame.slot}"
             new_call = CallLogEntry(
@@ -1519,28 +1795,37 @@ class HotspotManager:
                 hid_bytes = hid.encode("utf-8")
                 tagged_audio = bytes([frame.slot, len(hid_bytes)]) + hid_bytes + pcm_bytes
                 self._broadcast_audio_async(tagged_audio, user_id=uid)
-                if self.transcriber and self.transcriber.is_slot_enabled(hid, frame.slot):
-                    curr_call = active_calls.get(f"{hid}_{frame.slot}")
-                    self.transcriber.feed_audio(
-                        hid, frame.slot, frame.src_id, slot_state.src_callsign, pcm_bytes,
-                        call_id=curr_call.id if curr_call else ""
-                    )
-                if hasattr(self, "recorder") and self.recorder:
-                    curr_call = active_calls.get(f"{hid}_{frame.slot}")
-                    auto_rec = getattr(rt.config, "auto_record", False)
-                    self.recorder.feed_rx(
-                        hotspot_id=hid,
-                        slot=frame.slot,
-                        src_id=frame.src_id,
-                        src_callsign=slot_state.src_callsign,
-                        src_name=slot_state.src_name,
-                        talker_alias=slot_state.talker_alias,
-                        dst_id=frame.dst_id,
-                        pcm_bytes=pcm_bytes,
-                        call_id=curr_call.id if curr_call else "",
-                        user_id=uid,
-                        auto_record=auto_rec,
-                    )
+
+                # FreeDMR beacon / dial-a-tg filter (Step 6.5): ignore All Call 16777215 and TG 5000 from auto-record/AI
+                is_freedmr_beacon = (
+                    (getattr(rt.config, "network_type", "bm") or "bm").lower() == "freedmr"
+                    and (frame.dst_id == 16777215 or frame.src_id == 5000)
+                )
+                if is_freedmr_beacon:
+                    logger.debug(f"[MANAGER] Filtering FreeDMR beacon/service audio (src={frame.src_id}, dst={frame.dst_id}) from transcriber/recorder")
+                else:
+                    if self.transcriber and self.transcriber.is_slot_enabled(hid, frame.slot):
+                        curr_call = active_calls.get(f"{hid}_{frame.slot}")
+                        self.transcriber.feed_audio(
+                            hid, frame.slot, frame.src_id, slot_state.src_callsign, pcm_bytes,
+                            call_id=curr_call.id if curr_call else ""
+                        )
+                    if hasattr(self, "recorder") and self.recorder:
+                        curr_call = active_calls.get(f"{hid}_{frame.slot}")
+                        auto_rec = getattr(rt.config, "auto_record", False)
+                        self.recorder.feed_rx(
+                            hotspot_id=hid,
+                            slot=frame.slot,
+                            src_id=frame.src_id,
+                            src_callsign=slot_state.src_callsign,
+                            src_name=slot_state.src_name,
+                            talker_alias=slot_state.talker_alias,
+                            dst_id=frame.dst_id,
+                            pcm_bytes=pcm_bytes,
+                            call_id=curr_call.id if curr_call else "",
+                            user_id=uid,
+                            auto_record=auto_rec,
+                        )
 
     async def _resolve_caller_async(self, hid: str, slot: int, src_id: int, user_id: Optional[int] = None):
         try:
@@ -1611,7 +1896,7 @@ class HotspotManager:
                         for slot_num, st in [(1, rt.ts1), (2, rt.ts2)]:
                             if tx_st.active and hid == tx_st.hotspot_id and slot_num == tx_st.slot:
                                 continue
-                            if st.active and (now - st.last_seen > 1.8):
+                            if st.active and (now - st.last_seen > 2.5):
                                 st.active = False
                                 st.src_id = 0
                                 st.src_callsign = ""
@@ -1734,6 +2019,22 @@ class HotspotManager:
         send_ta = getattr(rt.config, "send_talker_alias", True) if rt else True
         talker_alias = ((rt.config.talker_alias or rt.config.callsign) if send_ta else "") if rt else "ME"
         src_name = "ME (ProxDMR)"
+
+        # XLX guard: enforce slot=2 and 7-digit src_id for xlxd validation
+        if rt and getattr(rt.config, "network_type", "bm") == "xlx":
+            slot = 2
+            raw_dmr = str(src_id or "").strip()
+            if raw_dmr.isdigit() and len(raw_dmr) >= 7:
+                src_id = int(raw_dmr[:7])
+            from .constants import xlx_tg_to_module
+            if 4001 <= dst_id <= 4026:
+                new_mod = xlx_tg_to_module(dst_id)
+                if new_mod:
+                    rt.config.xlx_module = new_mod
+                    if rt.client:
+                        rt.client.xlx_module = new_mod
+            elif dst_id == 0:
+                dst_id = 9
 
         tx_st.active = True
         tx_st.is_releasing = False
@@ -1906,6 +2207,10 @@ class HotspotManager:
                     ambes = rt.tx_encoder.encode_60ms_superframe(chunk)
                     if ambes and len(ambes) == 3:
                         src_id = rt.config.dmr_id
+                        if getattr(rt.config, "network_type", "bm") == "xlx":
+                            raw_dmr = str(src_id or "").strip()
+                            if raw_dmr.isdigit() and len(raw_dmr) >= 7:
+                                src_id = int(raw_dmr[:7])
                         burst_payload = self.tx_framer.create_burst(
                             ambe_3_frames=ambes,
                             burst_index=tx_st.burst_index,
@@ -1953,6 +2258,10 @@ class HotspotManager:
         if rt and rt.client and rt.status == BMState.ONLINE:
             try:
                 src_id = rt.config.dmr_id
+                if getattr(rt.config, "network_type", "bm") == "xlx":
+                    raw_dmr = str(src_id or "").strip()
+                    if raw_dmr.isdigit() and len(raw_dmr) >= 7:
+                        src_id = int(raw_dmr[:7])
 
                 # If roger beep is requested, append Roger Beep PCM + 0.5s silence tail
                 if roger_beep and roger_beep_pattern:

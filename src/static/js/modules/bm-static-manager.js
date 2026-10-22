@@ -1,6 +1,6 @@
 import { showToast } from '../core/toast.js';
 import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js';
-import { attachTgLivePreview } from '../core/formatters.js?v=2.9.284';
+import { attachTgLivePreview } from '../core/formatters.js?v=2.9.310';
 
 /**
  * ProxDMR BrandMeister Static & Dynamic TalkGroups Manager Module

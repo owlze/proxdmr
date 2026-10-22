@@ -212,7 +212,7 @@ body {
 .radio-container.collapsed .brand-title {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 0 !important;
+  gap: 5px !important;
   min-width: max-content !important;
   max-width: none !important;
   width: auto !important;
@@ -803,6 +803,239 @@ body.is-apk-mode .badge-about-apk-date {
   box-shadow: none !important;
 }
 
+/* Hotspot Network Identity Badge (Header & Settings Pill) */
+.hotspot-network-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  letter-spacing: 0.5px;
+  line-height: 1.25;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.hotspot-network-badge:hover {
+  transform: translateY(-0.5px);
+}
+
+.hotspot-network-badge .net-badge-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.hotspot-network-badge .net-badge-icon svg,
+.hotspot-network-badge .net-badge-icon img {
+  width: 13px;
+  height: 13px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Network Color Identities */
+.hotspot-network-badge.net-type-bm {
+  background: rgba(255, 107, 43, 0.16);
+  color: #ff8c5a;
+  border-color: rgba(255, 107, 43, 0.45);
+  box-shadow: 0 0 8px rgba(255, 107, 43, 0.15);
+}
+
+.hotspot-network-badge.net-type-tgif {
+  background: rgba(6, 182, 212, 0.16);
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.18);
+}
+
+.hotspot-network-badge.net-type-freedmr {
+  background: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.18);
+}
+
+.hotspot-network-badge.net-type-dmrplus {
+  background: rgba(139, 92, 246, 0.18);
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.48);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.2);
+}
+
+.hotspot-network-badge.net-type-xlx {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.48);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.18);
+}
+
+.hotspot-network-badge.net-type-custom {
+  background: rgba(100, 116, 139, 0.2);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+[data-theme="light"] .hotspot-network-badge.net-type-bm {
+  background: rgba(234, 88, 12, 0.12);
+  color: #c2410c;
+  border-color: rgba(234, 88, 12, 0.4);
+}
+[data-theme="light"] .hotspot-network-badge.net-type-tgif {
+  background: rgba(8, 145, 178, 0.12);
+  color: #0e7490;
+  border-color: rgba(8, 145, 178, 0.4);
+}
+[data-theme="light"] .hotspot-network-badge.net-type-freedmr {
+  background: rgba(5, 150, 105, 0.12);
+  color: #047857;
+  border-color: rgba(5, 150, 105, 0.4);
+}
+[data-theme="light"] .hotspot-network-badge.net-type-dmrplus {
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+  border-color: rgba(124, 58, 237, 0.4);
+}
+[data-theme="light"] .hotspot-network-badge.net-type-xlx {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.42);
+}
+[data-theme="light"] .hotspot-network-badge.net-type-custom {
+  background: rgba(71, 85, 105, 0.12);
+  color: #334155;
+  border-color: rgba(100, 116, 139, 0.4);
+}
+
+/* Dynamic Network-Themed Hotspot Settings Panel (#hotspotEditForm) */
+#hotspotEditForm.hs-edit-dynamic-panel {
+  position: relative;
+  padding: 12px 14px 10px 14px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 107, 43, 0.34);
+  background: linear-gradient(160deg, rgba(255, 107, 43, 0.10) 0%, rgba(255, 107, 43, 0.03) 55%, rgba(18, 22, 28, 0.45) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 140, 90, 0.12), 0 4px 18px rgba(0, 0, 0, 0.22);
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  margin-top: 4px;
+}
+
+#hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-bm {
+  border-color: rgba(255, 107, 43, 0.38);
+  background: linear-gradient(160deg, rgba(255, 107, 43, 0.11) 0%, rgba(255, 107, 43, 0.035) 55%, rgba(18, 22, 28, 0.48) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 140, 90, 0.15), 0 4px 18px rgba(255, 107, 43, 0.08);
+}
+
+#hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-tgif {
+  border-color: rgba(34, 211, 238, 0.40);
+  background: linear-gradient(160deg, rgba(6, 182, 212, 0.13) 0%, rgba(6, 182, 212, 0.04) 55%, rgba(18, 22, 28, 0.48) 100%);
+  box-shadow: inset 0 1px 0 rgba(34, 211, 238, 0.16), 0 4px 18px rgba(6, 182, 212, 0.09);
+}
+
+#hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-freedmr {
+  border-color: rgba(52, 211, 153, 0.40);
+  background: linear-gradient(160deg, rgba(16, 185, 129, 0.13) 0%, rgba(16, 185, 129, 0.04) 55%, rgba(18, 22, 28, 0.48) 100%);
+  box-shadow: inset 0 1px 0 rgba(52, 211, 153, 0.16), 0 4px 18px rgba(16, 185, 129, 0.09);
+}
+
+#hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-dmrplus {
+  border-color: rgba(167, 139, 250, 0.42);
+  background: linear-gradient(160deg, rgba(139, 92, 246, 0.14) 0%, rgba(139, 92, 246, 0.045) 55%, rgba(18, 22, 28, 0.48) 100%);
+  box-shadow: inset 0 1px 0 rgba(196, 181, 253, 0.16), 0 4px 18px rgba(139, 92, 246, 0.10);
+}
+
+#hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-xlx {
+  border-color: rgba(251, 191, 36, 0.42);
+  background: linear-gradient(160deg, rgba(245, 158, 11, 0.13) 0%, rgba(245, 158, 11, 0.04) 55%, rgba(18, 22, 28, 0.48) 100%);
+  box-shadow: inset 0 1px 0 rgba(251, 191, 36, 0.16), 0 4px 18px rgba(245, 158, 11, 0.09);
+}
+
+#hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-custom {
+  border-color: rgba(148, 163, 184, 0.38);
+  background: linear-gradient(160deg, rgba(100, 116, 139, 0.15) 0%, rgba(100, 116, 139, 0.045) 55%, rgba(18, 22, 28, 0.48) 100%);
+  box-shadow: inset 0 1px 0 rgba(203, 213, 225, 0.14), 0 4px 18px rgba(100, 116, 139, 0.09);
+}
+
+[data-theme="light"] #hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-bm {
+  border-color: rgba(234, 88, 12, 0.35);
+  background: linear-gradient(160deg, rgba(255, 237, 213, 0.65) 0%, rgba(255, 247, 237, 0.45) 100%);
+}
+[data-theme="light"] #hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-tgif {
+  border-color: rgba(8, 145, 178, 0.35);
+  background: linear-gradient(160deg, rgba(207, 250, 254, 0.65) 0%, rgba(236, 254, 255, 0.45) 100%);
+}
+[data-theme="light"] #hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-freedmr {
+  border-color: rgba(5, 150, 105, 0.35);
+  background: linear-gradient(160deg, rgba(209, 250, 229, 0.65) 0%, rgba(236, 253, 245, 0.45) 100%);
+}
+[data-theme="light"] #hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-dmrplus {
+  border-color: rgba(124, 58, 237, 0.35);
+  background: linear-gradient(160deg, rgba(237, 233, 254, 0.65) 0%, rgba(245, 243, 255, 0.45) 100%);
+}
+[data-theme="light"] #hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-xlx {
+  border-color: rgba(217, 119, 6, 0.38);
+  background: linear-gradient(160deg, rgba(254, 243, 199, 0.65) 0%, rgba(255, 251, 235, 0.45) 100%);
+}
+[data-theme="light"] #hotspotEditForm.hs-edit-dynamic-panel.hs-net-theme-custom {
+  border-color: rgba(100, 116, 139, 0.35);
+  background: linear-gradient(160deg, rgba(226, 232, 240, 0.65) 0%, rgba(248, 250, 252, 0.45) 100%);
+}
+
+/* Read-only Network Header for Existing Hotspots inside #hotspotEditForm */
+.hs-existing-net-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  flex-wrap: wrap;
+}
+
+.hs-existing-net-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hs-existing-net-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-primary, #f0f6fc);
+  letter-spacing: 0.2px;
+}
+
+.hs-existing-net-desc {
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--text-muted, #8b949e);
+  background: rgba(0, 0, 0, 0.22);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  white-space: nowrap;
+}
+
+[data-theme="light"] .hs-existing-net-header {
+  border-bottom-color: rgba(15, 23, 42, 0.10);
+}
+[data-theme="light"] .hs-existing-net-desc {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.10);
+  color: #475569;
+}
+
 /* Row 2: Controls Toolbar */
 .header-toolbar-row {
   display: flex;
@@ -1013,6 +1246,10 @@ select.form-input,
   color: #ffffff !important;
   border: 1px solid #1c6634 !important;
   color-scheme: dark;
+}
+
+#editHsSelect {
+  font-size: 0.73rem !important;
 }
 
 select:not(.bm-server-select):hover,
@@ -1265,6 +1502,36 @@ select option:focus {
   color: #38bdf8;
   border-color: rgba(56, 189, 248, 0.45);
   background: rgba(15, 17, 21, 0.55);
+}
+
+.bm-ping-mode-badge.net-mode-tgif {
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, 0.45);
+}
+
+.bm-ping-mode-badge.net-mode-bm {
+  color: #2ecc71;
+  border-color: rgba(46, 204, 113, 0.45);
+}
+
+.bm-ping-mode-badge.net-mode-freedmr {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.bm-ping-mode-badge.net-mode-dmrplus {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.48);
+}
+
+.bm-ping-mode-badge.net-mode-xlx {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.48);
+}
+
+.bm-ping-mode-badge.net-mode-custom {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.45);
 }
 
 .bm-ping-chart-wrap {
@@ -15050,7 +15317,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .radio-container.collapsed .brand-title {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 0 !important;
+  gap: 5px !important;
   min-width: max-content !important;
   max-width: none !important;
   width: auto !important;
@@ -15150,8 +15417,37 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   box-shadow: none !important;
 }
 
+/* Vertical stack for consecutive collapsed hotspots on PC */
+.collapsed-hotspots-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+}
+
+.collapsed-hotspots-stack > .radio-container.collapsed,
+.collapsed-hotspots-stack > .radio-container.collapsed.hotspot-compact-mode {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  justify-content: space-between !important;
+}
+
+.collapsed-hotspots-stack > .radio-container.collapsed .radio-header,
+.collapsed-hotspots-stack > .radio-container.collapsed .header-brand-row {
+  width: 100% !important;
+  justify-content: space-between !important;
+}
+
 /* Smartphone adaptation: Full-width collapsed hotspot micro-panels (browser & APK) */
 @media (max-width: 768px), (pointer: coarse) and (max-height: 520px) {
+  .collapsed-hotspots-stack {
+    display: contents !important;
+  }
+
   .radio-container.collapsed,
   .radio-container.collapsed.hotspot-compact-mode,
   .radio-container.collapsed.live-collapsed {
@@ -18690,10 +18986,46 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 
 [data-theme="light"] .bm-ping-mode-badge,
-[data-theme="light"] .bm-ping-mode-badge.mode-bm {
+[data-theme="light"] .bm-ping-mode-badge.mode-bm,
+[data-theme="light"] .bm-ping-mode-badge.net-mode-bm {
   color: #15803d !important;
   background: #f1f5f9 !important;
   border: 1px solid #cbd5e1 !important;
+  opacity: 1 !important;
+}
+
+[data-theme="light"] .bm-ping-mode-badge.net-mode-tgif {
+  color: #0891b2 !important;
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(8, 145, 178, 0.4) !important;
+  opacity: 1 !important;
+}
+
+[data-theme="light"] .bm-ping-mode-badge.net-mode-freedmr {
+  color: #047857 !important;
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(5, 150, 105, 0.4) !important;
+  opacity: 1 !important;
+}
+
+[data-theme="light"] .bm-ping-mode-badge.net-mode-dmrplus {
+  color: #6d28d9 !important;
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(124, 58, 237, 0.4) !important;
+  opacity: 1 !important;
+}
+
+[data-theme="light"] .bm-ping-mode-badge.net-mode-xlx {
+  color: #b45309 !important;
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(217, 119, 6, 0.4) !important;
+  opacity: 1 !important;
+}
+
+[data-theme="light"] .bm-ping-mode-badge.net-mode-custom {
+  color: #334155 !important;
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(100, 116, 139, 0.4) !important;
   opacity: 1 !important;
 }
 
@@ -26520,4 +26852,1419 @@ body.is-swl-mode .ptt-button::after,
   left: 0;
   max-width: min(340px, 88vw);
   z-index: 250;
+}
+
+/* ==========================================================================
+   XLX Hotspot Card & Direct Module Switcher
+   ========================================================================== */
+
+/* Disabled Memory buttons M1..M5 on XLX Hotspot Card */
+.card-net-xlx .btn-card-mem,
+.radio-container[data-network-type="xlx"] .btn-card-mem {
+  opacity: 0.35 !important;
+  filter: grayscale(1) !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+/* Disabled TS1 on XLX Hotspot Card */
+.card-net-xlx .vfo-ts1-row {
+  opacity: 0.48 !important;
+  background: rgba(30, 34, 42, 0.65) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.75);
+}
+
+.card-net-xlx .vfo-ts1-row .vfo-corner-badge {
+  background-color: #555e6b !important;
+  color: #a0aec0 !important;
+  text-decoration: line-through;
+  cursor: not-allowed !important;
+}
+
+.card-net-xlx .vfo-ts1-row .ts-tg-pill,
+.card-net-xlx .vfo-ts1-row .ts-tg-text,
+.card-net-xlx .vfo-ts1-row .btn-pan-ts1,
+.card-net-xlx .vfo-ts1-row .btn-mute-ts1 {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+}
+
+.xlx-ts1-disabled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(231, 76, 60, 0.16);
+  border: 1px solid rgba(231, 76, 60, 0.45);
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: #ff6b6b;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+[data-theme="light"] .xlx-ts1-disabled-badge {
+  background: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.5);
+  color: #c0392b;
+}
+
+.xlx-ts1-warn-icon {
+  font-size: 0.88rem;
+  line-height: 1;
+}
+
+.xlx-ts1-warn-text {
+  font-family: inherit;
+}
+
+/* PTT TS1 Slot Disabled in XLX */
+.card-net-xlx .ptt-button .ptt-slot-badge.ptt-slot-ts1,
+.ptt-slot-badge.ptt-slot-disabled {
+  opacity: 0.25 !important;
+  text-decoration: line-through !important;
+  filter: grayscale(1) !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  background: rgba(100, 100, 100, 0.2) !important;
+  color: #777 !important;
+}
+
+/* XLX Module Quick-Switcher Bar inside Card */
+.xlx-modules-card-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 3px 6px;
+  background: rgba(18, 22, 28, 0.88);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 5px;
+  margin: 3px 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+[data-theme="light"] .xlx-modules-card-bar {
+  background: #f4f6fa;
+  border-color: rgba(180, 140, 20, 0.4);
+}
+
+.xlx-bar-label {
+  font-size: 0.70rem;
+  font-weight: 800;
+  color: #d4af37;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .xlx-bar-label {
+  color: #a07800;
+}
+
+.xlx-bar-btns {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.btn-xlx-bar-mod {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #d0d7de;
+  border-radius: 3px;
+  font-weight: 800;
+  font-size: 0.74rem;
+  padding: 2px 6px;
+  cursor: pointer;
+  min-width: 22px;
+  text-align: center;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+}
+
+[data-theme="light"] .btn-xlx-bar-mod {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #24292f;
+}
+
+.btn-xlx-bar-mod:hover {
+  background: rgba(212, 175, 55, 0.25);
+  border-color: #d4af37;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.btn-xlx-bar-mod.active-xlx-mod {
+  background: linear-gradient(135deg, #d4af37, #f39c12) !important;
+  color: #0d1117 !important;
+  border-color: #f1c40f !important;
+  box-shadow: 0 0 8px rgba(241, 196, 15, 0.5) !important;
+  font-weight: 900 !important;
+}
+
+.btn-xlx-bar-all {
+  background: rgba(52, 152, 219, 0.15);
+  border: 1px solid rgba(52, 152, 219, 0.35);
+  color: #58a6ff;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+}
+
+[data-theme="light"] .btn-xlx-bar-all {
+  background: rgba(52, 152, 219, 0.12);
+  border-color: rgba(52, 152, 219, 0.45);
+  color: #0969da;
+}
+
+.btn-xlx-bar-all:hover {
+  background: rgba(52, 152, 219, 0.3);
+  border-color: #58a6ff;
+  color: #ffffff;
+}
+
+.btn-xlx-bar-unlink {
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.35);
+  color: #ff6b6b;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 0.70rem;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+}
+
+[data-theme="light"] .btn-xlx-bar-unlink {
+  background: rgba(231, 76, 60, 0.1);
+  border-color: rgba(231, 76, 60, 0.4);
+  color: #cf222e;
+}
+
+.btn-xlx-bar-unlink:hover {
+  background: rgba(231, 76, 60, 0.3);
+  border-color: #e74c3c;
+  color: #ffffff;
+}
+
+/* XLX All Modules Popover (A..Z) */
+.xlx-all-modules-popover {
+  position: absolute;
+  z-index: 1000;
+  background: #181c24;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  border-radius: 8px;
+  padding: 7px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+  width: 270px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  animation: popoverFadeIn 0.12s ease-out;
+}
+
+[data-theme="light"] .xlx-all-modules-popover {
+  background: #ffffff;
+  border-color: #d4af37;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.xlx-popover-tile {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e6edf3;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: 0.82rem;
+  padding: 4px 2px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+[data-theme="light"] .xlx-popover-tile {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+  color: #24292f;
+}
+
+.xlx-popover-tile:hover {
+  background: rgba(212, 175, 55, 0.35);
+  border-color: #d4af37;
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+.xlx-popover-tile.active {
+  background: linear-gradient(135deg, #d4af37, #f39c12) !important;
+  color: #0d1117 !important;
+  border-color: #f1c40f !important;
+  box-shadow: 0 0 8px rgba(241, 196, 15, 0.5) !important;
+}
+
+/* Network Badges in Contacts Tree */
+.contact-net-badge {
+  display: inline-block;
+  font-size: 0.58rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.contact-net-badge.net-bm {
+  background: rgba(88, 166, 255, 0.16);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+}
+
+.contact-net-badge.net-freedmr {
+  background: rgba(46, 204, 113, 0.16);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.35);
+}
+
+.contact-net-badge.net-tgif {
+  background: rgba(243, 156, 18, 0.16);
+  color: #f39c12;
+  border: 1px solid rgba(243, 156, 18, 0.35);
+}
+
+.contact-net-badge.net-xlx {
+  background: rgba(212, 175, 55, 0.22);
+  color: #e5c05b;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+}
+
+.contact-net-badge.net-dmrplus {
+  background: rgba(155, 89, 182, 0.18);
+  color: #9b59b6;
+  border: 1px solid rgba(155, 89, 182, 0.4);
+}
+
+.contact-net-badge.net-custom {
+  background: rgba(139, 148, 158, 0.18);
+  color: #8b949e;
+  border: 1px solid rgba(139, 148, 158, 0.4);
+}
+
+/* VFO XLX Row: replaces vfo-ts1-row for XLX hotspots */
+/* Ensure TS1 row is strictly hidden for XLX hotspots */
+.card-net-xlx .vfo-ts1-row,
+.radio-container[data-network-type="xlx"] .vfo-ts1-row {
+  display: none !important;
+}
+
+.vfo-xlx-row {
+  position: relative !important;
+  isolation: isolate !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  box-sizing: border-box !important;
+  padding: 6px 12px 8px 12px !important;
+  margin-bottom: 0 !important;
+  overflow: hidden !important;
+  height: 106px !important;
+  min-height: 106px !important;
+  max-height: 106px !important;
+  flex: 0 0 106px !important;
+  border: 1.5px solid rgba(212, 175, 55, 0.42) !important;
+  border-radius: 8px !important;
+  background: linear-gradient(160deg, rgba(245, 158, 11, 0.12) 0%, rgba(24, 28, 36, 0.95) 45%, rgba(18, 22, 28, 0.98) 100%) !important;
+  box-shadow:
+    -2px -2px 5px rgba(255, 255, 255, 0.05),
+    2px 2px 6px rgba(0, 0, 0, 0.5),
+    0 4px 10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(251, 191, 36, 0.15) !important;
+  user-select: none;
+}
+
+@media (max-width: 600px) {
+  .vfo-xlx-row {
+    height: 133px !important;
+    min-height: 133px !important;
+    max-height: 133px !important;
+    flex: 0 0 133px !important;
+  }
+}
+
+[data-theme="light"] .vfo-xlx-row {
+  border-color: rgba(217, 119, 6, 0.4) !important;
+  background: linear-gradient(160deg, rgba(254, 243, 199, 0.7) 0%, rgba(248, 250, 252, 0.95) 45%, #f1f5f9 100%) !important;
+  box-shadow:
+    -2px -2px 4px rgba(255, 255, 255, 0.8),
+    2px 2px 5px rgba(27, 31, 36, 0.12),
+    0 2px 6px rgba(27, 31, 36, 0.08),
+    inset 0 1px 0 rgba(251, 191, 36, 0.25) !important;
+}
+
+/* Service Info Header Bar (Top Green Box) */
+.xlx-server-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.22);
+  gap: 6px;
+  box-sizing: border-box;
+}
+
+[data-theme="light"] .xlx-server-info-bar {
+  border-bottom-color: rgba(217, 119, 6, 0.25);
+}
+
+.xlx-server-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xlx-server-icon {
+  font-size: 0.80rem;
+  line-height: 1;
+}
+
+.xlx-server-flag {
+  font-size: 0.86rem;
+  line-height: 1;
+}
+
+.xlx-server-title {
+  font-size: 0.74rem;
+  color: #e6edf3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xlx-server-title strong {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.xlx-server-title small {
+  color: #8b949e;
+  font-size: 0.68rem;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+[data-theme="light"] .xlx-server-title {
+  color: #24292f;
+}
+[data-theme="light"] .xlx-server-title strong {
+  color: #b45309;
+}
+[data-theme="light"] .xlx-server-title small {
+  color: #57606a;
+}
+
+.xlx-server-right {
+  flex-shrink: 0;
+}
+
+.xlx-proto-pill {
+  font-size: 0.60rem;
+  font-weight: 800;
+  color: #d4af37;
+  background: rgba(212, 175, 55, 0.12);
+  border: 1px solid rgba(212, 175, 55, 0.32);
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+[data-theme="light"] .xlx-proto-pill {
+  color: #a07800;
+  background: rgba(212, 175, 55, 0.1);
+  border-color: rgba(180, 140, 20, 0.3);
+}
+
+/* Main Controls Section (Shifted down, Red Box) */
+.xlx-main-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.xlx-modules-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  align-items: center;
+}
+
+.btn-xlx-mod {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #d0d7de;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: 0.80rem;
+  padding: 2px 0;
+  cursor: pointer;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  height: 25px;
+  text-align: center;
+  line-height: 18px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+[data-theme="light"] .btn-xlx-mod {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #24292f;
+}
+
+.btn-xlx-mod:hover {
+  background: rgba(212, 175, 55, 0.25);
+  border-color: #d4af37;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.btn-xlx-mod.active-xlx-mod {
+  background: linear-gradient(135deg, #d4af37, #f39c12) !important;
+  color: #0d1117 !important;
+  border-color: #f1c40f !important;
+  box-shadow: 0 0 10px rgba(241, 196, 15, 0.5) !important;
+  font-weight: 900 !important;
+}
+
+.xlx-controls-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.xlx-active-mod-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #d4af37;
+  background: rgba(212, 175, 55, 0.15);
+  border: 1px solid rgba(212, 175, 55, 0.38);
+  padding: 2px 9px;
+  border-radius: 5px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.xlx-active-mod-pill:hover {
+  border-color: #f1c40f;
+  transform: translateY(-1px);
+}
+
+.xlx-active-mod-pill strong {
+  font-size: 0.86rem;
+  font-weight: 900;
+  color: #f1c40f;
+  margin-left: 3px;
+}
+
+.xlx-active-mod-pill.active-xlx-mod {
+  background: linear-gradient(135deg, #d4af37, #f39c12) !important;
+  color: #0d1117 !important;
+  border-color: #f1c40f !important;
+  box-shadow: 0 0 10px rgba(241, 196, 15, 0.5) !important;
+  font-weight: 800 !important;
+}
+
+.xlx-active-mod-pill.active-xlx-mod strong {
+  color: #0d1117 !important;
+}
+
+[data-theme="light"] .xlx-active-mod-pill.active-xlx-mod {
+  background: linear-gradient(135deg, #d4af37, #f39c12) !important;
+  color: #0d1117 !important;
+  border-color: #f1c40f !important;
+}
+
+[data-theme="light"] .xlx-active-mod-pill.active-xlx-mod strong {
+  color: #0d1117 !important;
+}
+
+.btn-xlx-all.active-xlx-mod {
+  background: linear-gradient(135deg, #d4af37, #f39c12) !important;
+  color: #0d1117 !important;
+  border-color: #f1c40f !important;
+  box-shadow: 0 0 8px rgba(241, 196, 15, 0.45) !important;
+  font-weight: 800 !important;
+}
+
+[data-theme="light"] .xlx-active-mod-pill {
+  color: #a07800;
+  background: rgba(212, 175, 55, 0.12);
+  border-color: rgba(180, 140, 20, 0.35);
+}
+[data-theme="light"] .xlx-active-mod-pill strong {
+  color: #854d0e;
+}
+
+.xlx-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-xlx-all {
+  background: rgba(52, 152, 219, 0.15);
+  border: 1px solid rgba(52, 152, 219, 0.35);
+  color: #58a6ff;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  padding: 3px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+}
+
+[data-theme="light"] .btn-xlx-all {
+  background: rgba(52, 152, 219, 0.12);
+  border-color: rgba(52, 152, 219, 0.45);
+  color: #0969da;
+}
+
+.btn-xlx-all:hover {
+  background: rgba(52, 152, 219, 0.3);
+  border-color: #58a6ff;
+  color: #ffffff;
+}
+
+.btn-xlx-unlink {
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.35);
+  color: #ff6b6b;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  padding: 3px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+}
+
+[data-theme="light"] .btn-xlx-unlink {
+  background: rgba(231, 76, 60, 0.1);
+  border-color: rgba(231, 76, 60, 0.4);
+  color: #cf222e;
+}
+
+.btn-xlx-unlink:hover {
+  background: rgba(231, 76, 60, 0.3);
+  border-color: #e74c3c;
+  color: #ffffff;
+}
+
+
+/* ==========================================================================
+   Server Search & Sort Combobox (.srv-combo)
+   ========================================================================== */
+
+.bm-server-label-wrap.srv-combo-active .bm-server-select {
+  pointer-events: none !important;
+}
+
+.srv-combo-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: srvComboFadeIn 0.15s ease-out;
+}
+
+@keyframes srvComboFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.srv-combo-header {
+  padding: 8px 8px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid #21262d;
+  background: #0d1117;
+  border-radius: 7px 7px 0 0;
+}
+
+.srv-combo-search-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+}
+
+.srv-combo-search-icon {
+  position: absolute;
+  left: 9px;
+  font-size: 0.82rem;
+  color: #8b949e;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.srv-combo-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 28px 0 28px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  font-size: 0.82rem;
+  font-family: inherit;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.srv-combo-input:focus {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.srv-combo-clear {
+  position: absolute;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: #8b949e;
+  font-size: 0.85rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 0;
+}
+
+.srv-combo-clear:hover {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.15);
+}
+
+.srv-combo-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.70rem;
+  color: #8b949e;
+  padding: 0 2px;
+}
+
+.srv-combo-counter {
+  font-weight: 500;
+}
+
+.srv-combo-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.srv-combo-sort-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.srv-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  font-size: 0.70rem;
+  font-family: inherit;
+  background: #21262d;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.srv-sort-btn:hover {
+  background: #30363d;
+  color: #c9d1d9;
+}
+
+.srv-sort-btn.active {
+  background: #1f6feb;
+  color: #ffffff;
+  border-color: #388bfd;
+  font-weight: 600;
+}
+
+.srv-sort-btn .srv-sort-arrow {
+  font-size: 0.65rem;
+  font-weight: bold;
+  margin-left: 1px;
+}
+
+.srv-combo-test-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(56, 139, 253, 0.1);
+  border-bottom: 1px solid #21262d;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #58a6ff;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.srv-combo-test-row:hover {
+  background: rgba(56, 139, 253, 0.22);
+}
+
+.srv-combo-list {
+  max-height: calc(50vh - 120px);
+  min-height: 48px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 0;
+  margin: 0;
+  list-style: none;
+}
+
+.srv-combo-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.srv-combo-list::-webkit-scrollbar-track {
+  background: #161b22;
+}
+
+.srv-combo-list::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
+}
+
+.srv-combo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: #c9d1d9;
+  border-left: 3px solid transparent;
+  transition: background 0.1s ease, border-left-color 0.1s ease;
+}
+
+.srv-combo-item:hover,
+.srv-combo-item.is-highlighted {
+  background: #21262d;
+  color: #ffffff;
+}
+
+.srv-combo-item.is-selected {
+  background: rgba(35, 129, 66, 0.22);
+  border-left-color: #2ea043;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.srv-combo-item.is-dead {
+  color: #f85149;
+  opacity: 0.85;
+}
+
+.srv-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.srv-item-flag {
+  font-size: 0.95rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.srv-item-flag .flag-svg,
+.srv-item-flag img {
+  width: 16px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.srv-item-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
+}
+
+.srv-item-title strong {
+  color: #ffffff;
+}
+
+.srv-item-title small {
+  color: #8b949e;
+  font-size: 0.72rem;
+  margin-left: 4px;
+}
+
+.srv-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.srv-item-ping {
+  font-size: 0.70rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #21262d;
+  color: #3fb950;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.srv-combo-item.is-dead .srv-item-ping {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
+.srv-combo-mark {
+  background: rgba(234, 179, 8, 0.35);
+  color: #fbbf24;
+  padding: 0 1px;
+  border-radius: 2px;
+  font-weight: bold;
+}
+
+.srv-combo-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: #8b949e;
+}
+
+.srv-combo-more {
+  padding: 6px 10px;
+  text-align: center;
+  font-size: 0.72rem;
+  color: #8b949e;
+  background: #111418;
+  border-top: 1px solid #21262d;
+  font-style: italic;
+}
+
+/* Light Theme Support */
+[data-theme="light"] .srv-combo-panel {
+  background: #ffffff;
+  border-color: #d0d7de;
+  box-shadow: 0 12px 32px rgba(140, 149, 159, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .srv-combo-header {
+  background: #f6f8fa;
+  border-bottom-color: #d0d7de;
+}
+
+[data-theme="light"] .srv-combo-input {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #1f2328;
+}
+
+[data-theme="light"] .srv-combo-input:focus {
+  border-color: #0969da;
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.2);
+}
+
+[data-theme="light"] .srv-combo-status-row {
+  color: #656d76;
+}
+
+[data-theme="light"] .srv-sort-btn {
+  background: #f6f8fa;
+  color: #656d76;
+  border-color: #d0d7de;
+}
+
+[data-theme="light"] .srv-sort-btn:hover {
+  background: #eaeef2;
+  color: #1f2328;
+}
+
+[data-theme="light"] .srv-sort-btn.active {
+  background: #0969da;
+  color: #ffffff;
+  border-color: #0969da;
+}
+
+[data-theme="light"] .srv-combo-test-row {
+  background: rgba(9, 105, 218, 0.08);
+  border-bottom-color: #d0d7de;
+  color: #0969da;
+}
+
+[data-theme="light"] .srv-combo-test-row:hover {
+  background: rgba(9, 105, 218, 0.16);
+}
+
+[data-theme="light"] .srv-combo-list::-webkit-scrollbar-track {
+  background: #ffffff;
+}
+
+[data-theme="light"] .srv-combo-list::-webkit-scrollbar-thumb {
+  background: #d0d7de;
+}
+
+[data-theme="light"] .srv-combo-item {
+  color: #1f2328;
+}
+
+[data-theme="light"] .srv-combo-item:hover,
+[data-theme="light"] .srv-combo-item.is-highlighted {
+  background: #f3f4f6;
+  color: #1f2328;
+}
+
+[data-theme="light"] .srv-combo-item.is-selected {
+  background: rgba(46, 160, 67, 0.15);
+  border-left-color: #1a7f37;
+  color: #1f2328;
+}
+
+[data-theme="light"] .srv-combo-item.is-dead {
+  color: #cf222e;
+}
+
+[data-theme="light"] .srv-item-title strong {
+  color: #1f2328;
+}
+
+[data-theme="light"] .srv-item-title small {
+  color: #656d76;
+}
+
+[data-theme="light"] .srv-item-ping {
+  background: #f6f8fa;
+  color: #1a7f37;
+}
+
+[data-theme="light"] .srv-combo-item.is-dead .srv-item-ping {
+  background: rgba(207, 34, 46, 0.1);
+  color: #cf222e;
+}
+
+[data-theme="light"] .srv-combo-mark {
+  background: rgba(255, 211, 61, 0.45);
+  color: #744210;
+}
+
+[data-theme="light"] .srv-combo-more {
+  background: #f6f8fa;
+  border-top-color: #d0d7de;
+  color: #656d76;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 600px) {
+  .srv-combo-panel {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    max-height: 65vh !important;
+    border-radius: 14px 14px 0 0 !important;
+    border-bottom: none !important;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.8) !important;
+    z-index: 9999 !important;
+  }
+  .srv-combo-list {
+    max-height: calc(65vh - 130px) !important;
+  }
+}
+
+/* ==========================================================================
+   DMR+ (IPSC2) Reflector Quick Control Panel
+   ========================================================================== */
+
+.dmrplus-reflector-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: rgba(18, 22, 28, 0.75);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  user-select: none;
+}
+
+.dmrplus-ref-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dmrplus-ref-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #c9d1d9;
+}
+
+.dmrplus-ref-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.dmrplus-ref-label {
+  font-weight: 500;
+  color: #8b949e;
+}
+
+.dmrplus-ref-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  background: rgba(139, 92, 246, 0.2);
+  color: #c4b5fd;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+}
+
+.dmrplus-ref-badge.unlinked {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.dmrplus-ref-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.btn-dmrplus-action {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #e6edf3;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.btn-dmrplus-action:hover {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: #a78bfa;
+  color: #c4b5fd;
+}
+
+.btn-dmrplus-action.btn-dmrplus-unlink:hover {
+  background: rgba(248, 81, 73, 0.2);
+  border-color: #f85149;
+  color: #f85149;
+}
+
+.dmrplus-ref-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dmrplus-quick-label {
+  font-size: 0.78rem;
+  color: #e3b341;
+  flex-shrink: 0;
+}
+
+.dmrplus-quick-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.btn-dmrplus-quick {
+  background: rgba(33, 38, 45, 0.85);
+  border: 1px solid rgba(240, 246, 252, 0.12);
+  color: #c9d1d9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-dmrplus-quick:hover {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: #a78bfa;
+  color: #fff;
+}
+
+.btn-dmrplus-quick.active {
+  background: #7c3aed !important;
+  border-color: #a78bfa !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 6px rgba(139, 92, 246, 0.45);
+}
+
+/* Light theme support */
+[data-theme="light"] .dmrplus-reflector-bar {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+}
+
+[data-theme="light"] .dmrplus-ref-current {
+  color: #24292f;
+}
+
+[data-theme="light"] .dmrplus-ref-label {
+  color: #57606a;
+}
+
+[data-theme="light"] .btn-dmrplus-action {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #24292f;
+}
+
+[data-theme="light"] .btn-dmrplus-action:hover {
+  background: #ede9fe;
+  border-color: #7c3aed;
+  color: #6d28d9;
+}
+
+[data-theme="light"] .btn-dmrplus-quick {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #24292f;
+}
+
+[data-theme="light"] .btn-dmrplus-quick:hover {
+  background: #ede9fe;
+  border-color: #7c3aed;
+  color: #6d28d9;
+}
+
+[data-theme="light"] .btn-dmrplus-quick.active {
+  background: #7c3aed !important;
+  border-color: #7c3aed !important;
+  color: #ffffff !important;
+}
+
+/* Pinned Server Items */
+.srv-combo-item.is-pinned {
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 3px solid #f59e0b !important;
+}
+
+.srv-pin-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  line-height: 1;
+  opacity: 0.3;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.srv-combo-item:hover .srv-pin-btn {
+  opacity: 0.7;
+}
+
+.srv-pin-btn:hover {
+  opacity: 1 !important;
+  transform: scale(1.15);
+}
+
+.srv-pin-btn.is-active {
+  opacity: 1 !important;
+  filter: drop-shadow(0 0 2px rgba(245, 158, 11, 0.6));
+}
+
+[data-theme="light"] .srv-combo-item.is-pinned {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+
+/* XLX Locked TS Audio Mode (Locked strictly to Solo TS2) */
+.card-net-xlx .status-badge-item.ts-audio-mode-btn,
+.status-badge-item.ts-audio-mode-btn.ts-mode-locked {
+  cursor: not-allowed !important;
+}
+
+.card-net-xlx .status-badge-item.ts-audio-mode-btn:hover .ts-audio-mode-badge,
+.status-badge-item.ts-audio-mode-btn.ts-mode-locked:hover .ts-audio-mode-badge {
+  filter: none !important;
+  transform: none !important;
+}
+
+.card-net-xlx .status-badge-item.ts-audio-mode-btn:active .ts-audio-mode-badge,
+.status-badge-item.ts-audio-mode-btn.ts-mode-locked:active .ts-audio-mode-badge {
+  transform: none !important;
+}
+
+
+/* TG Search Result Quick Slot Add Buttons (+ in TS1, + in TS2) */
+.search-result-card .card-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-tg-slot-add {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+/* TS1 Button Styling: Cyan accent */
+.btn-tg-add-ts1 {
+  background: rgba(0, 219, 247, 0.1);
+  color: #00dbf7;
+  border: 1px solid rgba(0, 219, 247, 0.4);
+}
+.btn-tg-add-ts1:hover {
+  background: rgba(0, 219, 247, 0.25);
+  border-color: #00dbf7;
+  transform: translateY(-1px);
+}
+.btn-tg-add-ts1:active {
+  transform: scale(0.96);
+}
+
+/* TS2 Button Styling: Orange accent */
+.btn-tg-add-ts2 {
+  background: rgba(249, 135, 0, 0.1);
+  color: #f98700;
+  border: 1px solid rgba(249, 135, 0, 0.4);
+}
+.btn-tg-add-ts2:hover {
+  background: rgba(249, 135, 0, 0.25);
+  border-color: #f98700;
+  transform: translateY(-1px);
+}
+.btn-tg-add-ts2:active {
+  transform: scale(0.96);
+}
+
+/* Success Added State */
+.btn-tg-slot-add.btn-tg-added {
+  background: #2ea043 !important;
+  color: #ffffff !important;
+  border-color: #2ea043 !important;
+}
+
+/* Light Theme Support */
+[data-theme="light"] .btn-tg-add-ts1,
+.theme-light .btn-tg-add-ts1 {
+  background: rgba(0, 180, 216, 0.12) !important;
+  color: #0077b6 !important;
+  border-color: rgba(0, 180, 216, 0.6) !important;
+}
+[data-theme="light"] .btn-tg-add-ts2,
+.theme-light .btn-tg-add-ts2 {
+  background: rgba(249, 135, 0, 0.12) !important;
+  color: #c25e00 !important;
+  border-color: rgba(249, 135, 0, 0.6) !important;
 }

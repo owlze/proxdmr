@@ -22,7 +22,7 @@ import {
 import {
   isCheckMicOnTxEnabled,
   setCheckMicOnTxEnabled
-} from "../ptt/engine.js?v=2.9.260";
+} from "../ptt/engine.js?v=2.9.310";
 import { setHapticEnabled, setHapticDuration } from "../core/haptic.js";
 
 export function initGeneralSettings() {

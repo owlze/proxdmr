@@ -93,6 +93,46 @@ app_settings = load_app_settings()
 connected_clients: Set[WebSocket] = set()
 user_clients: Dict[int, Set[WebSocket]] = {}
 ws_user_map: Dict[WebSocket, int] = {}
+ws_active_hotspots: Dict[WebSocket, Set[str]] = {}
+
+def _prune_dead_ws_clients() -> None:
+    dead = {
+        s for s in list(connected_clients)
+        if s.client_state != WebSocketState.CONNECTED or s.application_state != WebSocketState.CONNECTED
+    }
+    if dead:
+        connected_clients.difference_update(dead)
+        for ws_dead in dead:
+            ws_active_hotspots.pop(ws_dead, None)
+            dead_uid = ws_user_map.pop(ws_dead, None)
+            if dead_uid and dead_uid in user_clients:
+                user_clients[dead_uid].discard(ws_dead)
+                if not user_clients[dead_uid]:
+                    user_clients.pop(dead_uid, None)
+    for uid_k, u_set in list(user_clients.items()):
+        stale_u = {
+            s for s in list(u_set)
+            if s.client_state != WebSocketState.CONNECTED or s.application_state != WebSocketState.CONNECTED
+        }
+        if stale_u:
+            u_set.difference_update(stale_u)
+            for ws_s in stale_u:
+                connected_clients.discard(ws_s)
+                ws_user_map.pop(ws_s, None)
+                ws_active_hotspots.pop(ws_s, None)
+            if not u_set:
+                user_clients.pop(uid_k, None)
+
+def _is_hotspot_open_on_any_client(user_id: int, hotspot_id: str, exclude_ws: Optional[WebSocket] = None) -> bool:
+    _prune_dead_ws_clients()
+    sockets = user_clients.get(user_id, set())
+    for s in list(sockets):
+        if exclude_ws is not None and s is exclude_ws:
+            continue
+        hset = ws_active_hotspots.get(s)
+        if hset is not None and hotspot_id in hset:
+            return True
+    return False
 
 class RadioState:
     def __init__(self):
@@ -346,6 +386,13 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(tg_resolver.check_and_update(interval_seconds=10800))
     asyncio.create_task(user_db.check_and_update(interval_seconds=10800))
     sync_task = asyncio.create_task(periodic_directory_sync())
+    try:
+        from dmr.xlx_hosts import xlx_hosts_mgr
+        asyncio.create_task(xlx_hosts_mgr.periodic_update_loop())
+        from dmr.dmrplus_hosts import dmrplus_hosts_mgr
+        asyncio.create_task(dmrplus_hosts_mgr.periodic_update_loop())
+    except Exception as e:
+        logger.warning(f"[MAIN] Failed to start xlx_hosts background loop: {e}")
     yield
     bm_ping_service.stop()
     sync_task.cancel()
@@ -1523,10 +1570,10 @@ async def create_hotspot(cfg: HotspotConfig, request: Request):
     if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
         raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
     for h in user_sett.hotspots:
-        if h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid:
+        if h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
             raise HTTPException(
                 status_code=400,
-                detail=f"SSID {cfg.bm_ssid} уже используется для DMR ID {cfg.dmr_id}. Выберите другой SSID (например, {cfg.bm_ssid + 1})"
+                detail=f"SSID {cfg.bm_ssid} уже используется для DMR ID {cfg.dmr_id} в этой сети. Выберите другой SSID (например, {cfg.bm_ssid + 1})"
             )
     rt = hotspot_manager.create_hotspot(cfg, user_id=uid)
     await save_user_settings(uid, user_sett.model_dump())
@@ -1568,10 +1615,10 @@ async def update_hotspot(hotspot_id: str, cfg: HotspotConfig, request: Request, 
         raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     for h in user_sett.hotspots:
-        if h.id != hotspot_id and h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid:
+        if h.id != hotspot_id and h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
             raise HTTPException(
                 status_code=400,
-                detail=f"SSID {cfg.bm_ssid} уже занят другим хотспотом с таким же DMR ID. Выберите свободный SSID"
+                detail=f"SSID {cfg.bm_ssid} уже занят другим хотспотом с таким же DMR ID в этой сети. Выберите свободный SSID"
             )
     rt = await hotspot_manager.update_hotspot(cfg, auto_connect=True if reconnect else None, user_id=uid)
     if not rt:
@@ -1584,6 +1631,30 @@ async def update_hotspot(hotspot_id: str, cfg: HotspotConfig, request: Request, 
     except Exception:
         pass
     return {"status": "ok", "hotspot": rt.to_dict()}
+
+class HotspotRptoUpdate(BaseModel):
+    rpto_options: Optional[str] = None
+    xlx_module: Optional[str] = None
+
+@app.post("/api/hotspots/{hotspot_id}/rpto")
+async def update_hotspot_rpto(hotspot_id: str, body: HotspotRptoUpdate, request: Request):
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    res = await hotspot_manager.set_hotspot_rpto(
+        hotspot_id,
+        rpto_options=body.rpto_options,
+        xlx_module=body.xlx_module,
+        user_id=uid,
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Хотспот не найден")
+    user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    await save_user_settings(uid, user_sett.model_dump())
+    if uid == 1:
+        save_app_settings(user_sett)
+    return {"status": "ok", **res}
 
 class HotspotAutoTgBmUpdate(BaseModel):
     enabled: bool
@@ -2912,6 +2983,102 @@ async def api_cancel_bm_benchmark():
     bm_ping_service.cancel_benchmark()
     return {"status": "ok", "running": False}
 
+@app.get("/api/servers/probe/results")
+async def api_get_server_probe_results(network_type: str = "bm"):
+    return server_probe_service.get_probe_results(network_type)
+
+@app.post("/api/servers/probe")
+async def api_start_server_probe(request: Request):
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    net_type = (body.get("network_type") or "freedmr").strip().lower()
+    servers = body.get("servers")
+
+    if not servers or not isinstance(servers, list):
+        if net_type == "bm":
+            bm_data = await get_bm_masters()
+            servers = bm_data.get("masters", [])
+        elif net_type == "freedmr":
+            await freedmr_hosts_mgr.fetch_hosts(force=False)
+            servers = freedmr_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+        elif net_type == "tgif":
+            servers = list(KNOWN_TGIF_SERVERS)
+        elif net_type == "dmrplus":
+            await dmrplus_hosts_mgr.fetch_hosts(force=False)
+            servers = dmrplus_hosts_mgr.get_hosts(enriched=False)
+        elif net_type == "xlx":
+            await xlx_hosts_mgr.fetch_hosts(force=False)
+            servers = xlx_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+        else:
+            servers = []
+
+    probe_id = 123456799
+    user_settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    if user_settings and hasattr(user_settings, "hotspots") and user_settings.hotspots:
+        base_id = user_settings.hotspots[0].dmr_id
+        if base_id and base_id > 0:
+            probe_id = base_id * 100 + 99
+
+    success = await server_probe_service.start_probe(
+        network_type=net_type,
+        servers=servers,
+        probe_id=probe_id,
+        broadcast_cb=broadcast_json
+    )
+    return {
+        "status": "ok" if success else "already_running",
+        "running": True,
+        "network_type": net_type
+    }
+
+@app.post("/api/servers/probe/cancel")
+async def api_cancel_server_probe(request: Request):
+    net_type = None
+    try:
+        body = await request.json()
+        net_type = body.get("network_type")
+    except Exception:
+        pass
+    server_probe_service.cancel_probe(net_type)
+    return {"status": "ok", "running": False}
+
+@app.get("/api/dmr/servers")
+async def api_get_dmr_servers(network_type: str = "freedmr", request: Request = None):
+    net_lower = (network_type or "bm").strip().lower()
+    if net_lower == "bm":
+        bm_data = await get_bm_masters()
+        base = bm_data.get("masters", [])
+        bench = bm_ping_service.get_benchmark_results()
+        if bench:
+            return {"status": "ok", "network_type": "bm", "servers": bench}
+        return {"status": "ok", "network_type": "bm", "servers": server_probe_service.enrich_servers_with_cache("bm", base)}
+    elif net_lower == "freedmr":
+        await freedmr_hosts_mgr.fetch_hosts(force=False)
+        base = freedmr_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+        return {"status": "ok", "network_type": "freedmr", "servers": server_probe_service.enrich_servers_with_cache("freedmr", base)}
+    elif net_lower == "tgif":
+        return {"status": "ok", "network_type": "tgif", "servers": server_probe_service.enrich_servers_with_cache("tgif", KNOWN_TGIF_SERVERS)}
+    elif net_lower == "dmrplus":
+        await dmrplus_hosts_mgr.fetch_hosts(force=False)
+        base = dmrplus_hosts_mgr.get_hosts(enriched=False)
+        return {"status": "ok", "network_type": "dmrplus", "servers": server_probe_service.enrich_servers_with_cache("dmrplus", base)}
+    elif net_lower == "xlx":
+        await xlx_hosts_mgr.fetch_hosts(force=False)
+        base = xlx_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+        return {"status": "ok", "network_type": "xlx", "servers": server_probe_service.enrich_servers_with_cache("xlx", base)}
+    elif net_lower == "custom":
+        return {"status": "ok", "network_type": "custom", "servers": []}
+    return {"status": "error", "message": f"Unknown network type {network_type}"}
+
 @app.post("/api/hotspots/{hotspot_id}/connect")
 async def connect_hotspot(hotspot_id: str, request: Request):
     user = _get_user_from_request(request)
@@ -2956,6 +3123,10 @@ async def collapse_hotspot_api(hotspot_id: str, request: Request):
         await ensure_active_user(uid, user.get("login", ""))
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
+    rt_check = hotspot_manager.get_runtime(uid, target_id)
+    real_hid = rt_check.config.id if rt_check else target_id
+    if _is_hotspot_open_on_any_client(uid, real_hid):
+        return {"status": "ok", "collapsed": True, "bm_status": "OFFLINE", "detail": "Свернут / отключен"}
     success = await hotspot_manager.set_hotspot_collapsed(target_id, True, user_id=uid)
     if success:
         rt = hotspot_manager.get_runtime(uid, target_id)
@@ -3073,12 +3244,15 @@ def _get_bm_device_and_key(
     if not cfg:
         return None, None, None, "Хотспот не найден"
 
+    net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower()
+    net_key_label = "TGIF API Key (v1)" if net_type == "tgif" else "BM API Key (v2)"
+
     api_key = (cfg.bm_api_key or "").strip()
     if not api_key and not allow_fallback:
-        return None, None, None, f"BM API Key (v2) не настроен для «{cfg.name or 'хотспота'}»"
+        return cfg, None, None, f"{net_key_label} не настроен для «{cfg.name or 'хотспота'}»"
 
     if cfg.dmr_id <= 0 and not allow_fallback:
-        return None, None, None, f"DMR ID не настроен для «{cfg.name or 'хотспота'}»"
+        return cfg, None, None, f"DMR ID не настроен для «{cfg.name or 'хотспота'}»"
 
     device_id = f"{cfg.dmr_id}{cfg.bm_ssid:02d}" if (cfg and cfg.bm_ssid > 0) else str(cfg.dmr_id if (cfg and cfg.dmr_id > 0) else "")
     return cfg, device_id, api_key, None
@@ -3091,13 +3265,37 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
         await ensure_active_user(uid, user.get("login", ""))
 
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, allow_fallback=False, user_id=uid)
+    net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower() if cfg else "bm"
     if not api_key:
-        return {"status": "NO_KEY", "detail": err or "Ключ не задан", "device_id": device_id}
+        return {"status": "NO_KEY", "detail": err or "Ключ не задан", "device_id": device_id, "network_type": net_type}
 
     def _check():
         import urllib.request, urllib.error
-        # Use BM v2 action/getRepeater or selfcare endpoint.
-        # Note: /v2/user is restricted by BrandMeister and returns HTTP 403 (Interactive login required).
+        if net_type == "tgif":
+            url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "ProxDMR/1.0",
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json"
+                }
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        return {"status": "ONLINE", "network_type": "tgif", "detail": "Авторизован", "device_id": device_id}
+                    return {"status": "ERROR", "network_type": "tgif", "detail": f"HTTP {resp.status}", "device_id": device_id}
+            except urllib.error.HTTPError as e:
+                if e.code in (401, 403):
+                    return {"status": "AUTH_FAILED", "network_type": "tgif", "detail": "Неверный токен TGIF (401)", "device_id": device_id}
+                if e.code == 404:
+                    return {"status": "ERROR", "network_type": "tgif", "detail": f"Устройство {device_id} не найдено в TGIF", "device_id": device_id}
+                return {"status": "ERROR", "network_type": "tgif", "detail": f"HTTP {e.code}", "device_id": device_id}
+            except Exception as e:
+                return {"status": "OFFLINE", "network_type": "tgif", "detail": "Сервер api.tgif.network недоступен", "device_id": device_id}
+
+        # BM check logic
         if device_id:
             url = f"https://api.brandmeister.network/v2/device/{device_id}/action/getRepeater"
         elif cfg and cfg.dmr_id:
@@ -3116,11 +3314,11 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
         try:
             with urllib.request.urlopen(req, timeout=4) as resp:
                 if resp.status == 200:
-                    return {"status": "ONLINE", "detail": "Авторизован", "device_id": device_id}
-                return {"status": "ERROR", "detail": f"HTTP {resp.status}", "device_id": device_id}
+                    return {"status": "ONLINE", "network_type": "bm", "detail": "Авторизован", "device_id": device_id}
+                return {"status": "ERROR", "network_type": "bm", "detail": f"HTTP {resp.status}", "device_id": device_id}
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                return {"status": "AUTH_FAILED", "detail": "Неверный токен (401)", "device_id": device_id}
+                return {"status": "AUTH_FAILED", "network_type": "bm", "detail": "Неверный токен (401)", "device_id": device_id}
             # Fallback to selfcare check if repeater/device action returns 404
             if e.code == 404 and cfg and cfg.dmr_id and url != f"https://api.brandmeister.network/v2/selfcare/{cfg.dmr_id}":
                 try:
@@ -3135,43 +3333,141 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
                     )
                     with urllib.request.urlopen(req_fb, timeout=4) as resp_fb:
                         if resp_fb.status == 200:
-                            return {"status": "ONLINE", "detail": "Авторизован", "device_id": device_id}
+                            return {"status": "ONLINE", "network_type": "bm", "detail": "Авторизован", "device_id": device_id}
                 except urllib.error.HTTPError as ef:
                     if ef.code in (401, 403):
-                        return {"status": "AUTH_FAILED", "detail": "Неверный токен (401)", "device_id": device_id}
-            return {"status": "ERROR", "detail": f"HTTP {e.code}", "device_id": device_id}
+                        return {"status": "AUTH_FAILED", "network_type": "bm", "detail": "Неверный токен (401)", "device_id": device_id}
+            return {"status": "ERROR", "network_type": "bm", "detail": f"HTTP {e.code}", "device_id": device_id}
         except Exception as e:
-            return {"status": "OFFLINE", "detail": "Сервер BM недоступен", "device_id": device_id}
+            return {"status": "OFFLINE", "network_type": "bm", "detail": "Сервер BM недоступен", "device_id": device_id}
 
     return await asyncio.to_thread(_check)
 
 @app.get("/api/tg/names")
-async def get_tg_names():
-    """Returns all locally cached and synchronized TalkGroup names."""
-    return {"status": "ok", "names": tg_resolver.get_all_names()}
+async def get_tg_names(network: str = "bm"):
+    """Returns all locally cached and synchronized TalkGroup names (both BM and TGIF)."""
+    if len(tg_resolver.tgif_cache) < 50:
+        await tg_resolver.fetch_tgif_catalog()
+    net = (network or "bm").strip().lower()
+    return {
+        "status": "ok",
+        "names": tg_resolver.get_all_names(net),
+        "tgif_names": tg_resolver.get_all_names("tgif")
+    }
 
 @app.post("/api/tg/lookup")
 async def lookup_tg_names(payload: dict):
-    """Resolves names for a list of TalkGroups, querying BM online if unknown and saving to local cache."""
+    """Resolves names for a list of TalkGroups according to network_type."""
     tgs = payload.get("talkgroups", [])
+    net = str(payload.get("network") or payload.get("network_type") or "bm").strip().lower()
     try:
         tgs = [int(x) for x in tgs if int(x) > 0]
     except Exception:
         tgs = []
-    res = await tg_resolver.resolve_many(tgs)
-    return {"status": "ok", "names": {str(k): v for k, v in res.items()}}
+    res = await tg_resolver.resolve_many(tgs, network_type=net)
+    return {"status": "ok", "network": net, "names": {str(k): v for k, v in res.items()}}
 
 
 @app.get("/api/tg/stats")
-async def get_tg_stats():
+async def get_tg_stats(network: str = "bm"):
     """Returns database statistics for TalkGroups catalog."""
-    return {"status": "ok", "stats": tg_resolver.get_stats()}
+    return {"status": "ok", "stats": tg_resolver.get_stats(network_type=network)}
+
+from src.dmr.constants import (
+    FREEDMR_MAX_RPTO_BYTES,
+    FREEDMR_DEFAULT_OPTS,
+    normalize_freedmr_slots,
+    parse_freedmr_rpto,
+    build_freedmr_rpto,
+    xlx_module_to_tg,
+    xlx_tg_to_module,
+)
+from src.dmr.freedmr_hosts import freedmr_hosts_mgr
+try:
+    from dmr.xlx_hosts import xlx_hosts_mgr
+except ImportError:
+    from src.dmr.xlx_hosts import xlx_hosts_mgr
+try:
+    from dmr.dmrplus_hosts import dmrplus_hosts_mgr
+except ImportError:
+    from src.dmr.dmrplus_hosts import dmrplus_hosts_mgr
+from src.dmr.server_probe import (
+    server_probe_service,
+    KNOWN_TGIF_SERVERS,
+    KNOWN_DMRPLUS_SERVERS,
+    KNOWN_XLX_SERVERS,
+)
+
+@app.get("/api/freedmr/hosts")
+async def get_freedmr_hosts(request: Request = None):
+    """Returns live/cached FreeDMR servers from official hosts list."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    await freedmr_hosts_mgr.fetch_hosts(force=False)
+    return freedmr_hosts_mgr.get_hosts()
+
+@app.get("/api/xlx/hosts")
+async def get_xlx_hosts(request: Request = None):
+    """Returns live/cached XLX reflectors catalog."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    await xlx_hosts_mgr.fetch_hosts(force=False)
+    return xlx_hosts_mgr.get_hosts(enriched=True)
+
+@app.post("/api/xlx/hosts/refresh")
+async def refresh_xlx_hosts(request: Request = None):
+    """Force re-fetches and updates XLX reflectors catalog."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    servers = await xlx_hosts_mgr.fetch_hosts(force=True)
+    return {
+        "status": "ok",
+        "count": len(servers),
+        "source": xlx_hosts_mgr._source,
+        "generated_at": int(xlx_hosts_mgr._last_loaded_ts)
+    }
+
+@app.get("/api/dmrplus/hosts")
+async def get_dmrplus_hosts(request: Request = None):
+    """Returns live/cached DMR+ (IPSC2) servers catalog."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    await dmrplus_hosts_mgr.fetch_hosts(force=False)
+    return dmrplus_hosts_mgr.get_hosts(enriched=True)
+
+@app.post("/api/dmrplus/hosts/refresh")
+async def refresh_dmrplus_hosts(request: Request = None):
+    """Force re-fetches and updates DMR+ servers catalog."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    servers = await dmrplus_hosts_mgr.fetch_hosts(force=True)
+    return {
+        "status": "ok",
+        "count": len(servers),
+        "source": dmrplus_hosts_mgr._source,
+        "generated_at": int(dmrplus_hosts_mgr._last_loaded_ts)
+    }
 
 @app.get("/api/tg/search")
-async def search_talkgroups(q: str = "", limit: int = 50):
-    """Searches TalkGroups across numbers, Russian/English names, cities, and countries."""
-    results = tg_resolver.search_talkgroups(q, limit=limit)
-    return {"status": "ok", "query": q, "count": len(results), "results": results, "stats": tg_resolver.get_stats()}
+async def search_talkgroups(q: str = "", limit: int = 50, network: str = "bm"):
+    """Searches TalkGroups across numbers, names, cities, and countries for the given network."""
+    net = (network or "bm").strip().lower()
+    if net == "tgif" and len(tg_resolver.tgif_cache) < 50:
+        await tg_resolver.fetch_tgif_catalog()
+    if net == "freedmr" and len(tg_resolver.freedmr_cache) < 50:
+        await tg_resolver.fetch_freedmr_catalog()
+    results = tg_resolver.search_talkgroups(q, limit=limit, network_type=net)
+    return {"status": "ok", "query": q, "network": net, "count": len(results), "results": results, "stats": tg_resolver.get_stats(network_type=net)}
 
 @app.get("/api/dmr/users/stats")
 async def get_dmr_users_stats():
@@ -3186,10 +3482,24 @@ async def search_dmr_users(q: str = "", limit: int = 50):
 
 @app.post("/api/dmr/sync")
 async def manual_sync_dmr_databases():
-    """Manual trigger to update TalkGroups catalog and RadioID user database."""
+    """Manual trigger to update TalkGroups catalogs (BM + TGIF + FreeDMR) and RadioID user database."""
     tg_count = await tg_resolver.fetch_master_catalog()
+    tgif_count = await tg_resolver.fetch_tgif_catalog()
+    freedmr_count = await tg_resolver.fetch_freedmr_catalog()
+    freedmr_servers = await freedmr_hosts_mgr.fetch_hosts(force=True)
+    xlx_servers = await xlx_hosts_mgr.fetch_hosts(force=True)
+    dmrplus_servers = await dmrplus_hosts_mgr.fetch_hosts(force=True)
     user_count = await user_db.update_from_network()
-    return {"status": "ok", "talkgroups_updated": tg_count, "users_count": user_count}
+    return {
+        "status": "ok",
+        "talkgroups_updated": tg_count,
+        "tgif_talkgroups": tgif_count,
+        "freedmr_talkgroups": freedmr_count,
+        "freedmr_hosts": len(freedmr_servers),
+        "xlx_hosts": len(xlx_servers),
+        "dmrplus_hosts": len(dmrplus_servers),
+        "users_count": user_count,
+    }
 
 @app.get("/api/bm/static-groups")
 async def get_bm_static_groups(hotspot_id: Optional[str] = None, request: Request = None):
@@ -3198,9 +3508,294 @@ async def get_bm_static_groups(hotspot_id: Optional[str] = None, request: Reques
     if user:
         await ensure_active_user(uid, user.get("login", ""))
 
+    cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
+    net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
+
+    if net_type == "tgif" and cfg_check:
+        if len(tg_resolver.tgif_cache) < 50:
+            await tg_resolver.fetch_tgif_catalog()
+
+        local_dyn = hotspot_manager.get_dynamic_tgs(cfg_check.id, max_age_sec=900.0, user_id=uid)
+        now = time.time()
+        dyn_ts1 = []
+        dyn_ts2 = []
+        for tg, ts in local_dyn.get(1, {}).items():
+            if tg not in (0, 4000, 9990):
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts1.append({
+                    "talkgroup": tg,
+                    "slot": 1,
+                    "name": tg_resolver.get_name(tg, network_type="tgif"),
+                    "last_active": ts,
+                    "remaining_sec": rem
+                })
+        for tg, ts in local_dyn.get(2, {}).items():
+            if tg not in (0, 4000, 9990):
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts2.append({
+                    "talkgroup": tg,
+                    "slot": 2,
+                    "name": tg_resolver.get_name(tg, network_type="tgif"),
+                    "last_active": ts,
+                    "remaining_sec": rem
+                })
+        cur_tg = getattr(cfg_check, "default_tg_ts2", 0) or getattr(cfg_check, "default_tg", 0)
+        if cur_tg and cur_tg not in (0, 4000, 9990) and not any(x["talkgroup"] == cur_tg for x in dyn_ts2):
+            dyn_ts2.append({
+                "talkgroup": cur_tg,
+                "slot": 2,
+                "name": tg_resolver.get_name(cur_tg, network_type="tgif"),
+                "last_active": now,
+                "remaining_sec": 900
+            })
+        dyn_ts1.sort(key=lambda x: x["talkgroup"])
+        dyn_ts2.sort(key=lambda x: x["talkgroup"])
+
+        api_key = (cfg_check.bm_api_key or "").strip()
+        if not api_key:
+            return {
+                "status": "error",
+                "code": "NO_API_KEY",
+                "network_type": "tgif",
+                "detail": f"TGIF API Key не настроен для «{cfg_check.name}»",
+                "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
+                "callsign": cfg_check.callsign,
+                "hotspot_name": cfg_check.name,
+                "hotspot_id": cfg_check.id,
+                "ts1": [],
+                "ts2": [],
+                "dynamic_ts1": dyn_ts1,
+                "dynamic_ts2": dyn_ts2,
+                "tg_names": tg_resolver.get_all_names("tgif")
+            }
+
+        def _fetch_tgif():
+            import urllib.request, urllib.error
+            url = f"https://api.tgif.network/v1/static-talkgroups/{device_id_check}"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "ProxDMR/1.0",
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json"
+                }
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    static_groups = data.get("memberships") or data.get("static_groups", [])
+                    ts1 = []
+                    ts2 = []
+                    for sg in static_groups:
+                        slot_num = int(sg.get("slot") or sg.get("timeslot", 1))
+                        tg_num = int(sg.get("talkgroup", 0))
+                        if tg_num <= 0:
+                            continue
+                        item = {
+                            "talkgroup": tg_num,
+                            "slot": slot_num,
+                            "name": tg_resolver.get_name(tg_num, network_type="tgif")
+                        }
+                        if slot_num == 1:
+                            ts1.append(item)
+                        elif slot_num == 2:
+                            ts2.append(item)
+
+                    static_tgs_1 = {x["talkgroup"] for x in ts1}
+                    static_tgs_2 = {x["talkgroup"] for x in ts2}
+                    filtered_dyn_ts1 = [x for x in dyn_ts1 if x["talkgroup"] not in static_tgs_1]
+                    filtered_dyn_ts2 = [x for x in dyn_ts2 if x["talkgroup"] not in static_tgs_2]
+
+                    return {
+                        "status": "ok",
+                        "network_type": "tgif",
+                        "device_id": device_id_check,
+                        "callsign": cfg_check.callsign,
+                        "hotspot_name": cfg_check.name,
+                        "hotspot_id": cfg_check.id,
+                        "limit": data.get("limit", 5),
+                        "supports_ts1": data.get("supports_ts1", True),
+                        "supports_ts2": data.get("supports_ts2", True),
+                        "ts1": ts1,
+                        "ts2": ts2,
+                        "dynamic_ts1": filtered_dyn_ts1,
+                        "dynamic_ts2": filtered_dyn_ts2,
+                        "tg_names": tg_resolver.get_all_names("tgif")
+                    }
+            except urllib.error.HTTPError as e:
+                err_text = ""
+                try:
+                    err_json = json.loads(e.read().decode("utf-8", errors="ignore"))
+                    err_text = err_json.get("message") or err_json.get("error") or ""
+                except Exception:
+                    pass
+                if e.code in (401, 403):
+                    return {"status": "error", "code": "AUTH_FAILED", "network_type": "tgif", "detail": "Неверный токен TGIF (401)", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+                if e.code == 404:
+                    return {"status": "error", "code": "NOT_FOUND", "network_type": "tgif", "detail": f"Устройство {device_id_check} не найдено на сервере TGIF. Проверьте регистрацию и SSID.", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+                return {"status": "error", "network_type": "tgif", "detail": f"Ошибка TGIF API: HTTP {e.code} ({err_text or e.reason})", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+            except Exception as e:
+                return {"status": "error", "network_type": "tgif", "detail": f"Сервер TGIF недоступен ({e})", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+
+        return await asyncio.to_thread(_fetch_tgif)
+
+    elif net_type == "freedmr" and cfg_check:
+        if len(tg_resolver.freedmr_cache) < 50:
+            await tg_resolver.fetch_freedmr_catalog()
+
+        parsed = parse_freedmr_rpto(getattr(cfg_check, "rpto_options", "") or "")
+        ts1 = [
+            {
+                "talkgroup": tg_num,
+                "slot": 1,
+                "name": tg_resolver.get_name(tg_num, network_type="freedmr")
+            }
+            for tg_num in parsed["ts1"]
+        ]
+        ts2 = [
+            {
+                "talkgroup": tg_num,
+                "slot": 2,
+                "name": tg_resolver.get_name(tg_num, network_type="freedmr")
+            }
+            for tg_num in parsed["ts2"]
+        ]
+
+        local_dyn = hotspot_manager.get_dynamic_tgs(cfg_check.id, max_age_sec=900.0, user_id=uid)
+        now = time.time()
+        static_1 = set(parsed["ts1"])
+        static_2 = set(parsed["ts2"])
+        dyn_ts1 = []
+        dyn_ts2 = []
+        for tg, ts in local_dyn.get(1, {}).items():
+            if tg not in (0, 4000, 9990) and tg not in static_1:
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts1.append({
+                    "talkgroup": tg,
+                    "slot": 1,
+                    "name": tg_resolver.get_name(tg, network_type="freedmr"),
+                    "last_active": ts,
+                    "remaining_sec": rem
+                })
+        for tg, ts in local_dyn.get(2, {}).items():
+            if tg not in (0, 4000, 9990) and tg not in static_2:
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts2.append({
+                    "talkgroup": tg,
+                    "slot": 2,
+                    "name": tg_resolver.get_name(tg, network_type="freedmr"),
+                    "last_active": ts,
+                    "remaining_sec": rem
+                })
+        dyn_ts1.sort(key=lambda x: x["talkgroup"])
+        dyn_ts2.sort(key=lambda x: x["talkgroup"])
+
+        return {
+            "status": "ok",
+            "network_type": "freedmr",
+            "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
+            "callsign": cfg_check.callsign,
+            "hotspot_name": cfg_check.name,
+            "hotspot_id": cfg_check.id,
+            "rpto_options": getattr(cfg_check, "rpto_options", "") or "",
+            "rpto_extra": dict(parsed["opts"]),
+            "ts1": ts1,
+            "ts2": ts2,
+            "dynamic_ts1": dyn_ts1,
+            "dynamic_ts2": dyn_ts2,
+            "tg_names": tg_resolver.get_all_names("freedmr")
+        }
+
+    elif net_type == "xlx" and cfg_check:
+        mod = (getattr(cfg_check, "xlx_module", "") or "").strip().upper()[:1]
+        mod_tg = xlx_module_to_tg(mod) if mod else 0
+        ts2 = []
+        if mod and 4001 <= mod_tg <= 4026:
+            ts2.append({
+                "talkgroup": mod_tg,
+                "slot": 2,
+                "module": mod,
+                "name": f"Module {mod} (Активный модуль → TG 9)"
+            })
+        dyn_ts2 = [
+            {
+                "talkgroup": 9,
+                "slot": 2,
+                "name": "Reflector Call (TS2)",
+                "last_active": time.time(),
+                "remaining_sec": 900
+            }
+        ] if mod else []
+        return {
+            "status": "ok",
+            "network_type": "xlx",
+            "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
+            "callsign": cfg_check.callsign,
+            "hotspot_name": cfg_check.name,
+            "hotspot_id": cfg_check.id,
+            "xlx_module": mod,
+            "supports_ts1": False,
+            "supports_ts2": True,
+            "ts1": [],
+            "ts2": ts2,
+            "dynamic_ts1": [],
+            "dynamic_ts2": dyn_ts2,
+            "tg_names": tg_resolver.get_all_names("xlx")
+        }
+
+    elif net_type != "bm" and cfg_check:
+        local_dyn = hotspot_manager.get_dynamic_tgs(cfg_check.id, max_age_sec=900.0, user_id=uid)
+        now = time.time()
+        dyn_ts1 = []
+        dyn_ts2 = []
+        for tg, ts in local_dyn.get(1, {}).items():
+            if tg not in (0, 4000, 9990):
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts1.append({
+                    "talkgroup": tg,
+                    "slot": 1,
+                    "name": tg_resolver.get_name(tg, network_type=net_type),
+                    "last_active": ts,
+                    "remaining_sec": rem
+                })
+        for tg, ts in local_dyn.get(2, {}).items():
+            if tg not in (0, 4000, 9990):
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts2.append({
+                    "talkgroup": tg,
+                    "slot": 2,
+                    "name": tg_resolver.get_name(tg, network_type=net_type),
+                    "last_active": ts,
+                    "remaining_sec": rem
+                })
+        cur_tg = getattr(cfg_check, "default_tg_ts2", 0) or getattr(cfg_check, "default_tg", 0)
+        if cur_tg and cur_tg not in (0, 4000, 9990) and not any(x["talkgroup"] == cur_tg for x in dyn_ts2):
+            dyn_ts2.append({
+                "talkgroup": cur_tg,
+                "slot": 2,
+                "name": tg_resolver.get_name(cur_tg, network_type=net_type),
+                "last_active": now,
+                "remaining_sec": 900
+            })
+        dyn_ts1.sort(key=lambda x: x["talkgroup"])
+        dyn_ts2.sort(key=lambda x: x["talkgroup"])
+        return {
+            "status": "ok",
+            "network_type": net_type,
+            "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
+            "callsign": cfg_check.callsign,
+            "hotspot_name": cfg_check.name,
+            "hotspot_id": cfg_check.id,
+            "ts1": [],
+            "ts2": [],
+            "dynamic_ts1": dyn_ts1,
+            "dynamic_ts2": dyn_ts2,
+            "tg_names": tg_resolver.get_all_names(net_type)
+        }
+
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
     if err:
-        return {"status": "error", "detail": err, "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id or "---", "hotspot_id": hotspot_id}
+        return {"status": "error", "network_type": net_type, "detail": err, "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id or "---", "hotspot_id": hotspot_id}
 
     local_dyn = hotspot_manager.get_dynamic_tgs(cfg.id, max_age_sec=900.0, user_id=uid)
 
@@ -3294,6 +3889,7 @@ async def get_bm_static_groups(hotspot_id: Optional[str] = None, request: Reques
 
                 return {
                     "status": "ok",
+                    "network_type": "bm",
                     "device_id": device_id,
                     "callsign": cfg.callsign,
                     "hotspot_name": cfg.name,
@@ -3424,9 +4020,221 @@ async def add_bm_static_group(payload: dict, request: Request = None):
     if not tgs:
         raise HTTPException(status_code=400, detail="Не указаны TalkGroup для добавления")
 
+    cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
+    net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
+
+    if net_type == "freedmr" and cfg_check:
+        parsed = parse_freedmr_rpto(getattr(cfg_check, "rpto_options", "") or "")
+        target_list = parsed["ts1"] if slot == 1 else parsed["ts2"]
+        other_list = parsed["ts2"] if slot == 1 else parsed["ts1"]
+        added = []
+        errors = []
+        moved_from_other_slot = []
+        for tg in tgs:
+            if tg in (0, 4000, 9990):
+                errors.append(f"TG {tg}: служебная группа (не может быть статической)")
+                continue
+            if tg in other_list:
+                other_list.remove(tg)
+                moved_from_other_slot.append(tg)
+            if tg not in target_list:
+                target_list.append(tg)
+            added.append(tg)
+
+        # Simplex hotspot: FreeDMR only uses Slot 2
+        if not getattr(cfg_check, "duplex", True):
+            for tg in parsed["ts1"]:
+                if tg not in parsed["ts2"]:
+                    parsed["ts2"].append(tg)
+            parsed["ts1"] = []
+
+        new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"], prefer_slot=slot)
+        if len(new_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
+            return {
+                "status": "error",
+                "detail": f"Превышен лимит длины RPTO сервера FreeDMR ({FREEDMR_MAX_RPTO_BYTES} байт). Удалите часть групп."
+            }
+
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, rpto_options=new_rpto, user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+
+        return {
+            "status": "ok",
+            "network_type": "freedmr",
+            "slot": slot,
+            "added": added,
+            "moved_from_other_slot": moved_from_other_slot,
+            "errors": errors,
+            "talkgroup": added[0] if added else None,
+            "rpto_options": new_rpto,
+            "message": f"Добавлено статических групп в RPTO FreeDMR: {len(added)}"
+        }
+
+    if net_type == "xlx" and cfg_check:
+        target_tg = tgs[-1]
+        if target_tg == 4000:
+            await hotspot_manager.set_hotspot_rpto(cfg_check.id, xlx_module="", user_id=uid)
+            user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+            await save_user_settings(uid, user_sett.model_dump())
+            if uid == 1:
+                save_app_settings(user_sett)
+            return {
+                "status": "ok",
+                "network_type": "xlx",
+                "slot": 2,
+                "xlx_module": "",
+                "added": [],
+                "errors": [],
+                "message": f"Модуль XLX отключен (TG 4000)"
+            }
+        mod = xlx_tg_to_module(target_tg)
+        if not mod:
+            return {
+                "status": "error",
+                "detail": f"В сети XLX для выбора модуля укажите TG 4001–4026 (Модули A–Z)"
+            }
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, xlx_module=mod, user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        return {
+            "status": "ok",
+            "network_type": "xlx",
+            "slot": 2,
+            "xlx_module": mod,
+            "added": [xlx_module_to_tg(mod)],
+            "errors": [],
+            "talkgroup": xlx_module_to_tg(mod),
+            "message": f"Подключен модуль XLX {mod} (TG {xlx_module_to_tg(mod)}) на TS2"
+        }
+
+    if net_type == "dmrplus" and cfg_check:
+        target_tg = tgs[-1]
+        if slot == 2:
+            if target_tg == 4000:
+                await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector="", user_id=uid)
+                user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+                await save_user_settings(uid, user_sett.model_dump())
+                if uid == 1:
+                    save_app_settings(user_sett)
+                return {
+                    "status": "ok",
+                    "network_type": "dmrplus",
+                    "slot": 2,
+                    "dmrplus_reflector": "",
+                    "added": [],
+                    "errors": [],
+                    "message": "Рефлектор DMR+ отключен (4000 Unlink)"
+                }
+            if target_tg == 5000:
+                rt = hotspot_manager.get_runtime(uid, cfg_check.id)
+                if rt and getattr(rt, "status", None) == BMState.ONLINE:
+                    await hotspot_manager.send_dmrplus_reflector_link_dmr(cfg_check.id, "5000", user_id=uid)
+                return {
+                    "status": "ok",
+                    "network_type": "dmrplus",
+                    "slot": 2,
+                    "added": [],
+                    "errors": [],
+                    "message": "Запрос статуса рефлектора DMR+ (5000 Status)"
+                }
+            ref_str = str(target_tg)
+            await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector=ref_str, user_id=uid)
+            user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+            await save_user_settings(uid, user_sett.model_dump())
+            if uid == 1:
+                save_app_settings(user_sett)
+            return {
+                "status": "ok",
+                "network_type": "dmrplus",
+                "slot": 2,
+                "dmrplus_reflector": ref_str,
+                "added": [target_tg],
+                "errors": [],
+                "talkgroup": target_tg,
+                "message": f"Подключен рефлектор DMR+ {ref_str} на TS2 (Голос в TG 9)"
+            }
+        else:
+            cfg_check.default_tg_ts1 = target_tg
+            rt = hotspot_manager.get_runtime(uid, cfg_check.id)
+            if rt:
+                rt.config.default_tg_ts1 = target_tg
+            user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+            await save_user_settings(uid, user_sett.model_dump())
+            if uid == 1:
+                save_app_settings(user_sett)
+            return {
+                "status": "ok",
+                "network_type": "dmrplus",
+                "slot": 1,
+                "added": [target_tg],
+                "errors": [],
+                "talkgroup": target_tg,
+                "message": f"Установлена группа DMR+ TG {target_tg} на TS1"
+            }
+
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
     if err:
         return {"status": "error", "detail": err}
+
+    net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower()
+
+    if net_type == "tgif":
+        def _add_tgif():
+            import urllib.request, urllib.error, time
+            added = []
+            errors = []
+            for i, tg in enumerate(tgs):
+                if tg in (9, 777, 4000, 9990, 31000):
+                    errors.append(f"TG {tg}: служебная группа TGIF (вызывается только динамически через PTT)")
+                    continue
+                if i > 0:
+                    time.sleep(0.06)
+                url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}"
+                req_data = json.dumps({"slot": slot, "timeslot": slot, "talkgroup": tg}).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=req_data,
+                    headers={
+                        "User-Agent": "ProxDMR/1.0",
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=6) as resp:
+                        resp.read()
+                        added.append(tg)
+                except urllib.error.HTTPError as e:
+                    err_msg = ""
+                    try:
+                        err_json = json.loads(e.read().decode("utf-8", errors="ignore"))
+                        err_msg = err_json.get("message") or err_json.get("error") or ""
+                    except Exception:
+                        pass
+                    errors.append(f"TG {tg}: HTTP {e.code} ({err_msg or e.reason})")
+                except Exception as e:
+                    errors.append(f"TG {tg}: {e}")
+
+            if not added and errors:
+                return {"status": "error", "detail": "; ".join(errors[:5])}
+            return {
+                "status": "ok",
+                "network_type": "tgif",
+                "slot": slot,
+                "added": added,
+                "errors": errors,
+                "talkgroup": added[0] if added else None,
+                "message": f"Добавлено статических групп: {len(added)}"
+            }
+
+        return await asyncio.to_thread(_add_tgif)
 
     def _add_all():
         import urllib.request, urllib.error, time
@@ -3505,9 +4313,16 @@ async def start_bm_static_groups_import(payload: dict, request: Request = None):
             act_ru = "удаления" if cur_task.action == "delete" else "импорта"
             return {"status": "busy", "message": f"Фоновая операция {act_ru} групп уже выполняется", "task": cur_task.to_dict()}
 
-    cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
-    if err:
-        return {"status": "error", "detail": err}
+    cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
+    net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
+    if net_type not in ("freedmr", "xlx"):
+        cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
+        if err:
+            return {"status": "error", "detail": err}
+    else:
+        cfg = cfg_check
+        device_id = device_id_check or str(cfg.dmr_id or "")
+        api_key = ""
 
     task_id = str(uuid.uuid4())[:8]
     task = BmImportTask(
@@ -3517,7 +4332,8 @@ async def start_bm_static_groups_import(payload: dict, request: Request = None):
         slot=slot,
         talkgroups=tgs,
         filename=filename,
-        action=action
+        action=action,
+        network_type=net_type
     )
     _bm_import_tasks[task_id] = task
     _user_active_bm_import[uid] = task_id
@@ -3576,9 +4392,51 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
     if not tgs:
         raise HTTPException(status_code=400, detail="Не указаны TalkGroup для удаления")
 
+    cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
+    net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
+
+    if net_type == "freedmr" and cfg_check:
+        parsed = parse_freedmr_rpto(getattr(cfg_check, "rpto_options", "") or "")
+        target_list = parsed["ts1"] if slot == 1 else parsed["ts2"]
+        deleted = []
+        for tg in tgs:
+            if tg in target_list:
+                target_list.remove(tg)
+                deleted.append(tg)
+        new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"])
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, rpto_options=new_rpto, user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        return {
+            "status": "ok",
+            "network_type": "freedmr",
+            "deleted": deleted,
+            "errors": [],
+            "rpto_options": new_rpto,
+            "message": f"Удалено статических групп из RPTO FreeDMR: {len(deleted)}"
+        }
+
+    if net_type == "xlx" and cfg_check:
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, xlx_module="", user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        return {
+            "status": "ok",
+            "network_type": "xlx",
+            "xlx_module": "",
+            "deleted": tgs,
+            "message": "Модуль XLX отключен (TG 4000)"
+        }
+
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
     if err:
         return {"status": "error", "detail": err}
+
+    net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower()
 
     # Automatically offload batch deletion of more than 5 groups to background task
     if len(tgs) > 5 or payload.get("background"):
@@ -3597,7 +4455,8 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             slot=slot,
             talkgroups=tgs,
             filename="Пакетное удаление",
-            action="delete"
+            action="delete",
+            network_type=net_type
         )
         _bm_import_tasks[task_id] = task
         _user_active_bm_import[uid] = task_id
@@ -3608,6 +4467,55 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             "task": task.to_dict(),
             "message": f"Фоновое удаление {len(tgs)} групп запущено"
         }
+
+    if net_type == "tgif":
+        def _delete_tgif():
+            import urllib.request, urllib.error, json, time
+            deleted = []
+            errors = []
+            for i, tg in enumerate(tgs):
+                if i > 0:
+                    time.sleep(0.06)
+                url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}"
+                body_data = json.dumps({"slot": slot, "timeslot": slot, "talkgroup": tg}).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=body_data,
+                    headers={
+                        "User-Agent": "ProxDMR/1.0",
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    method="DELETE"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=6) as resp:
+                        resp.read()
+                        deleted.append(tg)
+                except urllib.error.HTTPError as e:
+                    err_text = ""
+                    try:
+                        err_json = json.loads(e.read().decode("utf-8"))
+                        err_text = err_json.get("message") or err_json.get("error") or ""
+                    except Exception:
+                        pass
+                    msg = f"TG {tg}: {err_text}" if err_text else f"TG {tg}: HTTP {e.code}"
+                    errors.append(msg)
+                except Exception as e:
+                    errors.append(f"TG {tg}: {e}")
+
+            if not deleted and errors:
+                return {"status": "error", "detail": "; ".join(errors[:5])}
+            return {
+                "status": "ok",
+                "deleted": deleted,
+                "errors": errors,
+                "message": f"Удалено статических групп: {len(deleted)}"
+            }
+
+        # For TGIF, do NOT schedule reconnect!
+        return await asyncio.to_thread(_delete_tgif)
 
     def _delete_all():
         import urllib.request, urllib.error, time
@@ -3659,9 +4567,118 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
     payload = payload or {}
     hotspot_id = payload.get("hotspot_id")
     slot = payload.get("slot")
+    quick_ptt_unlink = bool(payload.get("quick_ptt_unlink"))
     slots_to_drop = [int(slot)] if slot in (1, 2) else [1, 2]
 
+    cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
+    net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
+    if net_type == "tgif" and cfg_check:
+        for s in slots_to_drop:
+            hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=s, user_id=uid)
+            hotspot_manager.send_silent_unlink_dmr(cfg_check.id, slot=s, user_id=uid)
+            try:
+                import urllib.request
+                sess_url = f"http://tgif.network:5040/api/sessions/update/{device_id_check}/{s - 1}/4000"
+                req_sess = urllib.request.Request(sess_url, headers={"User-Agent": "ProxDMR/1.0"})
+                with urllib.request.urlopen(req_sess, timeout=1.5) as r:
+                    r.read()
+            except Exception:
+                pass
+        return {
+            "status": "ok",
+            "hotspot_id": cfg_check.id,
+            "hotspot_name": cfg_check.name,
+            "device_id": device_id_check or str(cfg_check.dmr_id or ""),
+            "dropped_slots": slots_to_drop,
+            "dmr_4000_sent": True,
+            "message": f"Динамические группы сброшены для {cfg_check.name} (TGIF)"
+        }
+    elif net_type == "freedmr" and cfg_check:
+        for s in slots_to_drop:
+            hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=s, user_id=uid)
+            hotspot_manager.send_silent_unlink_dmr(cfg_check.id, slot=s, user_id=uid)
+        return {
+            "status": "ok",
+            "hotspot_id": cfg_check.id,
+            "hotspot_name": cfg_check.name,
+            "device_id": device_id_check or str(cfg_check.dmr_id or ""),
+            "dropped_slots": slots_to_drop,
+            "dmr_4000_sent": True,
+            "message": f"Динамические группы сброшены (TG 4000) для {cfg_check.name} (FreeDMR)"
+        }
+    elif net_type == "xlx" and cfg_check:
+        hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=2, user_id=uid)
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, xlx_module="", user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        return {
+            "status": "ok",
+            "hotspot_id": cfg_check.id,
+            "hotspot_name": cfg_check.name,
+            "device_id": device_id_check or str(cfg_check.dmr_id or ""),
+            "dropped_slots": [2],
+            "dmr_4000_sent": True,
+            "message": f"Модуль XLX отключен (TG 4000) для {cfg_check.name}"
+        }
+    elif net_type != "bm" and cfg_check:
+        for s in slots_to_drop:
+            hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=s, user_id=uid)
+            hotspot_manager.send_silent_unlink_dmr(cfg_check.id, slot=s, user_id=uid)
+        return {
+            "status": "ok",
+            "hotspot_id": cfg_check.id,
+            "hotspot_name": cfg_check.name,
+            "device_id": device_id_check or str(cfg_check.dmr_id or ""),
+            "dropped_slots": slots_to_drop,
+            "dmr_4000_sent": True,
+            "message": f"Динамические группы сброшены (TG 4000) для {cfg_check.name} ({net_type.upper()})"
+        }
+
+    # For BM network:
+    # 1. Always send HomeBrew silent unlink DMR burst (TG 4000) on each slot
+    if cfg_check:
+        for s in slots_to_drop:
+            hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=s, user_id=uid)
+            hotspot_manager.send_silent_unlink_dmr(cfg_check.id, slot=s, user_id=uid)
+
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
+
+    # If quick_ptt_unlink is True:
+    if quick_ptt_unlink:
+        if api_key and device_id:
+            # Fire and forget BM API drop in background without scheduling reconnect
+            def _bg_drop_bm_api(dev_id, key, slots):
+                import urllib.request, urllib.error
+                for s in slots:
+                    url = f"https://api.brandmeister.network/v2/device/{dev_id}/action/dropDynamicGroups/{s}"
+                    req = urllib.request.Request(
+                        url,
+                        headers={
+                            "User-Agent": "ProxDMR/0.1",
+                            "Authorization": f"Bearer {key}",
+                            "Accept": "application/json"
+                        }
+                    )
+                    try:
+                        with urllib.request.urlopen(req, timeout=4) as resp:
+                            resp.read()
+                    except Exception as e:
+                        logger.debug(f"[BM_DROP_API] Async drop TS{s} warning: {e}")
+            asyncio.create_task(asyncio.to_thread(_bg_drop_bm_api, device_id, api_key, slots_to_drop))
+
+        return {
+            "status": "ok",
+            "hotspot_id": cfg_check.id if cfg_check else (cfg.id if cfg else hotspot_id),
+            "hotspot_name": cfg_check.name if cfg_check else (cfg.name if cfg else ""),
+            "device_id": device_id_check or str(getattr(cfg_check, "dmr_id", "") or device_id or ""),
+            "dropped_slots": slots_to_drop,
+            "dmr_4000_sent": True,
+            "message": f"Отправлен посыл TG 4000 ({', '.join(f'TS{s}' for s in slots_to_drop)}) для {(cfg_check.name if cfg_check else '')}"
+        }
+
+    # Standard drop via BM API (when called from modal / UI button)
     if err:
         return {"status": "error", "detail": err}
 
@@ -3723,6 +4740,9 @@ async def get_bm_summary(
     import concurrent.futures, urllib.request, urllib.error, urllib.parse
 
     cfg, hs_device_id, hs_api_key, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
+    net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower() if cfg else "bm"
+    if net_type == "tgif" and len(tg_resolver.tgif_cache) < 50:
+        await tg_resolver.fetch_tgif_catalog()
     clean_id = str(target_id).strip()
     clean_call = str(callsign).strip().upper() if callsign else ""
     t_type = str(target_type or "AUTO").strip().upper()
@@ -3756,18 +4776,19 @@ async def get_bm_summary(
                 pass
 
         # 2. Concurrently query primary BM & RadioID endpoints
+        is_bm = (net_type == "bm")
         with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
-            f_tg = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/talkgroup/{clean_id}")
-            f_reg = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/registry/{clean_id}")
+            f_tg = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/talkgroup/{clean_id}") if is_bm else None
+            f_reg = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/registry/{clean_id}") if is_bm else None
             f_radio_user = ex.submit(_fetch_url, f"https://database.radioid.net/api/dmr/user/?id={clean_id}") if (clean_id.isdigit() and len(clean_id) >= 5) else None
             f_radio_rep = ex.submit(_fetch_url, f"https://database.radioid.net/api/dmr/repeater/?id={clean_id}") if (clean_id.isdigit() and len(clean_id) in (6, 7)) else None
-            f_dev_direct = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/{clean_id}") if (clean_id.isdigit() and len(clean_id) >= 6) else None
-            f_prof_direct = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/{clean_id}/profile") if (clean_id.isdigit() and len(clean_id) >= 6) else None
-            f_hs_subs = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/{hs_device_id}/talkgroup", hs_api_key) if hs_device_id else None
-            f_dev_by_call = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/byCall?callsign={urllib.parse.quote(res_call)}") if res_call else None
+            f_dev_direct = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/{clean_id}") if (is_bm and clean_id.isdigit() and len(clean_id) >= 6) else None
+            f_prof_direct = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/{clean_id}/profile") if (is_bm and clean_id.isdigit() and len(clean_id) >= 6) else None
+            f_hs_subs = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/{hs_device_id}/talkgroup", hs_api_key) if (is_bm and hs_device_id) else None
+            f_dev_by_call = ex.submit(_fetch_url, f"https://api.brandmeister.network/v2/device/byCall?callsign={urllib.parse.quote(res_call)}") if (is_bm and res_call) else None
 
-            tg_res = f_tg.result()
-            reg_res = f_reg.result()
+            tg_res = f_tg.result() if f_tg else None
+            reg_res = f_reg.result() if f_reg else None
             radio_user_res = f_radio_user.result() if f_radio_user else None
             radio_rep_res = f_radio_rep.result() if f_radio_rep else None
             dev_direct_res = f_dev_direct.result() if f_dev_direct else None
@@ -3832,7 +4853,7 @@ async def get_bm_summary(
             for d in dev_by_call_res:
                 if isinstance(d, dict) and d.get("id") and not any(existing.get("id") == d.get("id") for existing in dev_list):
                     dev_list.append(d)
-        elif res_call and not dev_by_call_res:
+        elif is_bm and res_call and not dev_by_call_res:
             extra_devs = _fetch_url(f"https://api.brandmeister.network/v2/device/byCall?callsign={urllib.parse.quote(res_call)}")
             if isinstance(extra_devs, list):
                 for d in extra_devs:
@@ -3840,7 +4861,7 @@ async def get_bm_summary(
                         dev_list.append(d)
 
         # Also if reg_data was empty by ID but we resolved callsign, look up registry by callsign
-        if not reg_data and res_call:
+        if is_bm and not reg_data and res_call:
             by_call_reg = _fetch_url(f"https://api.brandmeister.network/v2/registry/byCall/{urllib.parse.quote(res_call)}")
             if isinstance(by_call_reg, list) and by_call_reg:
                 reg_data = by_call_reg[0]
@@ -3848,7 +4869,7 @@ async def get_bm_summary(
                 reg_data = by_call_reg
 
         # If no device profile yet, but we found devices, fetch profile of the first device
-        if not prof_data and dev_list:
+        if is_bm and not prof_data and dev_list:
             first_dev_id = dev_list[0].get("id")
             if first_dev_id:
                 p_res = _fetch_url(f"https://api.brandmeister.network/v2/device/{first_dev_id}/profile")
@@ -3893,8 +4914,10 @@ async def get_bm_summary(
                     matched_slot = 1
                 break
 
-        local_name = tg_resolver.get_name(target_tg_num) if target_tg_num > 0 else ""
-        tg_display_name = tg_data.get("Name") or local_name or ""
+        local_name = tg_resolver.get_name(target_tg_num, network_type=net_type) if target_tg_num > 0 else ""
+        if local_name and local_name in (f"TG {target_tg_num}", "Группа BrandMeister", "Группа BM"):
+            local_name = ""
+        tg_display_name = (tg_data.get("Name") if is_bm else "") or local_name or ""
 
         # Dates
         valid_created = [d.get("created_at") for d in dev_list if isinstance(d, dict) and d.get("created_at")]
@@ -3905,7 +4928,7 @@ async def get_bm_summary(
         # 8. Classification
         has_operator = bool(reg_data.get("Call") or reg_data.get("Name") or radioid_user_info)
         has_device = bool(dev_list or radioid_rep_info)
-        has_tg = bool(tg_data.get("ID") or tg_data.get("Name") or local_name)
+        has_tg = bool((is_bm and (tg_data.get("ID") or tg_data.get("Name"))) or local_name)
 
         is_repeater = False
         if radioid_rep_info:
@@ -3920,7 +4943,7 @@ async def get_bm_summary(
             detected_label = "DMR ID радиолюбителя / оператора"
         elif is_repeater:
             detected_type = "repeater"
-            detected_label = "Репитер DMR BrandMeister"
+            detected_label = "Репитер DMR" if not is_bm else "Репитер DMR BrandMeister"
         elif has_device and not has_operator:
             detected_type = "hotspot"
             detected_label = "Персональный хотспот MMDVM"
@@ -3942,6 +4965,7 @@ async def get_bm_summary(
 
         return {
             "status": "ok",
+            "network_type": net_type,
             "target_type": detected_type.upper(),
             "target_id": clean_id,
             "callsign": res_call or reg_data.get("Call") or "",
@@ -3975,12 +4999,12 @@ async def get_bm_summary(
             "talkgroup": {
                 "id": target_tg_num,
                 "name": tg_display_name,
-                "bm_name": tg_data.get("Name") or "",
+                "bm_name": tg_data.get("Name") or "" if is_bm else local_name,
                 "local_name": local_name,
-                "is_registered": bool(tg_data.get("ID") or tg_data.get("Name")),
+                "is_registered": bool((is_bm and (tg_data.get("ID") or tg_data.get("Name"))) or local_name),
                 "is_subscribed": bool(matched_slot),
                 "slot": matched_slot,
-                "description": tg_data.get("description") or ""
+                "description": (tg_data.get("description") if is_bm else "") or ""
             },
             "radioid": radioid_user_info,
             "registry": reg_data,
@@ -4215,14 +5239,27 @@ async def get_bm_info(
 
 @app.get("/api/health")
 async def get_health():
+    _prune_dead_ws_clients()
     total_online = 0
     total_hs = 0
     try:
         for u in hotspot_manager.user_runtimes.values():
-            for rt in u.values():
-                total_hs += 1
-                if getattr(rt.status, 'value', str(rt.status)).lower() == 'online':
-                    total_online += 1
+            total_hs += len(u)
+        for ws in list(connected_clients):
+            uid = ws_user_map.get(ws)
+            if not uid:
+                continue
+            user_rts = hotspot_manager.user_runtimes.get(uid, {})
+            active_hids = ws_active_hotspots.get(ws)
+            if active_hids is not None:
+                for hid in list(active_hids):
+                    rt = user_rts.get(hid)
+                    if rt and getattr(rt.status, 'value', str(rt.status)).lower() == 'online':
+                        total_online += 1
+            else:
+                for rt in user_rts.values():
+                    if not getattr(rt.config, 'collapsed', False) and getattr(rt.status, 'value', str(rt.status)).lower() == 'online':
+                        total_online += 1
     except Exception:
         pass
     return {
@@ -5127,13 +6164,55 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     ws_user_id = ws_user["user_id"]
     ws_login = ws_user.get("login", "")
     client_id = f"{websocket.client.host}:{websocket.client.port}"
-    # Prune stale/disconnected sockets from connected_clients
-    dead = {s for s in connected_clients if s.client_state != WebSocketState.CONNECTED}
-    connected_clients.difference_update(dead)
-    for ws in dead:
-        dead_uid = ws_user_map.pop(ws, None)
-        if dead_uid and dead_uid in user_clients:
-            user_clients[dead_uid].discard(ws)
+    # Prune stale/disconnected sockets from connected_clients and user_clients
+    def _prune_stale_ws():
+        dead = {
+            s for s in list(connected_clients)
+            if s.client_state != WebSocketState.CONNECTED or s.application_state != WebSocketState.CONNECTED
+        }
+        connected_clients.difference_update(dead)
+        for ws_dead in dead:
+            dead_uid = ws_user_map.pop(ws_dead, None)
+            if dead_uid and dead_uid in user_clients:
+                user_clients[dead_uid].discard(ws_dead)
+        if ws_user_id in user_clients:
+            stale_u = {
+                s for s in list(user_clients[ws_user_id])
+                if s.client_state != WebSocketState.CONNECTED or s.application_state != WebSocketState.CONNECTED
+            }
+            user_clients[ws_user_id].difference_update(stale_u)
+            for ws_s in stale_u:
+                connected_clients.discard(ws_s)
+                ws_user_map.pop(ws_s, None)
+
+    _prune_stale_ws()
+    MAX_CONNECTIONS_PER_USER = 3
+    if len(user_clients.get(ws_user_id, set())) >= MAX_CONNECTIONS_PER_USER:
+        # Short grace yield in case a page refresh (F5) is closing an existing tab socket right now
+        await asyncio.sleep(0.12)
+        _prune_stale_ws()
+
+    active_user_sockets = user_clients.get(ws_user_id, set())
+    if len(active_user_sockets) >= MAX_CONNECTIONS_PER_USER:
+        logger.warning(
+            f"[WS] Connection rejected for {client_id} (user={ws_login}, id={ws_user_id}): "
+            f"limit {MAX_CONNECTIONS_PER_USER} reached ({len(active_user_sockets)} active)"
+        )
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "session_limit_exceeded",
+                "max_connections": MAX_CONNECTIONS_PER_USER,
+                "active_connections": len(active_user_sockets),
+                "login": ws_login
+            }))
+        except Exception:
+            pass
+        try:
+            await websocket.close(code=4008, reason="Connection limit reached (max 3)")
+        except Exception:
+            pass
+        return
+
     connected_clients.add(websocket)
     if ws_user_id not in user_clients:
         user_clients[ws_user_id] = set()
@@ -5142,6 +6221,10 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     logger.info(f"[WS] Client connected: {client_id} (user={ws_login}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
 
     user_settings = await ensure_active_user(ws_user_id, ws_login)
+    ws_active_hotspots[websocket] = {
+        rt.config.id for rt in hotspot_manager.get_user_runtimes(ws_user_id).values()
+        if not getattr(rt.config, "collapsed", False)
+    }
     u_radio_state = get_user_radio_state(ws_user_id)
 
     active_hs = hotspot_manager.get_active_runtime(ws_user_id)
@@ -5182,6 +6265,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         "bm_ping_history": bm_ping_service.get_history_dict(hours=24.0),
         "bm_benchmark_results": bm_ping_service.get_benchmark_results(),
         "bm_benchmark_running": bm_ping_service.is_benchmark_running(),
+        "server_probe_cache": server_probe_service._cache,
+        "server_probe_running": server_probe_service.is_probe_running(),
         "client_ping_history": client_ping_service.get_history_list(hours=6.0),
         "client_rtt": client_ping_service.current_rtt,
         "client_packet_loss": client_ping_service.get_packet_loss(),
@@ -5778,7 +6863,24 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     collapsed = bool(data.get("collapsed", False))
                     target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
                     if target_hs:
-                        await hotspot_manager.set_hotspot_collapsed(target_hs.config.id, collapsed, user_id=ws_user_id)
+                        real_hid = target_hs.config.id
+                        hset = ws_active_hotspots.setdefault(websocket, set())
+                        if collapsed:
+                            hset.discard(real_hid)
+                            if not _is_hotspot_open_on_any_client(ws_user_id, real_hid, exclude_ws=websocket):
+                                await hotspot_manager.set_hotspot_collapsed(real_hid, True, user_id=ws_user_id)
+                        else:
+                            hset.add(real_hid)
+                            await hotspot_manager.set_hotspot_collapsed(real_hid, False, user_id=ws_user_id)
+                            try:
+                                await websocket.send_text(json.dumps({
+                                    "type": "bm_status",
+                                    "hotspot_id": real_hid,
+                                    "status": target_hs.status.value,
+                                    "detail": target_hs.detail
+                                }))
+                            except Exception:
+                                pass
 
 
                 elif msg_type == "sync_settings":
@@ -5795,6 +6897,40 @@ async def websocket_radio_endpoint(websocket: WebSocket):
 
                 elif msg_type == "cancel_bm_benchmark":
                     bm_ping_service.cancel_benchmark()
+
+                elif msg_type == "start_server_probe":
+                    net = (data.get("network_type") or "freedmr").strip().lower()
+                    if net == "bm":
+                        masters_data = await get_bm_masters()
+                        servers = masters_data.get("masters", [])
+                    elif net == "freedmr":
+                        await freedmr_hosts_mgr.fetch_hosts(force=False)
+                        servers = freedmr_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+                    elif net == "tgif":
+                        servers = list(KNOWN_TGIF_SERVERS)
+                    elif net == "dmrplus":
+                        servers = list(KNOWN_DMRPLUS_SERVERS)
+                    elif net == "xlx":
+                        await xlx_hosts_mgr.fetch_hosts(force=False)
+                        servers = xlx_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+                    else:
+                        servers = []
+                    probe_id = 123456799
+                    u_sett = hotspot_manager.user_settings.get(ws_user_id, hotspot_manager.settings)
+                    if u_sett and hasattr(u_sett, "hotspots") and u_sett.hotspots:
+                        bid = u_sett.hotspots[0].dmr_id
+                        if bid and bid > 0:
+                            probe_id = bid * 100 + 99
+                    await server_probe_service.start_probe(
+                        network_type=net,
+                        servers=servers,
+                        probe_id=probe_id,
+                        broadcast_cb=broadcast_json
+                    )
+
+                elif msg_type == "cancel_server_probe":
+                    net = data.get("network_type")
+                    server_probe_service.cancel_probe(net)
 
                 elif msg_type == "bm_reconnect":
                     hid = data.get("hotspot_id")
@@ -5843,11 +6979,16 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         logger.error(f"[WS] Error on {client_id}: {e}")
     finally:
         connected_clients.discard(websocket)
+        removed_hids = ws_active_hotspots.pop(websocket, set())
         disc_uid = ws_user_map.pop(websocket, None)
         if disc_uid and disc_uid in user_clients:
             user_clients[disc_uid].discard(websocket)
             if not user_clients[disc_uid]:
                 user_clients.pop(disc_uid, None)
+            else:
+                for r_hid in list(removed_hids):
+                    if not _is_hotspot_open_on_any_client(disc_uid, r_hid):
+                        await hotspot_manager.set_hotspot_collapsed(r_hid, True, user_id=disc_uid)
         if u_radio_state.transmitting_client_id == client_id:
             await hotspot_manager.stop_tx(user_id=ws_user_id)
             u_radio_state.is_transmitting = False

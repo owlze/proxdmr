@@ -111,7 +111,12 @@ export function setSimultaneousSlotsEnabled(enabled, syncServer = true) {
   const boolVal = Boolean(enabled);
   localStorage.setItem("proxdmr_simultaneous_slots", boolVal ? "true" : "false");
   if (typeof window !== "undefined" && typeof window.setHotspotTsAudioMode === "function") {
-    window.setHotspotTsAudioMode("default", boolVal ? "doubl" : "solo");
+    const curMode = (typeof window.getHotspotTsAudioMode === "function") ? window.getHotspotTsAudioMode("default") : null;
+    if (boolVal && curMode === "auto") {
+      // Preserve "auto" mode! Both slots are active, but with dynamic handover.
+    } else {
+      window.setHotspotTsAudioMode("default", boolVal ? "doubl" : "solo");
+    }
   }
   if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
     window.scheduleSyncClientSettings();
@@ -644,6 +649,9 @@ export async function collapseHotspot(hid, options = {}) {
 
     renderHotspotsList();
     renderHotspotSelect();
+    if (typeof window !== "undefined" && typeof window.syncCollapsedHotspotStacks === "function") {
+      window.syncCollapsedHotspotStacks();
+    }
 
     const hsName = hs ? (hs.name || cid) : cid;
     showToast(window.t ? window.t("hotspots.collapsed_bg_toast", { name: hsName }, `Хотспот [${hsName}] свернут, но продолжает работать в фоне`) : `Хотспот [${hsName}] свернут, но продолжает работать в фоне`, 3500);
@@ -703,6 +711,9 @@ export async function collapseHotspot(hid, options = {}) {
   }
   renderHotspotsList();
   renderHotspotSelect();
+  if (typeof window !== "undefined" && typeof window.syncCollapsedHotspotStacks === "function") {
+    window.syncCollapsedHotspotStacks();
+  }
 
   // 5. Disconnect from BrandMeister network via WS (or REST fallback) for this collapsed hotspot
   if (typeof window !== "undefined" && typeof window.disableHotspotTranscribe === "function") {
@@ -813,6 +824,9 @@ export async function expandHotspot(hid) {
   switchActiveHotspot(cid);
   renderHotspotsList();
   renderHotspotSelect();
+  if (typeof window !== "undefined" && typeof window.syncCollapsedHotspotStacks === "function") {
+    window.syncCollapsedHotspotStacks();
+  }
 
   if (wasLive) {
     // If it was already live in background, it's already connected to BM!

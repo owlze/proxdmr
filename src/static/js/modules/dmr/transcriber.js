@@ -712,10 +712,13 @@ function ensurePipelineStage(row) {
   if (!row) return null;
   let stageBox = row.querySelector(".vfo-pipeline-stage");
   if (!stageBox) {
+    const tAsr = window.t ? window.t("vfo.pipeline_asr_title", {}, "Транскрибация речи (ASR)") : "Транскрибация речи (ASR)";
+    const tTrans = window.t ? window.t("vfo.pipeline_trans_title", {}, "Перевод текста") : "Перевод текста";
+    const tTts = window.t ? window.t("vfo.pipeline_tts_title", {}, "Синтез речи (TTS)") : "Синтез речи (TTS)";
     stageBox = document.createElement("div");
     stageBox.className = "vfo-pipeline-stage";
     stageBox.innerHTML = `
-      <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)">
+      <div class="vfo-pipeline-icon icon-mic" title="${tAsr}" data-i18n-title="vfo.pipeline_asr_title">
         <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
           <line x1="9" y1="5" x2="15" y2="5"/>
@@ -725,7 +728,7 @@ function ensurePipelineStage(row) {
           <line x1="8" y1="21" x2="16" y2="21"/>
         </svg>
       </div>
-      <div class="vfo-pipeline-icon icon-trans" title="Перевод текста">
+      <div class="vfo-pipeline-icon icon-trans" title="${tTrans}" data-i18n-title="vfo.pipeline_trans_title">
         <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="17 1 21 5 17 9"/>
           <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
@@ -733,7 +736,7 @@ function ensurePipelineStage(row) {
           <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
         </svg>
       </div>
-      <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)">
+      <div class="vfo-pipeline-icon icon-tts" title="${tTts}" data-i18n-title="vfo.pipeline_tts_title">
         <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
           <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
@@ -964,21 +967,47 @@ function refreshAllSlotTtsBadges(customLangCode = null) {
 window.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
 if (window.__proxdmr) window.__proxdmr.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
 
+function getSoloMutedHsSet() {
+  if (typeof window === "undefined") return new Set();
+  if (window._ttsSoloMutedHotspots instanceof Set) return window._ttsSoloMutedHotspots;
+  const s = new Set();
+  try {
+    const raw = localStorage.getItem("proxdmr_tts_solo_muted_hs");
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) arr.forEach(k => s.add(k));
+    }
+  } catch (_) {}
+  window._ttsSoloMutedHotspots = s;
+  return s;
+}
+
+function saveSoloMutedHsSet(s) {
+  if (typeof window === "undefined") return;
+  window._ttsSoloMutedHotspots = s;
+  try {
+    if (!s || s.size === 0) {
+      localStorage.removeItem("proxdmr_tts_solo_muted_hs");
+    } else {
+      localStorage.setItem("proxdmr_tts_solo_muted_hs", JSON.stringify(Array.from(s)));
+    }
+  } catch (_) {}
+}
+
 /**
  * Synchronizes TTS Solo Mode across all audio channels/slots.
- * When Solo mode is active and any slot has TTS turned ON:
- * - All other channels across all hotspots are muted immediately (setHotspotMute(hid, slot, true))
- *   and their VFO mute buttons display 🔇.
- * - Only the active TTS translation slot(s) remain unmuted.
- * - When TTS is turned OFF on that slot (or Solo mode is unchecked), all channels that were
- *   muted specifically by Solo mode are restored/unmuted back to their previous state.
- * - Pre-existing manual mutes set prior to Solo mode are preserved.
+ * - On any hotspot where real-time TTS is active on TS1 or TS2:
+ *   that hotspot is switched to Solo mode, the active TTS slot is unmuted, and the opposite TS on that hotspot is muted.
+ * - Other hotspots are muted ONLY if "Solo" (tts_mute_others) is enabled in TTS settings.
+ * - When TTS is turned OFF (or "Solo" is unchecked in TTS settings), other hotspots that were
+ *   muted specifically by TTS Solo mode are restored to their previous state.
  */
 function syncTtsSoloMode() {
   const s = window.transcriberSettings || {};
   const soloEnabled = (s.tts_mute_others !== false);
 
   const soloSet = (typeof getSoloMutedSet === "function") ? getSoloMutedSet() : (window._ttsSoloMutedSlots || new Set());
+  const soloHsSet = getSoloMutedHsSet();
 
   // 1. Gather all hotspots
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
@@ -997,65 +1026,101 @@ function syncTtsSoloMode() {
 
   // 2. Find which slots have TTS active
   const activeTtsSlots = [];
+  const activeTtsHids = new Set();
   hidSet.forEach(hid => {
     [1, 2].forEach(slot => {
       if (isSlotTtsActive(hid, slot)) {
         activeTtsSlots.push({ hid, slot, key: `${hid}_ts${slot}` });
+        activeTtsHids.add(hid);
       }
     });
   });
 
-  const shouldSolo = soloEnabled && (activeTtsSlots.length > 0);
+  // 2.5. Restore pre-TTS audio mode for any hotspot that no longer has an active TTS slot
+  if (window._preTtsAudioModes) {
+    Object.keys(window._preTtsAudioModes).forEach(h => {
+      if (!activeTtsHids.has(h)) {
+        const prevMode = window._preTtsAudioModes[h];
+        delete window._preTtsAudioModes[h];
+        if (prevMode && typeof setHotspotTsAudioMode === "function") {
+          setHotspotTsAudioMode(h, prevMode);
+        }
+      }
+    });
+  }
 
-  if (shouldSolo) {
-    // Solo is active!
-    hidSet.forEach(hid => {
-      // In "doubl" mode, respect simultaneous dual audio and do not auto-mute other slots!
-      const mode = (typeof getHotspotTsAudioMode === "function") ? getHotspotTsAudioMode(hid) : "doubl";
-      if (mode === "doubl") {
-        [1, 2].forEach(slot => {
-          const slotKey = `${hid}_ts${slot}`;
-          if (soloSet.has(slotKey)) {
-            soloSet.delete(slotKey);
-          }
-          if (hid === "default" && soloSet.has(`default_ts${slot}`)) {
-            soloSet.delete(`default_ts${slot}`);
-          }
-        });
-        return;
+  // 3. Enforce Solo mode & slot mutes on every hotspot that has an active TTS slot
+  activeTtsSlots.forEach(({ hid, slot }) => {
+    const otherSlot = slot === 1 ? 2 : 1;
+
+    // Remove this hotspot's slots from temporary soloSet (its slots are controlled by its own Solo mode)
+    [1, 2].forEach(sl => {
+      soloSet.delete(`${hid}_ts${sl}`);
+      if (hid === resolveHotspotId("default")) {
+        soloSet.delete(`default_ts${sl}`);
+      }
+    });
+
+    // Ensure this hotspot's master audio is unmuted
+    if (soloHsSet.has(hid)) {
+      soloHsSet.delete(hid);
+    }
+    if (typeof window.isHotspotAudioMuted === "function" && window.isHotspotAudioMuted(hid) && typeof window.setHotspotAudioMute === "function") {
+      window.setHotspotAudioMute(hid, false);
+    }
+
+    // Ensure this hotspot is in Solo TS mode
+    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
+      window._preTtsAudioModes = window._preTtsAudioModes || {};
+      const curMode = getHotspotTsAudioMode(hid);
+      if (!window._preTtsAudioModes[hid]) {
+        window._preTtsAudioModes[hid] = curMode;
+      }
+      if (curMode !== "solo") {
+        setHotspotTsAudioMode(hid, "solo");
+      }
+    }
+
+    // Ensure target TS is unmuted and the other TS on this hotspot is muted
+    if (getHotspotMute(hid, slot)) {
+      setHotspotMute(hid, slot, false);
+    }
+    if (!getHotspotMute(hid, otherSlot)) {
+      setHotspotMute(hid, otherSlot, true);
+    }
+  });
+
+  // 4. Handle OTHER hotspots (where TTS is NOT active)
+  const shouldMuteOtherHotspots = soloEnabled && (activeTtsSlots.length > 0);
+
+  if (shouldMuteOtherHotspots) {
+    hidSet.forEach(otherHid => {
+      if (activeTtsHids.has(otherHid)) return;
+
+      // Mute other hotspot master audio if not already muted
+      if (typeof window.isHotspotAudioMuted === "function" && typeof window.setHotspotAudioMute === "function") {
+        if (!window.isHotspotAudioMuted(otherHid)) {
+          soloHsSet.add(otherHid);
+          window.setHotspotAudioMute(otherHid, true);
+        }
       }
 
+      // Temporarily mute both slots on other hotspot if not persistently muted
       [1, 2].forEach(slot => {
-        const slotKey = `${hid}_ts${slot}`;
-        const isTts = activeTtsSlots.some(t => t.hid === hid && t.slot === slot);
-
-        if (isTts) {
-          // This is a speech translation channel.
-          // Ensure it is NOT marked in soloSet
-          if (soloSet.has(slotKey)) {
-            soloSet.delete(slotKey);
-          }
-          const getMuteFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
-          if (getMuteFn(hid, slot)) {
-            setHotspotMute(hid, slot, false, true);
-          }
-        } else {
-          // This is an other channel.
-          // Set temporary mute (isTemporary = true) so it does NOT affect localStorage or server DB
-          const getPersistFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
-          const wasAlreadyMuted = getPersistFn(hid, slot);
-          if (wasAlreadyMuted) {
-            setHotspotMute(hid, slot, true, true);
-          }
+        const getPersistFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
+        const wasPersistentlyMuted = getPersistFn(otherHid, slot);
+        if (!wasPersistentlyMuted) {
+          setHotspotMute(otherHid, slot, true, true);
         }
       });
     });
     if (typeof saveSoloMutedSet === "function") {
       saveSoloMutedSet(soloSet);
     }
+    saveSoloMutedHsSet(soloHsSet);
   } else {
-    // Solo is NOT active (either soloEnabled is false or no slots have TTS enabled)
-    // Restore all channels that were muted by Solo mode back to their persistent states
+    // Either TTS Solo ("tts_mute_others") is disabled in settings, or no slots have TTS enabled:
+    // Restore all other hotspots/slots that were muted by TTS Solo mode
     if (soloSet.size > 0) {
       const toRestore = Array.from(soloSet);
       soloSet.clear();
@@ -1066,6 +1131,7 @@ function syncTtsSoloMode() {
         const idx = slotKey.lastIndexOf("_ts");
         if (idx !== -1) {
           const hid = slotKey.substring(0, idx);
+          if (activeTtsHids.has(hid)) return;
           const slot = parseInt(slotKey.substring(idx + 3), 10) || 1;
           const wasPersistentMuted = (typeof getPersistentHotspotMute === "function")
             ? getPersistentHotspotMute(hid, slot)
@@ -1076,6 +1142,16 @@ function syncTtsSoloMode() {
       if (typeof updateHotspotCardMuteUI === "function") {
         updateHotspotCardMuteUI(null);
       }
+    }
+    if (soloHsSet.size > 0) {
+      const hsToRestore = Array.from(soloHsSet);
+      soloHsSet.clear();
+      saveSoloMutedHsSet(soloHsSet);
+      hsToRestore.forEach(hid => {
+        if (typeof window.setHotspotAudioMute === "function") {
+          window.setHotspotAudioMute(hid, false);
+        }
+      });
     }
   }
 
@@ -1474,14 +1550,14 @@ export function updateTtsUploadIndicator(progress, status = "running", voiceName
       ind.style.display = "inline-flex";
       if (percentEl) percentEl.textContent = `${pct}%`;
       ind.title = voiceName
-        ? `Загрузка голосовой модели Piper (${voiceName}): ${pct}%`
-        : `Загрузка голосовой модели Piper TTS: ${pct}%`;
+        ? (window.t ? window.t("transcriber.piper_dl_running_voice", { voice: voiceName, pct }, `Загрузка голосовой модели Piper (${voiceName}): ${pct}%`) : `Загрузка голосовой модели Piper (${voiceName}): ${pct}%`)
+        : (window.t ? window.t("transcriber.piper_dl_running", { pct }, `Загрузка голосовой модели Piper TTS: ${pct}%`) : `Загрузка голосовой модели Piper TTS: ${pct}%`);
     } else if (status === "completed") {
       ind.style.display = "inline-flex";
       if (percentEl) percentEl.textContent = "100%";
       ind.title = voiceName
-        ? `Модель Piper (${voiceName}) успешно установлена`
-        : "Модель Piper TTS успешно установлена";
+        ? (window.t ? window.t("transcriber.piper_dl_done_voice", { voice: voiceName }, `Модель Piper (${voiceName}) успешно установлена`) : `Модель Piper (${voiceName}) успешно установлена`)
+        : (window.t ? window.t("transcriber.piper_dl_done", {}, "Модель Piper TTS успешно установлена") : "Модель Piper TTS успешно установлена");
       ind._hideTimer = setTimeout(() => {
         ind.style.display = "none";
         ind._hideTimer = null;
@@ -1489,7 +1565,8 @@ export function updateTtsUploadIndicator(progress, status = "running", voiceName
     } else if (status === "error") {
       ind.style.display = "inline-flex";
       if (percentEl) percentEl.textContent = "ERR";
-      ind.title = `Ошибка загрузки модели Piper: ${voiceName || "сбой"}`;
+      const errStr = voiceName || (window.t ? window.t("common.error", {}, "сбой") : "сбой");
+      ind.title = window.t ? window.t("transcriber.piper_dl_err", { error: errStr }, `Ошибка загрузки модели Piper: ${errStr}`) : `Ошибка загрузки модели Piper: ${errStr}`;
       ind._hideTimer = setTimeout(() => {
         ind.style.display = "none";
         ind._hideTimer = null;
@@ -1521,7 +1598,7 @@ export function initPiperDownloadWatcher() {
           updateTtsUploadIndicator(100, "completed", d.voice_id);
         } else if (isWatching && d.status === "error") {
           isWatching = false;
-          updateTtsUploadIndicator(0, "error", d.error || "Сбой");
+          updateTtsUploadIndicator(0, "error", d.error || "Error");
         }
       }
     } catch (_) {}
@@ -1544,17 +1621,19 @@ async function checkAndPromptPiperModel(lang, onModelDownloaded, onFallbackReque
     }
 
     if (!data.supported) {
-      const msg = `Язык «${cleanLang.toUpperCase()}» отсутствует в каталоге моделей Piper TTS.<br><br>Переключить синтез речи на <b>Gemini API</b>?`;
+      const msg = window.t
+        ? window.t("transcriber.piper_unsupported_confirm", { lang: cleanLang.toUpperCase() }, `Язык «${cleanLang.toUpperCase()}» отсутствует в каталоге моделей Piper TTS.<br><br>Переключить синтез речи на <b>Gemini API</b>?`)
+        : `Язык «${cleanLang.toUpperCase()}» отсутствует в каталоге моделей Piper TTS.<br><br>Переключить синтез речи на <b>Gemini API</b>?`;
       let fallback = true;
       if (typeof window.showAppConfirm === "function") {
         fallback = await window.showAppConfirm({
-          title: "Язык не поддерживается в Piper TTS",
+          title: window.t ? window.t("transcriber.piper_unsupported_title", {}, "Язык не поддерживается в Piper TTS") : "Язык не поддерживается в Piper TTS",
           message: msg,
-          confirmText: "Переключить на Gemini API",
-          cancelText: "Использовать System TTS"
+          confirmText: window.t ? window.t("transcriber.switch_to_gemini", {}, "Переключить на Gemini API") : "Переключить на Gemini API",
+          cancelText: window.t ? window.t("transcriber.use_system_tts", {}, "Использовать System TTS") : "Использовать System TTS"
         });
       } else {
-        fallback = window.confirm(`Язык ${cleanLang.toUpperCase()} не поддерживается в Piper TTS. Переключить на Gemini API?`);
+        fallback = window.confirm(msg.replace(/<[^>]+>/g, ""));
       }
 
       if (fallback) {
@@ -2831,18 +2910,17 @@ function toggleSlotTts(row, slot) {
       recMgr.stopTtsPlayback();
     }
 
-    // 4. In solo or auto mode, ensure current TS is active; in doubl mode, preserve simultaneous dual audio
-    window._preTtsAudioModes = window._preTtsAudioModes || {};
-    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
-      const curMode = getHotspotTsAudioMode(hid);
-      if (curMode !== "doubl") {
-        if (!window._preTtsAudioModes[hid]) {
-          window._preTtsAudioModes[hid] = curMode;
-        }
-        if (curMode !== "solo") {
-          setHotspotTsAudioMode(hid, "solo");
-        }
-      }
+    // 4. Unmute global & hotspot audio, activate target TS, switch this HS to Solo mode, and mute opposite TS
+    if (typeof window.isGlobalAudioMuted === "function" && window.isGlobalAudioMuted() && typeof window.setGlobalAudioMute === "function") {
+      window.setGlobalAudioMute(false);
+    }
+    const soloHsSet = getSoloMutedHsSet();
+    if (soloHsSet.has(hid)) {
+      soloHsSet.delete(hid);
+      saveSoloMutedHsSet(soloHsSet);
+    }
+    if (typeof window.isHotspotAudioMuted === "function" && window.isHotspotAudioMuted(hid) && typeof window.setHotspotAudioMute === "function") {
+      window.setHotspotAudioMute(hid, false);
     }
 
     // 5. ACTIVATE THIS TS ON THIS HOTSPOT
@@ -2851,6 +2929,21 @@ function toggleSlotTts(row, slot) {
     } else if (typeof window.setActiveSlot === "function") {
       window.setActiveSlot(slot, true);
     }
+
+    // 6. Switch this hotspot to Solo mode and unmute target TS while muting the second TS
+    window._preTtsAudioModes = window._preTtsAudioModes || {};
+    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
+      const curMode = getHotspotTsAudioMode(hid);
+      if (!window._preTtsAudioModes[hid]) {
+        window._preTtsAudioModes[hid] = curMode;
+      }
+      if (curMode !== "solo") {
+        setHotspotTsAudioMode(hid, "solo");
+      }
+    }
+    const otherSlot = slot === 1 ? 2 : 1;
+    setHotspotMute(hid, slot, false);
+    setHotspotMute(hid, otherSlot, true);
   } else {
     // TURNING TTS OFF:
     // Restore pre-TTS audio mode for this hotspot if saved
@@ -4999,11 +5092,16 @@ function ensureCaptionFontControls(captionBox) {
   const ctrl = document.createElement("div");
   ctrl.className = "caption-font-ctrl";
   ctrl.setAttribute("role", "toolbar");
-  ctrl.setAttribute("aria-label", "Размер шрифта");
+  const ariaLbl = window.t ? window.t("transcriber.font_size_aria", {}, "Размер шрифта") : "Размер шрифта";
+  const downTitle = window.t ? window.t("transcriber.font_down_title", {}, "Уменьшить шрифт (A−)") : "Уменьшить шрифт (A−)";
+  const resetTitle = window.t ? window.t("transcriber.font_reset_title", {}, "Сбросить шрифт (11px)") : "Сбросить шрифт (11px)";
+  const upTitle = window.t ? window.t("transcriber.font_up_title", {}, "Увеличить шрифт (A+)") : "Увеличить шрифт (A+)";
+  ctrl.setAttribute("aria-label", ariaLbl);
+  ctrl.setAttribute("data-i18n-aria-label", "transcriber.font_size_aria");
   ctrl.innerHTML = `
-    <button type="button" class="btn-caption-font-down" title="Уменьшить шрифт (A−)">A−</button>
-    <span class="caption-font-val" title="Сбросить шрифт (11px)">${getCaptionFontSize()}</span>
-    <button type="button" class="btn-caption-font-up" title="Увеличить шрифт (A+)">A+</button>
+    <button type="button" class="btn-caption-font-down" title="${downTitle}" data-i18n-title="transcriber.font_down_title">A−</button>
+    <span class="caption-font-val" title="${resetTitle}" data-i18n-title="transcriber.font_reset_title">${getCaptionFontSize()}</span>
+    <button type="button" class="btn-caption-font-up" title="${upTitle}" data-i18n-title="transcriber.font_up_title">A+</button>
   `;
 
   let activeTimer = null;
@@ -5661,7 +5759,10 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   popup.style.transform = "translate(-50%, -50%)";
   popup.style.zIndex = "10011";
 
-  const titleText = isGroq ? "⚡ Ключи Groq Cloud API" : "🔑 Ключи Google Gemini API";
+  const t = window.t || ((k, _, def) => def);
+  const titleText = isGroq
+    ? t("transcriber.apikeys_groq_title", {}, "⚡ Ключи Groq Cloud API")
+    : t("transcriber.apikeys_gemini_title", {}, "🔑 Ключи Google Gemini API");
   const consoleUrl = isGroq ? "https://console.groq.com/keys" : "https://aistudio.google.com/app/apikey";
   const consoleName = isGroq ? "Groq Console ↗" : "Google AI Studio ↗";
 
@@ -5671,11 +5772,11 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   header.innerHTML = `
     <div class="tts-quick-title">
       <span class="tts-quick-icon">${isGroq ? "⚡" : "🔑"}</span>
-      <span>${titleText}</span>
+      <span>${titleText.replace(/^[⚡🔑]\s*/, "")}</span>
     </div>
     <div style="display: flex; align-items: center; gap: 10px;">
       <a href="${consoleUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.76rem; color: #38bdf8; text-decoration: none;">${consoleName}</a>
-      <button type="button" class="tts-quick-close" aria-label="Закрыть">&times;</button>
+      <button type="button" class="tts-quick-close" aria-label="${t("buttons.close", {}, "Закрыть")}">&times;</button>
     </div>
   `;
 
@@ -5689,7 +5790,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   hintText.style.color = "var(--text-muted, #8b949e)";
   hintText.style.marginBottom = "8px";
   hintText.style.lineHeight = "1.4";
-  hintText.textContent = "Введите по одному ключу на строку. Если ключей несколько, система распределяет нагрузку (Round-Robin) и автоматически перебирает следующий при лимитах (429 / Quota):";
+  hintText.textContent = t("transcriber.apikeys_hint", {}, "Введите по одному ключу на строку. Если ключей несколько, система распределяет нагрузку (Round-Robin) и автоматически перебирает следующий при лимитах (429 / Quota):");
   body.appendChild(hintText);
 
   // Editor container
@@ -5785,7 +5886,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   const lblUseFirst = document.createElement("label");
   lblUseFirst.htmlFor = "popChkUseFirstOnly";
   lblUseFirst.style.cursor = "pointer";
-  lblUseFirst.textContent = "Использовать только первый (платный ключ, без перебора)";
+  lblUseFirst.textContent = t("transcriber.apikeys_use_first_only", {}, "Использовать только первый (платный ключ, без перебора)");
 
   rowUseFirst.appendChild(chkUseFirst);
   rowUseFirst.appendChild(lblUseFirst);
@@ -5804,8 +5905,8 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
     const currentKeys = getKeysFromEditor();
     rowUseFirst.style.display = currentKeys.length > 1 ? "flex" : "none";
     statusEl.textContent = currentKeys.length > 0 
-      ? `Найдено ключей: ${currentKeys.length}`
-      : "Список пуст. Вставьте хотя бы один ключ.";
+      ? t("transcriber.apikeys_found_count", { count: currentKeys.length }, `Найдено ключей: ${currentKeys.length}`)
+      : t("transcriber.apikeys_empty_hint", {}, "Список пуст. Вставьте хотя бы один ключ.");
   }
 
   editor.addEventListener("input", () => {
@@ -5824,6 +5925,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   footer.style.background = "rgba(0, 0, 0, 0.22)";
   footer.style.borderTop = "1px solid var(--border-color, #30363d)";
 
+  const btnTestText = t("transcriber.apikeys_btn_test", {}, "Проверить");
   const btnTest = document.createElement("button");
   btnTest.type = "button";
   btnTest.className = "btn-secondary";
@@ -5833,7 +5935,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   btnTest.style.alignItems = "center";
   btnTest.style.gap = "5px";
   btnTest.style.cursor = "pointer";
-  btnTest.innerHTML = `<span>🔄</span><span>Проверить</span>`;
+  btnTest.innerHTML = `<span>🔄</span><span>${btnTestText}</span>`;
 
   const rightBtns = document.createElement("div");
   rightBtns.style.display = "flex";
@@ -5845,7 +5947,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   btnCancel.style.fontSize = "0.8rem";
   btnCancel.style.padding = "5px 12px";
   btnCancel.style.cursor = "pointer";
-  btnCancel.textContent = "Отмена";
+  btnCancel.textContent = t("buttons.cancel", {}, "Отмена");
 
   const btnSave = document.createElement("button");
   btnSave.type = "button";
@@ -5853,7 +5955,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   btnSave.style.fontSize = "0.8rem";
   btnSave.style.padding = "5px 16px";
   btnSave.style.cursor = "pointer";
-  btnSave.textContent = "Сохранить";
+  btnSave.textContent = t("buttons.save", {}, "Сохранить");
 
   rightBtns.appendChild(btnCancel);
   rightBtns.appendChild(btnSave);
@@ -5882,14 +5984,15 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
     const keysToTest = getKeysFromEditor();
     if (!keysToTest || keysToTest.length === 0) {
       statusEl.style.color = "#ef4444";
-      statusEl.textContent = "❌ Введите хотя бы один ключ для проверки";
+      statusEl.textContent = t("transcriber.apikeys_err_empty_test", {}, "❌ Введите хотя бы один ключ для проверки");
       return;
     }
 
+    const testingText = t("updates.checking", {}, "Проверка...");
     btnTest.disabled = true;
-    btnTest.innerHTML = `<span>⏳</span><span>Проверка...</span>`;
+    btnTest.innerHTML = `<span>⏳</span><span>${testingText}</span>`;
     statusEl.style.color = "var(--text-muted)";
-    statusEl.textContent = `Проверка ${keysToTest.length} ключей...`;
+    statusEl.textContent = t("transcriber.apikeys_testing_count", { count: keysToTest.length }, `Проверка ${keysToTest.length} ключей...`);
 
     try {
       const resp = await fetch("/api/transcriber/test-keys", {
@@ -5912,32 +6015,34 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
           if (item.valid) {
             validCount++;
             lineDiv.style.color = "#22c55e"; // Green
-            lineDiv.title = "OK: Ключ действителен";
+            lineDiv.title = t("transcriber.apikeys_key_valid", {}, "OK: Ключ действителен");
           } else {
             invalidCount++;
             lineDiv.style.color = "#ef4444"; // Red
-            lineDiv.title = item.error ? `Ошибка: ${item.error}` : "Недействителен";
+            lineDiv.title = item.error
+              ? `${t("common.error", {}, "Ошибка")}: ${item.error}`
+              : t("transcriber.apikeys_key_invalid", {}, "Недействителен");
           }
           editor.appendChild(lineDiv);
         });
 
         if (invalidCount === 0) {
           statusEl.style.color = "#22c55e";
-          statusEl.textContent = `✅ Все ключи (${validCount}) проверены и работают!`;
+          statusEl.textContent = t("transcriber.apikeys_all_valid", { count: validCount }, `✅ Все ключи (${validCount}) проверены и работают!`);
         } else {
           statusEl.style.color = "#ef4444";
-          statusEl.textContent = `⚠️ ${validCount} активных, ${invalidCount} с ошибками (выделены красным).`;
+          statusEl.textContent = t("transcriber.apikeys_partial_valid", { valid: validCount, invalid: invalidCount }, `⚠️ ${validCount} активных, ${invalidCount} с ошибками (выделены красным).`);
         }
       } else {
         statusEl.style.color = "#ef4444";
-        statusEl.textContent = "Ошибка при проверке ключей на сервере";
+        statusEl.textContent = t("transcriber.apikeys_err_server_test", {}, "Ошибка при проверке ключей на сервере");
       }
     } catch (err) {
       statusEl.style.color = "#ef4444";
-      statusEl.textContent = `Ошибка сети: ${err.message || err}`;
+      statusEl.textContent = `${t("bmtg_static.net_error", {}, "Сетевая ошибка")}: ${err.message || err}`;
     } finally {
       btnTest.disabled = false;
-      btnTest.innerHTML = `<span>🔄</span><span>Проверить</span>`;
+      btnTest.innerHTML = `<span>🔄</span><span>${btnTestText}</span>`;
     }
   });
 
@@ -5947,7 +6052,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
     const useFirst = Boolean(chkUseFirst.checked);
 
     btnSave.disabled = true;
-    btnSave.textContent = "Сохранение...";
+    btnSave.textContent = t("transcriber.apikeys_saving", {}, "Сохранение...");
 
     if (!window.transcriberSettings) window.transcriberSettings = {};
     if (isGroq) {
@@ -5990,7 +6095,8 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
     if (typeof updateTransApiKeyUI === "function") updateTransApiKeyUI(optTransEng ? optTransEng.value : "gemini");
 
     if (typeof showToast === "function") {
-      showToast(`Ключи ${isGroq ? "Groq" : "Gemini"} сохранены (${finalKeys.length})`, 2500);
+      const engLabel = isGroq ? "Groq" : "Gemini";
+      showToast(t("transcriber.apikeys_saved_toast", { engine: engLabel, count: finalKeys.length }, `Ключи ${engLabel} сохранены (${finalKeys.length})`), 2500);
     }
     closeApiKeysManagerPopover();
   });

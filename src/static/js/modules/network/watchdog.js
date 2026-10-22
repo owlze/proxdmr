@@ -226,7 +226,9 @@ export const triggerHotspotGwAction = async (hid) => {
     // Disconnect GW for THIS hotspot
     console.log(`[GW] Hotspot [${cid}] GW manually disconnected by user.`);
     setHotspotGwDisconnected(cid, true);
-    setIsManualGwDisconnect(true);
+    const allHs = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+    const allDisconnected = allHs.length > 0 && allHs.every(h => isHotspotGwDisconnected(h.id));
+    setIsManualGwDisconnect(allDisconnected);
     updateHotspotGwStatus(cid, false, window.t ? window.t("gw.disconnected_user", {}, "Отключено пользователем") : "Отключено пользователем");
 
     // Also disconnect BM for this hotspot
@@ -485,28 +487,121 @@ export function wireCardStatusInteractions(card, hs = null) {
   const apiRow = card.querySelector(".api-status-row");
   if (apiRow && !apiRow._statusWired) {
     apiRow._statusWired = true;
-    apiRow.addEventListener("click", (e) => {
+    const handleApiRowActivate = (e) => {
       e.stopPropagation();
       const cid = card.dataset.hotspotId || (hs && hs.id) || activeHotspotId || "default";
-      if (hs && (!hs.bm_api_key || hs.bm_api_key.trim().length <= 10)) {
-        openHotspotSettings(hs, "tab-edit-hs");
+      const curHs = (window.currentHotspots || []).find(h => h.id === cid) || hs;
+      const netType = ((curHs && curHs.network_type) || "bm").toLowerCase();
+      if (netType !== "bm" && netType !== "tgif") {
+        if (netType === "freedmr" || netType === "xlx") {
+          if (typeof window.openBmTgStaticModal === "function") {
+            window.openBmTgStaticModal(cid);
+            return;
+          }
+        }
+        openHotspotSettings(curHs, "tab-edit-hs");
+        setTimeout(() => {
+          const targetId = netType === "xlx" ? "editHsXlxModule" : "editHsRptoOptions";
+          const el = document.getElementById(targetId);
+          if (el && typeof el.focus === "function") {
+            el.focus();
+            if (typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+        }, 140);
+        return;
+      }
+      if (curHs && (!curHs.bm_api_key || curHs.bm_api_key.trim().length <= 8)) {
+        openHotspotSettings(curHs, "tab-edit-hs");
+        setTimeout(() => {
+          const el = document.getElementById("editHsApiKey");
+          if (el && typeof el.focus === "function") {
+            el.focus();
+            if (typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+        }, 140);
       } else {
         checkBmApiStatus(true, cid);
       }
-    });
+    };
+    apiRow.addEventListener("click", handleApiRowActivate);
     apiRow.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        e.stopPropagation();
-        const cid = card.dataset.hotspotId || (hs && hs.id) || activeHotspotId || "default";
-        if (hs && (!hs.bm_api_key || hs.bm_api_key.trim().length <= 10)) {
-          openHotspotSettings(hs, "tab-edit-hs");
-        } else {
-          checkBmApiStatus(true, cid);
-        }
+        handleApiRowActivate(e);
       }
     });
   }
+}
+
+export function renderHotspotAuxStatusBadge(card, hs) {
+  if (!card || !hs) return false;
+  const netType = (hs.network_type || "bm").toLowerCase();
+  if (netType === "bm" || netType === "tgif") return false;
+
+  const badge = card.querySelector(".api-status-badge");
+  const row = card.querySelector(".api-status-row");
+  const dt = card.querySelector(".api-detail-text");
+
+  let badgeClass = "status-online bm-online";
+  let badgeText = "NET:DIRECT";
+  let comment = "";
+  let tooltip = "";
+
+  if (netType === "xlx") {
+    const mod = ((hs.xlx_module || "D").trim().toUpperCase().slice(0, 1)) || "D";
+    const tgNum = 4000 + Math.max(1, Math.min(26, mod.charCodeAt(0) - 64));
+    badgeClass = "status-online bm-online";
+    badgeText = `XLX:MOD_${mod}`;
+    comment = window.t ? window.t("status.xlx_mod_detail", { mod, tg: tgNum }, `Модуль ${mod} (TG ${tgNum}) • клик для смены`) : `Модуль ${mod} (TG ${tgNum}) • клик для смены`;
+    tooltip = window.t ? window.t("status.xlx_mod_tooltip", { mod, tg: tgNum }, `🟣 XLX Reflector Module ${mod} (TG ${tgNum}). Нажмите для выбора модуля A–Z`) : `🟣 XLX Reflector Module ${mod} (TG ${tgNum}). Нажмите для выбора модуля A–Z`;
+  } else if (netType === "freedmr") {
+    const rpto = (hs.rpto_options || "").trim();
+    if (rpto) {
+      badgeClass = "status-online bm-online";
+      badgeText = "FREEDMR_RPTO:ACTIVE";
+      comment = `FreeDMR: ${rpto}`;
+      tooltip = window.t ? window.t("status.freedmr_rpto_ready_tooltip", { rpto }, `🟢 FreeDMR RPTO: ${rpto}. Нажмите для управления статическими TG`) : `🟢 FreeDMR RPTO: ${rpto}. Нажмите для управления статическими TG`;
+    } else {
+      badgeClass = "status-offline bm-offline";
+      badgeText = "FREEDMR_RPTO:READY";
+      comment = window.t ? window.t("status.freedmr_rpto_empty_detail", {}, "FreeDMR RPTO (клик для настройки TG)") : "FreeDMR RPTO (клик для настройки TG)";
+      tooltip = window.t ? window.t("status.freedmr_rpto_empty_tooltip", {}, "⚪ FreeDMR RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ FreeDMR RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)";
+    }
+  } else if (netType === "tgif") {
+    badgeClass = "status-online bm-online";
+    badgeText = "TGIF:DIRECT";
+    comment = window.t ? window.t("status.tgif_direct_detail", {}, "PTT роутинг (4000 — откл.)") : "PTT роутинг (4000 — откл.)";
+    tooltip = window.t ? window.t("status.tgif_direct_tooltip", {}, "🟢 TGIF Network: управление группами напрямую через PTT или TG 4000") : "🟢 TGIF Network: управление группами напрямую через PTT или TG 4000";
+  } else {
+    const rpto = (hs.rpto_options || "").trim();
+    if (rpto) {
+      badgeClass = "status-online bm-online";
+      badgeText = "RPTO:READY";
+      comment = `RPTO: ${rpto}`;
+      tooltip = window.t ? window.t("status.rpto_ready_tooltip", { rpto }, `🟢 RPTO Options: ${rpto}. Нажмите для изменения статических TG`) : `🟢 RPTO Options: ${rpto}. Нажмите для изменения статических TG`;
+    } else {
+      badgeClass = "status-offline bm-offline";
+      badgeText = "RPTO:CFG";
+      comment = window.t ? window.t("status.rpto_empty_detail", {}, "Опции RPTO (клик для настройки TG)") : "Опции RPTO (клик для настройки TG)";
+      tooltip = window.t ? window.t("status.rpto_empty_tooltip", {}, "⚪ RPTO Options не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ RPTO Options не заданы. Нажмите для настройки статических TG (TS1/TS2)";
+    }
+  }
+
+  if (badge) {
+    badge.className = `status-badge bm-badge api-status-badge ${badgeClass}`;
+    badge.textContent = badgeText;
+    badge.title = tooltip;
+  }
+  if (row) row.title = tooltip;
+  if (dt) {
+    dt.textContent = comment;
+    dt.title = tooltip;
+  }
+  return true;
 }
 
 // --- BrandMeister REST API Status (Per Hotspot) ---
@@ -534,39 +629,70 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
   const isHotspotCollapsed = typeof window.isHotspotCollapsed === "function" ? window.isHotspotCollapsed : () => false;
   const isHotspotLiveCollapsed = typeof window.isHotspotLiveCollapsed === "function" ? window.isHotspotLiveCollapsed : () => false;
 
+  // Render non-BM / non-TGIF badges immediately
+  currentHotspots.forEach(h => {
+    const nt = (h.network_type || "bm").toLowerCase();
+    if (nt !== "bm" && nt !== "tgif") {
+      const c = document.querySelector(`.radio-container[data-hotspot-id="${h.id}"]`);
+      if (c) renderHotspotAuxStatusBadge(c, h);
+    }
+  });
+
   let targets = [];
   if (hotspotId) {
     const realId = resolveHotspotId(hotspotId);
     const found = currentHotspots.find(h => h.id === realId || (realId === "default" && currentHotspots[0] === h));
-    if (found) targets.push(found);
-    else if (currentHotspots.length) targets.push(currentHotspots[0]);
+    if (found) {
+      const fnt = (found.network_type || "bm").toLowerCase();
+      if (fnt !== "bm" && fnt !== "tgif") {
+        const c = document.querySelector(`.radio-container[data-hotspot-id="${found.id}"]`) || document.getElementById("radioContainer");
+        if (c) renderHotspotAuxStatusBadge(c, found);
+        isCheckingApi = false;
+        return;
+      }
+      targets.push(found);
+    } else if (currentHotspots.length) {
+      targets.push(currentHotspots[0]);
+    }
   } else {
-    targets = currentHotspots.filter(h => h.bm_api_key && h.bm_api_key.trim().length > 10 && (!isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id)));
+    targets = currentHotspots.filter(h => {
+      const nt = (h.network_type || "bm").toLowerCase();
+      return (nt === "bm" || nt === "tgif") && h.bm_api_key && h.bm_api_key.trim().length > 8 && (!isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id));
+    });
   }
 
-  if (hotspotId && (!targets.length || !targets[0].bm_api_key || targets[0].bm_api_key.trim().length <= 10)) {
+  if (hotspotId && (!targets.length || !targets[0].bm_api_key || targets[0].bm_api_key.trim().length <= 8)) {
     const targetHsId = targets[0]?.id || resolveHotspotId(hotspotId);
     const targetHs = targets[0] || currentHotspots.find(h => h.id === targetHsId);
     if (targetHs) {
+      const tnt = (targetHs.network_type || "bm").toLowerCase();
+      if (tnt !== "bm" && tnt !== "tgif") {
+        const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHsId}"]`) || document.getElementById("radioContainer");
+        if (card) renderHotspotAuxStatusBadge(card, targetHs);
+        isCheckingApi = false;
+        return;
+      }
       targetHs._apiStatus = "NO_KEY";
       targetHs._apiDetail = "";
-    }
-    const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHsId}"]`)
-      || document.getElementById("radioContainer");
-    if (card) {
-      const badge = card.querySelector(".api-status-badge");
-      const row = card.querySelector(".api-status-row");
-      const dt = card.querySelector(".api-detail-text");
-      const ttip = window.t ? window.t("status.api_no_key_tooltip") : "⚪ BM API: Ключ не настроен. Нажмите для ввода";
-      if (badge) {
-        badge.className = "status-badge bm-badge api-status-badge status-offline bm-offline";
-        badge.textContent = "API:OFFLINE";
-        badge.title = ttip;
-      }
-      if (row) row.title = ttip;
-      if (dt) {
-        dt.textContent = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-        dt.title = ttip;
+      const isTgif = (tnt === "tgif");
+      const netShort = isTgif ? "TGIF" : "BM";
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHsId}"]`)
+        || document.getElementById("radioContainer");
+      if (card) {
+        const badge = card.querySelector(".api-status-badge");
+        const row = card.querySelector(".api-status-row");
+        const dt = card.querySelector(".api-detail-text");
+        const ttip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+        if (badge) {
+          badge.className = "status-badge bm-badge api-status-badge status-offline bm-offline";
+          badge.textContent = "API:NO KEY";
+          badge.title = ttip;
+        }
+        if (row) row.title = ttip;
+        if (dt) {
+          dt.textContent = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
+          dt.title = ttip;
+        }
       }
     }
     isCheckingApi = false;
@@ -582,8 +708,14 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
       const row = card ? card.querySelector(".api-status-row") : null;
       const dt = card ? card.querySelector(".api-detail-text") : null;
 
-      const checkingTtip = window.t ? window.t("status.api_checking_tooltip") : "🟡 BM API: Проверка соединения...";
-      const checkingDetail = window.t ? window.t("status.api_checking_detail") : "Проверка токена v2...";
+      const hsNet = (hs.network_type || "bm").toLowerCase();
+      const isTgif = hsNet === "tgif";
+      const netShort = isTgif ? "TGIF" : "BM";
+      const netVersion = isTgif ? "v1" : "v2";
+      const apiDomain = isTgif ? "api.tgif.network" : "api.brandmeister.network";
+
+      const checkingTtip = `🟡 ${netShort} API: Проверка соединения...`;
+      const checkingDetail = isTgif ? "Проверка токена TGIF..." : (window.t ? window.t("status.api_checking_detail") : "Проверка токена v2...");
       if (badge) {
         badge.className = "status-badge bm-badge api-status-badge status-connecting bm-connecting";
         badge.textContent = "API:CHECKING";
@@ -609,23 +741,23 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
           if (status === "ONLINE") {
             badge.classList.add("status-online", "bm-online");
             badge.textContent = "API:ONLINE";
-            comment = data.device_id ? `api.brandmeister.network (ID: ${data.device_id})` : "api.brandmeister.network (Авторизован)";
-            tooltip = window.t ? window.t("status.api_authorized_tooltip") : "🟢 BM API v2: Авторизован. Клик для повторной проверки";
+            comment = data.device_id ? `${apiDomain} (ID: ${data.device_id})` : `${apiDomain} (Авторизован)`;
+            tooltip = `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
           } else if (status === "AUTH_FAILED") {
             badge.classList.add("status-error", "bm-error");
             badge.textContent = "API:AUTH FAIL";
-            comment = data.detail || (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)");
-            tooltip = window.t ? window.t("status.api_auth_tooltip", { detail: comment }) : `🔴 BM API: ${comment}. Нажмите для настройки`;
+            comment = data.detail || (isTgif ? "Неверный токен TGIF (401)" : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
+            tooltip = `🔴 ${netShort} API: ${comment}. Нажмите для настройки`;
           } else if (status === "NO_KEY") {
             badge.classList.add("status-offline", "bm-offline");
             badge.textContent = "API:NO KEY";
             comment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-            tooltip = window.t ? window.t("status.api_no_key_tooltip") : "⚪ BM API: Ключ не настроен. Нажмите для ввода";
+            tooltip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
           } else {
             badge.classList.add("status-error", "bm-error");
             badge.textContent = "API:ERROR";
-            comment = data.detail || (window.t ? window.t("status.api_server_unreachable") : "Сервер api.brandmeister.network недоступен");
-            tooltip = window.t ? window.t("status.api_error_tooltip", { detail: comment }) : `🔴 BM API: ${comment}. Клик для повторной проверки`;
+            comment = data.detail || `Сервер ${apiDomain} недоступен`;
+            tooltip = `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`;
           }
 
           if (dt) {
@@ -636,10 +768,10 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
           if (row) row.title = tooltip;
         }
       } catch (e) {
-        console.error(`[API] Failed to check BM API status for ${hs.id}:`, e);
+        console.error(`[API] Failed to check ${netShort} API status for ${hs.id}:`, e);
         hs._apiStatus = "ERROR";
         const gwErr = window.t ? window.t("status.api_gateway_error") : "Ошибка связи со шлюзом";
-        const errTtip = window.t ? window.t("status.api_error_tooltip", { detail: gwErr }) : `🔴 BM API: ${gwErr}. Клик для повторной проверки`;
+        const errTtip = `🔴 ${netShort} API: ${gwErr}. Клик для повторной проверки`;
         if (badge) {
           badge.className = "status-badge bm-badge api-status-badge status-error bm-error";
           badge.textContent = "API:ERROR";
@@ -697,6 +829,7 @@ window.triggerHotspotGwAction = triggerHotspotGwAction;
 window.isHotspotGwDisconnected = isHotspotGwDisconnected;
 window.setHotspotGwDisconnected = setHotspotGwDisconnected;
 window.wireCardStatusInteractions = wireCardStatusInteractions;
+window.renderHotspotAuxStatusBadge = renderHotspotAuxStatusBadge;
 window.openHotspotApiSettings = openHotspotApiSettings;
 window.initWatchdog = initWatchdog;
 
@@ -711,6 +844,7 @@ window.__proxdmr.setHotspotGwDisconnected = setHotspotGwDisconnected;
 window.__proxdmr.runSystemLinkCheck = runSystemLinkCheck;
 window.__proxdmr.startSystemLinkWatchdog = startSystemLinkWatchdog;
 window.__proxdmr.wireCardStatusInteractions = wireCardStatusInteractions;
+window.__proxdmr.renderHotspotAuxStatusBadge = renderHotspotAuxStatusBadge;
 window.__proxdmr.checkBmApiStatus = checkBmApiStatus;
 window.__proxdmr.openHotspotApiSettings = openHotspotApiSettings;
 window.__proxdmr.initWatchdog = initWatchdog;

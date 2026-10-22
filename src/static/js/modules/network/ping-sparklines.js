@@ -26,6 +26,33 @@ function getCurrentHotspots() {
     : [];
 }
 
+export function getHotspotNetworkProfile(card, cid) {
+  const currentHotspots = getCurrentHotspots();
+  const rawCid = (card && card.dataset && card.dataset.hotspotId) || cid || "default";
+  const resolvedCid = resolveHotspotId(rawCid);
+  const hs = (currentHotspots && currentHotspots.length)
+    ? (currentHotspots.find(h => h.id === resolvedCid) || currentHotspots.find(h => h.id === rawCid) || (rawCid === "default" ? currentHotspots[0] : null) || currentHotspots[0])
+    : null;
+  const netBadge = card && card.querySelector ? card.querySelector(".hotspot-network-badge") : null;
+  const netType = (hs && hs.network_type)
+    ? hs.network_type
+    : ((card && card.dataset && card.dataset.networkType) || (netBadge && netBadge.dataset && netBadge.dataset.networkType) || "bm");
+
+  if (typeof window !== "undefined" && typeof window.getDmrNetworkProfile === "function") {
+    return window.getDmrNetworkProfile(netType);
+  }
+  const cleanType = String(netType || "bm").trim().toLowerCase();
+  const fallbackProfiles = {
+    bm: { id: "bm", shortLabel: "BM", fullName: "BrandMeister" },
+    tgif: { id: "tgif", shortLabel: "TGIF", fullName: "TGIF Network" },
+    freedmr: { id: "freedmr", shortLabel: "FDMR", fullName: "FreeDMR / ADN" },
+    dmrplus: { id: "dmrplus", shortLabel: "DMR+", fullName: "DMR+ / IPSC2" },
+    xlx: { id: "xlx", shortLabel: "XLX", fullName: "XLX Reflector" },
+    custom: { id: "custom", shortLabel: "HBP", fullName: "HomeBrew / HBlink3" }
+  };
+  return fallbackProfiles[cleanType] || fallbackProfiles.bm;
+}
+
 export let cachedBmHostPings = (typeof window !== "undefined" && window.cachedBmHostPings) || {};
 export let cachedBmLosses = (typeof window !== "undefined" && window.cachedBmLosses) || {};
 export let cachedBmHostLosses = (typeof window !== "undefined" && window.cachedBmHostLosses) || {};
@@ -364,17 +391,27 @@ export function renderCardPingSparkline(card, hostVal) {
     scaleBadge.title = ((typeof window !== "undefined" && window.t) ? window.t("ping.scale_badge_title") : "Масштаб (двойной тап для смены)") + ` (${currentScale})`;
   }
 
+  const netProfile = getHotspotNetworkProfile(card, cid);
+  const serverLabel = (netProfile && netProfile.shortLabel) || "BM";
+
   let modeBadge = chartWrap.querySelector(".bm-ping-mode-badge");
   if (!modeBadge) {
     modeBadge = document.createElement("span");
     modeBadge.className = "bm-ping-mode-badge";
     chartWrap.appendChild(modeBadge);
   }
-  modeBadge.textContent = isClientMode ? "GW" : "BM";
-  modeBadge.className = `bm-ping-mode-badge ${isClientMode ? "mode-client" : "mode-bm"}`;
+  modeBadge.textContent = isClientMode ? "GW" : serverLabel;
+  modeBadge.className = `bm-ping-mode-badge ${isClientMode ? "mode-client" : `mode-server net-mode-${netProfile.id || "bm"} mode-${(netProfile.id || "bm") === "bm" ? "bm" : netProfile.id}`}`;
+  modeBadge.dataset.networkType = (netProfile && netProfile.id) || "bm";
   modeBadge.title = isClientMode
-    ? ((typeof window !== "undefined" && window.t) ? window.t("ping.mode_client_tooltip") : "Режим: Client ↔ ProxDMR. Кликните по графику для смены на BM")
-    : ((typeof window !== "undefined" && window.t) ? window.t("ping.mode_bm_tooltip") : "Режим: BM. Кликните по графику для смены на Client ↔ ProxDMR");
+    ? ((typeof window !== "undefined" && window.t)
+        ? window.t("ping.mode_client_tooltip", { network: serverLabel })
+        : `Режим: Client ↔ ProxDMR. Кликните по графику для смены на ${serverLabel}`)
+    : ((typeof window !== "undefined" && window.t)
+        ? (window.t("ping.mode_server_tooltip", { network: serverLabel }) !== "ping.mode_server_tooltip"
+            ? window.t("ping.mode_server_tooltip", { network: serverLabel })
+            : window.t("ping.mode_bm_tooltip", { network: serverLabel }))
+        : `Режим: ${serverLabel}. Кликните по графику для смены на Client ↔ ProxDMR`);
 
   const svg = chartWrap.querySelector(".bm-ping-sparkline");
   if (!svg) return;
@@ -1028,7 +1065,7 @@ export function calculateClientPacketLoss(cidOrScale = "default", scale = null) 
   };
 }
 
-export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm") {
+export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm", networkLabel = null) {
   if (!pingEl) return;
 
   let pingRow = pingEl.querySelector(".ping-val-row");
@@ -1092,7 +1129,10 @@ export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm") {
     }
   }
 
-  const targetLabel = (mode === "client") ? "Client ↔ ProxDMR" : "BM";
+  const card = (pingEl && pingEl.closest) ? pingEl.closest(".radio-container, .multi-hotspot-card, [data-hotspot-id]") : null;
+  const netProfile = card ? getHotspotNetworkProfile(card) : null;
+  const resolvedLabel = networkLabel || (netProfile && netProfile.shortLabel) || (mode !== "client" && mode !== "bm" && mode !== "server" ? mode : "BM");
+  const targetLabel = (mode === "client") ? "Client ↔ ProxDMR" : resolvedLabel;
   const pingStr = (ms !== null) ? `${ms} ${((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms") : "ms")}` : ((typeof window !== "undefined" && window.t) ? window.t("ping.no_data") : "нет данных");
   const lossDisplay = isOffline ? "--" : ((lossInfo && lossInfo.lossPercent !== undefined && lossInfo.lossPercent !== null) ? Number(lossInfo.lossPercent).toFixed(1) : "0.0");
   const scaleInfo = (lossInfo && lossInfo.scale) ? ` [${lossInfo.scale}]` : "";
@@ -1127,6 +1167,7 @@ if (typeof window !== "undefined") {
   window.calculateCardPacketLoss = calculateCardPacketLoss;
   window.calculateClientPacketLoss = calculateClientPacketLoss;
   window.updatePingElement = updatePingElement;
+  window.getHotspotNetworkProfile = getHotspotNetworkProfile;
   window.cardPingHistories = cardPingHistories;
   window.bmPingHistory = bmPingHistory;
   window.cachedBmHostPings = cachedBmHostPings;
@@ -1156,6 +1197,7 @@ if (typeof window !== "undefined") {
     calculateCardPacketLoss,
     calculateClientPacketLoss,
     updatePingElement,
+    getHotspotNetworkProfile,
     getPings: () => ({
       cachedBmPings: (typeof window !== "undefined" && window.cachedBmPings) || {},
       cachedBmHostPings: (typeof window !== "undefined" && window.cachedBmHostPings) || cachedBmHostPings

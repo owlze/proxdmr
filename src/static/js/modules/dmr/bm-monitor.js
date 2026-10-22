@@ -370,15 +370,15 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     const cycleImg = document.getElementById("logFilterTsCycleImg");
     if (cycleBtn && cycleImg) {
       if (logFilter === "1") {
-        cycleImg.src = "/static/img/Bu1.png?v=2.9.81";
+        cycleImg.src = "/static/img/Bu1.png?v=2.9.310";
         cycleImg.alt = "TS1";
         cycleBtn.title = window.t ? window.t("live.btn_filter_ts1_title", {}, "Фильтр TS: только TS1 (клик: переключить на TS2)") : "Фильтр TS: только TS1 (клик: переключить на TS2)";
       } else if (logFilter === "2") {
-        cycleImg.src = "/static/img/Bu2.png?v=2.9.81";
+        cycleImg.src = "/static/img/Bu2.png?v=2.9.310";
         cycleImg.alt = "TS2";
         cycleBtn.title = window.t ? window.t("live.btn_filter_ts2_title", {}, "Фильтр TS: только TS2 (клик: переключить на оба TS)") : "Фильтр TS: только TS2 (клик: переключить на оба TS)";
       } else {
-        cycleImg.src = "/static/img/Bu1+2.png?v=2.9.81";
+        cycleImg.src = "/static/img/Bu1+2.png?v=2.9.310";
         cycleImg.alt = "TS1+2";
         cycleBtn.title = window.t ? window.t("live.btn_filter_both_title", {}, "Фильтр TS: оба TS (клик: переключить на TS1)") : "Фильтр TS: оба TS (клик: переключить на TS1)";
       }
@@ -446,8 +446,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
 
     if (isLogVisible && targetCard && liveMonitorPanel) {
-      if (targetCard.nextElementSibling !== liveMonitorPanel) {
-        targetCard.after(liveMonitorPanel);
+      const anchorEl = (targetCard && targetCard.closest(".collapsed-hotspots-stack")) || targetCard;
+      if (anchorEl && anchorEl.nextElementSibling !== liveMonitorPanel) {
+        anchorEl.after(liveMonitorPanel);
       }
     } else if (!isLogVisible && liveMonitorPanel) {
       const dashboard = document.querySelector(".app-dashboard");
@@ -757,6 +758,12 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     4000: "Отключение (Unlink)",
   };
   window.TG_NAMES = window.TG_NAMES;
+  window.TGIF_TG_NAMES = window.TGIF_TG_NAMES || {
+    777: "TGIF Multi-Lang",
+    31665: "TGIF The Mothership",
+    9990: "Parrot (Эхо-тест)",
+    4000: "Disconnect (Unlink)"
+  };
 
   // Populate Russian regional talkgroups 250001 - 250099 into window.TG_NAMES
   if (typeof BM_RUSSIA_REGIONS === "object") {
@@ -784,6 +791,13 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         });
       }
     }
+    const localTgifCache = localStorage.getItem("proxdmr_tgif_tg_names_cache");
+    if (localTgifCache) {
+      const parsedTgif = JSON.parse(localTgifCache);
+      if (parsedTgif && typeof parsedTgif === "object") {
+        Object.assign(window.TGIF_TG_NAMES, parsedTgif);
+      }
+    }
   } catch (e) {
     console.warn("Could not load local TG names cache:", e);
   }
@@ -793,16 +807,22 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     try {
       const resp = await fetch("/api/tg/names");
       const data = await resp.json();
-      if (data.status === "ok" && data.names) {
-        Object.keys(data.names).forEach(k => {
-          const cleaned = getCleanTgDesc(k, data.names[k]);
-          if (cleaned) {
-            window.TG_NAMES[k] = cleaned;
-          } else if (data.names[k]) {
-            window.TG_NAMES[k] = data.names[k];
-          }
-        });
-        localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES));
+      if (data.status === "ok") {
+        if (data.names) {
+          Object.keys(data.names).forEach(k => {
+            const cleaned = getCleanTgDesc(k, data.names[k]);
+            if (cleaned) {
+              window.TG_NAMES[k] = cleaned;
+            } else if (data.names[k]) {
+              window.TG_NAMES[k] = data.names[k];
+            }
+          });
+          localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES));
+        }
+        if (data.tgif_names && typeof data.tgif_names === "object") {
+          Object.assign(window.TGIF_TG_NAMES, data.tgif_names);
+          localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES));
+        }
         if (typeof window.updateTgDisplay === "function") window.updateTgDisplay();
         if (typeof window.renderQuickMemButtons === "function") window.renderQuickMemButtons();
       }
@@ -900,8 +920,12 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       const tgText = isPrivateCall ? `ID ${c.dst_id}` : `${c.dst_id}`;
       const tgDisplayHtml = isPrivateCall ? `ID <span class="dmr-id-text">${c.dst_id}</span>` : `${c.dst_id}`;
 
+      const callNetType = (typeof window.getHotspotNetworkType === "function")
+        ? window.getHotspotNetworkType(c.hotspot_id)
+        : "bm";
+      const isNonMccNet = (callNetType === "tgif" || callNetType === "xlx");
       const callerCountry = getCountryInfo(c.src_id, c.src_callsign);
-      const tgCountry = !isPrivateCall ? getCountryInfo(c.dst_id) : null;
+      const tgCountry = (!isPrivateCall && !isNonMccNet) ? getCountryInfo(c.dst_id) : null;
 
       let isDiffCountry = false;
       let tgFlagHtml = "";
@@ -935,10 +959,13 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
       let tgDesc = "";
       if (!isPrivateCall) {
-        const rawName = (typeof window.TG_NAMES !== "undefined" && window.TG_NAMES[c.dst_id]) || c.talkgroup_name || c.dst_name || "";
+        const netRaw = (typeof window.getNetworkRawTgName === "function")
+          ? window.getNetworkRawTgName(c.dst_id, callNetType)
+          : ((typeof window.TG_NAMES !== "undefined" && window.TG_NAMES[c.dst_id]) || "");
+        const rawName = netRaw || c.talkgroup_name || c.dst_name || "";
         let cleaned = "";
-        if (rawName) {
-          cleaned = typeof getCleanTgDesc === "function" ? getCleanTgDesc(c.dst_id, rawName) : rawName;
+        if (rawName || isNonMccNet) {
+          cleaned = typeof getCleanTgDesc === "function" ? getCleanTgDesc(c.dst_id, rawName, null, callNetType) : rawName;
         }
 
         if (isDiffCountry) {
@@ -959,7 +986,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
           }
         } else {
           if (cleaned) {
-            const shortDesc = cleaned.split(/[\(\/]/)[0].trim();
+            const shortDesc = isNonMccNet ? cleaned : cleaned.split(/[\(\/]/)[0].trim();
             tgDesc = shortDesc || cleaned;
           }
         }

@@ -939,7 +939,7 @@ export function toggleTranscriptionSummary(show = null) {
       : (window.t ? window.t("live.summary_open_title", {}, "Сводка распознанного текста за последние 24ч (клик: открыть/закрыть)") : "Сводка распознанного текста за последние 24ч (клик: открыть/закрыть)");
   }
   if (summaryImg) {
-    summaryImg.src = isOpen ? "/static/img/TXT_On.png?v=2.9.81" : "/static/img/TXT_Off.png?v=2.9.81";
+    summaryImg.src = isOpen ? "/static/img/TXT_On.png?v=2.9.310" : "/static/img/TXT_Off.png?v=2.9.310";
     summaryImg.alt = isOpen ? "TXT On" : "TXT Off";
   }
 

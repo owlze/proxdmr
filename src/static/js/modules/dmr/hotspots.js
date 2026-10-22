@@ -16,6 +16,7 @@ import {
   setupMutePanButtonEvents,
   updateCardMuteUI,
   updateCardPanUI,
+  updateCardTsAudioModeUI,
   updateCardRecUI,
   updateAllHotspotRecUI
 } from '../audio/routing.js';
@@ -37,7 +38,8 @@ import {
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
 } from '../ptt/engine.js?v=2.9.260';
-import { wireCardStatusInteractions, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js';
+import { wireCardStatusInteractions, renderHotspotAuxStatusBadge, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js';
+import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js';
 import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.282';
 import { showLongPressEffect } from '../ui/long-press.js';
 
@@ -284,8 +286,9 @@ export function switchActiveHotspot(newId) {
     const curHs = (typeof window !== "undefined" && window.currentHotspots) || [];
     const targetHs = curHs.find(h => h.id === newId);
     if (targetHs) {
+      const isXlx = ((targetHs.network_type || "").toLowerCase() === "xlx");
       const t1 = targetHs.default_tg_ts1 || 91;
-      const t2 = targetHs.default_tg_ts2 || 2501;
+      const t2 = isXlx ? 9 : (targetHs.default_tg_ts2 || 2501);
       if (typeof window !== "undefined") {
         window.tgTs1 = t1;
         window.tgTs2 = t2;
@@ -304,7 +307,13 @@ export function switchActiveHotspot(newId) {
       window.updateHotspotCardMuteUI(newId);
     }
     document.querySelectorAll(".radio-container").forEach(c => {
-      c.classList.toggle("active-hotspot", c.dataset.hotspotId === newId);
+      const isAct = c.dataset.hotspotId === newId;
+      c.classList.toggle("active-hotspot", isAct);
+      if (isAct && targetHs && (targetHs.network_type || "").toLowerCase() === "xlx") {
+        if (typeof setCardSlot === "function") {
+          setCardSlot(c, 2, false);
+        }
+      }
     });
     if (typeof updatePttLockUI === "function") {
       updatePttLockUI();
@@ -339,7 +348,7 @@ export function triggerAddNewHotspot() {
       localStorage.setItem("proxdmr_settings_last_tab", "tab-edit-hs");
     } catch (_) {}
 
-    const usedSsids = new Set(currentHotspots.map(h => Number(h.bm_ssid)));
+    const usedSsids = new Set(currentHotspots.filter(h => (h.network_type || "bm") === "bm").map(h => Number(h.bm_ssid)));
     let nextSsid = 1;
     while (usedSsids.has(nextSsid)) {
       nextSsid++;
@@ -354,6 +363,9 @@ export function triggerAddNewHotspot() {
       send_talker_alias: true,
       dmr_id: baseHs.dmr_id || "",
       bm_ssid: nextSsid,
+      network_type: "bm",
+      rpto_options: "",
+      xlx_module: "D",
       bm_password: "",
       bm_api_key: "",
       bm_master_host: "2322.master.brandmeister.network",
@@ -638,9 +650,545 @@ function setupCollapseButtonLongPress(btn, cid) {
   });
 }
 
+let _isSyncingCollapsedStacks = false;
+
+export function syncCollapsedHotspotStacks() {
+  if (_isSyncingCollapsedStacks) return;
+  const radiosGrid = document.getElementById("radiosGrid");
+  if (!radiosGrid) return;
+
+  _isSyncingCollapsedStacks = true;
+  try {
+    // 1. Unwrap any existing .collapsed-hotspots-stack wrappers back into radiosGrid
+    radiosGrid.querySelectorAll(".collapsed-hotspots-stack").forEach(stack => {
+      while (stack.firstChild) {
+        radiosGrid.insertBefore(stack.firstChild, stack);
+      }
+      stack.remove();
+    });
+
+    // 2. Ensure all .radio-container cards are in currentHotspots order
+    const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+      ? window.currentHotspots
+      : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
+    const displayHotspots = allHs.slice(0, 7);
+    displayHotspots.forEach(hs => {
+      const card = radiosGrid.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`);
+      if (card) {
+        radiosGrid.appendChild(card);
+      }
+    });
+
+    // 3. Group runs of 2 or more consecutive .radio-container.collapsed cards into a vertical .collapsed-hotspots-stack
+    const cards = Array.from(radiosGrid.querySelectorAll(":scope > .radio-container"));
+    let currentRun = [];
+
+    const flushRun = () => {
+      if (currentRun.length >= 2) {
+        const stack = document.createElement("div");
+        stack.className = "collapsed-hotspots-stack";
+        radiosGrid.insertBefore(stack, currentRun[0]);
+        currentRun.forEach(c => stack.appendChild(c));
+      }
+      currentRun = [];
+    };
+
+    cards.forEach(card => {
+      if (card.classList.contains("collapsed")) {
+        currentRun.push(card);
+      } else {
+        flushRun();
+      }
+    });
+    flushRun();
+
+    // 4. Reposition liveMonitorPanel if visible so it stays right after its target card (or stack)
+    const liveMonitorPanel = document.getElementById("liveMonitorPanel");
+    const isLogVis = Boolean(typeof window.isLogVisible !== "undefined" ? window.isLogVisible : (liveMonitorPanel && !liveMonitorPanel.classList.contains("hidden")));
+    if (isLogVis && liveMonitorPanel) {
+      const isMobile = window.innerWidth <= 768;
+      const effectiveHid = (isMobile && (!window.currentLogHotspotId || window.currentLogHotspotId === "all"))
+        ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
+        : window.currentLogHotspotId;
+
+      const targetCard = (effectiveHid && effectiveHid !== "all")
+        ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
+        : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
+
+      const anchorEl = (targetCard && targetCard.closest(".collapsed-hotspots-stack")) || targetCard;
+      if (anchorEl && anchorEl.nextElementSibling !== liveMonitorPanel) {
+        anchorEl.after(liveMonitorPanel);
+      }
+    }
+
+    if (!radiosGrid._collapsedStackObserver && typeof window.MutationObserver !== "undefined") {
+      radiosGrid._collapsedStackObserver = new MutationObserver((mutations) => {
+        if (_isSyncingCollapsedStacks) return;
+        let shouldSync = false;
+        for (const m of mutations) {
+          if (m.type === "attributes" && m.attributeName === "class" && m.target && m.target.classList && m.target.classList.contains("radio-container")) {
+            const isCol = m.target.classList.contains("collapsed");
+            const prevCol = m.target.dataset._prevCollapsedState === "1";
+            if (isCol !== prevCol) {
+              m.target.dataset._prevCollapsedState = isCol ? "1" : "0";
+              shouldSync = true;
+            }
+          }
+        }
+        if (shouldSync) {
+          syncCollapsedHotspotStacks();
+        }
+      });
+      radiosGrid.querySelectorAll(".radio-container").forEach(c => {
+        c.dataset._prevCollapsedState = c.classList.contains("collapsed") ? "1" : "0";
+      });
+      radiosGrid._collapsedStackObserver.observe(radiosGrid, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class"]
+      });
+    } else {
+      radiosGrid.querySelectorAll(".radio-container").forEach(c => {
+        c.dataset._prevCollapsedState = c.classList.contains("collapsed") ? "1" : "0";
+      });
+    }
+  } finally {
+    _isSyncingCollapsedStacks = false;
+  }
+}
+
+export async function linkHotspotXlxModule(cid, moduleLetter) {
+  const allHs = (window.currentHotspots || []);
+  const hs = allHs.find(h => h.id === cid) || allHs[0];
+  const hsName = hs ? hs.name : cid;
+
+  if (!moduleLetter) {
+    // Unlink (TG 4000)
+    try {
+      const resp = await fetch("/api/bm/static-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: cid,
+          slot: 2,
+          talkgroup: 4000,
+          talkgroups: [4000]
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data.status === "ok") {
+        if (hs) hs.xlx_module = "";
+        const toastMsg = window.t
+          ? window.t("quick_assign.xlx_module_unlinked", { name: hsName }, `✅ [${hsName}] TS2: Модуль XLX отключен (TG 4000)`)
+          : `✅ [${hsName}] TS2: Модуль XLX отключен (TG 4000)`;
+        showToast(toastMsg, 2500);
+        renderRadiosGrid();
+      } else {
+        showToast(data.detail || data.message || "Ошибка отключения модуля", 3000);
+      }
+    } catch (e) {
+      console.error("[XLX] Unlink failed:", e);
+      showToast("Ошибка сети при отключении модуля", 2500);
+    }
+    return;
+  }
+
+  const modClean = String(moduleLetter).trim().toUpperCase().slice(0, 1);
+  const modCode = modClean.charCodeAt(0);
+  if (modCode < 65 || modCode > 90) return;
+  const modTg = 4001 + (modCode - 65);
+
+  try {
+    const resp = await fetch("/api/bm/static-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: cid,
+        slot: 2,
+        talkgroup: modTg,
+        talkgroups: [modTg]
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (data.status === "ok") {
+      if (hs) hs.xlx_module = modClean;
+      const toastMsg = window.t
+        ? window.t("quick_assign.xlx_module_set_toast", { name: hsName, module: modClean, tg: modTg }, `✅ [${hsName}] TS2: Подключен модуль XLX ${modClean} (TG ${modTg})`)
+        : `✅ [${hsName}] TS2: Подключен модуль XLX ${modClean} (TG ${modTg})`;
+      showToast(toastMsg, 2500);
+      renderRadiosGrid();
+    } else {
+      showToast(data.detail || data.message || "Ошибка подключения модуля", 3000);
+    }
+  } catch (e) {
+    console.error("[XLX] Link module failed:", e);
+    showToast("Ошибка сети при переключении модуля", 2500);
+  }
+}
+
+export function openXlxAllModulesPopover(cid, anchorEl, currentMod = "") {
+  document.querySelectorAll(".xlx-all-modules-popover").forEach(el => el.remove());
+  const popover = document.createElement("div");
+  popover.className = "xlx-all-modules-popover";
+  const allLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+  allLetters.forEach(letter => {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = `xlx-popover-tile ${letter === currentMod ? "active" : ""}`;
+    tile.textContent = letter;
+    tile.title = `Модуль ${letter} (TG ${4001 + (letter.charCodeAt(0) - 65)})`;
+    tile.onclick = (e) => {
+      e.stopPropagation();
+      popover.remove();
+      linkHotspotXlxModule(cid, letter);
+    };
+    popover.appendChild(tile);
+  });
+
+  document.body.appendChild(popover);
+  const rect = anchorEl.getBoundingClientRect();
+  popover.style.top = `${window.scrollY + rect.bottom + 6}px`;
+  popover.style.left = `${Math.max(10, Math.min(window.innerWidth - 290, window.scrollX + rect.left - 80))}px`;
+
+  const onDocClick = (e) => {
+    if (!popover.contains(e.target) && e.target !== anchorEl) {
+      popover.remove();
+      document.removeEventListener("click", onDocClick);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", onDocClick), 50);
+}
+
+export function updateCardXlxPanel(card, hs) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const isXlxNet = ((targetHs && targetHs.network_type) || card.dataset.networkType || "bm").toLowerCase() === "xlx";
+  card.classList.toggle("card-net-xlx", isXlxNet);
+
+  const cardCid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+  if (typeof updateCardTsAudioModeUI === "function") {
+    updateCardTsAudioModeUI(card, cardCid);
+  } else if (typeof window !== "undefined" && typeof window.updateCardTsAudioModeUI === "function") {
+    window.updateCardTsAudioModeUI(card, cardCid);
+  }
+
+  const vfoTs1 = card.querySelector(".vfo-ts1-row");
+  const vfoTs2 = card.querySelector(".vfo-ts2-row");
+  let vfoXlx = card.querySelector(".vfo-xlx-row");
+
+  const oldModBar = card.querySelector(".xlx-modules-card-bar");
+  if (oldModBar) oldModBar.remove();
+
+  if (isXlxNet) {
+    if (vfoTs1) vfoTs1.style.setProperty("display", "none", "important");
+
+    if (!vfoXlx) {
+      vfoXlx = document.createElement("div");
+      vfoXlx.className = "vfo-row vfo-xlx-row";
+      if (vfoTs2 && vfoTs2.parentElement) {
+        vfoTs2.parentElement.insertBefore(vfoXlx, vfoTs2);
+      } else if (vfoTs1 && vfoTs1.parentElement) {
+        vfoTs1.parentElement.appendChild(vfoXlx);
+      } else {
+        const screenEl = card.querySelector(".radio-screen") || card;
+        screenEl.appendChild(vfoXlx);
+      }
+    } else {
+      vfoXlx.style.removeProperty("display");
+    }
+
+    const curMod = String((targetHs && targetHs.xlx_module) || "").trim().toUpperCase().slice(0, 1) || "D";
+    const commonMods = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+    const isExtendedMod = curMod > "J";
+    const cid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+    const modLabel = window.t
+      ? window.t("hotspots.xlx_module_bar_label", {}, "Модуль:")
+      : "Модуль:";
+
+    const selectEl = card.querySelector(".bm-server-select");
+    const selectHost = selectEl && selectEl.value && selectEl.value !== "__TEST_SERVERS__" ? selectEl.value : "";
+    const srvRaw = (targetHs && targetHs.bm_master_host) || selectHost || (targetHs && targetHs.custom_server_host) || (targetHs && targetHs.xlx_reflector) || (targetHs && targetHs.bm_master_name) || "";
+    const srvInfo = typeof getBmServerInfo === "function" ? getBmServerInfo(srvRaw, "xlx") : (typeof resolveCardMasterInfo === "function" ? resolveCardMasterInfo(srvRaw, "xlx") : null);
+    const cCode = srvInfo && srvInfo.countryCode && srvInfo.countryCode !== "GLOBAL" ? srvInfo.countryCode : "";
+    const flag = cCode ? isoToEmoji(cCode) : "🌐";
+    const serverName = (srvInfo && srvInfo.displayName) || (targetHs && targetHs.xlx_reflector) || (targetHs && targetHs.bm_master_name) || "XLX Reflector";
+    const serverHost = (srvInfo && srvInfo.host) || (targetHs && targetHs.custom_server_host) || srvRaw || "";
+    const hostDetail = serverHost && serverHost !== serverName ? ` (${serverHost})` : "";
+
+    vfoXlx.innerHTML = `
+      <div class="xlx-server-info-bar">
+        <div class="xlx-server-left">
+          <span class="xlx-server-icon">📡</span>
+          <span class="xlx-server-flag">${flag}</span>
+          <span class="xlx-server-title" title="${safeEscapeHtml(serverName + hostDetail)}"><strong>${safeEscapeHtml(serverName)}</strong><small>${safeEscapeHtml(hostDetail)}</small></span>
+        </div>
+        <div class="xlx-server-right">
+          <span class="xlx-proto-pill">MMDVM · TS2</span>
+        </div>
+      </div>
+      <div class="xlx-main-controls">
+        <div class="xlx-modules-grid">
+          ${commonMods.map(m => `
+            <button type="button" class="btn-xlx-mod ${m === curMod ? 'active-xlx-mod' : ''}" data-module="${m}" title="Модуль ${m} (TG ${4001 + (m.charCodeAt(0) - 65)})">${m}</button>
+          `).join("")}
+        </div>
+        <div class="xlx-controls-col">
+          <div class="xlx-active-mod-pill ${isExtendedMod ? 'active-xlx-mod' : ''}" role="button" tabindex="0" title="Текущий модуль: ${curMod}. Кликните для выбора любого модуля A–Z">${modLabel} <strong>${curMod}</strong></div>
+          <div class="xlx-actions-row">
+            <button type="button" class="btn-xlx-all ${isExtendedMod ? 'active-xlx-mod' : ''}" title="Все 26 модулей A–Z (выбор в 1 клик)">🔤 ${isExtendedMod ? curMod : 'A–Z'} ▾</button>
+            <button type="button" class="btn-xlx-unlink" title="Отключить модуль (Unlink TG 4000)">🔌 4000</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    vfoXlx.querySelectorAll(".btn-xlx-mod").forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        linkHotspotXlxModule(cid, b.dataset.module);
+      };
+    });
+
+    const modPill = vfoXlx.querySelector(".xlx-active-mod-pill");
+    if (modPill) {
+      modPill.onclick = (e) => {
+        e.stopPropagation();
+        openXlxAllModulesPopover(cid, modPill, curMod);
+      };
+    }
+
+    const btnAll = vfoXlx.querySelector(".btn-xlx-all");
+    if (btnAll) {
+      btnAll.onclick = (e) => {
+        e.stopPropagation();
+        openXlxAllModulesPopover(cid, btnAll, curMod);
+      };
+    }
+
+    const btnUnlink = vfoXlx.querySelector(".btn-xlx-unlink");
+    if (btnUnlink) {
+      btnUnlink.onclick = (e) => {
+        e.stopPropagation();
+        linkHotspotXlxModule(cid, null);
+      };
+    }
+  } else {
+    if (vfoTs1) vfoTs1.style.removeProperty("display");
+    if (vfoXlx) vfoXlx.style.setProperty("display", "none", "important");
+  }
+}
+
+export async function linkHotspotDmrPlusReflector(cid, reflectorNum) {
+  const allHs = (window.currentHotspots || []);
+  const hs = allHs.find(h => h.id === cid) || allHs[0];
+  const hsName = hs ? hs.name : cid;
+  const num = parseInt(reflectorNum, 10);
+
+  if (!num || num === 4000) {
+    try {
+      const resp = await fetch("/api/bm/static-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: cid,
+          slot: 2,
+          talkgroup: 4000,
+          talkgroups: [4000]
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data.status === "ok") {
+        if (hs) hs.dmrplus_reflector = "";
+        const unlinkedText = window.t ? window.t("dmrplus.ref_unlinked", {}, "Отключен") : "Отключен";
+        showToast(`✅ [${hsName}] TS2: Рефлектор DMR+ ${unlinkedText} (4000 Unlink)`, 2500);
+        renderRadiosGrid();
+      } else {
+        showToast(data.detail || data.message || "Ошибка отключения рефлектора", 3000);
+      }
+    } catch (e) {
+      console.error("[DMR+] Unlink failed:", e);
+      showToast("Ошибка сети при отключении рефлектора", 2500);
+    }
+    return;
+  }
+
+  if (num === 5000) {
+    try {
+      const resp = await fetch("/api/bm/static-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: cid,
+          slot: 2,
+          talkgroup: 5000,
+          talkgroups: [5000]
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data.status === "ok") {
+        showToast(`ℹ️ [${hsName}] TS2: Запрос статуса рефлектора (5000 Status)`, 2500);
+      } else {
+        showToast(data.detail || data.message || "Ошибка запроса статуса", 3000);
+      }
+    } catch (e) {
+      console.error("[DMR+] Status request failed:", e);
+      showToast("Ошибка сети при запросе статуса", 2500);
+    }
+    return;
+  }
+
+  try {
+    const resp = await fetch("/api/bm/static-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: cid,
+        slot: 2,
+        talkgroup: num,
+        talkgroups: [num]
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (data.status === "ok") {
+      if (hs) hs.dmrplus_reflector = String(num);
+      const toastMsg = window.t
+        ? window.t("dmrplus.ref_linked_toast", { ref: num }, `Подключен рефлектор ${num} (Голос в TG 9)`)
+        : `Подключен рефлектор ${num} (Голос в TG 9)`;
+      showToast(`✅ [${hsName}] TS2: ${toastMsg}`, 2500);
+      renderRadiosGrid();
+    } else {
+      showToast(data.detail || data.message || "Ошибка подключения рефлектора", 3000);
+    }
+  } catch (e) {
+    console.error("[DMR+] Link reflector failed:", e);
+    showToast("Ошибка сети при переключении рефлектора", 2500);
+  }
+}
+
+export function updateCardDmrPlusPanel(card, hs) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const isDmrPlusNet = ((targetHs && targetHs.network_type) || card.dataset.networkType || "bm").toLowerCase() === "dmrplus";
+  card.classList.toggle("card-net-dmrplus", isDmrPlusNet);
+
+  let dmrPlusBar = card.querySelector(".dmrplus-reflector-bar");
+
+  if (!isDmrPlusNet) {
+    if (dmrPlusBar) dmrPlusBar.remove();
+    return;
+  }
+
+  const vfoTs2 = card.querySelector(".vfo-ts2-row");
+  if (!dmrPlusBar) {
+    dmrPlusBar = document.createElement("div");
+    dmrPlusBar.className = "dmrplus-reflector-bar";
+    if (vfoTs2 && vfoTs2.nextSibling) {
+      vfoTs2.parentNode.insertBefore(dmrPlusBar, vfoTs2.nextSibling);
+    } else if (vfoTs2) {
+      vfoTs2.parentNode.appendChild(dmrPlusBar);
+    } else {
+      const screenEl = card.querySelector(".radio-screen") || card;
+      screenEl.appendChild(dmrPlusBar);
+    }
+  }
+
+  const cid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+  const curRef = String((targetHs && targetHs.dmrplus_reflector) || "").trim();
+
+  const refNames = {
+    "4530": "RU",
+    "4001": "DL",
+    "4030": "OE",
+    "4020": "HB",
+    "4400": "UK",
+    "4500": "EA",
+    "4700": "US",
+    "4800": "PT"
+  };
+  const curRefSuffix = refNames[curRef] ? ` ${refNames[curRef]}` : "";
+  const curRefDisplay = curRef ? `${curRef}${curRefSuffix}` : (window.t ? window.t("dmrplus.ref_unlinked", {}, "Отключен") : "Отключен");
+
+  const refLabel = window.t ? window.t("dmrplus.reflector_label", {}, "Рефлектор:") : "Рефлектор:";
+  const unlinkTitle = window.t ? window.t("dmrplus.unlink_btn", {}, "4000 Отключить") : "4000 Отключить";
+  const statusTitle = window.t ? window.t("dmrplus.status_btn", {}, "5000 Статус") : "5000 Статус";
+  const quickTitle = window.t ? window.t("dmrplus.quick_ref_title", {}, "Быстрое переключение рефлектора DMR+") : "Быстрое переключение рефлектора DMR+";
+
+  dmrPlusBar.innerHTML = `
+    <div class="dmrplus-ref-header">
+      <div class="dmrplus-ref-current" title="Текущий рефлектор TS2 (Голос в TG 9)">
+        <span class="dmrplus-ref-icon">📡</span>
+        <span class="dmrplus-ref-label">${refLabel}</span>
+        <span class="dmrplus-ref-badge ${curRef ? 'active' : 'unlinked'}">${curRefDisplay}</span>
+      </div>
+      <div class="dmrplus-ref-actions">
+        <button type="button" class="btn-dmrplus-action btn-dmrplus-unlink" title="${unlinkTitle}">🔌 4000</button>
+        <button type="button" class="btn-dmrplus-action btn-dmrplus-status" title="${statusTitle}">ℹ️ 5000</button>
+        <button type="button" class="btn-dmrplus-action btn-dmrplus-custom" title="Ввести номер рефлектора (4001–4999)">🔢 4xxx</button>
+      </div>
+    </div>
+    <div class="dmrplus-ref-quick-row">
+      <span class="dmrplus-quick-label" title="${quickTitle}">⚡</span>
+      <div class="dmrplus-quick-btns">
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4530' ? 'active' : ''}" data-ref="4530" title="4530 RU (Россия / СНГ)">🇷🇺 4530</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4001' ? 'active' : ''}" data-ref="4001" title="4001 DL (Германия общий)">🇩🇪 4001</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4030' ? 'active' : ''}" data-ref="4030" title="4030 OE (Австрия)">🇦🇹 4030</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4400' ? 'active' : ''}" data-ref="4400" title="4400 UK (Великобритания)">🇬🇧 4400</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4700' ? 'active' : ''}" data-ref="4700" title="4700 US (Северная Америка)">🇺🇸 4700</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4800' ? 'active' : ''}" data-ref="4800" title="4800 PT (Бразилия)">🇧🇷 4800</button>
+      </div>
+    </div>
+  `;
+
+  dmrPlusBar.querySelectorAll(".btn-dmrplus-quick").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      linkHotspotDmrPlusReflector(cid, btn.dataset.ref);
+    };
+  });
+
+  const btnUnlink = dmrPlusBar.querySelector(".btn-dmrplus-unlink");
+  if (btnUnlink) {
+    btnUnlink.onclick = (e) => {
+      e.stopPropagation();
+      linkHotspotDmrPlusReflector(cid, 4000);
+    };
+  }
+
+  const btnStatus = dmrPlusBar.querySelector(".btn-dmrplus-status");
+  if (btnStatus) {
+    btnStatus.onclick = (e) => {
+      e.stopPropagation();
+      linkHotspotDmrPlusReflector(cid, 5000);
+    };
+  }
+
+  const btnCustom = dmrPlusBar.querySelector(".btn-dmrplus-custom");
+  if (btnCustom) {
+    btnCustom.onclick = (e) => {
+      e.stopPropagation();
+      const promptText = window.t ? window.t("dmrplus.prompt_reflector", {}, "Введите номер рефлектора DMR+ (4001–4999):") : "Введите номер рефлектора DMR+ (4001–4999):";
+      const userVal = prompt(promptText, curRef || "4530");
+      if (userVal !== null && userVal.trim()) {
+        const parsed = parseInt(userVal.trim(), 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          linkHotspotDmrPlusReflector(cid, parsed);
+        }
+      }
+    };
+  }
+}
+
 export function renderRadiosGrid() {
     const radiosGrid = document.getElementById("radiosGrid");
     if (!radiosGrid) return;
+
+    radiosGrid.querySelectorAll(".collapsed-hotspots-stack").forEach(stack => {
+      while (stack.firstChild) {
+        radiosGrid.insertBefore(stack.firstChild, stack);
+      }
+      stack.remove();
+    });
 
     const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
       ? window.currentHotspots
@@ -666,9 +1214,11 @@ export function renderRadiosGrid() {
         if (idx === 0 && existingCards[0] && (!existingCards[0].dataset.hotspotId || existingCards[0].dataset.hotspotId === "default")) {
           card = existingCards[0];
           card.dataset.hotspotId = hs.id;
+          card.dataset.networkType = (hs.network_type || "bm").toLowerCase();
         } else if (template) {
           card = template.content.firstElementChild.cloneNode(true);
           card.dataset.hotspotId = hs.id;
+          card.dataset.networkType = (hs.network_type || "bm").toLowerCase();
           if (window.I18N) window.I18N.apply(card);
           radiosGrid.appendChild(card);
         }
@@ -738,6 +1288,25 @@ export function renderRadiosGrid() {
 
       updateCardBmBanner(card, hs);
 
+      const isXlxNet = ((hs && hs.network_type) || "bm").toLowerCase() === "xlx";
+      card.classList.toggle("card-net-xlx", isXlxNet);
+
+      const isDmrPlusNet = ((hs && hs.network_type) || "bm").toLowerCase() === "dmrplus";
+      card.classList.toggle("card-net-dmrplus", isDmrPlusNet);
+
+      updateCardXlxPanel(card, hs);
+      updateCardDmrPlusPanel(card, hs);
+      if (isXlxNet) {
+        setCardSlot(card, 2, false);
+      }
+
+      // PTT button TS1 disabled badge for XLX
+      const cardPttEl = card.querySelector(".ptt-button");
+      if (cardPttEl) {
+        const ts1PttBadge = cardPttEl.querySelector(".ptt-slot-ts1");
+        if (ts1PttBadge) ts1PttBadge.classList.toggle("ptt-slot-disabled", isXlxNet);
+      }
+
       const tg1Num = card.querySelector(".tg-ts1-num");
       if (tg1Num) {
         const cid = card.dataset.hotspotId || hs.id;
@@ -747,6 +1316,14 @@ export function renderRadiosGrid() {
         tg1Num.title = window.t ? window.t("hotspots.tg1_select_title", {}, "Кликните для выбора группы или ID на TS1") : "Кликните для выбора группы или ID на TS1";
         tg1Num.onclick = (e) => {
           e.stopPropagation();
+          const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
+          if (curNet === "xlx") {
+            const warnMsg = window.t
+              ? window.t("hotspots.xlx_ts1_blocked_toast", {}, "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.")
+              : "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.";
+            showToast(warnMsg, 3000);
+            return;
+          }
           switchActiveHotspot(cid);
           setCardSlot(card, 1, true);
           openTgTxUseModal(1, cid);
@@ -756,16 +1333,38 @@ export function renderRadiosGrid() {
       const tg2Num = card.querySelector(".tg-ts2-num");
       if (tg2Num) {
         const cid = card.dataset.hotspotId || hs.id;
-        const curTg2 = getHotspotTg(cid, 2);
-        tg2Num.textContent = `TG ${curTg2}`;
-        tg2Num.style.cursor = "pointer";
-        tg2Num.title = window.t ? window.t("hotspots.tg2_select_title", {}, "Кликните для выбора группы или ID на TS2") : "Кликните для выбора группы или ID на TS2";
-        tg2Num.onclick = (e) => {
-          e.stopPropagation();
-          switchActiveHotspot(cid);
-          setCardSlot(card, 2, true);
-          openTgTxUseModal(2, cid);
-        };
+        const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
+        if (curNet === "dmrplus") {
+          tg2Num.textContent = "TG 9 (Reflector)";
+          tg2Num.style.cursor = "pointer";
+          tg2Num.title = window.t ? window.t("dmrplus.ts2_voice_hint", {}, "Голос на TS2 всегда в TG 9") : "Голос на TS2 всегда в TG 9";
+          tg2Num.onclick = (e) => {
+            e.stopPropagation();
+            switchActiveHotspot(cid);
+            setCardSlot(card, 2, true);
+            openTgTxUseModal(2, cid);
+          };
+        } else if (curNet === "xlx") {
+          tg2Num.textContent = "TG 9 (Reflector)";
+          tg2Num.style.cursor = "pointer";
+          tg2Num.title = window.t ? window.t("hotspots.xlx_ts2_voice_hint", {}, "В сети XLX связь ведётся на TS2 / TG 9") : "В сети XLX связь ведётся на TS2 / TG 9";
+          tg2Num.onclick = (e) => {
+            e.stopPropagation();
+            switchActiveHotspot(cid);
+            setCardSlot(card, 2, true);
+          };
+        } else {
+          const curTg2 = getHotspotTg(cid, 2);
+          tg2Num.textContent = `TG ${curTg2}`;
+          tg2Num.style.cursor = "pointer";
+          tg2Num.title = window.t ? window.t("hotspots.tg2_select_title", {}, "Кликните для выбора группы или ID на TS2") : "Кликните для выбора группы или ID на TS2";
+          tg2Num.onclick = (e) => {
+            e.stopPropagation();
+            switchActiveHotspot(cid);
+            setCardSlot(card, 2, true);
+            openTgTxUseModal(2, cid);
+          };
+        }
       }
 
       // Update per-hotspot mute and pan state in UI
@@ -818,58 +1417,68 @@ export function renderRadiosGrid() {
       const apiBadge = card.querySelector(".api-status-badge");
       const apiDetail = card.querySelector(".api-detail-text");
       const apiRow = card.querySelector(".api-status-row");
-      const hasApiKey = Boolean(hs.bm_api_key && hs.bm_api_key.trim().length > 10);
+      const netType = ((hs && hs.network_type) || "bm").toLowerCase();
 
-      if (!hasApiKey) {
-        hs._apiStatus = "NO_KEY";
-      } else if (!hs._apiStatus) {
-        hs._apiStatus = "CHECKING";
-      }
+      if (netType !== "bm" && netType !== "tgif") {
+        renderHotspotAuxStatusBadge(card, hs);
+      } else {
+        const isTgif = (netType === "tgif");
+        const apiDomain = isTgif ? "api.tgif.network" : "api.brandmeister.network";
+        const netShort = isTgif ? "TGIF" : "BM";
+        const netVersion = isTgif ? "v1" : "v2";
+        const hasApiKey = Boolean(hs.bm_api_key && hs.bm_api_key.trim().length > 8);
 
-      const apiStatus = hs._apiStatus || (hasApiKey ? "CHECKING" : "NO_KEY");
-      let apiBadgeClass = "status-offline bm-offline";
-      let apiBadgeText = "API:OFFLINE";
-      let apiComment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-      let apiTooltip = window.t ? window.t("status.api_no_key_tooltip") : "⚪ BM API: Ключ не настроен. Нажмите для ввода";
+        if (!hasApiKey) {
+          hs._apiStatus = "NO_KEY";
+        } else if (!hs._apiStatus) {
+          hs._apiStatus = "CHECKING";
+        }
 
-      if (apiStatus === "ONLINE") {
-        apiBadgeClass = "status-online bm-online";
-        apiBadgeText = "API:ONLINE";
-        apiComment = hs._apiDetail ? `api.brandmeister.network (${hs._apiDetail})` : "api.brandmeister.network (Авторизован)";
-        apiTooltip = window.t ? window.t("status.api_authorized_tooltip") : "🟢 BM API v2: Авторизован. Клик для повторной проверки";
-      } else if (apiStatus === "CHECKING") {
-        apiBadgeClass = "status-connecting bm-connecting";
-        apiBadgeText = "API:CHECKING";
-        apiComment = window.t ? window.t("status.api_checking_detail") : "Проверка токена v2...";
-        apiTooltip = window.t ? window.t("status.api_checking_tooltip") : "🟡 BM API: Проверка соединения...";
-      } else if (apiStatus === "AUTH_FAILED") {
-        apiBadgeClass = "status-error bm-error";
-        apiBadgeText = "API:AUTH FAIL";
-        apiComment = hs._apiDetail || (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)");
-        apiTooltip = window.t ? window.t("status.api_auth_tooltip", { detail: apiComment }) : `🔴 BM API: ${apiComment}. Нажмите для настройки`;
-      } else if (apiStatus === "NO_KEY") {
-        apiBadgeClass = "status-offline bm-offline";
-        apiBadgeText = "API:NO KEY";
-        apiComment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-        apiTooltip = window.t ? window.t("status.api_no_key_tooltip") : "⚪ BM API: Ключ не настроен. Нажмите для ввода";
-      } else if (apiStatus === "OFFLINE" || apiStatus === "ERROR") {
-        apiBadgeClass = "status-error bm-error";
-        apiBadgeText = "API:ERROR";
-        apiComment = hs._apiDetail || (window.t ? window.t("status.api_server_unreachable") : "Сервер api.brandmeister.network недоступен");
-        apiTooltip = window.t ? window.t("status.api_error_tooltip", { detail: apiComment }) : `🔴 BM API: ${apiComment}. Клик для повторной проверки`;
-      }
+        const apiStatus = hs._apiStatus || (hasApiKey ? "CHECKING" : "NO_KEY");
+        let apiBadgeClass = "status-offline bm-offline";
+        let apiBadgeText = "API:OFFLINE";
+        let apiComment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
+        let apiTooltip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
 
-      if (apiBadge) {
-        apiBadge.className = `status-badge bm-badge api-status-badge ${apiBadgeClass}`;
-        apiBadge.textContent = apiBadgeText;
-        apiBadge.title = apiTooltip;
-      }
-      if (apiDetail) {
-        apiDetail.textContent = apiComment;
-        apiDetail.title = apiTooltip;
-      }
-      if (apiRow) {
-        apiRow.title = apiTooltip;
+        if (apiStatus === "ONLINE") {
+          apiBadgeClass = "status-online bm-online";
+          apiBadgeText = "API:ONLINE";
+          apiComment = hs._apiDetail ? `${apiDomain} (${hs._apiDetail})` : `${apiDomain} (Авторизован)`;
+          apiTooltip = `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
+        } else if (apiStatus === "CHECKING") {
+          apiBadgeClass = "status-connecting bm-connecting";
+          apiBadgeText = "API:CHECKING";
+          apiComment = isTgif ? "Проверка токена TGIF..." : (window.t ? window.t("status.api_checking_detail") : "Проверка токена v2...");
+          apiTooltip = `🟡 ${netShort} API: Проверка соединения...`;
+        } else if (apiStatus === "AUTH_FAILED") {
+          apiBadgeClass = "status-error bm-error";
+          apiBadgeText = "API:AUTH FAIL";
+          apiComment = hs._apiDetail || (isTgif ? "Неверный токен TGIF (401)" : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
+          apiTooltip = `🔴 ${netShort} API: ${apiComment}. Нажмите для настройки`;
+        } else if (apiStatus === "NO_KEY") {
+          apiBadgeClass = "status-offline bm-offline";
+          apiBadgeText = "API:NO KEY";
+          apiComment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
+          apiTooltip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+        } else if (apiStatus === "OFFLINE" || apiStatus === "ERROR") {
+          apiBadgeClass = "status-error bm-error";
+          apiBadgeText = "API:ERROR";
+          apiComment = hs._apiDetail || `Сервер ${apiDomain} недоступен`;
+          apiTooltip = `🔴 ${netShort} API: ${apiComment}. Клик для повторной проверки`;
+        }
+
+        if (apiBadge) {
+          apiBadge.className = `status-badge bm-badge api-status-badge ${apiBadgeClass}`;
+          apiBadge.textContent = apiBadgeText;
+          apiBadge.title = apiTooltip;
+        }
+        if (apiDetail) {
+          apiDetail.textContent = apiComment;
+          apiDetail.title = apiTooltip;
+        }
+        if (apiRow) {
+          apiRow.title = apiTooltip;
+        }
       }
 
       // Wire card events
@@ -953,12 +1562,42 @@ export function renderRadiosGrid() {
         }
         wireCardStatusInteractions(card, hs);
 
+        const handleHotspotManageAction = (cid) => {
+          const curHs = (window.currentHotspots || []).find(h => h.id === cid) || hs;
+          const curNet = ((curHs && curHs.network_type) || "bm").toLowerCase();
+          if (curNet !== "bm" && curNet !== "tgif" && curNet !== "freedmr" && curNet !== "xlx") {
+            openHotspotSettings(curHs, "tab-edit-hs");
+            setTimeout(() => {
+              const targetId = "editHsRptoOptions";
+              const el = document.getElementById(targetId);
+              if (el && typeof el.focus === "function") {
+                el.focus();
+                if (typeof el.scrollIntoView === "function") {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+              }
+            }, 140);
+            showToast(window.t ? window.t("hotspots.rpto_manage_hint", {}, "⚙️ Задайте статические группы (TS1 / TS2) в поле RPTO Options и нажмите «Отправить»") : "⚙️ Задайте статические группы (TS1 / TS2) в поле RPTO Options и нажмите «Отправить»", 3200);
+            return;
+          }
+          openBmTgStaticModal(cid);
+        };
+
         const btnStatic = card.querySelector(".btn-bm-static-edit");
         if (btnStatic) {
+          if (netType === "tgif") {
+            btnStatic.title = "Управление TalkGroups TGIF (Статические / Динамические)";
+          } else if (netType === "freedmr") {
+            btnStatic.title = "Управление TalkGroups FreeDMR (Статические / Динамические)";
+          } else if (netType === "xlx") {
+            btnStatic.title = "Управление модулями XLX (A–Z / TG 9)";
+          } else if (netType === "bm") {
+            btnStatic.title = "Управление TalkGroups BM (Статические / Динамические)";
+          }
           btnStatic.onclick = (e) => {
             e.stopPropagation();
             const cid = card.dataset.hotspotId || hs.id;
-            openBmTgStaticModal(cid);
+            handleHotspotManageAction(cid);
           };
         }
 
@@ -973,6 +1612,15 @@ export function renderRadiosGrid() {
 
         const btnSrch = card.querySelector(".btn-srch-tg-id");
         if (btnSrch) {
+          if (netType === "tgif") {
+            btnSrch.title = "TG: поиск групп | Manage: управление TG TGIF | ID: поиск позывных/ID";
+          } else if (netType === "freedmr") {
+            btnSrch.title = "TG: поиск групп | Manage: управление TG FreeDMR | ID: поиск позывных/ID";
+          } else if (netType === "xlx") {
+            btnSrch.title = "TG: поиск групп | Manage: управление модулями XLX | ID: поиск позывных/ID";
+          } else if (netType === "bm") {
+            btnSrch.title = "TG: поиск групп | Manage: управление TG BM | ID: поиск позывных/ID";
+          }
           btnSrch.onclick = (e) => {
             e.stopPropagation();
             const cid = card.dataset.hotspotId || hs.id;
@@ -982,7 +1630,7 @@ export function renderRadiosGrid() {
             const action = actionTarget ? actionTarget.dataset.action : null;
 
             if (action === "manage") {
-              openBmTgStaticModal(cid);
+              handleHotspotManageAction(cid);
               return;
             }
             if (action === "tg" || action === "id") {
@@ -996,7 +1644,7 @@ export function renderRadiosGrid() {
             if (ratio < 0.33) {
               openSearchTgIdModal(slot, cid, "tg");
             } else if (ratio < 0.67) {
-              openBmTgStaticModal(cid);
+              handleHotspotManageAction(cid);
             } else {
               openSearchTgIdModal(slot, cid, "id");
             }
@@ -1038,6 +1686,16 @@ export function renderRadiosGrid() {
         const vfo1 = card.querySelector(".vfo-ts1-row");
         if (vfo1) {
           vfo1.addEventListener("click", (e) => {
+            const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
+            if (curNet === "xlx") {
+              e.stopPropagation();
+              e.preventDefault();
+              const warnMsg = window.t
+                ? window.t("hotspots.xlx_ts1_blocked_toast", {}, "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.")
+                : "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.";
+              showToast(warnMsg, 3000);
+              return;
+            }
             if (vfo1._suppressClickUntil && Date.now() < vfo1._suppressClickUntil) {
               e.stopPropagation();
               e.preventDefault();
@@ -1080,6 +1738,16 @@ export function renderRadiosGrid() {
             badge1.style.cursor = "pointer";
             badge1.title = window.t ? window.t("hotspots.tg1_badge_title", {}, "Выбрать группу передачи для TS1 (справочник TG)") : "Выбрать группу передачи для TS1 (справочник TG)";
             const openModal1 = (e) => {
+              const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
+              if (curNet === "xlx") {
+                e.stopPropagation();
+                e.preventDefault();
+                const warnMsg = window.t
+                  ? window.t("hotspots.xlx_ts1_blocked_toast", {}, "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.")
+                  : "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.";
+                showToast(warnMsg, 3000);
+                return;
+              }
               if (vfo1._suppressClickUntil && Date.now() < vfo1._suppressClickUntil) {
                 e.stopPropagation();
                 e.preventDefault();
@@ -1250,6 +1918,11 @@ export function renderRadiosGrid() {
           let isLockLongPressed = false;
           let lockPressStartX = 0;
           let lockPressStartY = 0;
+          let pttHoldStartTimer = null;
+          let lastPttTapTime = 0;
+          let lastPttTapSlot = 0;
+          const PTT_DOUBLE_TAP_MS = 320;
+          const PTT_HOLD_DELAY_MS = 180;
 
           cardPttBtn.addEventListener("pointerdown", (e) => {
             const cid = resolveHotspotId(card.dataset.hotspotId || hs.id || "default");
@@ -1312,34 +1985,73 @@ export function renderRadiosGrid() {
             }
 
             // Determine targetSlot based on left (TS1) vs right (TS2) click coordinate
-            const targetSlot = (relX < (rect.width / 2)) ? 1 : 2;
-            setCardSlot(card, targetSlot, true);
-            cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
-            cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
-            cardPttBtn.classList.add(`tx-slot-${targetSlot}`);
+            const isXlx = ((hs && hs.network_type) || "bm").toLowerCase() === "xlx";
+            const targetSlot = isXlx ? 2 : ((relX < (rect.width / 2)) ? 1 : 2);
+            const now = Date.now();
 
-            // 3. Branch: PTT mode check - "toggle" (Переключение) vs "hold" (Удержание)
-            const pttMode = (typeof window.getHotspotPttMode === "function") ? window.getHotspotPttMode(cid) : getHotspotPttMode(cid);
-            if (pttMode === "toggle") {
+            // Проверка на ДВОЙНОЙ ТАП (<= 320 мс)
+            if ((now - lastPttTapTime) <= PTT_DOUBLE_TAP_MS) {
               e.preventDefault();
               e.stopPropagation();
-              if (typeof window !== "undefined" && window.isPttPressed) {
-                cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
-                stopTransmission();
-              } else {
-                switchActiveHotspot(cid);
-                startTransmission(cid, targetSlot);
+              lastPttTapTime = 0;
+              if (pttHoldStartTimer) {
+                clearTimeout(pttHoldStartTimer);
+                pttHoldStartTimer = null;
+              }
+              cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
+              if (typeof window.stopTransmission === "function") {
+                window.stopTransmission({ silentCancel: true });
+              }
+              setCardSlot(card, targetSlot, true);
+              switchActiveHotspot(cid);
+              if (typeof window.triggerQuickUnlink4000 === "function") {
+                window.triggerQuickUnlink4000(cid, targetSlot);
               }
               return;
             }
 
-            // 4. Branch: Unlocked in "hold" mode - proceed to transmission!
+            lastPttTapTime = now;
+            lastPttTapSlot = targetSlot;
+
+            const pttMode = (typeof window.getHotspotPttMode === "function") ? window.getHotspotPttMode(cid) : getHotspotPttMode(cid);
+
+            // In "toggle" mode:
+            if (pttMode === "toggle") {
+              e.preventDefault();
+              e.stopPropagation();
+              if (typeof window !== "undefined" && (window.isPttPressed || window.isTransmissionStarting)) {
+                cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
+                stopTransmission();
+                return;
+              }
+              setCardSlot(card, targetSlot, true);
+              cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
+              cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
+              cardPttBtn.classList.add(`tx-slot-${targetSlot}`);
+              switchActiveHotspot(cid);
+              if (pttHoldStartTimer) clearTimeout(pttHoldStartTimer);
+              pttHoldStartTimer = setTimeout(() => {
+                pttHoldStartTimer = null;
+                startTransmission(cid, targetSlot);
+              }, PTT_HOLD_DELAY_MS);
+              return;
+            }
+
+            // In "hold" mode:
             e.preventDefault();
             try {
               cardPttBtn.setPointerCapture(e.pointerId);
             } catch (err) {}
+            setCardSlot(card, targetSlot, true);
+            cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
+            cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
+            cardPttBtn.classList.add(`tx-slot-${targetSlot}`);
             switchActiveHotspot(cid);
-            startTransmission(cid, targetSlot);
+            if (pttHoldStartTimer) clearTimeout(pttHoldStartTimer);
+            pttHoldStartTimer = setTimeout(() => {
+              pttHoldStartTimer = null;
+              startTransmission(cid, targetSlot);
+            }, PTT_HOLD_DELAY_MS);
           });
 
           cardPttBtn.addEventListener("pointermove", (e) => {
@@ -1358,11 +2070,12 @@ export function renderRadiosGrid() {
               const rect = cardPttBtn.getBoundingClientRect();
               const relX = e.clientX - rect.left;
               if (relX >= 0 && relX <= rect.width) {
-                const hoverSlot = (relX < (rect.width / 2)) ? 1 : 2;
+                const isXlx = ((hs && hs.network_type) || "bm").toLowerCase() === "xlx";
+                const hoverSlot = isXlx ? 2 : ((relX < (rect.width / 2)) ? 1 : 2);
                 const wasSlot1 = cardPttBtn.classList.contains("hover-slot-1");
                 const wasSlot2 = cardPttBtn.classList.contains("hover-slot-2");
                 const prevSlot = wasSlot1 ? 1 : (wasSlot2 ? 2 : 0);
-                cardPttBtn.classList.toggle("hover-slot-1", hoverSlot === 1);
+                cardPttBtn.classList.toggle("hover-slot-1", !isXlx && hoverSlot === 1);
                 cardPttBtn.classList.toggle("hover-slot-2", hoverSlot === 2);
                 if (prevSlot !== hoverSlot) {
                   updateCardPttHintForSlot(card, hoverSlot);
@@ -1375,10 +2088,8 @@ export function renderRadiosGrid() {
             const lockIconEl = cardPttBtn.querySelector(".ptt-lock-icon");
             if (lockIconEl) lockIconEl.classList.remove("lock-pressing");
 
-            cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
-            updateCardPttHint(card);
-
             const cid = resolveHotspotId(card.dataset.hotspotId || hs.id || "default");
+            const pttMode = (typeof window.getHotspotPttMode === "function") ? window.getHotspotPttMode(cid) : getHotspotPttMode(cid);
 
             if (lockPressTimer) {
               clearTimeout(lockPressTimer);
@@ -1411,12 +2122,16 @@ export function renderRadiosGrid() {
               return;
             }
 
-            // In "toggle" mode, pointerup must not stop transmission
-            const pttMode = (typeof window.getHotspotPttMode === "function") ? window.getHotspotPttMode(cid) : getHotspotPttMode(cid);
+            // In "toggle" mode, pointerup must not stop transmission or strip active TX slot highlight
             if (pttMode === "toggle") {
               e.preventDefault();
               e.stopPropagation();
               return;
+            }
+
+            if (pttHoldStartTimer) {
+              clearTimeout(pttHoldStartTimer);
+              pttHoldStartTimer = null;
             }
 
             e.preventDefault();
@@ -1426,7 +2141,10 @@ export function renderRadiosGrid() {
               }
             } catch (err) {}
 
-            if (typeof window !== "undefined" && window.isPttPressed) {
+            cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2");
+            updateCardPttHint(card);
+
+            if (typeof window !== "undefined" && (window.isPttPressed || window.isTransmissionStarting)) {
               stopTransmission();
             }
           });
@@ -1440,14 +2158,21 @@ export function renderRadiosGrid() {
             const lockIconEl = cardPttBtn.querySelector(".ptt-lock-icon");
             if (lockIconEl) lockIconEl.classList.remove("lock-pressing");
 
-            cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
-            updateCardPttHint(card);
+            cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
 
             const cid = resolveHotspotId(card.dataset.hotspotId || hs.id || "default");
             const pttMode = (typeof window.getHotspotPttMode === "function") ? window.getHotspotPttMode(cid) : getHotspotPttMode(cid);
             if (pttMode === "toggle") {
               return;
             }
+
+            if (pttHoldStartTimer) {
+              clearTimeout(pttHoldStartTimer);
+              pttHoldStartTimer = null;
+            }
+
+            cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2");
+            updateCardPttHint(card);
 
             e.preventDefault();
             try {
@@ -1475,8 +2200,13 @@ export function renderRadiosGrid() {
               return;
             }
 
-            if ((typeof window !== "undefined" && window.isPttPressed) && (!cardPttBtn.hasPointerCapture || !cardPttBtn.hasPointerCapture(e.pointerId))) {
-              cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
+            if (pttHoldStartTimer) {
+              clearTimeout(pttHoldStartTimer);
+              pttHoldStartTimer = null;
+            }
+
+            if ((typeof window !== "undefined" && (window.isPttPressed || window.isTransmissionStarting)) && (!cardPttBtn.hasPointerCapture || !cardPttBtn.hasPointerCapture(e.pointerId))) {
+              cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2");
               stopTransmission();
             }
           });
@@ -1573,46 +2303,74 @@ export function renderRadiosGrid() {
           const u = userCalls[num];
           const isPrivate = Boolean(u || num > 999999);
 
+          const formatUserLoc = (usr) => {
+            if (!usr) return "";
+            const parts = [];
+            if (usr.city) parts.push(usr.city);
+            if (usr.state && usr.state !== usr.city) parts.push(usr.state);
+            if (usr.country && usr.country !== usr.state && usr.country !== usr.city) parts.push(usr.country);
+            return parts.join(", ");
+          };
+
+          const formatUserPrefixHint = (usr) => {
+            if (!usr) return "";
+            const uid = usr.radio_id !== undefined ? usr.radio_id : usr.id;
+            const cs = (usr.callsign || "").trim();
+            const nm = (usr.name || "").trim();
+            const loc = [usr.city, usr.country].filter(Boolean).join(", ");
+            const details = [nm, loc].filter(Boolean).join(", ");
+            return `<span class="quick-tg-pop-sub">↳ Напр.: <b>ID ${safeEscapeHtml(String(uid))}</b> — <strong>${safeEscapeHtml(cs)}</strong>${details ? ` (${safeEscapeHtml(details)})` : ""}</span>`;
+          };
+
           if (isPrivate) {
             const cInfo = getCountryInfo(num, u?.callsign || "", u?.country || "");
             const flagHtml = getFlagBadgeHtml(cInfo, false);
             const cLabel = (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "DMR ID";
             let quoteHtml = "";
             let isKnown = false;
+            const idCacheEntry = cache["id_" + num];
+            const isIdNotFound = (idCacheEntry === "not_found" || (idCacheEntry && idCacheEntry.status === "not_found"));
+            const idPrefixUser = (idCacheEntry && typeof idCacheEntry === "object") ? idCacheEntry.prefixUser : null;
 
             if (u && (u.callsign || u.name)) {
               isKnown = true;
               const cs = (u.callsign || "").trim();
               const nm = (u.name || "").trim();
-              const loc = [u.city, u.country].filter(Boolean).join(", ");
+              const loc = formatUserLoc(u);
               quoteHtml = `<span class="quick-tg-pop-main"><strong>${safeEscapeHtml(cs)}</strong>${nm ? ` — ${safeEscapeHtml(nm)}` : ""}</span>` +
                 (loc ? `<span class="quick-tg-pop-sub">${safeEscapeHtml(loc)}</span>` : "");
-            } else if (cache["id_" + num] === "not_found") {
+            } else if (isIdNotFound) {
               const notFoundTxt = window.t ? window.t("tgtx.private_id_custom", {}, "Личный вызов DMR ID (нет в базе RadioID)") : "Личный вызов DMR ID (нет в базе RadioID)";
-              quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(notFoundTxt)}</span>`;
+              quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(notFoundTxt)}</span>` +
+                (idPrefixUser ? formatUserPrefixHint(idPrefixUser) : "");
             } else {
               const searchTxt = window.t ? window.t("tgtx.private_id_searching", {}, "Личный вызов DMR ID • поиск позывного...") : "Личный вызов DMR ID • поиск позывного...";
               quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(searchTxt)}</span>`;
               if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
               previewDebounceTimer = setTimeout(async () => {
                 try {
-                  const res = await fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=5`);
+                  const res = await fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=8`);
                   const data = await res.json();
-                  const exact = ((data && data.results) || []).find(it => Number(it.id) === num);
+                  const list = (data && data.results) || [];
+                  const getUid = (it) => Number(it && (it.radio_id !== undefined ? it.radio_id : it.id));
+                  const exact = list.find(it => getUid(it) === num);
+                  const prefixUser = list.find(it => getUid(it) !== num && String(getUid(it)).startsWith(String(num)));
                   if (exact) {
+                    const normUser = Object.assign({}, exact, { id: num, radio_id: num });
                     if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
-                    window.USER_CALLSIGNS[num] = exact;
-                    cache["id_" + num] = "found";
+                    window.USER_CALLSIGNS[num] = normUser;
+                    try { localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS)); } catch (_) {}
+                    cache["id_" + num] = { status: "found", prefixUser: prefixUser || null };
                   } else {
-                    cache["id_" + num] = "not_found";
+                    cache["id_" + num] = { status: "not_found", prefixUser: prefixUser || null };
                   }
                 } catch (_) {
-                  cache["id_" + num] = "not_found";
+                  cache["id_" + num] = { status: "not_found", prefixUser: null };
                 }
                 if (quickInput && quickInput.value.replace(/\D/g, "") === String(num)) {
                   renderQuickPreview();
                 }
-              }, 140);
+              }, 120);
             }
 
             previewPopup.innerHTML = `
@@ -1644,16 +2402,20 @@ export function renderRadiosGrid() {
 
           if (cleanDesc) {
             isKnown = true;
-            quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cleanDesc)}»</span>`;
+            const cached = cache["tg_" + num];
+            quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cleanDesc)}»</span>` +
+              (cached && cached.prefixUser ? formatUserPrefixHint(cached.prefixUser) : "");
           } else if (cache["tg_" + num]) {
             const cached = cache["tg_" + num];
             if (cached.exactName) {
               isKnown = true;
-              quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cached.exactName)}»</span>`;
+              quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cached.exactName)}»</span>` +
+                (cached.prefixUser ? formatUserPrefixHint(cached.prefixUser) : "");
             } else {
               const customTxt = window.t ? window.t("tgtx.custom_group_hint", { tg: num }, `Группа TG ${num} (вне справочника)`) : `Группа TG ${num} (вне справочника)`;
               quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(customTxt)}</span>` +
-                (cached.prefix ? `<span class="quick-tg-pop-sub">↳ Напр.: <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "");
+                (cached.prefix ? `<span class="quick-tg-pop-sub">↳ Напр.: <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "") +
+                (cached.prefixUser ? formatUserPrefixHint(cached.prefixUser) : "");
             }
           } else {
             const typingTxt = window.t ? window.t("tgtx.typing_group_hint", { tg: num }, `Группа TG ${num} • проверка...`) : `Группа TG ${num} • проверка...`;
@@ -1661,8 +2423,15 @@ export function renderRadiosGrid() {
             if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
             previewDebounceTimer = setTimeout(async () => {
               try {
-                const res = await fetch(`/api/tg/search?q=${encodeURIComponent(String(num))}&limit=8`);
-                const data = await res.json();
+                const promises = [
+                  fetch(`/api/tg/search?q=${encodeURIComponent(String(num))}&limit=8`).then(r => r.json()).catch(() => null)
+                ];
+                if (num >= 100) {
+                  promises.push(
+                    fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=5`).then(r => r.json()).catch(() => null)
+                  );
+                }
+                const [data, userData] = await Promise.all(promises);
                 const list = (data && data.results) || [];
                 const exact = list.find(r => Number(r.tg) === num);
                 const prefixItem = list.find(r => Number(r.tg) !== num && String(r.tg).startsWith(String(num)));
@@ -1677,9 +2446,21 @@ export function renderRadiosGrid() {
                   const pDesc = getCleanTgDesc(prefixItem.tg, prefixItem.name) || prefixItem.name || ("TG " + prefixItem.tg);
                   prefixObj = { tg: prefixItem.tg, desc: pDesc };
                 }
-                cache["tg_" + num] = { exactName: exactClean, prefix: prefixObj };
+                let prefixUser = null;
+                if (userData && Array.isArray(userData.results)) {
+                  const getUid = (it) => Number(it && (it.radio_id !== undefined ? it.radio_id : it.id));
+                  const exactUser = userData.results.find(it => getUid(it) === num);
+                  if (exactUser && !exactClean) {
+                    const normUser = Object.assign({}, exactUser, { id: num, radio_id: num });
+                    if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
+                    window.USER_CALLSIGNS[num] = normUser;
+                    try { localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS)); } catch (_) {}
+                  }
+                  prefixUser = userData.results.find(it => getUid(it) !== num && String(getUid(it)).startsWith(String(num))) || null;
+                }
+                cache["tg_" + num] = { exactName: exactClean, prefix: prefixObj, prefixUser };
               } catch (_) {
-                cache["tg_" + num] = { exactName: "", prefix: null };
+                cache["tg_" + num] = { exactName: "", prefix: null, prefixUser: null };
               }
               if (quickInput && quickInput.value.replace(/\D/g, "") === String(num)) {
                 renderQuickPreview();
@@ -1860,6 +2641,8 @@ export function renderRadiosGrid() {
       }
     });
 
+    syncCollapsedHotspotStacks();
+
     // Ensure live activity monitor / history panel stays correctly positioned after card reordering in radiosGrid
     const liveMonitorPanel = document.getElementById("liveMonitorPanel");
     const isLogVis = Boolean(typeof window.isLogVisible !== "undefined" ? window.isLogVisible : (liveMonitorPanel && !liveMonitorPanel.classList.contains("hidden")));
@@ -1873,8 +2656,9 @@ export function renderRadiosGrid() {
         ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
         : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
 
-      if (targetCard && targetCard.nextElementSibling !== liveMonitorPanel) {
-        targetCard.after(liveMonitorPanel);
+      const anchorEl = (targetCard && targetCard.closest(".collapsed-hotspots-stack")) || targetCard;
+      if (anchorEl && anchorEl.nextElementSibling !== liveMonitorPanel) {
+        anchorEl.after(liveMonitorPanel);
       }
     } else if (!isLogVis && liveMonitorPanel) {
       const dashboard = document.querySelector(".app-dashboard");
@@ -1929,7 +2713,30 @@ export function renderHotspotsList() {
       const isCollapsed = isHotspotCollapsed(hs.id);
       const isLive = isHotspotLiveCollapsed(hs.id);
       const isOnline = (!isCollapsed || isLive) && hs.status === "ONLINE";
-      const lockTitle = window.t ? window.t("hotspots.auto_tg_bm_disabled_title", {}, "Автонастройка TG BM отключена") : "Автонастройка TG BM отключена";
+      const hsNet = (hs.network_type || "bm").toLowerCase();
+      let netTag = "BM";
+      let autoTgDisabledKey = "hotspots.auto_tg_bm_disabled_title";
+      let autoTgCardTextKey = "hs_edit.auto_tg_bm";
+      let autoTgCardTextFallback = "Автонастройка TG BM";
+      if (hsNet === "tgif") {
+        netTag = "TGIF";
+        autoTgDisabledKey = "hotspots.auto_tg_tgif_disabled_title";
+        autoTgCardTextKey = "hs_edit.auto_tg_tgif";
+        autoTgCardTextFallback = "Автонастройка TG TGIF";
+      } else if (hsNet === "freedmr") {
+        netTag = "FreeDMR";
+        autoTgDisabledKey = "hotspots.auto_tg_freedmr_disabled_title";
+        autoTgCardTextKey = "hs_edit.auto_tg_freedmr";
+        autoTgCardTextFallback = "Автонастройка TG FreeDMR";
+      } else if (hsNet === "xlx") {
+        netTag = "XLX";
+        autoTgDisabledKey = "hotspots.auto_tg_xlx_disabled_title";
+        autoTgCardTextKey = "hs_edit.auto_tg_xlx";
+        autoTgCardTextFallback = "Автоподключение XLX";
+      }
+      const lockTitle = window.t 
+        ? window.t(autoTgDisabledKey, {}, `Автонастройка TG ${netTag} отключена`) 
+        : `Автонастройка TG ${netTag} отключена`;
       const lockIcon = !isAutoTgBm ? `<span class="hs-lock-icon" style="margin-left: 6px; font-size: 0.95em; vertical-align: middle;" title="${lockTitle}">🔒</span>` : '';
       const collapsedBgText = window.t ? window.t("hotspots.badge_collapsed_bg", {}, "🟢 СВЕРНУТ (В ФОНЕ)") : "🟢 СВЕРНУТ (В ФОНЕ)";
       const collapsedText = window.t ? window.t("hotspots.badge_collapsed", {}, "⚪ СВЕРНУТ") : "⚪ СВЕРНУТ";
@@ -1961,10 +2768,11 @@ export function renderHotspotsList() {
             ${currentHotspots.length > 1 ? `<button class="btn-card-action danger btn-del-hs" data-id="${hs.id}">🗑️</button>` : ""}
           </div>
           <div class="hs-card-toggles-row" style="display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap;">
+            ${(hsNet === "bm" || hsNet === "tgif" || hsNet === "freedmr" || hsNet === "xlx") ? `
             <label class="hs-card-autotg-label" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; cursor: pointer; user-select: none; color: var(--text-primary, #c9d1d9);">
               <input type="checkbox" class="chk-hs-autotg" data-id="${hs.id}" ${isAutoTgBm ? 'checked' : ''} style="cursor: pointer; width: 15px; height: 15px; accent-color: #58a6ff;">
-              <span data-i18n="hs_edit.auto_tg_bm">${window.t ? window.t("hs_edit.auto_tg_bm") : "Автонастройка TG BM"}</span>
-            </label>
+              <span>${window.t ? window.t(autoTgCardTextKey, {}, autoTgCardTextFallback) : autoTgCardTextFallback}</span>
+            </label>` : ""}
             <label class="hs-card-autorec-label" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; cursor: pointer; user-select: none; color: var(--text-primary, #c9d1d9);" title="Автозапись TS1/2">
               <input type="checkbox" class="chk-hs-autorec" data-id="${hs.id}" ${hs.auto_record !== false ? 'checked' : ''} style="cursor: pointer; width: 15px; height: 15px; accent-color: #ef4444;">
               <span data-i18n="hs_edit.auto_record">${window.t ? window.t("hs_edit.auto_record") : "Автозапись TS1/2"}</span>
@@ -2031,7 +2839,22 @@ export function renderHotspotsList() {
               body: JSON.stringify({ enabled: newVal })
             });
             if (res.ok) {
-              showToast(newVal ? (window.t ? window.t("hotspots.auto_tg_bm_on", { name: hs.name }, `✅ [${hs.name}]: Автонастройка TG BM включена`) : `✅ [${hs.name}]: Автонастройка TG BM включена`) : (window.t ? window.t("hotspots.auto_tg_bm_off", { name: hs.name }, `🔒 [${hs.name}]: Автонастройка TG BM отключена`) : `🔒 [${hs.name}]: Автонастройка TG BM отключена`), 2500);
+              let netKeyOn = "hotspots.auto_tg_bm_on";
+              let netKeyOff = "hotspots.auto_tg_bm_off";
+              if (hsNet === "tgif") {
+                netKeyOn = "hotspots.auto_tg_tgif_on";
+                netKeyOff = "hotspots.auto_tg_tgif_off";
+              } else if (hsNet === "freedmr") {
+                netKeyOn = "hotspots.auto_tg_freedmr_on";
+                netKeyOff = "hotspots.auto_tg_freedmr_off";
+              } else if (hsNet === "xlx") {
+                netKeyOn = "hotspots.auto_tg_xlx_on";
+                netKeyOff = "hotspots.auto_tg_xlx_off";
+              }
+              const toastMsg = newVal 
+                ? (window.t ? window.t(netKeyOn, { name: hs.name }, `✅ [${hs.name}]: Автонастройка TG ${netTag} включена`) : `✅ [${hs.name}]: Автонастройка TG ${netTag} включена`) 
+                : (window.t ? window.t(netKeyOff, { name: hs.name }, `🔒 [${hs.name}]: Автонастройка TG ${netTag} отключена`) : `🔒 [${hs.name}]: Автонастройка TG ${netTag} отключена`);
+              showToast(toastMsg, 2500);
             }
           } catch (err) {
             console.error("Failed to toggle auto_tg_bm:", err);
@@ -2068,15 +2891,19 @@ export function renderHotspotsList() {
   }
 export async function fetchBmMasters() {
     try {
-      const resp = await fetch("/api/bm/masters");
+      const resp = await fetch("/api/dmr/servers?network_type=bm");
       if (resp.ok) {
         const data = await resp.json();
-        if (data && Array.isArray(data.masters)) {
-          bmMastersList = data.masters;
+        const list = (data && Array.isArray(data.servers)) ? data.servers : (data && Array.isArray(data.masters) ? data.masters : []);
+        if (list.length > 0) {
+          window._dmrServersCache = window._dmrServersCache || {};
+          window._dmrServersCache["bm"] = list;
+          window._dmrServersCacheVer = Date.now();
+          bmMastersList = list;
           window.bmMastersList = bmMastersList;
           if (window.__proxdmr) window.__proxdmr.bmMastersList = bmMastersList;
           const editHsHost = document.getElementById("editHsHost");
-          renderBmMastersDropdown(editHsHost ? editHsHost.value : "");
+          renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "bm");
           refreshAllCardsBmBanner();
         }
       }
@@ -2084,21 +2911,28 @@ export async function fetchBmMasters() {
       console.warn("Не удалось загрузить список серверов BM:", e);
     }
   }
-export function renderBmMastersDropdown(currentHost) {
+export function renderBmMastersDropdown(currentHost, networkTypeOverride = null) {
     const editHsMasterSelect = document.getElementById("editHsMasterSelect");
     if (!editHsMasterSelect) return;
     const editHsHost = document.getElementById("editHsHost");
+    const editHsNetworkType = document.getElementById("editHsNetworkType");
+    const netType = (networkTypeOverride || (editHsNetworkType ? editHsNetworkType.value : "bm") || "bm").toLowerCase();
+    const profile = getDmrNetworkProfile(netType);
     const hostVal = (currentHost !== undefined && currentHost !== null) ? currentHost : (editHsHost ? editHsHost.value : "");
     editHsMasterSelect.innerHTML = "";
 
-    const benchOpt = document.createElement("option");
-    benchOpt.value = "__TEST_SERVERS__";
-    benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
-    editHsMasterSelect.appendChild(benchOpt);
+    if (netType !== "custom") {
+      const benchOpt = document.createElement("option");
+      benchOpt.value = "__TEST_SERVERS__";
+      benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
+      editHsMasterSelect.appendChild(benchOpt);
+    }
 
     const defOpt = document.createElement("option");
     defOpt.value = "";
-    defOpt.textContent = window.t ? window.t("hs_edit.master_select_prompt") : "🌍 Выберите страну / сервер BM...";
+    defOpt.textContent = netType === "bm"
+      ? (window.t ? window.t("hs_edit.master_select_prompt") : "🌍 Выберите страну / сервер BM...")
+      : `🌐 Выберите сервер ${profile.shortName}...`;
     editHsMasterSelect.appendChild(defOpt);
 
     let matched = false;
@@ -2107,18 +2941,50 @@ export function renderBmMastersDropdown(currentHost) {
     const curLang = (window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
     const recTag = window.t ? window.t("bm.master_recommended", {}, "⭐ [Рекомендуется]") : "⭐ [Рекомендуется]";
 
-    if (Array.isArray(bmMastersList)) {
-      bmMastersList.forEach(m => {
+    const cached = window._dmrServersCache && window._dmrServersCache[netType];
+    const rawServers = (Array.isArray(cached) && cached.length > 0)
+      ? cached
+      : (netType === "bm"
+          ? (Array.isArray(bmMastersList) && bmMastersList.length ? bmMastersList : (typeof getNetworkServersList === "function" ? getNetworkServersList("bm") : []))
+          : (typeof getNetworkServersList === "function" ? getNetworkServersList(netType) : []));
+
+    const servers = typeof sortServersForDropdown === "function" ? sortServersForDropdown(rawServers) : rawServers;
+
+    if (Array.isArray(servers)) {
+      servers.forEach(m => {
         if (!m) return;
         const opt = document.createElement("option");
         opt.value = m.host || "";
-        const cCode = (m.country_code || m.country || "").toUpperCase();
-        const countryName = getLocalizedCountryName(cCode, m.country_name || m.country || "BM", curLang);
-        const flag = m.flag || isoToEmoji(cCode);
+        if (m.port) opt.dataset.port = String(m.port);
+        if (m.password) opt.dataset.password = String(m.password);
+        const cCode = (m.country_code || m.country || "GLOBAL").toUpperCase();
+        const countryName = netType === "bm"
+          ? getLocalizedCountryName(cCode, m.country_name || m.country || "BM", curLang)
+          : (m.country_name || m.country || profile.shortLabel || profile.shortName || "DMR");
+        const flag = m.flag || (cCode !== "GLOBAL" ? isoToEmoji(cCode) : "🌐");
         const recSuffix = m.recommended ? ` ${recTag}` : "";
-        opt.textContent = `${flag} ${countryName} — BM ${m.id || ""} (${m.host || ""})${recSuffix}`;
+        const prefixLabel = netType === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || "");
+        const labelMid = prefixLabel ? `${prefixLabel} ` : "";
+
+        const st = (m.state || "").toLowerCase();
+        const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
+                       (m.udp_ok === false && m.avg_ping == null && m.udp_ms == null) ||
+                       (m.loss_pct !== undefined && m.loss_pct >= 100);
+        const pingVal = (m.udp_ms !== undefined && m.udp_ms !== null) ? m.udp_ms : ((m.avg_ping !== undefined && m.avg_ping !== null) ? m.avg_ping : null);
+
+        if (isDead) {
+          opt.textContent = `🔴 НЕ ОТВЕЧАЕТ · ${flag} ${countryName} — ${labelMid}(${m.host || ""})`;
+          opt.style.color = "#ef4444";
+          opt.dataset.dead = "1";
+        } else if (pingVal !== null && !isNaN(pingVal)) {
+          opt.textContent = `⚡ ${Math.round(pingVal)} мс · ${flag} ${countryName} — ${labelMid}(${m.host || ""})${recSuffix}`;
+          opt.dataset.ping = String(Math.round(pingVal));
+        } else {
+          opt.textContent = `${flag} ${countryName} — ${labelMid}(${m.host || ""})${recSuffix}`;
+        }
+
         const mHost = (m.host || "").toLowerCase();
-        const mIp = m.ip || "";
+        const mIp = (m.ip || "").toLowerCase();
         if (cleanCurrent && (cleanCurrent === mHost || cleanCurrent === mIp)) {
           opt.selected = true;
           matched = true;
@@ -2127,13 +2993,395 @@ export function renderBmMastersDropdown(currentHost) {
       });
     }
 
-    const customOpt = document.createElement("option");
-    customOpt.value = "CUSTOM";
-    customOpt.textContent = window.t ? window.t("hs_edit.master_custom_option") : "✏️ Ввести свой адрес вручную (другой сервер / IP)";
     if (!matched && cleanCurrent) {
+      const customOpt = document.createElement("option");
+      customOpt.value = cleanCurrent;
+      customOpt.textContent = netType === "freedmr"
+        ? `⚠️ Свой / устаревший: ${cleanCurrent}`
+        : (window.t ? window.t("hs_edit.master_custom_option") : `✏️ Ввести свой адрес вручную (${cleanCurrent})`);
       customOpt.selected = true;
+      editHsMasterSelect.appendChild(customOpt);
+    } else {
+      const customOpt = document.createElement("option");
+      customOpt.value = "CUSTOM";
+      customOpt.textContent = window.t ? window.t("hs_edit.master_custom_option") : "✏️ Ввести свой адрес вручную (другой сервер / IP)";
+      editHsMasterSelect.appendChild(customOpt);
     }
-    editHsMasterSelect.appendChild(customOpt);
+  }
+
+export function buildRptoFromCurrentFormFields(netTypeOverride) {
+  const editHsNetworkType = document.getElementById("editHsNetworkType");
+  const cleanType = (netTypeOverride || (editHsNetworkType && editHsNetworkType.value) || "bm").toLowerCase();
+  const editHsTgTs1 = document.getElementById("editHsTgTs1");
+  const editHsTgTs2 = document.getElementById("editHsTgTs2");
+  const editHsId = document.getElementById("editHsId");
+  const tg1 = parseInt(editHsTgTs1 ? editHsTgTs1.value : "0", 10) || 0;
+  const tg2 = parseInt(editHsTgTs2 ? editHsTgTs2.value : "0", 10) || 0;
+
+  if (cleanType === "dmrplus") {
+    const refEl = document.getElementById("editHsDmrPlusRef");
+    const relinkEl = document.getElementById("editHsDmrPlusRelink");
+    const startRef = parseInt(refEl ? refEl.value : "4530", 10) || 4530;
+    const relinkTime = parseInt(relinkEl ? relinkEl.value : "60", 10) || 60;
+    const parts = [`StartRef=${startRef}`, `RelinkTime=${relinkTime}`];
+    if (tg1 > 0 && tg1 !== 9990) parts.push(`TS1_1=${tg1}`);
+    if (tg2 > 0 && tg2 !== 9990 && tg2 !== 9) parts.push(`TS2_1=${tg2}`);
+    return parts.join(";") + ";";
+  }
+
+  if (cleanType === "freedmr" || cleanType === "custom") {
+    const curId = editHsId ? editHsId.value.trim() : "";
+    const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const curHs = currentHotspots.find(h => h.id === curId);
+    const isSimplex = curHs && curHs.duplex === false;
+
+    const parts = [];
+    if (isSimplex) {
+      // Simplex Hotspots can only use TS2
+      const activeTg = (tg2 > 0 && tg2 !== 9990) ? tg2 : ((tg1 > 0 && tg1 !== 9990) ? tg1 : 0);
+      if (activeTg > 0) parts.push(`TS2=${activeTg}`);
+    } else {
+      if (tg1 > 0 && tg1 !== 9990) parts.push(`TS1=${tg1}`);
+      if (tg2 > 0 && tg2 !== 9990 && tg2 !== tg1) parts.push(`TS2=${tg2}`);
+      if (tg1 === tg2 && tg1 > 0) {
+        showToast(`FreeDMR не допускает одну TG на обоих слотах — TG ${tg1} оставлена только на TS1`, 2800);
+      }
+    }
+
+    // Merge smart defaults (TIMER=10, VOICE=0, SINGLE=0, DIAL=0) with user-provided options in #editHsRptoOptions
+    const editHsRptoOptions = document.getElementById("editHsRptoOptions");
+    const existingRpto = editHsRptoOptions ? (editHsRptoOptions.value || "") : "";
+    const userOpts = {};
+    if (existingRpto) {
+      existingRpto.split(";").forEach(chunk => {
+        chunk = chunk.trim();
+        if (chunk && chunk.includes("=")) {
+          const [k, v] = chunk.split("=", 2);
+          const kUp = k.trim().toUpperCase();
+          if (kUp !== "TS1" && kUp !== "TS2") {
+            userOpts[kUp] = v.trim();
+          }
+        }
+      });
+    }
+
+    const defaultOpts = {
+      "DIAL": "0",
+      "TIMER": "10",
+      "VOICE": "0",
+      "SINGLE": "0"
+    };
+
+    const finalOpts = { ...defaultOpts, ...userOpts };
+    for (const [k, v] of Object.entries(finalOpts)) {
+      if (v !== "") parts.push(`${k}=${v}`);
+    }
+
+    return parts.join(";") + ";";
+  }
+
+  return "";
+}
+
+export function applyEditHsNetworkTypeUI(netType, options = {}) {
+    const cleanType = (netType || "bm").toLowerCase();
+    const profile = getDmrNetworkProfile(cleanType);
+    const editHsId = document.getElementById("editHsId");
+    const isNewHotspot = options.isNewHotspot !== undefined
+      ? Boolean(options.isNewHotspot)
+      : (!editHsId || !editHsId.value || editHsId.value === "__new__");
+
+    const xlxEl = document.getElementById("editHsXlxModule");
+    const curMod = ((xlxEl && xlxEl.value) ? xlxEl.value : "D").toUpperCase().slice(0, 1) || "D";
+    const modTg = 4000 + Math.max(1, Math.min(26, curMod.charCodeAt(0) - 64));
+
+    const hasBmApi = Boolean(profile.hasBmApi || profile.supportsBmApi || cleanType === "bm");
+    const hasRpto = Boolean(profile.hasRpto || profile.supportsRpto || cleanType === "freedmr" || cleanType === "dmrplus" || cleanType === "custom");
+    const hasXlxModule = Boolean(profile.hasXlxModule || profile.supportsXlxModule || cleanType === "xlx");
+    const fullName = profile.fullName || profile.name || "BrandMeister DMR";
+    const shortLabel = profile.shortLabel || profile.shortName || "BM";
+
+    // 1. Toggle network type selector (ONLY for new HS) vs read-only network header (for existing HS)
+    const netTypeGroup = document.getElementById("editHsNetworkTypeGroup");
+    const existingNetHeader = document.getElementById("editHsExistingNetHeader");
+    if (netTypeGroup) {
+      netTypeGroup.style.display = isNewHotspot ? "block" : "none";
+    }
+    if (existingNetHeader) {
+      existingNetHeader.style.display = isNewHotspot ? "none" : "flex";
+    }
+
+    const pillEl = document.getElementById("editHsNetworkTypePill");
+    if (pillEl) {
+      renderNetworkBadgeElement(pillEl, cleanType, { xlxModule: curMod });
+    }
+    const existingPillEl = document.getElementById("editHsExistingNetPill");
+    if (existingPillEl) {
+      renderNetworkBadgeElement(existingPillEl, cleanType, { xlxModule: curMod });
+    }
+    const existingTitleEl = document.getElementById("editHsExistingNetTitle");
+    if (existingTitleEl) {
+      existingTitleEl.textContent = fullName;
+    }
+    const existingDescEl = document.getElementById("editHsExistingNetDesc");
+    if (existingDescEl) {
+      if (cleanType === "bm") {
+        existingDescEl.textContent = "🔒 Сеть HS • MMDVM + API v2";
+      } else if (cleanType === "tgif") {
+        existingDescEl.textContent = "🔒 Сеть HS • MMDVM + TGIF API v1";
+      } else if (cleanType === "freedmr") {
+        existingDescEl.textContent = "🔒 Сеть HS • HomeBrew + RPTO";
+      } else if (cleanType === "dmrplus") {
+        existingDescEl.textContent = "🔒 Сеть HS • IPSC2 + StartRef (RPTO)";
+      } else if (cleanType === "xlx") {
+        existingDescEl.textContent = `🔒 Сеть HS • Модуль ${curMod} (TG ${modTg} на TS2)`;
+      } else {
+        existingDescEl.textContent = "🔒 Сеть HS • Custom MMDVM";
+      }
+    }
+
+    // 2. Apply dynamic network color palette to the form container (#hotspotEditForm)
+    const formEl = document.getElementById("hotspotEditForm");
+    if (formEl) {
+      formEl.classList.add("hs-edit-dynamic-panel");
+      ["bm", "tgif", "freedmr", "dmrplus", "xlx", "custom"].forEach(t => {
+        formEl.classList.remove(`hs-net-theme-${t}`);
+      });
+      formEl.classList.add(`hs-net-theme-${cleanType}`);
+    }
+
+    // 3. Toggle network-specific field blocks
+    const pwdGroup = document.getElementById("editHsPasswordGroup");
+    const apiKeyGroup = document.getElementById("editHsApiKeyGroup");
+    const autoTgBmGroup = document.getElementById("editHsAutoTgBmGroup");
+    const testServersCol = document.getElementById("editHsTestServersCol");
+    const dmrPlusGroup = document.getElementById("editHsDmrPlusGroup");
+    const rptoGroup = document.getElementById("editHsRptoGroup");
+    const rptoLabel = document.getElementById("editHsRptoLabel");
+    const rptoInput = document.getElementById("editHsRptoOptions");
+    const rptoHint = document.getElementById("editHsRptoHint");
+    const btnBuildRptoFromTg = document.getElementById("btnBuildRptoFromTg");
+    const btnSendRptoNow = document.getElementById("btnSendRptoNow");
+    const xlxGroup = document.getElementById("editHsXlxGroup");
+    const tgRow = document.getElementById("editHsTgRow");
+    const pwdLabel = document.getElementById("editHsPasswordLabel");
+    const masterLabel = document.getElementById("editHsMasterSelectLabel");
+    const editHsHost = document.getElementById("editHsHost");
+    const editHsPort = document.getElementById("editHsPort");
+    const editHsPassword = document.getElementById("editHsPassword");
+    const editHsTgTs1 = document.getElementById("editHsTgTs1");
+    const editHsTgTs2 = document.getElementById("editHsTgTs2");
+    const tgTs1Label = document.getElementById("editHsTgTs1Label");
+    const tgTs2Label = document.getElementById("editHsTgTs2Label");
+
+    if (pwdGroup) pwdGroup.style.display = "";
+    if (apiKeyGroup) apiKeyGroup.style.display = hasBmApi ? "" : "none";
+    if (autoTgBmGroup) autoTgBmGroup.style.display = (hasBmApi || cleanType === "freedmr" || cleanType === "xlx") ? "inline-flex" : "none";
+    if (testServersCol) {
+      testServersCol.style.display = (cleanType === "custom" || cleanType === "bm" || cleanType === "tgif" || cleanType === "freedmr" || cleanType === "dmrplus" || cleanType === "xlx") ? "flex" : "none";
+      const btnTestBmServers = document.getElementById("btnTestBmServers");
+      const btnSpan = btnTestBmServers ? btnTestBmServers.querySelector("span:not(.btn-icon)") : null;
+      if (btnSpan) {
+        if (cleanType === "custom") {
+          btnSpan.textContent = window.t ? window.t("server_probe.btn_check_single", {}, "Проверить сервер") : "Проверить сервер";
+        } else {
+          btnSpan.textContent = window.t ? window.t("bm_bench.btn_test", {}, "Тест серверов") : "Тест серверов";
+        }
+      }
+    }
+    if (dmrPlusGroup) dmrPlusGroup.style.display = (cleanType === "dmrplus") ? "flex" : "none";
+    if (rptoGroup) rptoGroup.style.display = hasRpto ? "" : "none";
+    if (btnBuildRptoFromTg) btnBuildRptoFromTg.style.display = hasRpto ? "inline-flex" : "none";
+    if (btnSendRptoNow) btnSendRptoNow.style.display = (!isNewHotspot && hasRpto) ? "inline-flex" : "none";
+    if (xlxGroup) xlxGroup.style.display = hasXlxModule ? "" : "none";
+    if (tgRow) tgRow.style.display = (cleanType === "xlx") ? "none" : "flex";
+
+    // Dynamic API key & instructions texts per network
+    const apiKeyLabel = document.getElementById("editHsApiKeyLabel");
+    const apiKeyInput = document.getElementById("editHsApiKey");
+    const apiKeyHint = document.getElementById("editHsApiKeyHint");
+    const btnApiHelp = document.getElementById("btnBmApiHelp");
+    const btnApiHelpText = document.getElementById("btnBmApiHelpText");
+    const apiHelpHeaderTitle = document.getElementById("bmApiHelpHeaderTitle");
+    const apiHelpBm = document.getElementById("bmApiHelpContentBm");
+    const apiHelpTgif = document.getElementById("bmApiHelpContentTgif");
+    const autoTgText = document.getElementById("editHsAutoTgBmText");
+
+    if (cleanType === "tgif") {
+      if (apiKeyLabel) apiKeyLabel.textContent = window.t ? window.t("hs_edit.tgif_api_key", {}, "TGIF API Key (Static TG API v1)") : "TGIF API Key (Static TG API v1)";
+      if (apiKeyInput) apiKeyInput.placeholder = window.t ? window.t("hs_edit.tgif_api_key_placeholder", {}, "Вставьте Static TG API Token из профиля tgif.network...") : "Вставьте Static TG API Token из профиля tgif.network...";
+      if (apiKeyHint) apiKeyHint.textContent = window.t ? window.t("hs_edit.tgif_api_key_hint", {}, "Необходим для удаленного управления статическими TalkGroups на стороне TGIF Network") : "Необходим для удаленного управления статическими TalkGroups на стороне TGIF Network";
+      if (btnApiHelpText) btnApiHelpText.textContent = window.t ? window.t("hs_edit.btn_help_tgif", {}, "❓ Инструкция TGIF") : "❓ Инструкция TGIF";
+      if (btnApiHelp) btnApiHelp.title = window.t ? window.t("hs_edit.btn_help_tgif_title", {}, "Инструкция: как получить Static TG API Token в личном кабинете TGIF") : "Инструкция: как получить Static TG API Token в личном кабинете TGIF";
+      if (apiHelpHeaderTitle) apiHelpHeaderTitle.textContent = window.t ? window.t("hs_edit.tgif_help_header", {}, "🔑 Как получить Static TG API Token в TGIF:") : "🔑 Как получить Static TG API Token в TGIF:";
+      if (apiHelpBm) apiHelpBm.classList.add("hidden");
+      if (apiHelpTgif) apiHelpTgif.classList.remove("hidden");
+      if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_tgif", {}, "Автонастройка TG TGIF") : "Автонастройка TG TGIF";
+    } else if (cleanType === "freedmr") {
+      if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_freedmr", {}, "Автонастройка TG FreeDMR") : "Автонастройка TG FreeDMR";
+      if (apiHelpBm) apiHelpBm.classList.add("hidden");
+      if (apiHelpTgif) apiHelpTgif.classList.add("hidden");
+    } else if (cleanType === "xlx") {
+      if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_xlx", {}, "Автоподключение XLX") : "Автоподключение XLX";
+      if (apiHelpBm) apiHelpBm.classList.add("hidden");
+      if (apiHelpTgif) apiHelpTgif.classList.add("hidden");
+    } else {
+      if (apiKeyLabel) apiKeyLabel.textContent = window.t ? window.t("hs_edit.api_key", {}, "BM API Key (v2)") : "BM API Key (v2)";
+      if (apiKeyInput) apiKeyInput.placeholder = window.t ? window.t("hs_edit.api_key_placeholder", {}, "Вставьте JWT-токен из профиля BM...") : "Вставьте JWT-токен из профиля BM...";
+      if (apiKeyHint) apiKeyHint.textContent = window.t ? window.t("hs_edit.api_key_hint", {}, "Необходим для удаленного управления TalkGroups и сброса динамических групп на стороне BM") : "Необходим для удаленного управления TalkGroups и сброса динамических групп на стороне BM";
+      if (btnApiHelpText) btnApiHelpText.textContent = window.t ? window.t("hs_edit.btn_help", {}, "❓ Инструкция BM") : "❓ Инструкция BM";
+      if (btnApiHelp) btnApiHelp.title = window.t ? window.t("hs_edit.btn_help_title", {}, "Инструкция: как получить API-ключ в личном кабинете BM") : "Инструкция: как получить API-ключ в личном кабинете BM";
+      if (apiHelpHeaderTitle) apiHelpHeaderTitle.textContent = window.t ? window.t("hs_edit.help_header", {}, "🔑 Как получить API v2 Key в BM:") : "🔑 Как получить API v2 Key в BM:";
+      if (apiHelpBm) apiHelpBm.classList.remove("hidden");
+      if (apiHelpTgif) apiHelpTgif.classList.add("hidden");
+      if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_bm", {}, "Автонастройка TG BM") : "Автонастройка TG BM";
+    }
+
+    // Customize RPTO texts for FreeDMR vs DMR+ vs Custom
+    if (cleanType === "freedmr") {
+      if (rptoLabel) rptoLabel.textContent = "Опции FreeDMR (RPTO) — статические TG (TS1 / TS2)";
+      if (rptoInput) rptoInput.placeholder = "TS1=2501;TS2=250,2505;DIAL=0;";
+      if (rptoHint) rptoHint.textContent = "Передаётся в пакете RPTO сразу после авторизации (нажмите «🔄 Из TS1/TS2» для автосборки из стартовых групп ниже)";
+    } else if (cleanType === "dmrplus") {
+      if (rptoLabel) rptoLabel.textContent = "Строка конфигурации DMR+ / IPSC2 (RPTO)";
+      if (rptoInput) rptoInput.placeholder = "StartRef=4530;RelinkTime=60;TS1_1=2501;TS2_1=250;";
+      if (rptoHint) rptoHint.textContent = "Формируется автоматически из полей StartRef / RelinkTime / TG или редактируется вручную";
+    } else if (cleanType === "custom") {
+      if (rptoLabel) rptoLabel.textContent = "Опции HomeBrew (RPTO) — статические TG и параметры";
+      if (rptoInput) rptoInput.placeholder = "TS1=2501;TS2=2505;";
+      if (rptoHint) rptoHint.textContent = "Строка опций RPTO, отправляемая серверу HBlink3 / MMDVM после пакета RPTC";
+    }
+
+    // Customize password label & placeholder
+    if (pwdLabel) {
+      if (cleanType === "bm") {
+        pwdLabel.textContent = window.t ? window.t("hs_edit.bm_password", {}, "Пароль хотспота (BM SelfCare)") : "Пароль хотспота (BM SelfCare)";
+        if (editHsPassword) editHsPassword.placeholder = "Персональный пароль безопасности из BM SelfCare";
+      } else if (cleanType === "tgif") {
+        pwdLabel.textContent = window.t ? window.t("hs_edit.tgif_password", {}, "Ключ безопасности TGIF (Hotspot Security Key / passw0rd)") : "Ключ безопасности TGIF (Hotspot Security Key / passw0rd)";
+        if (editHsPassword) editHsPassword.placeholder = "Ключ из профиля tgif.network (или passw0rd)";
+      } else if (cleanType === "freedmr") {
+        pwdLabel.textContent = window.t ? window.t("hs_edit.freedmr_password", {}, "Пароль хотспота FreeDMR (из портала / passw0rd)") : "Пароль хотспота FreeDMR (из портала / passw0rd)";
+        if (editHsPassword) editHsPassword.placeholder = "Персональный пароль FreeDMR (или passw0rd)";
+      } else if (cleanType === "dmrplus") {
+        pwdLabel.textContent = "Пароль сервера DMR+ / IPSC2 (стандартный: PASSWORD)";
+        if (editHsPassword) editHsPassword.placeholder = "По умолчанию: PASSWORD";
+      } else if (cleanType === "xlx") {
+        pwdLabel.textContent = "Пароль рефлектора XLX (стандартный: passw0rd)";
+        if (editHsPassword) editHsPassword.placeholder = "По умолчанию: passw0rd";
+      } else {
+        pwdLabel.textContent = window.t ? window.t("hs_edit.net_password", { network: shortLabel }, `Пароль сервера (${shortLabel})`) : `Пароль сервера (${shortLabel})`;
+        if (editHsPassword) editHsPassword.placeholder = "Пароль мастер-сервера (passw0rd)";
+      }
+    }
+
+    // Customize server selector label & host placeholder
+    if (masterLabel) {
+      if (cleanType === "bm") {
+        masterLabel.textContent = window.t ? window.t("hs_edit.master_select_label", {}, "Сервер BM (Master) — выбор по странам") : "Сервер BM (Master) — выбор по странам";
+      } else if (cleanType === "tgif") {
+        masterLabel.textContent = "Сервер TGIF Network (Основной / Европа)";
+      } else if (cleanType === "freedmr") {
+        masterLabel.textContent = "Сервер FreeDMR / ADN — выбор по странам";
+      } else if (cleanType === "dmrplus") {
+        masterLabel.textContent = "Мастер-сервер DMR+ / IPSC2 — выбор по странам";
+      } else if (cleanType === "xlx") {
+        masterLabel.textContent = "Рефлектор XLX — выбор сервера (порт 62030)";
+      } else {
+        masterLabel.textContent = "Выбор сервера (пресет или свой IP/домен)";
+      }
+    }
+    if (editHsHost) {
+      editHsHost.placeholder = profile.defaultHost || "127.0.0.1";
+    }
+
+    // Customize TS1 / TS2 labels per network
+    if (tgTs1Label && tgTs2Label) {
+      if (cleanType === "tgif") {
+        tgTs1Label.textContent = "Стартовая TG (Слот 1)";
+        tgTs2Label.textContent = "Основная TG TGIF (Слот 2 • 4000 = сброс)";
+      } else if (cleanType === "freedmr") {
+        tgTs1Label.textContent = "Статическая / стартовая TG (Слот 1)";
+        tgTs2Label.textContent = "Статическая / стартовая TG (Слот 2)";
+      } else if (cleanType === "dmrplus") {
+        tgTs1Label.textContent = "Глобальная TG (Слот 1: TS1_1)";
+        tgTs2Label.textContent = "Локальная TG / Рефлектор (Слот 2: 9)";
+      } else {
+        tgTs1Label.textContent = window.t ? window.t("hs_edit.tg_ts1", {}, "Стартовая TG (Слот 1)") : "Стартовая TG (Слот 1)";
+        tgTs2Label.textContent = window.t ? window.t("hs_edit.tg_ts2", {}, "Стартовая TG (Слот 2)") : "Стартовая TG (Слот 2)";
+      }
+    }
+
+    // 4. Apply network defaults when switching network type on a new hotspot
+    if (options.applyDefaults) {
+      if (isNewHotspot) {
+        const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const usedSsids = new Set(
+          currentHotspots
+            .filter(h => ((h.network_type || "bm").toLowerCase() === cleanType))
+            .map(h => Number(h.bm_ssid))
+        );
+        let nextSsid = 1;
+        while (usedSsids.has(nextSsid) && nextSsid < 99) {
+          nextSsid++;
+        }
+        const editHsSsid = document.getElementById("editHsSsid");
+        if (editHsSsid) editHsSsid.value = nextSsid;
+      }
+
+      let chosenDefaultHost = profile.defaultHost || "";
+      let chosenDefaultPort = profile.defaultPort || 62031;
+      let chosenDefaultPwd = profile.defaultPassword || "";
+      const cachedServers = window._dmrServersCache && window._dmrServersCache[cleanType];
+      if (Array.isArray(cachedServers)) {
+        const fastest = cachedServers.find(s => s && s.state === "online" && s.host);
+        if (fastest) {
+          chosenDefaultHost = fastest.host;
+          if (fastest.port) chosenDefaultPort = fastest.port;
+          if (fastest.password) chosenDefaultPwd = fastest.password;
+        }
+      }
+      if (editHsHost) editHsHost.value = chosenDefaultHost;
+      if (editHsPort) editHsPort.value = profile.defaultPort || 62031;
+      if (editHsPassword) {
+        const curPwd = editHsPassword.value.trim();
+        if (cleanType === "bm") {
+          if (curPwd === "passw0rd" || curPwd === "PASSWORD") editHsPassword.value = "";
+        } else if (cleanType === "dmrplus") {
+          if (!curPwd || curPwd === "passw0rd") editHsPassword.value = "PASSWORD";
+        } else if (cleanType === "xlx") {
+          editHsPassword.value = "passw0rd";
+        } else if (!curPwd || curPwd === "PASSWORD") {
+          editHsPassword.value = profile.defaultPassword || "passw0rd";
+        }
+      }
+      if (cleanType === "xlx") {
+        if (editHsTgTs1) editHsTgTs1.value = 9;
+        if (editHsTgTs2) editHsTgTs2.value = modTg;
+        if (rptoInput) rptoInput.value = "";
+      } else if (cleanType === "tgif") {
+        if (editHsTgTs1) editHsTgTs1.value = 9990;
+        if (editHsTgTs2) editHsTgTs2.value = 777;
+        if (rptoInput) rptoInput.value = "";
+      } else if (cleanType === "freedmr") {
+        if (editHsTgTs1) editHsTgTs1.value = 91;
+        if (editHsTgTs2) editHsTgTs2.value = 250;
+        if (rptoInput) rptoInput.value = buildRptoFromCurrentFormFields("freedmr");
+      } else if (cleanType === "dmrplus") {
+        if (editHsTgTs1) editHsTgTs1.value = 2501;
+        if (editHsTgTs2) editHsTgTs2.value = 9;
+        const refEl = document.getElementById("editHsDmrPlusRef");
+        const relinkEl = document.getElementById("editHsDmrPlusRelink");
+        if (refEl && !refEl.value) refEl.value = 4530;
+        if (relinkEl && !relinkEl.value) relinkEl.value = 60;
+        if (rptoInput) rptoInput.value = buildRptoFromCurrentFormFields("dmrplus");
+      } else {
+        if (editHsTgTs1) editHsTgTs1.value = 9990;
+        if (editHsTgTs2) editHsTgTs2.value = 9990;
+      }
+    }
+
+    renderBmMastersDropdown(editHsHost ? editHsHost.value : "", cleanType);
   }
 
   // =========================================================================
@@ -2146,6 +3394,11 @@ export function populateEditHotspotFormFields(hs) {
     const editHsSendTalkerAlias = document.getElementById("editHsSendTalkerAlias");
     const editHsDmrId = document.getElementById("editHsDmrId");
     const editHsSsid = document.getElementById("editHsSsid");
+    const editHsNetworkType = document.getElementById("editHsNetworkType");
+    const editHsRptoOptions = document.getElementById("editHsRptoOptions");
+    const editHsDmrPlusRef = document.getElementById("editHsDmrPlusRef");
+    const editHsDmrPlusRelink = document.getElementById("editHsDmrPlusRelink");
+    const editHsXlxModule = document.getElementById("editHsXlxModule");
     const editHsPassword = document.getElementById("editHsPassword");
     const btnToggleHsPassword = document.getElementById("btnToggleHsPassword");
     const editHsApiKey = document.getElementById("editHsApiKey");
@@ -2158,6 +3411,13 @@ export function populateEditHotspotFormFields(hs) {
     const editHsAutoconnect = document.getElementById("editHsAutoconnect");
     const editHsAutoTgBm = document.getElementById("editHsAutoTgBm");
 
+    const isNewHotspot = !hs.id || hs.id === "__new__";
+    const netType = (hs.network_type || "bm").toLowerCase();
+    const netProfile = getDmrNetworkProfile(netType);
+
+    if (editHsNetworkType) {
+      editHsNetworkType.value = netType;
+    }
     if (editHsId) editHsId.value = hs.id || "";
     if (editHsName) editHsName.value = hs.name || "";
     if (editHsCallsign) editHsCallsign.value = hs.callsign || "";
@@ -2168,8 +3428,22 @@ export function populateEditHotspotFormFields(hs) {
     if (editHsSendTalkerAlias) editHsSendTalkerAlias.checked = hs.send_talker_alias !== false;
     if (editHsDmrId) editHsDmrId.value = hs.dmr_id || "";
     if (editHsSsid) editHsSsid.value = (hs.bm_ssid !== undefined && hs.bm_ssid !== null && Number(hs.bm_ssid) >= 1) ? Math.min(99, Math.max(1, Number(hs.bm_ssid))) : 1;
+    let rawRpto = hs.rpto_options || "";
+    if (!rawRpto && netType === "freedmr") {
+      rawRpto = buildRptoFromCurrentFormFields("freedmr");
+    }
+    if (editHsRptoOptions) editHsRptoOptions.value = rawRpto;
+    if (editHsDmrPlusRef) {
+      const mRef = rawRpto.match(/StartRef\s*=\s*(\d+)/i);
+      editHsDmrPlusRef.value = hs.dmrplus_reflector || (mRef ? mRef[1] : "4530");
+    }
+    if (editHsDmrPlusRelink) {
+      const mRel = rawRpto.match(/RelinkTime\s*=\s*(\d+)/i);
+      editHsDmrPlusRelink.value = mRel ? mRel[1] : "60";
+    }
+    if (editHsXlxModule) editHsXlxModule.value = ((hs.xlx_module || "D").trim().toUpperCase().slice(0, 1)) || "D";
     if (editHsPassword) {
-      editHsPassword.value = hs.bm_password || "";
+      editHsPassword.value = hs.bm_password || (netType === "xlx" ? "passw0rd" : "");
       editHsPassword.type = "password";
     }
     if (btnToggleHsPassword) btnToggleHsPassword.textContent = "👁️";
@@ -2179,10 +3453,9 @@ export function populateEditHotspotFormFields(hs) {
     }
     if (btnToggleHsApiKey) btnToggleHsApiKey.textContent = "👁️";
     if (bmApiHelpCard) bmApiHelpCard.classList.add("hidden");
-    const hostVal = hs.bm_master_host || "2322.master.brandmeister.network";
+    const hostVal = hs.bm_master_host || netProfile.defaultHost || "2322.master.brandmeister.network";
     if (editHsHost) editHsHost.value = hostVal;
-    renderBmMastersDropdown(hostVal);
-    if (editHsPort) editHsPort.value = hs.bm_master_port || 62031;
+    if (editHsPort) editHsPort.value = hs.bm_master_port || netProfile.defaultPort || 62031;
     if (editHsTgTs1) editHsTgTs1.value = hs.default_tg_ts1 || 9990;
     if (editHsTgTs2) editHsTgTs2.value = hs.default_tg_ts2 || 9990;
     if (editHsAutoconnect) {
@@ -2192,7 +3465,19 @@ export function populateEditHotspotFormFields(hs) {
       editHsAutoTgBm.checked = hs.auto_tg_bm !== undefined && hs.auto_tg_bm !== null ? Boolean(hs.auto_tg_bm) : true;
     }
 
+    applyEditHsNetworkTypeUI(netType, { applyDefaults: false, isNewHotspot });
     updateEditHsToolbarUI(hs);
+    if (netType === "freedmr") {
+      refreshFreeDmrServers().then(() => {
+        renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "freedmr");
+      });
+    } else if (netType === "dmrplus") {
+      if (typeof refreshDmrPlusServers === "function") {
+        refreshDmrPlusServers().then(() => {
+          renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "dmrplus");
+        });
+      }
+    }
   }
 
 export function updateEditHsToolbarUI(hs) {
@@ -2212,9 +3497,11 @@ export function updateEditHsToolbarUI(hs) {
     currentHotspots.forEach(h => {
       const opt = document.createElement("option");
       opt.value = h.id;
+      const netProf = getDmrNetworkProfile(h.network_type || "bm");
+      const netTag = `[${netProf.badgePrefix}] `;
       const ssidStr = (h.bm_ssid !== undefined && h.bm_ssid !== null) ? ` · SSID ${h.bm_ssid}` : "";
       const callStr = h.callsign ? ` (${h.callsign}${ssidStr})` : "";
-      opt.textContent = `${h.name || "Хотспот"}${callStr}`;
+      opt.textContent = `${netTag}${h.name || "Хотспот"}${callStr}`;
       if (h.id === curId) opt.selected = true;
       editHsSelect.appendChild(opt);
     });
@@ -2480,14 +3767,42 @@ export function initHotspotsManager() {
       const val = editHsMasterSelect.value;
       if (val === "__TEST_SERVERS__") {
         const cur = (editHsHost ? editHsHost.value : "").trim().toLowerCase();
-        const found = bmMastersList.find(m => m.host.toLowerCase() === cur || m.ip === cur);
-        editHsMasterSelect.value = found ? found.host : (cur ? "CUSTOM" : "");
         const hsId = (editHsId && editHsId.value) ? editHsId.value : (window.activeHotspotId || "default");
-        openBmBenchmarkModal(hsId);
+        const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+        const curHs = curHsList.find(h => h && h.id === hsId);
+        const editHsNetworkType = document.getElementById("editHsNetworkType");
+        const curNet = (curHs && curHs.network_type) || (editHsNetworkType ? editHsNetworkType.value : "bm") || "bm";
+        const list = (window._dmrServersCache && window._dmrServersCache[curNet.toLowerCase()])
+          ? window._dmrServersCache[curNet.toLowerCase()]
+          : (curNet === "bm" ? bmMastersList : getNetworkServersList(curNet, bmMastersList));
+        const found = (list || []).find(m => m && ((m.host && m.host.toLowerCase() === cur) || m.ip === cur));
+        editHsMasterSelect.value = found ? found.host : (cur ? "CUSTOM" : "");
+        if (typeof openBmBenchmarkModal === "function") {
+          openBmBenchmarkModal(hsId, curNet);
+        }
         return;
       }
       if (val && val !== "CUSTOM") {
         if (editHsHost) editHsHost.value = val;
+        const selOpt = editHsMasterSelect.selectedOptions && editHsMasterSelect.selectedOptions[0];
+        if (selOpt) {
+          if (selOpt.dataset.dead === "1") {
+            if (typeof showToast === "function") {
+              showToast(window.t ? window.t("server_probe.warn_dead_selected", {}, "⚠️ Сервер не ответил при тестировании сетей") : "⚠️ Сервер не ответил при тестировании сетей", "warning");
+            }
+          }
+          const editHsPort = document.getElementById("editHsPort");
+          if (editHsPort && selOpt.dataset.port) {
+            editHsPort.value = selOpt.dataset.port;
+          }
+          const editHsPassword = document.getElementById("editHsPassword");
+          if (editHsPassword && selOpt.dataset.password) {
+            const curPass = (editHsPassword.value || "").trim();
+            if (!curPass || curPass === "passw0rd" || curPass === "PASSWORD") {
+              editHsPassword.value = selOpt.dataset.password;
+            }
+          }
+        }
       } else if (val === "CUSTOM") {
         if (editHsHost) editHsHost.focus();
       }
@@ -2499,11 +3814,140 @@ export function initHotspotsManager() {
     editHsHost.addEventListener("input", () => {
       if (!editHsMasterSelect) return;
       const hostVal = editHsHost.value.trim().toLowerCase();
-      const found = bmMastersList.find(m => m.host.toLowerCase() === hostVal || m.ip === hostVal);
+      const editHsNetworkType = document.getElementById("editHsNetworkType");
+      const curNet = (editHsNetworkType ? editHsNetworkType.value : "bm") || "bm";
+      const list = curNet === "bm" ? bmMastersList : getNetworkServersList(curNet, bmMastersList);
+      const found = (list || []).find(m => m && ((m.host && m.host.toLowerCase() === hostVal) || m.ip === hostVal));
       if (found) {
         editHsMasterSelect.value = found.host;
       } else {
         editHsMasterSelect.value = "CUSTOM";
+      }
+    });
+  }
+
+  const editHsNetworkType = document.getElementById("editHsNetworkType");
+  if (editHsNetworkType && !editHsNetworkType._wired) {
+    editHsNetworkType._wired = true;
+    editHsNetworkType.addEventListener("change", () => {
+      const newNet = (editHsNetworkType.value || "bm").toLowerCase();
+      applyEditHsNetworkTypeUI(newNet, { applyDefaults: true });
+      if (newNet === "freedmr") {
+        refreshFreeDmrServers().then(() => {
+          const editHsHost = document.getElementById("editHsHost");
+          renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "freedmr");
+        });
+      }
+    });
+  }
+
+  const editHsXlxModule = document.getElementById("editHsXlxModule");
+  if (editHsXlxModule && !editHsXlxModule._wired) {
+    editHsXlxModule._wired = true;
+    editHsXlxModule.addEventListener("change", () => {
+      const mod = (editHsXlxModule.value || "D").toUpperCase();
+      const modCode = mod.charCodeAt(0);
+      const modTg = 4000 + Math.max(1, Math.min(26, modCode - 64));
+      const pillEl = document.getElementById("editHsNetworkTypePill");
+      if (pillEl) {
+        renderNetworkBadgeElement(pillEl, "xlx", { xlxModule: mod });
+      }
+      const existingPillEl = document.getElementById("editHsExistingNetPill");
+      if (existingPillEl) {
+        renderNetworkBadgeElement(existingPillEl, "xlx", { xlxModule: mod });
+      }
+      const existingDescEl = document.getElementById("editHsExistingNetDesc");
+      if (existingDescEl) {
+        existingDescEl.textContent = `🔒 Сеть HS • Модуль ${mod} (TG ${modTg} на TS2)`;
+      }
+      const tgTs2Label = document.getElementById("editHsTgTs2Label");
+      if (tgTs2Label) {
+        tgTs2Label.textContent = `TG модуля ${mod} (TS2: 4001–4026)`;
+      }
+      const editHsTgTs2 = document.getElementById("editHsTgTs2");
+      if (editHsTgTs2 && modCode >= 65 && modCode <= 90) {
+        editHsTgTs2.value = modTg;
+      }
+    });
+  }
+
+  const editHsDmrPlusRef = document.getElementById("editHsDmrPlusRef");
+  const editHsDmrPlusRelink = document.getElementById("editHsDmrPlusRelink");
+  const syncDmrPlusRpto = () => {
+    const editHsNetworkType = document.getElementById("editHsNetworkType");
+    const curNet = (editHsNetworkType ? editHsNetworkType.value : "bm").toLowerCase();
+    if (curNet !== "dmrplus") return;
+    const editHsRptoOptions = document.getElementById("editHsRptoOptions");
+    if (editHsRptoOptions) {
+      editHsRptoOptions.value = buildRptoFromCurrentFormFields("dmrplus");
+    }
+  };
+  if (editHsDmrPlusRef && !editHsDmrPlusRef._wired) {
+    editHsDmrPlusRef._wired = true;
+    editHsDmrPlusRef.addEventListener("input", syncDmrPlusRpto);
+    editHsDmrPlusRef.addEventListener("change", syncDmrPlusRpto);
+  }
+  if (editHsDmrPlusRelink && !editHsDmrPlusRelink._wired) {
+    editHsDmrPlusRelink._wired = true;
+    editHsDmrPlusRelink.addEventListener("input", syncDmrPlusRpto);
+    editHsDmrPlusRelink.addEventListener("change", syncDmrPlusRpto);
+  }
+
+  const btnBuildRptoFromTg = document.getElementById("btnBuildRptoFromTg");
+  if (btnBuildRptoFromTg && !btnBuildRptoFromTg._wired) {
+    btnBuildRptoFromTg._wired = true;
+    btnBuildRptoFromTg.addEventListener("click", () => {
+      const editHsRptoOptions = document.getElementById("editHsRptoOptions");
+      if (!editHsRptoOptions) return;
+      const built = buildRptoFromCurrentFormFields();
+      if (built) {
+        editHsRptoOptions.value = built;
+        showToast(`✅ Сформирована строка RPTO: ${built}`, 2200);
+      }
+    });
+  }
+
+  const btnSendRptoNow = document.getElementById("btnSendRptoNow");
+  if (btnSendRptoNow && !btnSendRptoNow._wired) {
+    btnSendRptoNow._wired = true;
+    btnSendRptoNow.addEventListener("click", async () => {
+      const editHsId = document.getElementById("editHsId");
+      const id = editHsId ? editHsId.value.trim() : "";
+      if (!id || id === "__new__") {
+        showToast(window.t ? window.t("hotspots.save_first_rpto", {}, "Сначала сохраните хотспот, чтобы отправить RPTO опции") : "Сначала сохраните хотспот, чтобы отправить RPTO опции", 2800);
+        return;
+      }
+      const editHsRptoOptions = document.getElementById("editHsRptoOptions");
+      const editHsXlxModule = document.getElementById("editHsXlxModule");
+      const rptoVal = editHsRptoOptions ? editHsRptoOptions.value.trim() : "";
+      const xlxVal = editHsXlxModule ? editHsXlxModule.value.trim().toUpperCase() : "D";
+      btnSendRptoNow.disabled = true;
+      try {
+        const resp = await fetch(`/api/hotspots/${encodeURIComponent(id)}/rpto`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rpto_options: rptoVal, xlx_module: xlxVal })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data.detail || resp.statusText);
+        }
+        const curHs = (window.currentHotspots || []).find(h => h.id === id);
+        if (curHs) {
+          curHs.rpto_options = rptoVal;
+          curHs.xlx_module = xlxVal;
+          const card = document.querySelector(`.radio-container[data-hotspot-id="${id}"]`);
+          if (card) renderHotspotAuxStatusBadge(card, curHs);
+        }
+        if (data.sent_live) {
+          showToast(window.t ? window.t("hotspots.rpto_sent_live", {}, "✅ Пакет RPTO отправлен на сервер и сохранен") : "✅ Пакет RPTO отправлен на сервер и сохранен", 2800);
+        } else {
+          showToast(window.t ? window.t("hotspots.rpto_saved_offline", {}, "✅ Опции RPTO сохранены (будут отправлены при подключении)") : "✅ Опции RPTO сохранены (будут отправлены при подключении)", 2800);
+        }
+      } catch (err) {
+        showToast("❌ Ошибка отправки RPTO: " + (err && err.message ? err.message : err), 3000);
+      } finally {
+        btnSendRptoNow.disabled = false;
       }
     });
   }
@@ -2584,7 +4028,26 @@ export function initHotspotsManager() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enabled: newVal })
         });
-        showToast(newVal ? (window.t ? window.t("hotspots.auto_tg_bm_global_on", {}, "✅ Автонастройка TG BM включена") : "✅ Автонастройка TG BM включена") : (window.t ? window.t("hotspots.auto_tg_bm_global_off", {}, "🔒 Автонастройка TG BM отключена") : "🔒 Автонастройка TG BM отключена"), 2000);
+        const hsNet = ((target && target.network_type) || "bm").toLowerCase();
+        let netTag = "BM";
+        let netKeyOn = "hotspots.auto_tg_bm_global_on";
+        let netKeyOff = "hotspots.auto_tg_bm_global_off";
+        if (hsNet === "tgif") {
+          netTag = "TGIF";
+          netKeyOn = "hotspots.auto_tg_tgif_global_on";
+          netKeyOff = "hotspots.auto_tg_tgif_global_off";
+        } else if (hsNet === "freedmr") {
+          netTag = "FreeDMR";
+          netKeyOn = "hotspots.auto_tg_freedmr_global_on";
+          netKeyOff = "hotspots.auto_tg_freedmr_global_off";
+        } else if (hsNet === "xlx") {
+          netTag = "XLX";
+          netKeyOn = "hotspots.auto_tg_xlx_global_on";
+          netKeyOff = "hotspots.auto_tg_xlx_global_off";
+        }
+        showToast(newVal 
+          ? (window.t ? window.t(netKeyOn, {}, `✅ Автонастройка TG ${netTag} включена`) : `✅ Автонастройка TG ${netTag} включена`) 
+          : (window.t ? window.t(netKeyOff, {}, `🔒 Автонастройка TG ${netTag} отключена`) : `🔒 Автонастройка TG ${netTag} отключена`), 2000);
       } catch (err) {
         console.error("Failed to toggle auto_tg_bm:", err);
       }
@@ -2810,6 +4273,9 @@ export function initHotspotsManager() {
       const editHsSendTalkerAlias = document.getElementById("editHsSendTalkerAlias");
       const editHsDmrId = document.getElementById("editHsDmrId");
       const editHsSsid = document.getElementById("editHsSsid");
+      const editHsNetworkType = document.getElementById("editHsNetworkType");
+      const editHsRptoOptions = document.getElementById("editHsRptoOptions");
+      const editHsXlxModule = document.getElementById("editHsXlxModule");
       const editHsPassword = document.getElementById("editHsPassword");
       const editHsApiKey = document.getElementById("editHsApiKey");
       const editHsHost = document.getElementById("editHsHost");
@@ -2818,6 +4284,15 @@ export function initHotspotsManager() {
       const editHsTgTs2 = document.getElementById("editHsTgTs2");
       const editHsAutoconnect = document.getElementById("editHsAutoconnect");
       const editHsAutoTgBm = document.getElementById("editHsAutoTgBm");
+
+      const networkTypeVal = (editHsNetworkType ? editHsNetworkType.value.trim().toLowerCase() : "bm") || "bm";
+      const netProfile = getDmrNetworkProfile(networkTypeVal);
+      const xlxModuleVal = ((editHsXlxModule ? editHsXlxModule.value.trim().toUpperCase() : "D") || "D").slice(0, 1);
+      const xlxModTg = 4000 + Math.max(1, Math.min(26, xlxModuleVal.charCodeAt(0) - 64));
+      let rptoOptionsVal = editHsRptoOptions ? editHsRptoOptions.value.trim() : "";
+      if (!rptoOptionsVal && (networkTypeVal === "dmrplus" || networkTypeVal === "freedmr")) {
+        rptoOptionsVal = buildRptoFromCurrentFormFields(networkTypeVal);
+      }
 
       const nameVal = (editHsName ? editHsName.value.trim() : "") || (id === "default" ? "Main" : `Хотспот #${(window.currentHotspots || []).length + 1}`);
       const callsignVal = (editHsCallsign ? editHsCallsign.value.trim().toUpperCase() : "") || "N0CALL";
@@ -2841,12 +4316,17 @@ export function initHotspotsManager() {
         return;
       }
       const ssidVal = isNaN(parsedSsid) ? 1 : Math.max(1, Math.min(99, parsedSsid));
-      const passwordVal = editHsPassword ? editHsPassword.value.trim() : "";
+      let passwordVal = editHsPassword ? editHsPassword.value.trim() : "";
+      if (networkTypeVal === "xlx" && !passwordVal) {
+        passwordVal = "passw0rd";
+      } else if (networkTypeVal === "dmrplus" && !passwordVal) {
+        passwordVal = "PASSWORD";
+      }
       const apiKeyVal = editHsApiKey ? editHsApiKey.value.trim() : "";
-      const hostVal = (editHsHost ? editHsHost.value.trim() : "") || "2322.master.brandmeister.network";
-      const portVal = parseInt(editHsPort ? editHsPort.value : "62031", 10) || 62031;
-      const tg1Val = parseInt(editHsTgTs1 ? editHsTgTs1.value : "9990", 10) || 9990;
-      const tg2Val = parseInt(editHsTgTs2 ? editHsTgTs2.value : "9990", 10) || 9990;
+      const hostVal = (editHsHost ? editHsHost.value.trim() : "") || netProfile.defaultHost || "2322.master.brandmeister.network";
+      const portVal = parseInt(editHsPort ? editHsPort.value : String(netProfile.defaultPort || 62031), 10) || netProfile.defaultPort || 62031;
+      const tg1Val = networkTypeVal === "xlx" ? 9 : (parseInt(editHsTgTs1 ? editHsTgTs1.value : "9990", 10) || 9990);
+      const tg2Val = networkTypeVal === "xlx" ? xlxModTg : (parseInt(editHsTgTs2 ? editHsTgTs2.value : "9990", 10) || 9990);
       const autoconnectVal = editHsAutoconnect ? editHsAutoconnect.checked : true;
       const autoTgBmVal = editHsAutoTgBm ? editHsAutoTgBm.checked : true;
 
@@ -2861,6 +4341,10 @@ export function initHotspotsManager() {
         send_talker_alias: sendTalkerAliasVal,
         dmr_id: dmrIdVal,
         bm_ssid: ssidVal,
+        network_type: networkTypeVal,
+        rpto_options: rptoOptionsVal,
+        xlx_module: xlxModuleVal,
+        dmrplus_reflector: (document.getElementById("editHsDmrPlusRef") ? document.getElementById("editHsDmrPlusRef").value.trim() : (existing.dmrplus_reflector || "4530")),
         bm_password: passwordVal,
         bm_api_key: apiKeyVal,
         bm_master_host: hostVal,
@@ -3094,10 +4578,16 @@ window.switchActiveHotspot = switchActiveHotspot;
 window.triggerAddNewHotspot = triggerAddNewHotspot;
 window.openHotspotSettings = openHotspotSettings;
 window.renderRadiosGrid = renderRadiosGrid;
+window.linkHotspotXlxModule = linkHotspotXlxModule;
+window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
+window.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
+window.openXlxAllModulesPopover = openXlxAllModulesPopover;
+window.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
 window.applyActiveHotspotToUI = applyActiveHotspotToUI;
 window.renderHotspotsList = renderHotspotsList;
 window.fetchBmMasters = fetchBmMasters;
 window.renderBmMastersDropdown = renderBmMastersDropdown;
+window.applyEditHsNetworkTypeUI = applyEditHsNetworkTypeUI;
 window.populateEditHotspotFormFields = populateEditHotspotFormFields;
 window.openEditHotspotForm = openEditHotspotForm;
 window.initHotspotsManager = initHotspotsManager;
@@ -3115,10 +4605,16 @@ window.__proxdmr.switchActiveHotspot = switchActiveHotspot;
 window.__proxdmr.triggerAddNewHotspot = triggerAddNewHotspot;
 window.__proxdmr.openHotspotSettings = openHotspotSettings;
 window.__proxdmr.renderRadiosGrid = renderRadiosGrid;
+window.__proxdmr.linkHotspotXlxModule = linkHotspotXlxModule;
+window.__proxdmr.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
+window.__proxdmr.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
+window.__proxdmr.openXlxAllModulesPopover = openXlxAllModulesPopover;
+window.__proxdmr.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
 window.__proxdmr.applyActiveHotspotToUI = applyActiveHotspotToUI;
 window.__proxdmr.renderHotspotsList = renderHotspotsList;
 window.__proxdmr.fetchBmMasters = fetchBmMasters;
 window.__proxdmr.renderBmMastersDropdown = renderBmMastersDropdown;
+window.__proxdmr.applyEditHsNetworkTypeUI = applyEditHsNetworkTypeUI;
 window.__proxdmr.populateEditHotspotFormFields = populateEditHotspotFormFields;
 window.__proxdmr.openEditHotspotForm = openEditHotspotForm;
 window.__proxdmr.initHotspotsManager = initHotspotsManager;
@@ -3132,3 +4628,94 @@ window.__proxdmr.closeHotspotOrderModal = closeHotspotOrderModal;
 window.addEventListener("languageChanged", () => {
   renderBmMastersDropdown();
 });
+
+export function checkAndRenderFailoverBadges() {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  if (!Array.isArray(curHsList)) return;
+
+  curHsList.forEach(hs => {
+    if (!hs) return;
+    const card = document.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`);
+    if (!card) return;
+
+    const existing = card.querySelector(".server-failover-card-notice");
+
+    if (hs.status === "ONLINE" || hs.status === "DISCONNECTED") {
+      if (existing) existing.remove();
+      return;
+    }
+
+    const failedCycles = hs.failed_cycles || 0;
+    const det = (hs.detail || "").toLowerCase();
+    const isServerDeadNotice = failedCycles >= 3 || det.includes("не отвечает на udp") || (det.includes("все 5 попыток") && failedCycles >= 2);
+
+    if (!isServerDeadNotice) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    const net = (hs.network_type || "bm").toLowerCase();
+    const cachedList = (window._dmrServersCache && window._dmrServersCache[net]) || [];
+    const fastest = cachedList.find(s => s && s.state === "online" && s.host && (s.host.toLowerCase() !== (hs.bm_master_host || "").toLowerCase()));
+
+    if (!fastest) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+    const cCode = (fastest.country_code || fastest.country || "").toUpperCase();
+    const cName = getLocalizedCountryName(cCode, fastest.country_name || fastest.country || "DMR", curLang);
+    const flag = fastest.flag || (cCode ? isoToEmoji(cCode) : "") || "🌐";
+    const pingMs = Math.round(fastest.udp_ms || fastest.avg_ping || 15);
+    const switchText = window.t ? window.t("server_probe.quick_switch", {}, "Переключить") : "Переключить";
+
+    if (!existing) {
+      const noticeDiv = document.createElement("div");
+      noticeDiv.className = "server-failover-card-notice";
+      noticeDiv.style.cssText = "display:flex; align-items:center; justify-content:space-between; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:6px; padding:4px 8px; margin:4px 8px 6px; font-size:11px; color:#fca5a5;";
+      noticeDiv.innerHTML = `
+        <span style="display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          <span>⚠️ Сервер не отвечает. Лучший:</span> <b>${cName} (${pingMs} мс)</b>
+        </span>
+        <button type="button" class="btn-failover-quick-switch" style="background:#2563eb; color:#fff; border:none; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:600; cursor:pointer; flex-shrink:0; margin-left:8px;">${switchText}</button>
+      `;
+
+      noticeDiv.querySelector(".btn-failover-quick-switch").addEventListener("click", () => {
+        const title = `${flag} ${cName}`;
+        if (typeof selectBmBenchmarkServer === "function") {
+          selectBmBenchmarkServer(fastest.host, title, fastest.port, fastest.password);
+        }
+        noticeDiv.remove();
+      });
+
+      const bottomBar = card.querySelector(".screen-bottom-bar") || card;
+      bottomBar.parentNode.insertBefore(noticeDiv, bottomBar);
+    }
+  });
+}
+
+window.checkAndRenderFailoverBadges = checkAndRenderFailoverBadges;
+
+window.onServerProbeComplete = function(msg) {
+  const completedNet = (msg && msg.network_type ? msg.network_type : "").toLowerCase();
+  window._dmrServersCache = window._dmrServersCache || {};
+  if (msg && Array.isArray(msg.results) && msg.results.length > 0) {
+    window._dmrServersCache[completedNet] = msg.results;
+    window._dmrServersCacheVer = Date.now();
+  }
+  const editHsNetworkType = document.getElementById("editHsNetworkType");
+  const curNet = (editHsNetworkType ? editHsNetworkType.value : "bm").toLowerCase();
+  if (curNet === completedNet) {
+    const editHsHost = document.getElementById("editHsHost");
+    renderBmMastersDropdown(editHsHost ? editHsHost.value : "", curNet);
+  }
+  if (typeof refreshAllCardsBmBanner === "function") {
+    refreshAllCardsBmBanner();
+  }
+  if (typeof checkAndRenderFailoverBadges === "function") {
+    checkAndRenderFailoverBadges();
+  }
+};
+
+if (typeof window !== 'undefined') { window.updateCardXlxPanel = updateCardXlxPanel; window.updateCardDmrPlusPanel = updateCardDmrPlusPanel; window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector; }

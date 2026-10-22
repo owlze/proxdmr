@@ -1,6 +1,6 @@
 import { refreshAllCardsBmBanner } from '../dmr/bm-banner.js';
 import { currentBmStatus, updateBmStatus } from '../dmr/bm-status.js';
-import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.284';
+import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.319';
 
 /**
  * Language Selector & i18n Localization Engine Module
@@ -95,7 +95,14 @@ export function initLanguageManager() {
         const ws = window.ws;
         window.updateGwStatus(Boolean(ws && ws.readyState === WebSocket.OPEN));
       }
-      if (typeof updateBmStatus === "function") updateBmStatus(currentBmStatus);
+      if (typeof window.updateBmStatus === "function") {
+        const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+        if (hsList.length > 0) {
+          hsList.forEach(h => window.updateBmStatus(h.status || "OFFLINE", h.detail || "", h.id));
+        } else {
+          window.updateBmStatus(currentBmStatus);
+        }
+      }
       if (typeof window.updateApkUpdateUI === "function") window.updateApkUpdateUI();
       if (typeof window.updateTgDisplay === "function") window.updateTgDisplay();
       if (typeof window.renderQuickMemButtons === "function") window.renderQuickMemButtons();

@@ -967,21 +967,47 @@ function refreshAllSlotTtsBadges(customLangCode = null) {
 window.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
 if (window.__proxdmr) window.__proxdmr.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
 
+function getSoloMutedHsSet() {
+  if (typeof window === "undefined") return new Set();
+  if (window._ttsSoloMutedHotspots instanceof Set) return window._ttsSoloMutedHotspots;
+  const s = new Set();
+  try {
+    const raw = localStorage.getItem("proxdmr_tts_solo_muted_hs");
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) arr.forEach(k => s.add(k));
+    }
+  } catch (_) {}
+  window._ttsSoloMutedHotspots = s;
+  return s;
+}
+
+function saveSoloMutedHsSet(s) {
+  if (typeof window === "undefined") return;
+  window._ttsSoloMutedHotspots = s;
+  try {
+    if (!s || s.size === 0) {
+      localStorage.removeItem("proxdmr_tts_solo_muted_hs");
+    } else {
+      localStorage.setItem("proxdmr_tts_solo_muted_hs", JSON.stringify(Array.from(s)));
+    }
+  } catch (_) {}
+}
+
 /**
  * Synchronizes TTS Solo Mode across all audio channels/slots.
- * When Solo mode is active and any slot has TTS turned ON:
- * - All other channels across all hotspots are muted immediately (setHotspotMute(hid, slot, true))
- *   and their VFO mute buttons display 🔇.
- * - Only the active TTS translation slot(s) remain unmuted.
- * - When TTS is turned OFF on that slot (or Solo mode is unchecked), all channels that were
- *   muted specifically by Solo mode are restored/unmuted back to their previous state.
- * - Pre-existing manual mutes set prior to Solo mode are preserved.
+ * - On any hotspot where real-time TTS is active on TS1 or TS2:
+ *   that hotspot is switched to Solo mode, the active TTS slot is unmuted, and the opposite TS on that hotspot is muted.
+ * - Other hotspots are muted ONLY if "Solo" (tts_mute_others) is enabled in TTS settings.
+ * - When TTS is turned OFF (or "Solo" is unchecked in TTS settings), other hotspots that were
+ *   muted specifically by TTS Solo mode are restored to their previous state.
  */
 function syncTtsSoloMode() {
   const s = window.transcriberSettings || {};
   const soloEnabled = (s.tts_mute_others !== false);
 
   const soloSet = (typeof getSoloMutedSet === "function") ? getSoloMutedSet() : (window._ttsSoloMutedSlots || new Set());
+  const soloHsSet = getSoloMutedHsSet();
 
   // 1. Gather all hotspots
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
@@ -1000,65 +1026,101 @@ function syncTtsSoloMode() {
 
   // 2. Find which slots have TTS active
   const activeTtsSlots = [];
+  const activeTtsHids = new Set();
   hidSet.forEach(hid => {
     [1, 2].forEach(slot => {
       if (isSlotTtsActive(hid, slot)) {
         activeTtsSlots.push({ hid, slot, key: `${hid}_ts${slot}` });
+        activeTtsHids.add(hid);
       }
     });
   });
 
-  const shouldSolo = soloEnabled && (activeTtsSlots.length > 0);
+  // 2.5. Restore pre-TTS audio mode for any hotspot that no longer has an active TTS slot
+  if (window._preTtsAudioModes) {
+    Object.keys(window._preTtsAudioModes).forEach(h => {
+      if (!activeTtsHids.has(h)) {
+        const prevMode = window._preTtsAudioModes[h];
+        delete window._preTtsAudioModes[h];
+        if (prevMode && typeof setHotspotTsAudioMode === "function") {
+          setHotspotTsAudioMode(h, prevMode);
+        }
+      }
+    });
+  }
 
-  if (shouldSolo) {
-    // Solo is active!
-    hidSet.forEach(hid => {
-      // In "doubl" mode, respect simultaneous dual audio and do not auto-mute other slots!
-      const mode = (typeof getHotspotTsAudioMode === "function") ? getHotspotTsAudioMode(hid) : "doubl";
-      if (mode === "doubl") {
-        [1, 2].forEach(slot => {
-          const slotKey = `${hid}_ts${slot}`;
-          if (soloSet.has(slotKey)) {
-            soloSet.delete(slotKey);
-          }
-          if (hid === "default" && soloSet.has(`default_ts${slot}`)) {
-            soloSet.delete(`default_ts${slot}`);
-          }
-        });
-        return;
+  // 3. Enforce Solo mode & slot mutes on every hotspot that has an active TTS slot
+  activeTtsSlots.forEach(({ hid, slot }) => {
+    const otherSlot = slot === 1 ? 2 : 1;
+
+    // Remove this hotspot's slots from temporary soloSet (its slots are controlled by its own Solo mode)
+    [1, 2].forEach(sl => {
+      soloSet.delete(`${hid}_ts${sl}`);
+      if (hid === resolveHotspotId("default")) {
+        soloSet.delete(`default_ts${sl}`);
+      }
+    });
+
+    // Ensure this hotspot's master audio is unmuted
+    if (soloHsSet.has(hid)) {
+      soloHsSet.delete(hid);
+    }
+    if (typeof window.isHotspotAudioMuted === "function" && window.isHotspotAudioMuted(hid) && typeof window.setHotspotAudioMute === "function") {
+      window.setHotspotAudioMute(hid, false);
+    }
+
+    // Ensure this hotspot is in Solo TS mode
+    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
+      window._preTtsAudioModes = window._preTtsAudioModes || {};
+      const curMode = getHotspotTsAudioMode(hid);
+      if (!window._preTtsAudioModes[hid]) {
+        window._preTtsAudioModes[hid] = curMode;
+      }
+      if (curMode !== "solo") {
+        setHotspotTsAudioMode(hid, "solo");
+      }
+    }
+
+    // Ensure target TS is unmuted and the other TS on this hotspot is muted
+    if (getHotspotMute(hid, slot)) {
+      setHotspotMute(hid, slot, false);
+    }
+    if (!getHotspotMute(hid, otherSlot)) {
+      setHotspotMute(hid, otherSlot, true);
+    }
+  });
+
+  // 4. Handle OTHER hotspots (where TTS is NOT active)
+  const shouldMuteOtherHotspots = soloEnabled && (activeTtsSlots.length > 0);
+
+  if (shouldMuteOtherHotspots) {
+    hidSet.forEach(otherHid => {
+      if (activeTtsHids.has(otherHid)) return;
+
+      // Mute other hotspot master audio if not already muted
+      if (typeof window.isHotspotAudioMuted === "function" && typeof window.setHotspotAudioMute === "function") {
+        if (!window.isHotspotAudioMuted(otherHid)) {
+          soloHsSet.add(otherHid);
+          window.setHotspotAudioMute(otherHid, true);
+        }
       }
 
+      // Temporarily mute both slots on other hotspot if not persistently muted
       [1, 2].forEach(slot => {
-        const slotKey = `${hid}_ts${slot}`;
-        const isTts = activeTtsSlots.some(t => t.hid === hid && t.slot === slot);
-
-        if (isTts) {
-          // This is a speech translation channel.
-          // Ensure it is NOT marked in soloSet
-          if (soloSet.has(slotKey)) {
-            soloSet.delete(slotKey);
-          }
-          const getMuteFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
-          if (getMuteFn(hid, slot)) {
-            setHotspotMute(hid, slot, false, true);
-          }
-        } else {
-          // This is an other channel.
-          // Set temporary mute (isTemporary = true) so it does NOT affect localStorage or server DB
-          const getPersistFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
-          const wasAlreadyMuted = getPersistFn(hid, slot);
-          if (wasAlreadyMuted) {
-            setHotspotMute(hid, slot, true, true);
-          }
+        const getPersistFn = (typeof getPersistentHotspotMute === "function") ? getPersistentHotspotMute : getHotspotMute;
+        const wasPersistentlyMuted = getPersistFn(otherHid, slot);
+        if (!wasPersistentlyMuted) {
+          setHotspotMute(otherHid, slot, true, true);
         }
       });
     });
     if (typeof saveSoloMutedSet === "function") {
       saveSoloMutedSet(soloSet);
     }
+    saveSoloMutedHsSet(soloHsSet);
   } else {
-    // Solo is NOT active (either soloEnabled is false or no slots have TTS enabled)
-    // Restore all channels that were muted by Solo mode back to their persistent states
+    // Either TTS Solo ("tts_mute_others") is disabled in settings, or no slots have TTS enabled:
+    // Restore all other hotspots/slots that were muted by TTS Solo mode
     if (soloSet.size > 0) {
       const toRestore = Array.from(soloSet);
       soloSet.clear();
@@ -1069,6 +1131,7 @@ function syncTtsSoloMode() {
         const idx = slotKey.lastIndexOf("_ts");
         if (idx !== -1) {
           const hid = slotKey.substring(0, idx);
+          if (activeTtsHids.has(hid)) return;
           const slot = parseInt(slotKey.substring(idx + 3), 10) || 1;
           const wasPersistentMuted = (typeof getPersistentHotspotMute === "function")
             ? getPersistentHotspotMute(hid, slot)
@@ -1079,6 +1142,16 @@ function syncTtsSoloMode() {
       if (typeof updateHotspotCardMuteUI === "function") {
         updateHotspotCardMuteUI(null);
       }
+    }
+    if (soloHsSet.size > 0) {
+      const hsToRestore = Array.from(soloHsSet);
+      soloHsSet.clear();
+      saveSoloMutedHsSet(soloHsSet);
+      hsToRestore.forEach(hid => {
+        if (typeof window.setHotspotAudioMute === "function") {
+          window.setHotspotAudioMute(hid, false);
+        }
+      });
     }
   }
 
@@ -2837,18 +2910,17 @@ function toggleSlotTts(row, slot) {
       recMgr.stopTtsPlayback();
     }
 
-    // 4. In solo or auto mode, ensure current TS is active; in doubl mode, preserve simultaneous dual audio
-    window._preTtsAudioModes = window._preTtsAudioModes || {};
-    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
-      const curMode = getHotspotTsAudioMode(hid);
-      if (curMode !== "doubl") {
-        if (!window._preTtsAudioModes[hid]) {
-          window._preTtsAudioModes[hid] = curMode;
-        }
-        if (curMode !== "solo") {
-          setHotspotTsAudioMode(hid, "solo");
-        }
-      }
+    // 4. Unmute global & hotspot audio, activate target TS, switch this HS to Solo mode, and mute opposite TS
+    if (typeof window.isGlobalAudioMuted === "function" && window.isGlobalAudioMuted() && typeof window.setGlobalAudioMute === "function") {
+      window.setGlobalAudioMute(false);
+    }
+    const soloHsSet = getSoloMutedHsSet();
+    if (soloHsSet.has(hid)) {
+      soloHsSet.delete(hid);
+      saveSoloMutedHsSet(soloHsSet);
+    }
+    if (typeof window.isHotspotAudioMuted === "function" && window.isHotspotAudioMuted(hid) && typeof window.setHotspotAudioMute === "function") {
+      window.setHotspotAudioMute(hid, false);
     }
 
     // 5. ACTIVATE THIS TS ON THIS HOTSPOT
@@ -2857,6 +2929,21 @@ function toggleSlotTts(row, slot) {
     } else if (typeof window.setActiveSlot === "function") {
       window.setActiveSlot(slot, true);
     }
+
+    // 6. Switch this hotspot to Solo mode and unmute target TS while muting the second TS
+    window._preTtsAudioModes = window._preTtsAudioModes || {};
+    if (typeof getHotspotTsAudioMode === "function" && typeof setHotspotTsAudioMode === "function") {
+      const curMode = getHotspotTsAudioMode(hid);
+      if (!window._preTtsAudioModes[hid]) {
+        window._preTtsAudioModes[hid] = curMode;
+      }
+      if (curMode !== "solo") {
+        setHotspotTsAudioMode(hid, "solo");
+      }
+    }
+    const otherSlot = slot === 1 ? 2 : 1;
+    setHotspotMute(hid, slot, false);
+    setHotspotMute(hid, otherSlot, true);
   } else {
     // TURNING TTS OFF:
     // Restore pre-TTS audio mode for this hotspot if saved

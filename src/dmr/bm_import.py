@@ -18,7 +18,8 @@ class BmImportTask:
         slot: int,
         talkgroups: list[int],
         filename: str = "",
-        action: str = "add"
+        action: str = "add",
+        network_type: str = "bm"
     ):
         self.task_id = task_id
         self.user_id = user_id
@@ -27,6 +28,7 @@ class BmImportTask:
         self.talkgroups = talkgroups
         self.filename = filename
         self.action = action if action in ("add", "delete") else "add"
+        self.network_type = (network_type or "bm").strip().lower()
         self.total = len(talkgroups)
         self.current = 0
         self.current_tg: Optional[int] = None
@@ -61,6 +63,7 @@ class BmImportTask:
             "slot": self.slot,
             "filename": self.filename,
             "action": self.action,
+            "network_type": self.network_type,
             "total": self.total,
             "current": self.current,
             "current_tg": self.current_tg,
@@ -88,8 +91,9 @@ async def execute_bm_import(
     reconnect_fn: Optional[Callable[[str, int], None]] = None
 ):
     action_label = "delete" if task.action == "delete" else "import"
+    net_tag = "TGIF" if task.network_type == "tgif" else "BM"
     logger.info(
-        f"[BM_TASK] Started background {action_label} task {task.task_id} for user {task.user_id}: "
+        f"[{net_tag}_TASK] Started background {action_label} task {task.task_id} for user {task.user_id}: "
         f"{task.total} groups ({task.action}) in slot {task.slot}"
     )
 
@@ -99,7 +103,97 @@ async def execute_bm_import(
             "task": task.to_dict()
         })
 
+    if task.network_type == "freedmr":
+        from .constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES
+        from .manager import hotspot_manager
+        rt = hotspot_manager.get_runtime(task.user_id, task.hotspot_id)
+        if not rt:
+            task.status = "error"
+            task.message = f"Хотспот '{task.hotspot_id}' не найден"
+            task.finished_at = time.time()
+            if broadcast_fn:
+                await broadcast_fn(task.user_id, {"type": "bm_import_finished", "task": task.to_dict()})
+            return
+
+        is_delete = (task.action == "delete")
+        parsed = parse_freedmr_rpto(getattr(rt.config, "rpto_options", "") or "")
+        target_list = parsed["ts1"] if task.slot == 1 else parsed["ts2"]
+
+        for i, tg in enumerate(task.talkgroups):
+            if task.cancelled:
+                task.status = "cancelled"
+                break
+            task.current_tg = tg
+            if is_delete:
+                if tg in target_list:
+                    target_list.remove(tg)
+                    task.deleted.append(tg)
+                else:
+                    task.errors.append(f"TG {tg} не найдена в слоте {task.slot}")
+            else:
+                if tg in (0, 4000, 9990):
+                    task.errors.append(f"TG {tg}: служебная группа")
+                else:
+                    if tg not in target_list:
+                        target_list.append(tg)
+                    task.added.append(tg)
+
+            task.current = i + 1
+            if broadcast_fn:
+                await broadcast_fn(task.user_id, {"type": "bm_import_progress", "task": task.to_dict()})
+            await asyncio.sleep(0.01)
+
+        new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"])
+        if len(new_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
+            task.status = "error"
+            task.message = f"Превышен лимит длины строки RPTO FreeDMR ({FREEDMR_MAX_RPTO_BYTES} байт)"
+        else:
+            await hotspot_manager.set_hotspot_rpto(rt.config.id, rpto_options=new_rpto, user_id=task.user_id)
+            task.status = "completed" if not task.cancelled else "cancelled"
+            if is_delete:
+                task.message = f"Успешно удалено {len(task.deleted)} из {task.total} групп из TS{task.slot} FreeDMR"
+            else:
+                task.message = f"Успешно добавлено {len(task.added)} из {task.total} групп в TS{task.slot} FreeDMR"
+            if task.errors:
+                task.message += f" ({len(task.errors)} ошибок)"
+
+        task.finished_at = time.time()
+        if broadcast_fn:
+            await broadcast_fn(task.user_id, {"type": "bm_import_finished", "task": task.to_dict()})
+        return
+
     def _add_single_tg(tg_num: int):
+        if task.network_type == "tgif":
+            if tg_num in (9, 777, 4000, 9990, 31000):
+                return False, f"TG {tg_num}: служебная группа TGIF (не может быть статической)"
+            url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}"
+            req_data = json.dumps({"slot": task.slot, "timeslot": task.slot, "talkgroup": tg_num}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=req_data,
+                headers={
+                    "User-Agent": "ProxDMR/1.0",
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    resp.read()
+                    return True, None
+            except urllib.error.HTTPError as e:
+                err_text = ""
+                try:
+                    err_json = json.loads(e.read().decode("utf-8", errors="ignore"))
+                    err_text = err_json.get("message") or err_json.get("error") or ""
+                except Exception:
+                    pass
+                return False, f"TG {tg_num}: HTTP {e.code} ({err_text or e.reason})"
+            except Exception as e:
+                return False, f"TG {tg_num}: {e}"
+
         url = f"https://api.brandmeister.network/v2/device/{device_id}/talkgroup"
         req_data = json.dumps({"slot": task.slot, "group": tg_num}).encode("utf-8")
         req = urllib.request.Request(
@@ -124,6 +218,35 @@ async def execute_bm_import(
             return False, f"TG {tg_num}: {e}"
 
     def _delete_single_tg(tg_num: int):
+        if task.network_type == "tgif":
+            url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}"
+            req_data = json.dumps({"slot": task.slot, "timeslot": task.slot, "talkgroup": tg_num}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=req_data,
+                headers={
+                    "User-Agent": "ProxDMR/1.0",
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
+                method="DELETE"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    resp.read()
+                    return True, None
+            except urllib.error.HTTPError as e:
+                err_text = ""
+                try:
+                    err_json = json.loads(e.read().decode("utf-8", errors="ignore"))
+                    err_text = err_json.get("message") or err_json.get("error") or ""
+                except Exception:
+                    pass
+                return False, f"TG {tg_num}: HTTP {e.code} ({err_text or e.reason})"
+            except Exception as e:
+                return False, f"TG {tg_num}: {e}"
+
         url = f"https://api.brandmeister.network/v2/device/{device_id}/talkgroup/{task.slot}/{tg_num}"
         req = urllib.request.Request(
             url,
@@ -202,7 +325,7 @@ async def execute_bm_import(
             f"added={len(task.added)}, deleted={len(task.deleted)}, errors={len(task.errors)}"
         )
 
-        if (task.added or task.deleted) and reconnect_fn:
+        if (task.added or task.deleted) and reconnect_fn and task.network_type == "bm":
             try:
                 reconnect_fn(task.hotspot_id, user_id=task.user_id)
             except Exception as e:

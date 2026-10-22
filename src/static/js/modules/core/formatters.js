@@ -146,6 +146,10 @@
   ];
 
   export function getCountryInfo(dmrId, callsign = "", countryName = "") {
+    const idStr = dmrId != null ? String(dmrId).trim() : "";
+    if (idStr === "4000" || idStr === "9990") {
+      return { name: "Global", name_en: "", flag: "🌐" };
+    }
     let cs = (callsign || "").trim();
     if (!cs && dmrId && typeof window !== "undefined" && window.USER_CALLSIGNS && window.USER_CALLSIGNS[dmrId]?.callsign) {
       cs = window.USER_CALLSIGNS[dmrId].callsign.trim();
@@ -157,8 +161,7 @@
         }
       }
     }
-    if (dmrId) {
-      const idStr = dmrId.toString();
+    if (idStr) {
       const mcc = idStr.substring(0, 3);
       if (DMR_MCC_MAP[mcc]) {
         return DMR_MCC_MAP[mcc];
@@ -663,11 +666,61 @@
     4000: "Отключение (Unlink)"
   };
 
-  export function getCleanTgDesc(tg, rawName, lang = null) {
+  export function getHotspotNetworkType(hidOrCard = null) {
+    if (typeof window === "undefined") return "bm";
+    let hid = null;
+    if (hidOrCard && typeof hidOrCard === "object" && hidOrCard.dataset) {
+      hid = hidOrCard.dataset.hotspotId;
+    } else if (typeof hidOrCard === "string" && hidOrCard.trim()) {
+      hid = hidOrCard.trim();
+    }
+    if (!hid) {
+      hid = window.activeHotspotId || "default";
+    }
+    const resolveFn = typeof window.resolveHotspotId === "function" ? window.resolveHotspotId : (x => x || "default");
+    const resolved = resolveFn(hid);
+    const list = Array.isArray(window.currentHotspots) ? window.currentHotspots : [];
+    const hs = list.find(h => h && (h.id === resolved || h.id === hid)) || (resolved === "default" ? list[0] : null);
+    return ((hs && hs.network_type) || "bm").toLowerCase();
+  }
+
+  export function getNetworkRawTgName(tg, networkType = null) {
+    const sTg = String(tg || "").trim();
+    if (!sTg) return "";
+    const nTg = parseInt(sTg, 10);
+    const net = (networkType || getHotspotNetworkType()).toLowerCase();
+    if (net === "tgif") {
+      if (nTg === 4000) return "Disconnect (Unlink)";
+      if (nTg === 9990) return "Parrot (Эхо-тест)";
+      const tgifMap = (typeof window !== "undefined" && window.TGIF_TG_NAMES) || {};
+      if (tgifMap[sTg]) return String(tgifMap[sTg]).trim();
+      if (nTg === 31665) return "TGIF The Mothership";
+      if (nTg === 777) return "TGIF Multi-Lang";
+      return "";
+    }
+    if (net === "xlx") {
+      if (nTg === 4000) return "Unlink (Отключение)";
+      if (nTg === 9) return "Reflector Call (TS2)";
+      if (nTg >= 4001 && nTg <= 4026) {
+        return `Module ${String.fromCharCode(65 + (nTg - 4001))}`;
+      }
+      return "";
+    }
+    if (net === "dmrplus") {
+      if (nTg === 4000) return "Unlink (Отключение)";
+      if (nTg === 9990) return "Parrot (Эхо-тест)";
+      if (nTg >= 4001 && nTg <= 4999) return `Reflector ${nTg}`;
+    }
+    const bmMap = (typeof window !== "undefined" && window.TG_NAMES) || {};
+    return bmMap[sTg] ? String(bmMap[sTg]).trim() : "";
+  }
+
+  export function getCleanTgDesc(tg, rawName, lang = null, networkType = null) {
     const sTg = String(tg || "").trim();
     let str = String(rawName || "").trim();
     const curLang = lang || getActiveLang();
     const isCyr = (curLang === "ru" || curLang === "uk");
+    const net = networkType ? String(networkType).toLowerCase() : "";
 
     const stripOuterBrackets = (s) => {
       let r = String(s || "").trim();
@@ -676,6 +729,49 @@
       }
       return r;
     };
+
+    // Network-specific handling for TGIF, XLX, DMR+
+    if (net === "tgif") {
+      if (sTg === "4000") return isCyr ? "Отключение" : "Disconnect";
+      if (sTg === "9990") return isCyr ? "Эхо-тест" : "Parrot";
+      const tgifMap = (typeof window !== "undefined" && window.TGIF_TG_NAMES) || {};
+      const officialTgif = tgifMap[sTg]
+        ? String(tgifMap[sTg]).trim()
+        : (sTg === "31665" ? "TGIF The Mothership" : (sTg === "777" ? "TGIF Multi-Lang" : ""));
+      // If TG exists in TGIF catalog, always prefer TGIF name over any cached BM name
+      if (officialTgif) {
+        str = officialTgif;
+      }
+      if (!str) return "";
+      str = stripOuterBrackets(str);
+      if (sTg) {
+        const parenRegex = new RegExp(`\\s*[\\(\\[]\\s*(?:tg|id|call)?[\\s\\-_#:]*${sTg}\\s*[\\)\\]]`, "gi");
+        str = str.replace(parenRegex, "").trim();
+        const prefixRegex = new RegExp(`^(?:tg|call|unit|id)?[\\s\\-_#:]*${sTg}[\\s\\-_/:]*`, "i");
+        str = str.replace(prefixRegex, "").trim();
+      }
+      const lowerTgif = str.toLowerCase();
+      if (!str || lowerTgif === "talkgroup" || lowerTgif === "tg" || lowerTgif === "unknown" || lowerTgif === "неизвестно") {
+        return "";
+      }
+      return str;
+    }
+
+    if (net === "xlx") {
+      const nTg = parseInt(sTg, 10);
+      if (nTg === 4000) return isCyr ? "Отключение" : "Unlink";
+      if (nTg === 9) return "Reflector Call";
+      if (nTg >= 4001 && nTg <= 4026) {
+        return `Module ${String.fromCharCode(65 + (nTg - 4001))}`;
+      }
+    }
+
+    if (net === "dmrplus") {
+      const nTg = parseInt(sTg, 10);
+      if (nTg >= 4001 && nTg <= 4999) {
+        return `Reflector ${nTg}`;
+      }
+    }
 
     // 1. Resolve well-known worldwide / system TalkGroups
     if (sTg && GLOBAL_TG_MAP[sTg]) {
@@ -922,8 +1018,8 @@
     descEl.style.setProperty("font-size", `${chosenPx.toFixed(1)}px`, "important");
   }
 
-  export function renderTgTextHtml(tg, prefix, rawName, title) {
-    let cleanDesc = getCleanTgDesc(tg, rawName);
+  export function renderTgTextHtml(tg, prefix, rawName, title, networkType = null) {
+    let cleanDesc = getCleanTgDesc(tg, rawName, null, networkType);
     while (cleanDesc && ((cleanDesc.startsWith("(") && cleanDesc.endsWith(")")) || (cleanDesc.startsWith("[") && cleanDesc.endsWith("]")))) {
       cleanDesc = cleanDesc.slice(1, -1).trim();
     }
@@ -1034,6 +1130,10 @@
     window.formatHistoryTime = formatHistoryTime;
     window.updateClockBarActiveState = updateClockBarActiveState;
     window.adjustPttDescFontSize = adjustPttDescFontSize;
+    window.getHotspotNetworkType = getHotspotNetworkType;
+    window.getNetworkRawTgName = getNetworkRawTgName;
+    window.getCleanTgDesc = getCleanTgDesc;
+    window.renderTgTextHtml = renderTgTextHtml;
   }
 
 export function safeEscapeHtml(str) {
@@ -1099,21 +1199,39 @@ export function attachTgLivePreview(inputEl, opts = {}) {
     const mode = opts.mode || "auto";
     const isPrivate = mode === "id" ? true : (mode === "tg" ? false : Boolean(u || num > 999999));
 
+    const formatUserLoc = (usr) => {
+      if (!usr) return "";
+      const parts = [];
+      if (usr.city) parts.push(usr.city);
+      if (usr.state && usr.state !== usr.city) parts.push(usr.state);
+      if (usr.country && usr.country !== usr.state && usr.country !== usr.city) parts.push(usr.country);
+      return parts.join(", ");
+    };
+
+    const formatUserPrefixHint = (usr) => {
+      if (!usr) return "";
+      const uid = usr.radio_id !== undefined ? usr.radio_id : usr.id;
+      const cs = (usr.callsign || "").trim();
+      const nm = (usr.name || "").trim();
+      const loc = [usr.city, usr.country].filter(Boolean).join(", ");
+      const details = [nm, loc].filter(Boolean).join(", ");
+      return `<span class="quick-tg-pop-sub">↳ Напр.: <b>ID ${safeEscapeHtml(String(uid))}</b> — <strong>${safeEscapeHtml(cs)}</strong>${details ? ` (${safeEscapeHtml(details)})` : ""}</span>`;
+    };
+
     if (isPrivate) {
-      const cInfo = getCountryInfo(num, u?.callsign || "", u?.country || "");
-      const flagHtml = getFlagBadgeHtml(cInfo, false);
-      const cLabel = (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "DMR ID";
       let quoteHtml = "";
       let isKnown = false;
+      const idCacheEntry = cache["id_" + num];
+      const isIdNotFound = (idCacheEntry === "not_found" || (idCacheEntry && idCacheEntry.status === "not_found"));
 
       if (u && (u.callsign || u.name)) {
         isKnown = true;
         const cs = (u.callsign || "").trim();
         const nm = (u.name || "").trim();
-        const loc = [u.city, u.country].filter(Boolean).join(", ");
+        const loc = formatUserLoc(u);
         quoteHtml = `<span class="quick-tg-pop-main"><strong>${safeEscapeHtml(cs)}</strong>${nm ? ` — ${safeEscapeHtml(nm)}` : ""}</span>` +
           (loc ? `<span class="quick-tg-pop-sub">${safeEscapeHtml(loc)}</span>` : "");
-      } else if (cache["id_" + num] === "not_found") {
+      } else if (isIdNotFound) {
         const notFoundTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.private_id_custom", {}, "Личный вызов DMR ID (нет в базе RadioID)") : "Личный вызов DMR ID (нет в базе RadioID)";
         quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(notFoundTxt)}</span>`;
       } else {
@@ -1122,26 +1240,36 @@ export function attachTgLivePreview(inputEl, opts = {}) {
         if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
         previewDebounceTimer = setTimeout(async () => {
           try {
-            const res = await fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=5`);
+            const res = await fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=8`);
             const data = await res.json();
-            const exact = ((data && data.results) || []).find(it => Number(it.id) === num);
+            const list = (data && data.results) || [];
+            const getUid = (it) => Number(it && (it.radio_id !== undefined ? it.radio_id : it.id));
+            const exact = list.find(it => getUid(it) === num);
             if (exact) {
+              const normUser = Object.assign({}, exact, { id: num, radio_id: num });
               if (typeof window !== "undefined") {
                 if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
-                window.USER_CALLSIGNS[num] = exact;
+                window.USER_CALLSIGNS[num] = normUser;
+                try { localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS)); } catch (_) {}
               }
-              cache["id_" + num] = "found";
+              cache["id_" + num] = { status: "found", prefixUser: null };
             } else {
-              cache["id_" + num] = "not_found";
+              cache["id_" + num] = { status: "not_found", prefixUser: null };
             }
           } catch (_) {
-            cache["id_" + num] = "not_found";
+            cache["id_" + num] = { status: "not_found", prefixUser: null };
           }
           if (inputEl && String(inputEl.value || "").replace(/\D/g, "") === String(num)) {
             renderPreview();
           }
-        }, 140);
+        }, 120);
       }
+
+      const cInfo = (isKnown || String(num).length >= 7)
+        ? getCountryInfo(num, u?.callsign || "", u?.country || "")
+        : { name: "Global", name_en: "", flag: "🌐" };
+      const flagHtml = getFlagBadgeHtml(cInfo, false);
+      const cLabel = (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "DMR ID";
 
       lastRenderedInfo = {
         num,
@@ -1171,14 +1299,15 @@ export function attachTgLivePreview(inputEl, opts = {}) {
       return;
     }
 
-    // TalkGroup
+    // TalkGroup (network-aware, exact typed number only)
     const isParrot = (num === 9990);
-    const tgNames = (typeof window !== "undefined" && window.TG_NAMES) || {};
-    const rawName = tgNames[num] ? String(tgNames[num]).trim() : (isParrot ? "Parrot / Echo (Эхо-тест)" : "");
-    let cleanDesc = getCleanTgDesc(num, rawName);
-    const cInfo = (num >= 100 || rawName) ? getCountryInfo(num, "", "") : { name: "Global", name_en: "", flag: "🌐" };
-    const flagHtml = getFlagBadgeHtml(cInfo, isParrot);
-    const cLabel = isParrot ? "Эхо-тест" : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup");
+    const isUnlink = (num === 4000);
+    const cardEl = inputEl && inputEl.closest ? inputEl.closest(".radio-container") : null;
+    const netType = getHotspotNetworkType(cardEl || opts.hotspotId);
+    const rawName = getNetworkRawTgName(num, netType) || (isParrot ? "Parrot / Echo (Эхо-тест)" : "");
+    let cleanDesc = getCleanTgDesc(num, rawName, null, netType);
+    const isNonMccNet = (netType === "tgif" || netType === "xlx");
+    const tgCacheKey = `tg_${netType}_${num}`;
 
     let quoteHtml = "";
     let isKnown = false;
@@ -1186,16 +1315,15 @@ export function attachTgLivePreview(inputEl, opts = {}) {
     if (cleanDesc) {
       isKnown = true;
       quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cleanDesc)}»</span>`;
-    } else if (cache["tg_" + num]) {
-      const cached = cache["tg_" + num];
+    } else if (cache[tgCacheKey]) {
+      const cached = cache[tgCacheKey];
       if (cached.exactName) {
         isKnown = true;
         cleanDesc = cached.exactName;
         quoteHtml = `<span class="quick-tg-pop-main">«${safeEscapeHtml(cached.exactName)}»</span>`;
       } else {
         const customTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.custom_group_hint", { tg: num }, `Группа TG ${num} (вне справочника)`) : `Группа TG ${num} (вне справочника)`;
-        quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(customTxt)}</span>` +
-          (cached.prefix ? `<span class="quick-tg-pop-sub">↳ Напр.: <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "");
+        quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(customTxt)}</span>`;
       }
     } else {
       const typingTxt = (typeof window !== "undefined" && window.t) ? window.t("tgtx.typing_group_hint", { tg: num }, `Группа TG ${num} • проверка...`) : `Группа TG ${num} • проверка...`;
@@ -1203,27 +1331,45 @@ export function attachTgLivePreview(inputEl, opts = {}) {
       if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
       previewDebounceTimer = setTimeout(async () => {
         try {
-          const res = await fetch(`/api/tg/search?q=${encodeURIComponent(String(num))}&limit=8`);
-          const data = await res.json();
+          const promises = [
+            fetch(`/api/tg/search?q=${encodeURIComponent(String(num))}&limit=8&network=${encodeURIComponent(netType)}`).then(r => r.json()).catch(() => null)
+          ];
+          if (mode === "auto" && num >= 100) {
+            promises.push(
+              fetch(`/api/dmr/users/search?q=${encodeURIComponent(String(num))}&limit=5`).then(r => r.json()).catch(() => null)
+            );
+          }
+          const [data, userData] = await Promise.all(promises);
           const list = (data && data.results) || [];
           const exact = list.find(r => Number(r.tg) === num);
-          const prefixItem = list.find(r => Number(r.tg) !== num && String(r.tg).startsWith(String(num)));
           let exactClean = "";
           if (exact && exact.name) {
-            exactClean = getCleanTgDesc(num, exact.name) || exact.name;
+            exactClean = getCleanTgDesc(num, exact.name, null, netType) || exact.name;
             if (typeof window !== "undefined") {
-              if (!window.TG_NAMES) window.TG_NAMES = {};
-              window.TG_NAMES[num] = exact.name;
+              if (netType === "tgif") {
+                if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+                window.TGIF_TG_NAMES[num] = exact.name;
+              } else {
+                if (!window.TG_NAMES) window.TG_NAMES = {};
+                window.TG_NAMES[num] = exact.name;
+              }
             }
           }
-          let prefixObj = null;
-          if (prefixItem) {
-            const pDesc = getCleanTgDesc(prefixItem.tg, prefixItem.name) || prefixItem.name || ("TG " + prefixItem.tg);
-            prefixObj = { tg: prefixItem.tg, desc: pDesc };
+          if (userData && Array.isArray(userData.results)) {
+            const getUid = (it) => Number(it && (it.radio_id !== undefined ? it.radio_id : it.id));
+            const exactUser = userData.results.find(it => getUid(it) === num);
+            if (exactUser && !exactClean) {
+              const normUser = Object.assign({}, exactUser, { id: num, radio_id: num });
+              if (typeof window !== "undefined") {
+                if (!window.USER_CALLSIGNS) window.USER_CALLSIGNS = {};
+                window.USER_CALLSIGNS[num] = normUser;
+                try { localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS)); } catch (_) {}
+              }
+            }
           }
-          cache["tg_" + num] = { exactName: exactClean, prefix: prefixObj };
+          cache[tgCacheKey] = { exactName: exactClean, prefix: null, prefixUser: null };
         } catch (_) {
-          cache["tg_" + num] = { exactName: "", prefix: null };
+          cache[tgCacheKey] = { exactName: "", prefix: null, prefixUser: null };
         }
         if (inputEl && String(inputEl.value || "").replace(/\D/g, "") === String(num)) {
           renderPreview();
@@ -1231,13 +1377,20 @@ export function attachTgLivePreview(inputEl, opts = {}) {
       }, 120);
     }
 
+    const canResolveMccCountry = !isNonMccNet && !isParrot && !isUnlink && (isKnown || (String(num).length === 3 && Boolean(DMR_MCC_MAP[String(num)])));
+    const cInfo = isNonMccNet
+      ? { name: netType.toUpperCase(), name_en: netType.toUpperCase(), flag: "🌐" }
+      : (canResolveMccCountry ? getCountryInfo(num, "", "") : { name: "Global", name_en: "", flag: "🌐" });
+    const flagHtml = getFlagBadgeHtml(cInfo, isParrot);
+    const cLabel = isParrot ? "Эхо-тест" : (isNonMccNet ? netType.toUpperCase() : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup"));
+
     lastRenderedInfo = {
       num,
       isPrivate: false,
       isKnown,
       user: null,
       cleanDesc: cleanDesc || "",
-      country: (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : ""
+      country: (!isNonMccNet && cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : ""
     };
 
     const hintText = typeof opts.actionHint === "function"

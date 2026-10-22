@@ -28,10 +28,10 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.305';
+} from '../dmr/transcriber.js?v=2.9.312';
 import { renderTranscriptionSummary } from '../dmr/transcription.js';
-import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.306';
-import { updateApkUpdateUI } from '../core/updater.js?v=2.9.282';
+import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.325';
+import { updateApkUpdateUI } from '../core/updater.js?v=2.9.312';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js';
 
 // State variables declared in module scope
@@ -298,6 +298,20 @@ export function connectWebSocket(force = false) {
     }
     ws.binaryType = "arraybuffer";
 
+    if (typeof window !== "undefined" && !window._wsUnloadListenerAdded) {
+      window._wsUnloadListenerAdded = true;
+      const closeOnUnload = () => {
+        try {
+          if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            ws.onclose = null;
+            ws.close(1000, "Page unload");
+          }
+        } catch (_) {}
+      };
+      window.addEventListener("pagehide", closeOnUnload);
+      window.addEventListener("beforeunload", closeOnUnload);
+    }
+
     // Set connection timeout (5.5s) to prevent browser from hanging in CONNECTING indefinitely
     wsConnectTimeoutTimer = setTimeout(() => {
       wsConnectTimeoutTimer = null;
@@ -422,9 +436,12 @@ export function connectWebSocket(force = false) {
             vfoRow.classList.add("vfo-rx-active");
             updateCardModeBadge(targetCard);
           }
-          if (targetCard._lastRx && targetCard._lastRx[slot]) {
-            targetCard._lastRx[slot].lastAudioTime = Date.now() / 1000;
+          if (!targetCard._lastRx) targetCard._lastRx = {};
+          if (!targetCard._lastRx[slot]) {
+            targetCard._lastRx[slot] = { active: true, slot: slot };
           }
+          targetCard._lastRx[slot].lastAudioTime = Date.now() / 1000;
+          targetCard._lastRx[slot].active = true;
         }
 
         // 2. Multi-layer selective muting and simultaneous slot checks
@@ -550,6 +567,42 @@ export function handleGwDisconnectFailure(eventOrReason) {
       return;
     }
 
+    // Connection limit exceeded (max 3 connections per account)
+    if ((eventOrReason && eventOrReason.code === 4008) || window._isSessionLimitExceeded) {
+      console.warn("[WS] Connection limit reached (4008)");
+      clearWsReconnectTimer();
+      setWasGwConnected(false);
+      setIsManualGwDisconnect(true);
+      const limitStatusTxt = window.t ? window.t("gw.session_limit_status", {}, "Лимит подключений (макс. 3 на аккаунт)") : "Лимит подключений (макс. 3 на аккаунт)";
+      updateGwStatus(false, limitStatusTxt);
+      if (!window._sessionLimitModalOpen) {
+        window._sessionLimitModalOpen = true;
+        const limitTitle = window.t ? window.t("gw.session_limit_title", {}, "Лимит одновременных подключений") : "Лимит одновременных подключений";
+        const limitMsg = window.t
+          ? window.t("gw.session_limit_msg", {}, "Допускается не более 3 одновременных подключений от одного аккаунта ProxDMR.<br><br>Пожалуйста, закройте одно из активных подключений (вкладку браузера или приложение на другом устройстве) и нажмите кнопку ниже для повторного входа.")
+          : "Допускается не более 3 одновременных подключений от одного аккаунта ProxDMR.<br><br>Пожалуйста, закройте одно из активных подключений (вкладку браузера или приложение на другом устройстве) и нажмите кнопку ниже для повторного входа.";
+        const retryBtnTxt = window.t ? window.t("gw.session_limit_retry_btn", {}, "🔄 Повторить подключение") : "🔄 Повторить подключение";
+        if (typeof window.showAppAlert === "function") {
+          window.showAppAlert({
+            title: limitTitle,
+            message: limitMsg,
+            html: true,
+            icon: "🚫",
+            confirmText: retryBtnTxt
+          }).then(() => {
+            window._sessionLimitModalOpen = false;
+            window._isSessionLimitExceeded = false;
+            setIsManualGwDisconnect(false);
+            connectWebSocket(true);
+          });
+        } else {
+          showToast(`🚫 ${limitStatusTxt}`, 6000);
+          window._sessionLimitModalOpen = false;
+        }
+      }
+      return;
+    }
+
     if (window.isManualGwDisconnect) {
       console.log("[WS] Disconnected manually by user, auto-reconnect disabled.");
       clearWsReconnectTimer();
@@ -619,6 +672,11 @@ export function handleGwDisconnectFailure(eventOrReason) {
     }
   }
 export function handleServerMessage(msg) {
+    if (msg.type === "session_limit_exceeded") {
+      window._isSessionLimitExceeded = true;
+      handleGwDisconnectFailure({ code: 4008 });
+      return;
+    }
     if (msg.type === "state_change") {
       if (msg.is_tx === false) {
         if (typeof window.onServerTxEnded === "function") {
@@ -761,12 +819,8 @@ export function handleServerMessage(msg) {
           if (typeof disableHotspotTranscribe === "function") {
             disableHotspotTranscribe(cid, true, false);
           }
-          if (hs.status !== "DISCONNECTED" && hs.status !== "OFFLINE") {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: "bm_disconnect", hotspot_id: hs.id }));
-              ws.send(JSON.stringify({ type: "hotspot_collapse", hotspot_id: hs.id, collapsed: true }));
-            }
-            fetch(`/api/hotspots/${hs.id}/disconnect`, { method: "POST" }).catch(() => {});
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "hotspot_collapse", hotspot_id: hs.id, collapsed: true }));
           }
           hs.status = "DISCONNECTED";
           hs.detail = window.t ? window.t("status.bm_collapsed_detail", {}, "Свернут / отключен") : "Свернут / отключен";
@@ -832,6 +886,19 @@ export function handleServerMessage(msg) {
         isBenchmarkRunning = Boolean(msg.bm_benchmark_running);
         if (typeof setBenchmarkRunningUI === "function") {
           setBenchmarkRunningUI(isBenchmarkRunning);
+        }
+      }
+      if (msg.server_probe_cache && typeof msg.server_probe_cache === "object") {
+        window._dmrServersCache = window._dmrServersCache || {};
+        Object.keys(msg.server_probe_cache).forEach(k => {
+          const entry = msg.server_probe_cache[k];
+          if (entry && Array.isArray(entry.results) && entry.results.length > 0) {
+            window._dmrServersCache[k.toLowerCase()] = entry.results;
+          }
+        });
+        window._dmrServersCacheVer = Date.now();
+        if (typeof refreshAllCardsBmBanner === "function") {
+          refreshAllCardsBmBanner();
         }
       }
       if (msg.server_time) {
@@ -1041,7 +1108,10 @@ export function handleServerMessage(msg) {
         if (msg.app_settings.simultaneous_slots !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_simultaneous_slots`, msg.app_settings.simultaneous_slots ? "true" : "false");
           localStorage.setItem("proxdmr_simultaneous_slots", msg.app_settings.simultaneous_slots ? "true" : "false");
-          setSimultaneousSlotsEnabled(msg.app_settings.simultaneous_slots, false);
+          const curMode = (typeof window.getHotspotTsAudioMode === "function") ? window.getHotspotTsAudioMode("default") : null;
+          if (!(msg.app_settings.simultaneous_slots && curMode === "auto")) {
+            setSimultaneousSlotsEnabled(msg.app_settings.simultaneous_slots, false);
+          }
         }
         if (msg.app_settings.check_mic_on_tx !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_check_mic_on_tx`, msg.app_settings.check_mic_on_tx ? "true" : "false");
@@ -1361,6 +1431,14 @@ export function handleServerMessage(msg) {
       if (typeof handleBmBenchmarkComplete === "function") {
         handleBmBenchmarkComplete(msg);
       }
+    } else if (msg.type === "server_probe_progress") {
+      if (typeof window.handleServerProbeProgress === "function") {
+        window.handleServerProbeProgress(msg);
+      }
+    } else if (msg.type === "server_probe_complete") {
+      if (typeof window.handleServerProbeComplete === "function") {
+        window.handleServerProbeComplete(msg);
+      }
     } else if (msg.type === "bm_ping") {
       if (msg.pings) cachedBmPings = { ...cachedBmPings, ...msg.pings };
       if (msg.host_pings) cachedBmHostPings = { ...cachedBmHostPings, ...msg.host_pings };
@@ -1417,12 +1495,9 @@ export function handleServerMessage(msg) {
           targetHs.detail = "Свернут / отключен";
         }
         updateBmStatus("DISCONNECTED", window.t ? window.t("status.bm_collapsed_detail", {}, "Свернут / отключен") : "Свернут / отключен", msg.hotspot_id);
-        if (msg.status !== "DISCONNECTED" && msg.status !== "OFFLINE") {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "bm_disconnect", hotspot_id: msg.hotspot_id }));
-            ws.send(JSON.stringify({ type: "hotspot_collapse", hotspot_id: msg.hotspot_id, collapsed: true }));
-          }
-          fetch(`/api/hotspots/${msg.hotspot_id}/disconnect`, { method: "POST" }).catch(() => {});
+        const stUpper = String(msg.status || "").toUpperCase();
+        if (ws && ws.readyState === WebSocket.OPEN && stUpper !== "DISCONNECTED" && stUpper !== "OFFLINE") {
+          ws.send(JSON.stringify({ type: "hotspot_collapse", hotspot_id: msg.hotspot_id, collapsed: true }));
         }
         if (targetHs) {
           renderHotspotsList();
@@ -1855,7 +1930,11 @@ export function handleServerMessage(msg) {
         const resolvedTarget = resolveHotspotId(targetId);
         const hsObj = allHs.find(h => h.id === targetId || resolveHotspotId(h.id) === resolvedTarget);
         if (hsObj) {
+          const prevCollapsed = hsObj.collapsed;
+          const prevLive = hsObj.isLiveCollapsed;
           Object.assign(hsObj, msg.hotspot);
+          if (typeof prevCollapsed === "boolean") hsObj.collapsed = prevCollapsed;
+          if (typeof prevLive === "boolean") hsObj.isLiveCollapsed = prevLive;
           if (msg.hotspot.auto_record !== undefined) {
             try { localStorage.setItem(`proxdmr_autorec_${resolvedTarget}`, msg.hotspot.auto_record ? "1" : "0"); } catch (_) {}
           }
