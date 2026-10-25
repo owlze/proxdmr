@@ -98,6 +98,25 @@ export function initAndroidBridge() {
     }
 
     // Full exit button in settings
+    const authServerSettingsRow = document.getElementById("authServerSettingsRow");
+    if (authServerSettingsRow) {
+      authServerSettingsRow.style.display = "block";
+    }
+
+    const btnServerSettings = document.getElementById("btnAndroidServerSettings");
+    if (btnServerSettings && !btnServerSettings._wired) {
+      btnServerSettings._wired = true;
+      btnServerSettings.addEventListener("click", () => {
+        if (window.AndroidBridge && typeof window.AndroidBridge.openServerSettings === "function") {
+          try {
+            window.AndroidBridge.openServerSettings();
+          } catch (err) {
+            console.warn("[AndroidBridge] openServerSettings failed:", err);
+          }
+        }
+      });
+    }
+
     const btnExit = document.getElementById("btnExitApp");
     if (btnExit) {
       btnExit.addEventListener("click", () => {

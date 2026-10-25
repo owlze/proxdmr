@@ -1,6 +1,6 @@
 import { showToast } from '../core/toast.js';
 import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js';
-import { attachTgLivePreview } from '../core/formatters.js?v=2.9.310';
+import { attachTgLivePreview } from '../core/formatters.js?v=2.9.367';
 
 /**
  * ProxDMR BrandMeister Static & Dynamic TalkGroups Manager Module
@@ -177,12 +177,20 @@ function populatePresetSelects() {
 }
 populatePresetSelects();
 
-let staticTgsTs1 = [];
-let staticTgsTs2 = [];
-let dynamicTgsTs1 = [];
-let dynamicTgsTs2 = [];
-let selectedTs1 = new Set();
-let selectedTs2 = new Set();
+window.__bmStaticState = window.__bmStaticState || {
+  staticTgsTs1: [],
+  staticTgsTs2: [],
+  dynamicTgsTs1: [],
+  dynamicTgsTs2: [],
+  selectedTs1: new Set(),
+  selectedTs2: new Set()
+};
+let staticTgsTs1 = window.__bmStaticState.staticTgsTs1;
+let staticTgsTs2 = window.__bmStaticState.staticTgsTs2;
+let dynamicTgsTs1 = window.__bmStaticState.dynamicTgsTs1;
+let dynamicTgsTs2 = window.__bmStaticState.dynamicTgsTs2;
+let selectedTs1 = window.__bmStaticState.selectedTs1;
+let selectedTs2 = window.__bmStaticState.selectedTs2;
 let isBmTgLoading = false;
 let currentStaticModalHotspotId = null;
 let currentBmTgActiveTab = "static";
@@ -355,6 +363,14 @@ async function loadBmTgStaticGroups(targetHid) {
     dynamicTgsTs2 = data.dynamic_ts2 || [];
     selectedTs1.clear();
     selectedTs2.clear();
+    if (window.__bmStaticState) {
+      window.__bmStaticState.staticTgsTs1 = staticTgsTs1;
+      window.__bmStaticState.staticTgsTs2 = staticTgsTs2;
+      window.__bmStaticState.dynamicTgsTs1 = dynamicTgsTs1;
+      window.__bmStaticState.dynamicTgsTs2 = dynamicTgsTs2;
+      window.__bmStaticState.selectedTs1 = selectedTs1;
+      window.__bmStaticState.selectedTs2 = selectedTs2;
+    }
 
     renderSlotList(1);
     renderSlotList(2);
@@ -395,8 +411,8 @@ async function loadBmTgStaticGroups(targetHid) {
 
 function renderSlotList(slot) {
   const isSlot1 = slot === 1;
-  const items = isSlot1 ? staticTgsTs1 : staticTgsTs2;
-  const selectedSet = isSlot1 ? selectedTs1 : selectedTs2;
+  const items = isSlot1 ? (window.__bmStaticState?.staticTgsTs1 || staticTgsTs1) : (window.__bmStaticState?.staticTgsTs2 || staticTgsTs2);
+  const selectedSet = isSlot1 ? (window.__bmStaticState?.selectedTs1 || selectedTs1) : (window.__bmStaticState?.selectedTs2 || selectedTs2);
   const listEl = isSlot1 ? bmTs1List : bmTs2List;
   const countEl = isSlot1 ? bmTs1Count : bmTs2Count;
   const chkAllEl = isSlot1 ? chkSelectAllTs1 : chkSelectAllTs2;
@@ -516,26 +532,33 @@ function renderSlotList(slot) {
   }
 }
 
-if (chkSelectAllTs1) {
-  chkSelectAllTs1.addEventListener("change", () => {
-    if (chkSelectAllTs1.checked) {
-      staticTgsTs1.forEach(item => selectedTs1.add(item.talkgroup));
-    } else {
-      selectedTs1.clear();
-    }
-    renderSlotList(1);
-  });
-}
+if (!window.__bmStaticManagerSelectAllAttached) {
+  window.__bmStaticManagerSelectAllAttached = true;
+  if (chkSelectAllTs1) {
+    chkSelectAllTs1.addEventListener("change", () => {
+      const items = window.__bmStaticState ? window.__bmStaticState.staticTgsTs1 : staticTgsTs1;
+      const sel = window.__bmStaticState ? window.__bmStaticState.selectedTs1 : selectedTs1;
+      if (chkSelectAllTs1.checked) {
+        items.forEach(item => sel.add(item.talkgroup));
+      } else {
+        sel.clear();
+      }
+      renderSlotList(1);
+    });
+  }
 
-if (chkSelectAllTs2) {
-  chkSelectAllTs2.addEventListener("change", () => {
-    if (chkSelectAllTs2.checked) {
-      staticTgsTs2.forEach(item => selectedTs2.add(item.talkgroup));
-    } else {
-      selectedTs2.clear();
-    }
-    renderSlotList(2);
-  });
+  if (chkSelectAllTs2) {
+    chkSelectAllTs2.addEventListener("change", () => {
+      const items = window.__bmStaticState ? window.__bmStaticState.staticTgsTs2 : staticTgsTs2;
+      const sel = window.__bmStaticState ? window.__bmStaticState.selectedTs2 : selectedTs2;
+      if (chkSelectAllTs2.checked) {
+        items.forEach(item => sel.add(item.talkgroup));
+      } else {
+        sel.clear();
+      }
+      renderSlotList(2);
+    });
+  }
 }
 
 if (btnDeleteSelectedTs1) {

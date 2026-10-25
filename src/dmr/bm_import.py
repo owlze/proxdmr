@@ -88,7 +88,8 @@ async def execute_bm_import(
     device_id: str,
     api_key: str,
     broadcast_fn: Optional[Callable[[int, dict], Awaitable[None]]] = None,
-    reconnect_fn: Optional[Callable[[str, int], None]] = None
+    reconnect_fn: Optional[Callable[[str, int], None]] = None,
+    hotspot_manager=None
 ):
     action_label = "delete" if task.action == "delete" else "import"
     net_tag = "TGIF" if task.network_type == "tgif" else "BM"
@@ -104,62 +105,83 @@ async def execute_bm_import(
         })
 
     if task.network_type == "freedmr":
-        from .constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES
-        from .manager import hotspot_manager
-        rt = hotspot_manager.get_runtime(task.user_id, task.hotspot_id)
-        if not rt:
+        try:
+            import sys
+            from .constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES
+            hm = hotspot_manager
+            if hm is None:
+                for mod_name in ("main", "src.main", "__main__"):
+                    mod = sys.modules.get(mod_name)
+                    if mod and hasattr(mod, "hotspot_manager"):
+                        hm = getattr(mod, "hotspot_manager")
+                        break
+            if hm is None:
+                raise RuntimeError("Менеджер хотспотов не инициализирован")
+
+            rt = hm.get_runtime(task.user_id, task.hotspot_id)
+            if not rt:
+                task.status = "error"
+                task.message = f"Хотспот '{task.hotspot_id}' не найден"
+                return
+
+            is_delete = (task.action == "delete")
+            parsed = parse_freedmr_rpto(getattr(rt.config, "rpto_options", "") or "")
+            target_list = parsed["ts1"] if task.slot == 1 else parsed["ts2"]
+
+            for i, tg in enumerate(task.talkgroups):
+                if task.cancelled:
+                    task.status = "cancelled"
+                    break
+                task.current_tg = tg
+                if is_delete:
+                    if tg in target_list:
+                        target_list.remove(tg)
+                        task.deleted.append(tg)
+                    else:
+                        task.errors.append(f"TG {tg} не найдена в слоте {task.slot}")
+                else:
+                    if tg in (0, 4000, 5000, 9990, 9991, 9999):
+                        task.errors.append(f"TG {tg}: служебная группа")
+                    elif tg in target_list:
+                        task.added.append(tg)
+                    else:
+                        cand_ts1 = list(parsed["ts1"]) + ([tg] if task.slot == 1 else [])
+                        cand_ts2 = list(parsed["ts2"]) + ([tg] if task.slot == 2 else [])
+                        cand_rpto = build_freedmr_rpto(cand_ts1, cand_ts2, parsed["opts"], prefer_slot=task.slot)
+                        if len(cand_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
+                            task.errors.append(f"TG {tg}: превышен лимит RPTO ({FREEDMR_MAX_RPTO_BYTES} б)")
+                        else:
+                            target_list.append(tg)
+                            task.added.append(tg)
+
+                task.current = i + 1
+                if broadcast_fn:
+                    await broadcast_fn(task.user_id, {"type": "bm_import_progress", "task": task.to_dict()})
+                await asyncio.sleep(0.01)
+
+            new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"], prefer_slot=task.slot)
+            if len(new_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
+                task.status = "error"
+                task.message = f"Превышен лимит длины строки RPTO FreeDMR ({FREEDMR_MAX_RPTO_BYTES} байт)"
+            else:
+                await hm.set_hotspot_rpto(rt.config.id, rpto_options=new_rpto, user_id=task.user_id)
+                task.status = "completed" if not task.cancelled else "cancelled"
+                if is_delete:
+                    task.message = f"Успешно удалено {len(task.deleted)} из {task.total} групп из TS{task.slot} FreeDMR"
+                else:
+                    task.message = f"Успешно добавлено {len(task.added)} из {task.total} групп в TS{task.slot} FreeDMR"
+                if task.errors:
+                    task.message += f" ({len(task.errors)} ошибок)"
+        except Exception as e:
+            logger.error(f"[FREEDMR_TASK] Task {task.task_id} failed: {e}")
             task.status = "error"
-            task.message = f"Хотспот '{task.hotspot_id}' не найден"
+            task.message = f"Ошибка FreeDMR: {e}"
+        finally:
             task.finished_at = time.time()
+            if _user_active_bm_import.get(task.user_id) == task.task_id:
+                _user_active_bm_import.pop(task.user_id, None)
             if broadcast_fn:
                 await broadcast_fn(task.user_id, {"type": "bm_import_finished", "task": task.to_dict()})
-            return
-
-        is_delete = (task.action == "delete")
-        parsed = parse_freedmr_rpto(getattr(rt.config, "rpto_options", "") or "")
-        target_list = parsed["ts1"] if task.slot == 1 else parsed["ts2"]
-
-        for i, tg in enumerate(task.talkgroups):
-            if task.cancelled:
-                task.status = "cancelled"
-                break
-            task.current_tg = tg
-            if is_delete:
-                if tg in target_list:
-                    target_list.remove(tg)
-                    task.deleted.append(tg)
-                else:
-                    task.errors.append(f"TG {tg} не найдена в слоте {task.slot}")
-            else:
-                if tg in (0, 4000, 9990):
-                    task.errors.append(f"TG {tg}: служебная группа")
-                else:
-                    if tg not in target_list:
-                        target_list.append(tg)
-                    task.added.append(tg)
-
-            task.current = i + 1
-            if broadcast_fn:
-                await broadcast_fn(task.user_id, {"type": "bm_import_progress", "task": task.to_dict()})
-            await asyncio.sleep(0.01)
-
-        new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"])
-        if len(new_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
-            task.status = "error"
-            task.message = f"Превышен лимит длины строки RPTO FreeDMR ({FREEDMR_MAX_RPTO_BYTES} байт)"
-        else:
-            await hotspot_manager.set_hotspot_rpto(rt.config.id, rpto_options=new_rpto, user_id=task.user_id)
-            task.status = "completed" if not task.cancelled else "cancelled"
-            if is_delete:
-                task.message = f"Успешно удалено {len(task.deleted)} из {task.total} групп из TS{task.slot} FreeDMR"
-            else:
-                task.message = f"Успешно добавлено {len(task.added)} из {task.total} групп в TS{task.slot} FreeDMR"
-            if task.errors:
-                task.message += f" ({len(task.errors)} ошибок)"
-
-        task.finished_at = time.time()
-        if broadcast_fn:
-            await broadcast_fn(task.user_id, {"type": "bm_import_finished", "task": task.to_dict()})
         return
 
     def _add_single_tg(tg_num: int):

@@ -161,6 +161,21 @@ class PiperService:
         if self._catalog is not None and not force_reload and getattr(self, "_catalog_mtime", 0) == mtime:
             return self._catalog
 
+        if not os.path.exists(self.catalog_path):
+            try:
+                os.makedirs(os.path.dirname(self.catalog_path), exist_ok=True)
+                url = BASE_HF_URL + "voices.json"
+                logger.info(f"[PIPER] Catalog missing at {self.catalog_path}, auto-downloading from {url}...")
+                req = urllib.request.Request(url, headers={"User-Agent": "ProxDMR/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    raw_data = resp.read().decode("utf-8")
+                    with open(self.catalog_path, "w", encoding="utf-8") as f:
+                        f.write(raw_data)
+                mtime = os.path.getmtime(self.catalog_path)
+                logger.info(f"[PIPER] Catalog successfully auto-downloaded to {self.catalog_path}")
+            except Exception as e:
+                logger.warning(f"[PIPER] Failed to auto-download voices catalog: {e}")
+
         if os.path.exists(self.catalog_path):
             try:
                 with open(self.catalog_path, "r", encoding="utf-8") as f:
@@ -221,7 +236,11 @@ class PiperService:
                         info = catalog.get(voice_id, {})
                         lang_info = info.get("language", {})
                         code = lang_info.get("code", "")
-                        lang_short = code.split("_")[0] if code else "unknown"
+                        if not code and "-" in voice_id:
+                            cand = voice_id.split("-")[0]
+                            if "_" in cand:
+                                code = cand
+                        lang_short = code.split("_")[0].lower() if code else "unknown"
 
                         raw_name = info.get("name", voice_id.split("-")[1] if "-" in voice_id else voice_id)
                         name = format_voice_name(voice_id, raw_name)
@@ -278,6 +297,26 @@ class PiperService:
                     "num_speakers": v.get("num_speakers", 1)
                 })
 
+        # Ensure locally installed voices on disk for this language are present
+        known_ids = {r["id"] for r in results}
+        for inst in self.list_installed_voices():
+            inst_short = inst.get("lang_short", "").lower()
+            inst_code = inst.get("language_code", "").lower()
+            if inst_short == lang or inst_code == lang:
+                if inst["id"] not in known_ids:
+                    results.append({
+                        "id": inst["id"],
+                        "name": inst["name"],
+                        "language_code": inst.get("language_code", ""),
+                        "lang_short": inst_short,
+                        "quality": inst.get("quality", "medium"),
+                        "gender": inst.get("gender", "neutral"),
+                        "size_mb": inst.get("size_mb", 60.0),
+                        "installed": True,
+                        "num_speakers": 1
+                    })
+                    known_ids.add(inst["id"])
+
         # Sort: installed first, then by quality (medium, high, low), then name
         def sort_voice(x):
             q_order = 0 if x["quality"] == "medium" else (1 if x["quality"] == "high" else 2)
@@ -288,13 +327,15 @@ class PiperService:
         return results
 
     def is_lang_supported(self, lang: str) -> bool:
-        """Returns True if the Piper catalog has any voices for this language code."""
+        """Returns True if the Piper catalog has any voices for this language code, or if installed on disk."""
         catalog = self.load_catalog()
         lang = lang.lower().strip()
         for v in catalog.values():
             code = v.get("language", {}).get("code", "")
             if code and code.split("_")[0].lower() == lang:
                 return True
+        if self.has_installed_voice_for_lang(lang):
+            return True
         return False
 
     def has_installed_voice_for_lang(self, lang: str) -> bool:

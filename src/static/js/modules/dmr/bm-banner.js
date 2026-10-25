@@ -14,10 +14,10 @@ import {
   calculateClientPacketLoss,
   calculateCardPacketLoss,
   updatePingElement
-} from "../network/ping-sparklines.js?v=2.9.326";
+} from "../network/ping-sparklines.js?v=2.9.367";
 import { openBmBenchmarkModal } from "./bm-benchmark.js";
 import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js";
-import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js";
+import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js?v=2.9.367";
 
 export const KNOWN_BM_MASTERS = [
   { id: 2322, country: "AT", country_name: "Австрия", host: "2322.master.brandmeister.network", ip: "62.171.130.35" },
@@ -922,12 +922,79 @@ export function updateCardBmBanner(card, hs) {
     }
   }
 
+  const isOfflineCardForE2e = isCollapsed || (!isOnline && !isPrimary);
+  card._lastServerPingMs = (!isOfflineCardForE2e && pingMs !== null && pingMs !== undefined && !isNaN(Number(pingMs)) && Number(pingMs) >= 0)
+    ? Math.round(Number(pingMs))
+    : null;
+  updateCardE2eDisplay(card);
+
   // Render SVG Ping Sparkline
   renderCardPingSparkline(card, hostVal);
 
   if (typeof window !== "undefined" && typeof window.updateCardXlxPanel === "function") {
     window.updateCardXlxPanel(card, hs);
   }
+}
+
+export function applyE2eColorClass(rttEl, valMs) {
+  if (!rttEl) return;
+  rttEl.classList.remove("e2e-good", "e2e-warn", "e2e-bad");
+  if (valMs === null || valMs === undefined || isNaN(Number(valMs)) || Number(valMs) < 0) {
+    return;
+  }
+  const ms = Number(valMs);
+  if (ms <= 150) {
+    rttEl.classList.add("e2e-good");
+  } else if (ms <= 350) {
+    rttEl.classList.add("e2e-warn");
+  } else {
+    rttEl.classList.add("e2e-bad");
+  }
+}
+
+export function updateCardE2eDisplay(card) {
+  if (!card) return;
+  const rttEl = card.querySelector(".rtt-display");
+  if (!rttEl) return;
+
+  const rawClient = (typeof window !== "undefined" && window.cachedClientRtt !== undefined && window.cachedClientRtt !== null)
+    ? Number(window.cachedClientRtt)
+    : NaN;
+  const clientMs = (!isNaN(rawClient) && rawClient >= 0) ? Math.round(rawClient) : null;
+
+  const rawSrv = (card._lastServerPingMs !== undefined && card._lastServerPingMs !== null)
+    ? Number(card._lastServerPingMs)
+    : NaN;
+  const srvMs = (!isNaN(rawSrv) && rawSrv >= 0) ? Math.round(rawSrv) : null;
+
+  const curLang = (typeof window !== "undefined" && ((window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang)))) || "ru";
+  const isEn = (curLang !== "ru" && curLang !== "uk");
+
+  let displayedMs = null;
+
+  if (clientMs !== null && srvMs !== null) {
+    displayedMs = clientMs + srvMs;
+    rttEl.textContent = `E2E: ${displayedMs}ms`;
+    rttEl.title = isEn
+      ? `End-to-End Latency (E2E): ${displayedMs} ms (Client: ${clientMs} ms + Network: ${srvMs} ms)`
+      : `Сквозная задержка (E2E): ${displayedMs} мс (Клиент: ${clientMs} мс + Сеть: ${srvMs} мс)`;
+  } else if (clientMs !== null) {
+    displayedMs = clientMs;
+    rttEl.textContent = `E2E: ${clientMs}ms`;
+    rttEl.title = isEn
+      ? `End-to-End Latency (E2E): ${clientMs} ms (Client: ${clientMs} ms, network ping N/A)`
+      : `Сквозная задержка (E2E): ${clientMs} мс (Клиент: ${clientMs} мс, пинг сети н/д)`;
+  } else if (srvMs !== null) {
+    displayedMs = srvMs;
+    rttEl.textContent = `E2E: ${srvMs}ms`;
+    rttEl.title = isEn
+      ? `End-to-End Latency (E2E): ${srvMs} ms (Network: ${srvMs} ms)`
+      : `Сквозная задержка (E2E): ${srvMs} мс (Сеть: ${srvMs} мс)`;
+  } else {
+    rttEl.textContent = "E2E: --ms";
+  }
+
+  applyE2eColorClass(rttEl, displayedMs);
 }
 
 export function refreshAllCardsBmBanner() {
@@ -1575,6 +1642,8 @@ if (typeof window !== "undefined") {
   window.populateBmServerSelect = populateBmServerSelect;
   window.isHotspotFullyOnline = isHotspotFullyOnline;
   window.updateCardBmBanner = updateCardBmBanner;
+  window.updateCardE2eDisplay = updateCardE2eDisplay;
+  window.applyE2eColorClass = applyE2eColorClass;
   window.refreshAllCardsBmBanner = refreshAllCardsBmBanner;
   window.updateRxBannerFreshness = updateRxBannerFreshness;
   window.updateCardRxLiveBanner = updateCardRxLiveBanner;
@@ -1602,6 +1671,8 @@ if (typeof window !== "undefined") {
     populateBmServerSelect,
     isHotspotFullyOnline,
     updateCardBmBanner,
+    updateCardE2eDisplay,
+    applyE2eColorClass,
     refreshAllCardsBmBanner,
     updateRxBannerFreshness,
     updateCardRxLiveBanner,

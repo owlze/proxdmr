@@ -165,6 +165,7 @@
     const openMenus = document.querySelectorAll(".mini-preset-menu.show");
     if (openMenus.length > 0) {
       openMenus.forEach(m => m.classList.remove("show"));
+      document.querySelectorAll(".control-pair-btn.open").forEach(p => p.classList.remove("open"));
       if (!fromPopstate) notifyNavClosed();
       return true;
     }
@@ -318,23 +319,38 @@
     }
 
     const audioRxModalEl = document.getElementById("audioRxModal");
-    if (audioRxModalEl && audioRxModalEl.classList.contains("active")) {
-      audioRxModalEl.classList.remove("active");
-      if (!fromPopstate) notifyNavClosed();
+    if (audioRxModalEl && (audioRxModalEl.classList.contains("active") || audioRxModalEl.style.display === "flex")) {
+      if (typeof window.closeAudioRxModal === "function") {
+        window.closeAudioRxModal();
+      } else {
+        audioRxModalEl.classList.remove("active");
+        audioRxModalEl.style.display = "";
+        if (!fromPopstate) notifyNavClosed();
+      }
       return true;
     }
 
     const audioTxModalEl = document.getElementById("audioTxModal");
-    if (audioTxModalEl && audioTxModalEl.classList.contains("active")) {
-      audioTxModalEl.classList.remove("active");
-      if (!fromPopstate) notifyNavClosed();
+    if (audioTxModalEl && (audioTxModalEl.classList.contains("active") || audioTxModalEl.style.display === "flex")) {
+      if (typeof window.closeAudioTxModal === "function") {
+        window.closeAudioTxModal();
+      } else {
+        audioTxModalEl.classList.remove("active");
+        audioTxModalEl.style.display = "";
+        if (!fromPopstate) notifyNavClosed();
+      }
       return true;
     }
 
     const dsdfmeModalEl = document.getElementById("dsdfmeModal");
-    if (dsdfmeModalEl && dsdfmeModalEl.classList.contains("active")) {
-      dsdfmeModalEl.classList.remove("active");
-      if (!fromPopstate) notifyNavClosed();
+    if (dsdfmeModalEl && (dsdfmeModalEl.classList.contains("active") || dsdfmeModalEl.style.display === "flex")) {
+      if (typeof window.closeDsdfmeModal === "function") {
+        window.closeDsdfmeModal();
+      } else {
+        dsdfmeModalEl.classList.remove("active");
+        dsdfmeModalEl.style.display = "";
+        if (!fromPopstate) notifyNavClosed();
+      }
       return true;
     }
 
@@ -375,6 +391,7 @@
     if (activeModals.length > 0) {
       const topModal = activeModals[activeModals.length - 1];
       topModal.classList.remove("active");
+      topModal.style.display = "";
       if (!fromPopstate) notifyNavClosed();
       return true;
     }

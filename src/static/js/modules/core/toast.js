@@ -1,6 +1,10 @@
 // Toast and HUD Notifications
 
-export function showCenterHudToast(text, duration = 1000) {
+// Short toasts: hold on screen for 1.6s, then smooth fade-out for 0.8s
+const TOAST_HOLD_MS = 1600;
+const TOAST_FADE_MS = 800;
+
+export function showCenterHudToast(text, duration = TOAST_HOLD_MS) {
   const old = document.getElementById("proxdmrCenterHudToast");
   if (old) old.remove();
 
@@ -12,13 +16,13 @@ export function showCenterHudToast(text, duration = 1000) {
     "left: 50%;",
     "transform: translate(-50%, -50%) scale(0.85);",
     "z-index: 100000;",
-    "background: #00ff66;",
-    "border: 1.5px solid rgba(0, 0, 0, 0.25);",
-    "box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), 0 0 18px rgba(0, 255, 102, 0.45);",
-    "color: #042410;",
+    "background: #0a5f2e;",
+    "border: 1.5px solid rgba(255, 255, 255, 0.22);",
+    "box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), 0 0 18px rgba(0, 255, 102, 0.28);",
+    "color: #ffffff;",
     "text-shadow: none;",
     "padding: 16px 28px;",
-    "border-radius: 16px;",
+    "border-radius: 0px;",
     "font-size: 1.25rem;",
     "font-weight: 700;",
     "letter-spacing: 0.5px;",
@@ -41,11 +45,12 @@ export function showCenterHudToast(text, duration = 1000) {
   });
 
   setTimeout(() => {
+    hud.style.transition = `opacity ${TOAST_FADE_MS}ms ease-out, transform ${TOAST_FADE_MS}ms ease-out`;
     hud.style.opacity = "0";
-    hud.style.transform = "translate(-50%, -50%) scale(0.92)";
+    hud.style.transform = "translate(-50%, -50%) scale(0.96)";
     setTimeout(() => {
       if (hud.parentNode) hud.remove();
-    }, 300);
+    }, TOAST_FADE_MS + 40);
   }, duration);
 }
 
@@ -64,18 +69,18 @@ export function stripToastEmojis(text) {
 
 /**
  * Show a short toast notification centered on the target Hotspot card (or screen center if global)
- * with #00ff66 background and 1 second pause.
+ * with dark green background, white text, 1.6s pause and 0.8s fade-out.
  *
  * @param {string} msg Message text
  * @param {number} duration Duration in ms (default: 1000)
  * @param {HTMLElement|string|null} targetCardOrId Optional target card element or hotspot id
  */
-export function showToast(msg, duration = 1000, targetCardOrId = null) {
-  let dur = (typeof duration === "number" && !isNaN(duration) && duration > 4500) ? duration : 1000;
+export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) {
+  let dur = (typeof duration === "number" && !isNaN(duration) && duration > 4500) ? duration : TOAST_HOLD_MS;
   if (typeof duration !== "number" && !targetCardOrId) {
     if (typeof duration === "string" && (duration.startsWith("hs") || (typeof document !== "undefined" && document.querySelector(`.radio-container[data-hotspot-id="${duration}"]`)))) {
       targetCardOrId = duration;
-      dur = 1000;
+      dur = TOAST_HOLD_MS;
     }
   }
 
@@ -226,13 +231,13 @@ export function showToast(msg, duration = 1000, targetCardOrId = null) {
   const toast = document.createElement("div");
   toast.className = "proxdmr-toast-item";
   toast.style.cssText = [
-    "background: #00ff66;",
-    "border: 1px solid rgba(0, 0, 0, 0.25);",
-    "box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 255, 102, 0.4);",
-    "color: #042410;",
+    "background: #0a5f2e;",
+    "border: 1px solid rgba(255, 255, 255, 0.22);",
+    "box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 255, 102, 0.25);",
+    "color: #ffffff;",
     "text-shadow: none;",
     "padding: 7px 16px;",
-    "border-radius: 8px;",
+    "border-radius: 0px;",
     "font-size: 0.86rem;",
     "font-weight: 700;",
     "line-height: 1.3;",
@@ -257,8 +262,9 @@ export function showToast(msg, duration = 1000, targetCardOrId = null) {
   });
 
   setTimeout(() => {
+    toast.style.transition = `opacity ${TOAST_FADE_MS}ms ease-out, transform ${TOAST_FADE_MS}ms ease-out`;
     toast.style.opacity = "0";
-    toast.style.transform = "scale(0.92)";
+    toast.style.transform = "scale(0.96)";
     setTimeout(() => {
       toast.remove();
       if (container && container.childNodes.length === 0) {
@@ -268,7 +274,7 @@ export function showToast(msg, duration = 1000, targetCardOrId = null) {
         }
         container.remove();
       }
-    }, 230);
+    }, TOAST_FADE_MS + 40);
   }, dur);
 }
 

@@ -95,6 +95,8 @@ class AppSettings(BaseModel):
     quick_mem: Dict[str, Any] = Field(default_factory=dict)
     client_settings: Dict[str, Any] = Field(default_factory=dict)
     recordings_settings: Dict[str, Any] = Field(default_factory=dict)
+    qrz_com_username: str = ""
+    qrz_com_password: str = ""
     hamqth_username: str = ""
     hamqth_password: str = ""
     disable_update_notifications: bool = False

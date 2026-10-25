@@ -43,8 +43,10 @@ SILERO_VOICES_BY_LANG: Dict[str, List[Dict[str, Any]]] = {
         {"id": "en_3", "name": "Voice 3 (Male)", "gender": "male"},
     ],
     "de": [
-        {"id": "eva", "name": "Eva (Weiblich)", "gender": "female"},
-        {"id": "karl", "name": "Karl (Männlich)", "gender": "male"},
+        {"id": "eva_k", "name": "Eva (Женский)", "gender": "female"},
+        {"id": "karlsson", "name": "Karlsson (Мужской)", "gender": "male"},
+        {"id": "bernd_ungerer", "name": "Bernd (Мужской)", "gender": "male"},
+        {"id": "friedrich", "name": "Friedrich (Мужской)", "gender": "male"},
     ],
     "es": [
         {"id": "es_0", "name": "Voz 0 (Femenino)", "gender": "female"},
@@ -60,7 +62,7 @@ DEFAULT_SILERO_VOICES: Dict[str, str] = {
     "ru": "kseniya",
     "uk": "mykyta",
     "en": "en_0",
-    "de": "eva",
+    "de": "eva_k",
     "es": "es_0",
     "fr": "fr_0",
 }
@@ -99,19 +101,30 @@ class SileroService:
             clean_lang = "uk"
         return SILERO_VOICES_BY_LANG.get(clean_lang, [])
 
-    def resolve_voice(self, requested_voice: Optional[str], lang: str = "ru", gender: str = "male") -> str:
-        clean_lang = (lang or "ru").lower().strip()
+    def resolve_voice(self, requested_voice: Optional[str] = None, lang: str = "ru", gender: str = "UNKNOWN") -> str:
+        clean_lang = (lang or "ru").lower().strip()[:2]
         if clean_lang == "ua":
             clean_lang = "uk"
         if not self.is_lang_supported(clean_lang):
-            return ""
-        if requested_voice and requested_voice != "auto":
-            return requested_voice
+            clean_lang = "ru"
+
         voices = self.get_voices_for_lang(clean_lang)
-        for v in voices:
-            if v["gender"] == gender:
-                return v["id"]
-        return DEFAULT_SILERO_VOICES.get(clean_lang, "kseniya")
+        valid_ids = {v["id"] for v in voices}
+
+        legacy_map = {"eva": "eva_k", "karl": "karlsson"}
+        if requested_voice in legacy_map and legacy_map[requested_voice] in valid_ids:
+            return legacy_map[requested_voice]
+
+        if requested_voice and requested_voice != "auto" and requested_voice in valid_ids:
+            return requested_voice
+
+        target_gender = "male" if str(gender).upper() == "MALE" else ("female" if str(gender).upper() == "FEMALE" else None)
+        if target_gender:
+            for v in voices:
+                if v.get("gender") == target_gender:
+                    return v["id"]
+
+        return DEFAULT_SILERO_VOICES.get(clean_lang, "kseniya" if clean_lang == "ru" else (voices[0]["id"] if voices else ""))
 
     def _get_or_load_model(self, lang: str):
         if not HAVE_TORCH:
@@ -187,8 +200,9 @@ class SileroService:
                 wf.writeframes(audio_np.tobytes())
             return bio.getvalue(), None
         except Exception as e:
-            logger.warning(f"[SILERO] Synthesis error: {e}")
-            return None, f"Ошибка Silero TTS: {e}"
+            err_msg = str(e) or type(e).__name__
+            logger.warning(f"[SILERO] Synthesis error: {err_msg}")
+            return None, f"Ошибка Silero TTS: {err_msg}"
 
     async def synthesize_async(
         self,

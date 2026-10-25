@@ -7,7 +7,7 @@
 import { showCenterHudToast, showToast } from "../core/toast.js";
 import { scheduleSyncClientSettings } from "../settings/sync.js";
 import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.284";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.367";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;
@@ -665,6 +665,8 @@ export async function collapseHotspot(hid, options = {}) {
   // если в нем работал плеер — плеер останавливается.
   // ═══════════════════════════════════════════════════════════════════
 
+
+
   // 1. Mute hotspot audio and save previous state
   const wasMuted = isHotspotAudioMuted(cid);
   localStorage.setItem(`proxdmr_pre_collapse_mute_${cid}`, wasMuted ? "1" : "0");
@@ -829,7 +831,7 @@ export async function expandHotspot(hid) {
   }
 
   if (wasLive) {
-    // If it was already live in background, it's already connected to BM!
+    // If it was already live in background (or demo mode), it's already connected to BM!
     const nameBadge = card.querySelector(".hotspot-name-badge");
     if (nameBadge && hs && hs.status === "ONLINE") {
       nameBadge.classList.add("is-online");

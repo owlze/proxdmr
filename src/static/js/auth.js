@@ -4,6 +4,15 @@
 (function () {
   'use strict';
 
+  try {
+    if (window.location && window.location.search && window.location.search.includes('logged_out=')) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('logged_out');
+      const cleanUrl = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  } catch (e) {}
+
   // --- DOM Elements ---
   let authModal, loginForm;
   let loginError;
@@ -132,6 +141,250 @@
     if (loginError) loginError.textContent = '';
   }
 
+
+  // --- Demo Mode Frontend Support ---
+  let demoStatusTimer = null;
+  let demoCountdownInterval = null;
+  let demoHeaderTimer = null;
+
+  function _formatMinSec(totalSec) {
+    const m = Math.floor(totalSec / 60);
+    const s = Math.floor(totalSec % 60);
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function startDemoCountdown(type, seconds, maxSessions = 10) {
+    if (demoCountdownInterval) clearInterval(demoCountdownInterval);
+    const box = document.getElementById('authDemoCountdownBox');
+    const btn = document.getElementById('btnAuthDemoLogin');
+    if (btn) btn.disabled = true;
+    if (box) box.style.display = 'block';
+
+    let rem = Math.max(0, parseInt(seconds) || 0);
+
+    const updateUI = () => {
+      const timeStr = _formatMinSec(rem);
+      if (type === 'cooldown') {
+        const text = (window.t ? window.t('demo.cooldown_countdown', { time: timeStr }) : `⏳ Повторный демо-вход будет доступен через ${timeStr}`);
+        if (box) box.textContent = text;
+      } else {
+        const text = (window.t ? window.t('demo.slots_full_countdown', { max: maxSessions, time: timeStr }) : `⏳ Все демо-слоты заняты (${maxSessions}/${maxSessions}). Ближайший освободится через ${timeStr}`);
+        if (box) box.textContent = text;
+      }
+    };
+
+    updateUI();
+
+    demoCountdownInterval = setInterval(() => {
+      rem--;
+      if (rem <= 0) {
+        clearInterval(demoCountdownInterval);
+        demoCountdownInterval = null;
+        if (box) box.style.display = 'none';
+        if (btn) btn.disabled = false;
+        fetchDemoStatus();
+      } else {
+        updateUI();
+      }
+    }, 1000);
+  }
+
+  async function fetchDemoStatus() {
+    try {
+      const res = await fetch('/api/auth/status?_t=' + Date.now());
+      if (!res.ok) return;
+      const data = await res.json();
+      const sec = document.getElementById('authDemoSection');
+      if (!sec) return;
+
+      if (!data.demo || !data.demo.enabled) {
+        sec.style.display = 'none';
+        return;
+      }
+
+      sec.style.display = 'block';
+      const sessMin = (data.demo.session_minutes !== undefined && data.demo.session_minutes !== null) ? data.demo.session_minutes : 10;
+      window._lastDemoSessionMinutes = sessMin;
+      const btnTxt = document.getElementById('btnAuthDemoLoginText');
+      if (btnTxt) {
+        btnTxt.textContent = (window.t && typeof window.t === 'function')
+          ? window.t('demo.login_btn', { minutes: sessMin })
+          : `Демо-вход (${sessMin} мин)`;
+      }
+      const slotsInfo = document.getElementById('authDemoSlotsInfo');
+      if (slotsInfo) {
+        const slotsTxt = (window.t ? window.t('demo.slots_free', { free: data.demo.free_slots, max: data.demo.max_sessions }) : `Свободно слотов: ${data.demo.free_slots} из ${data.demo.max_sessions}`);
+        slotsInfo.textContent = slotsTxt;
+      }
+
+      const btn = document.getElementById('btnAuthDemoLogin');
+      const box = document.getElementById('authDemoCountdownBox');
+
+      if (data.demo.cooldown_remaining_sec > 0) {
+        startDemoCountdown('cooldown', data.demo.cooldown_remaining_sec);
+      } else if (data.demo.slots_full) {
+        startDemoCountdown('slots_full', data.demo.nearest_slot_sec, data.demo.max_sessions);
+      } else {
+        if (!demoCountdownInterval) {
+          if (box) box.style.display = 'none';
+          if (btn) btn.disabled = false;
+        }
+      }
+    } catch (_) {}
+  }
+
+  function startDemoStatusPolling() {
+    stopDemoStatusPolling();
+    fetchDemoStatus();
+    demoStatusTimer = setInterval(fetchDemoStatus, 5000);
+  }
+
+  function stopDemoStatusPolling() {
+    if (demoStatusTimer) {
+      clearInterval(demoStatusTimer);
+      demoStatusTimer = null;
+    }
+  }
+
+  function initDemoHeaderTimer(expiresAt, sessionMinutes, cooldownSeconds) {
+    if (demoHeaderTimer) clearInterval(demoHeaderTimer);
+    const badge = document.getElementById('demoHeaderBadge');
+    const timeEl = document.getElementById('demoHeaderTime');
+    if (!badge || !timeEl) return;
+
+    badge.style.display = 'inline-flex';
+
+    if (sessionMinutes) {
+      window._lastDemoSessionMinutes = sessionMinutes;
+    }
+    const fallbackSec = ((sessionMinutes || window._lastDemoSessionMinutes || 10) * 60);
+    const targetExpiresAt = expiresAt || (Math.floor(Date.now() / 1000) + fallbackSec);
+
+    const tick = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const rem = Math.max(0, targetExpiresAt - now);
+      const m = Math.floor(rem / 60);
+      const s = Math.floor(rem % 60);
+      const timeStr = `${m}.${String(s).padStart(2, '0')}`;
+      timeEl.textContent = `Demo: ${timeStr}`;
+
+      badge.classList.remove('warning', 'danger');
+      if (rem <= 20) {
+        badge.classList.add('danger');
+      } else if (rem <= 60) {
+        badge.classList.add('warning');
+      }
+
+      if (rem <= 0) {
+        clearInterval(demoHeaderTimer);
+        demoHeaderTimer = null;
+        window.onDemoSessionExpired(cooldownSeconds || 60);
+      }
+    };
+
+    tick();
+    demoHeaderTimer = setInterval(tick, 1000);
+  }
+  window.initDemoHeaderTimer = initDemoHeaderTimer;
+
+  window.onDemoSessionExpired = function (cooldownSec = 60) {
+    if (window.isDemoExpiredHandled) return;
+    window.isDemoExpiredHandled = true;
+    window.isDemoExpired = true;
+    window.isDemoMode = false;
+    document.body.classList.remove('is-demo-mode');
+
+    const badge = document.getElementById('demoHeaderBadge');
+    if (badge) badge.style.display = 'none';
+
+    try {
+      if (window.audioPlayer && typeof window.audioPlayer.stop === 'function') {
+        window.audioPlayer.stop();
+      }
+    } catch (_) {}
+
+    performLogout(true);
+
+    setTimeout(() => {
+      window.isDemoExpiredHandled = false;
+      showModal(true);
+      if (loginError) {
+        const msg = (window.t ? window.t('demo.session_expired_toast', {}, '⏱️ Время демо-сессии истекло. Повторный вход будет доступен через 01:00.') : '⏱️ Время демо-сессии истекло. Повторный вход будет доступен через 01:00.');
+        loginError.textContent = msg;
+      }
+      startDemoCountdown('cooldown', cooldownSec);
+    }, 150);
+  };
+
+  function applyDemoReadOnlyLock() {
+    if (!window.isDemoMode) return;
+
+    const containers = [
+      document.getElementById('settingsModal'),
+      document.getElementById('hotspotOrderModal'),
+      document.getElementById('bmTgStaticModal'),
+      document.getElementById('tab-edit-hs'),
+    ].filter(Boolean);
+
+    containers.forEach(container => {
+      const demoAllowedInputIds = new Set([
+        'optLanguage',
+        'languageSelect',
+        'themeSelect',
+        'optTranscriberTargetLang',
+        'optTranscriberNoTranslate',
+        'optTtsEngine',
+        'optTtsModel',
+        'optTtsStyle',
+        'optTtsVoice',
+        'optTtsSpeed',
+        'optTtsDucking',
+        'optTtsPauseDucking',
+        'optTtsMuteOthers',
+        'optTtsAnnounceCallsign',
+        'optTtsSkipShortCallsign',
+      ]);
+      container.querySelectorAll('input, select, textarea').forEach(el => {
+        if (demoAllowedInputIds.has(el.id) || el.classList.contains('local-demo-allowed')) {
+          el.disabled = false;
+          el.classList.remove('demo-disabled-control');
+          return;
+        }
+        el.disabled = true;
+        el.classList.add('demo-disabled-control');
+      });
+
+      container.querySelectorAll('button').forEach(btn => {
+        if (
+          btn.classList.contains('tab-btn') ||
+          btn.classList.contains('account-subtab-btn') ||
+          btn.classList.contains('icon-btn') ||
+          btn.classList.contains('modal-close') ||
+          btn.classList.contains('btn-subtab') ||
+          btn.id === 'closeSettingsBtn' ||
+          btn.id === 'adminCancelAddBtn' ||
+          btn.id === 'adminResetPwdCancelBtn' ||
+          btn.id === 'btnTestTts' ||
+          (btn.type === 'submit' && btn.closest('#transcriberSettingsForm')) ||
+          btn.hasAttribute('data-tab') ||
+          btn.hasAttribute('data-account-tab') ||
+          btn.hasAttribute('data-subtab')
+        ) {
+          btn.disabled = false;
+          btn.classList.remove('demo-disabled-control');
+          return;
+        }
+        btn.disabled = true;
+        btn.classList.add('demo-disabled-control');
+      });
+    });
+
+    document.querySelectorAll('.demo-readonly-banner').forEach(b => {
+      b.style.display = 'flex';
+    });
+  }
+  window.applyDemoReadOnlyLock = applyDemoReadOnlyLock;
+
   function initAuth() {
     authModal = document.getElementById('authModal');
     loginForm = document.getElementById('authLoginForm');
@@ -175,6 +428,28 @@
     if (authImportConfigBtn) {
       authImportConfigBtn.addEventListener('click', doImportConfigFromLoginScreen);
     }
+    const authServerSettingsRow = document.getElementById('authServerSettingsRow');
+    const authServerSettingsBtn = document.getElementById('authServerSettingsBtn');
+    if (authServerSettingsRow && authServerSettingsBtn) {
+      const isApk = isApkMode() || Boolean(window.AndroidBridge && typeof window.AndroidBridge.openServerSettings === 'function');
+      if (isApk) {
+        authServerSettingsRow.style.display = 'block';
+      }
+      if (!authServerSettingsBtn._wired) {
+        authServerSettingsBtn._wired = true;
+        authServerSettingsBtn.addEventListener('click', () => {
+          if (window.AndroidBridge && typeof window.AndroidBridge.openServerSettings === 'function') {
+            try {
+              window.AndroidBridge.openServerSettings();
+            } catch (err) {
+              console.warn('[AndroidBridge] openServerSettings failed:', err);
+            }
+          } else {
+            console.log('[AndroidBridge] openServerSettings only available in APK mode');
+          }
+        });
+      }
+    }
     if (loginForm) {
       loginForm.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
@@ -187,6 +462,37 @@
     // Logout
     if (logoutBtn) {
       logoutBtn.addEventListener('click', doLogout);
+    }
+
+    const btnDemoLogin = document.getElementById('btnAuthDemoLogin');
+    if (btnDemoLogin && !btnDemoLogin._wired) {
+      btnDemoLogin._wired = true;
+      btnDemoLogin.addEventListener('click', () => {
+        const uInput = document.getElementById('authLoginInput');
+        const pInput = document.getElementById('authPasswordInput');
+        if (uInput) uInput.value = 'demo';
+        if (pInput) pInput.value = 'demo';
+        doLogin();
+      });
+    }
+
+    const demoHeaderLogoutBtn = document.getElementById('demoHeaderLogoutBtn');
+    if (demoHeaderLogoutBtn && !demoHeaderLogoutBtn._wired) {
+      demoHeaderLogoutBtn._wired = true;
+      demoHeaderLogoutBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        doLogout();
+      });
+    }
+
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (settingsBtn && !settingsBtn._demoWired) {
+      settingsBtn._demoWired = true;
+      settingsBtn.addEventListener('click', () => {
+        if (window.isDemoMode && typeof window.applyDemoReadOnlyLock === 'function') {
+          setTimeout(window.applyDemoReadOnlyLock, 50);
+        }
+      });
     }
 
     // Custom logout modal buttons
@@ -221,10 +527,75 @@
       }
     });
 
+    const onLangUpdate = () => {
+      updateAccountUI();
+      const btnTxt = document.getElementById('btnAuthDemoLoginText');
+      if (btnTxt && window.t) {
+        btnTxt.textContent = window.t('demo.login_btn', { minutes: window._lastDemoSessionMinutes || 10 });
+      }
+    };
+
     if (window.I18N && typeof window.I18N.onLanguageChange === 'function') {
-      window.I18N.onLanguageChange(() => updateAccountUI());
+      window.I18N.onLanguageChange(onLangUpdate);
+    } else if (window.i18n && typeof window.i18n.onChange === 'function') {
+      window.i18n.onChange(onLangUpdate);
     }
-    window.addEventListener('languageChanged', () => updateAccountUI());
+    window.addEventListener('languageChanged', onLangUpdate);
+    
+  window.localizeDemoText = function(val) {
+    if (!val || typeof val !== "string") return val;
+    const callLabel = window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной";
+    const nameLabel = window.t ? window.t("demo.your_name", {}, "Ваше имя") : "Ваше имя";
+    if (val === "Ваш позывной" || val === "Your CALL" || val === "Your Callsign") return callLabel;
+    if (val === "Your Name" || val === "Ваше имя") return nameLabel;
+    if (val === "Ваш позывной (Your Name)") return `${callLabel} (${nameLabel})`;
+    return val
+      .replace(/Ваш позывной/g, callLabel)
+      .replace(/Your CALL/g, callLabel)
+      .replace(/Your Callsign/g, callLabel)
+      .replace(/Your Name/g, nameLabel)
+      .replace(/Ваше имя/g, nameLabel);
+  };
+
+  window.refreshDemoMasksInDom = function() {
+    const isDemo = (typeof window.isDemoMode === "function") ? window.isDemoMode() : Boolean(window.isDemoMode);
+    if (!isDemo) return;
+    document.querySelectorAll(".callsign-display").forEach(el => {
+      if (!el.dataset.rawCallsign) {
+        el.dataset.rawCallsign = el.textContent.trim();
+      }
+      el.textContent = window.localizeDemoText(el.dataset.rawCallsign);
+    });
+    document.querySelectorAll(".hotspot-card-meta").forEach(el => {
+      if (el.textContent.includes("|")) {
+        const parts = el.textContent.split("|");
+        const cs = parts[0].trim();
+        const id = parts[1].trim();
+        if (cs === "Ваш позывной" || cs === "Your CALL" || cs === "Your Callsign" || cs === (window.t ? window.t("demo.your_callsign") : "")) {
+          el.textContent = `${window.localizeDemoText("Ваш позывной")} | ${id}`;
+        }
+      }
+    });
+    ["editHsCallsign", "editHsTalkerAlias", "optQrzComUsername", "optHamQthUsername"].forEach(id => {
+      const inp = document.getElementById(id);
+      if (inp && inp.value) {
+        inp.value = window.localizeDemoText(inp.value);
+      }
+    });
+  };
+
+  window.addEventListener('languageChanged', () => {
+    updateAccountUI();
+    if (typeof window.refreshDemoMasksInDom === "function") {
+      window.refreshDemoMasksInDom();
+    }
+    const authModal = document.getElementById("authModal");
+    if (authModal && authModal.classList.contains("active")) {
+      if (typeof fetchDemoStatus === "function") {
+        fetchDemoStatus();
+      }
+    }
+  });
   }
 
   function wirePasswordToggle(btnId, inputId) {
@@ -468,6 +839,7 @@
 
   function showModal(show) {
     if (show) {
+      startDemoStatusPolling();
       if (window.isFirstRun) {
         showOnboarding(true);
         if (authModal) authModal.classList.remove('active');
@@ -478,6 +850,7 @@
       if (authModal) authModal.classList.add('active');
       document.body.classList.add('auth-locked');
     } else {
+      stopDemoStatusPolling();
       if (authModal) authModal.classList.remove('active');
       showOnboarding(false);
       document.body.classList.remove('auth-locked');
@@ -510,6 +883,20 @@
         if (currentUser) {
           if (data.role) currentUser.role = data.role;
           if (data.is_swl !== undefined) currentUser.is_swl = data.is_swl;
+          if (data.is_demo !== undefined) currentUser.is_demo = data.is_demo;
+          if (data.demo_expires_at) currentUser.demo_expires_at = data.demo_expires_at;
+          if (data.demo_cooldown_seconds) currentUser.demo_cooldown_seconds = data.demo_cooldown_seconds;
+        }
+        if (currentUser && currentUser.is_demo) {
+          window.isDemoMode = true;
+          document.body.classList.add('is-demo-mode');
+          if (typeof window.stopAndReleaseMic === 'function') {
+            window.stopAndReleaseMic();
+          }
+          initDemoHeaderTimer(currentUser.demo_expires_at, currentUser.demo_session_minutes, currentUser.demo_cooldown_seconds);
+        } else {
+          window.isDemoMode = false;
+          document.body.classList.remove('is-demo-mode');
         }
         window.currentUserId = currentUser ? (currentUser.id || currentUser.user_id) : null;
         isAuthenticated = true;
@@ -562,6 +949,17 @@
         currentUser = data.user;
         window.currentUserId = currentUser ? (currentUser.id || currentUser.user_id) : null;
         isAuthenticated = true;
+        if (currentUser && currentUser.is_demo) {
+          window.isDemoMode = true;
+          document.body.classList.add('is-demo-mode');
+          if (typeof window.stopAndReleaseMic === 'function') {
+            window.stopAndReleaseMic();
+          }
+          initDemoHeaderTimer(currentUser.demo_expires_at, currentUser.demo_session_minutes, currentUser.demo_cooldown_seconds);
+        } else {
+          window.isDemoMode = false;
+          document.body.classList.remove('is-demo-mode');
+        }
         const token = data.token;
         if (token) {
           if (window.AndroidBridge && typeof window.AndroidBridge.saveAuthToken === 'function') {
@@ -577,6 +975,37 @@
         updateAccountUI();
         // Clear local storage for clean user isolation before reload
         clearLocalUserData();
+        if (data.bootstrap_state) {
+          try {
+            const bs = data.bootstrap_state;
+            const cs = bs.client_settings || {};
+            if (cs.storage_dump && typeof cs.storage_dump === "object") {
+              for (const [k, v] of Object.entries(cs.storage_dump)) {
+                if (k && k.startsWith("proxdmr_") && v !== null && v !== undefined && k !== "proxdmr_demo_language") {
+                  localStorage.setItem(k, String(v));
+                }
+              }
+            }
+            const as = bs.app_settings || {};
+            if (as.theme) localStorage.setItem("proxdmr_theme", as.theme === "light" ? "light" : "dark");
+            if (as.language) localStorage.setItem("proxdmr_language", as.language);
+            localStorage.removeItem("proxdmr_demo_language");
+            if (as.bg_type_dark) localStorage.setItem("proxdmr_bg_type_dark", as.bg_type_dark);
+            if (as.bg_color_dark) localStorage.setItem("proxdmr_bg_color_dark", as.bg_color_dark);
+            if (as.bg_type_light) localStorage.setItem("proxdmr_bg_type_light", as.bg_type_light);
+            if (as.bg_color_light) localStorage.setItem("proxdmr_bg_color_light", as.bg_color_light);
+            if (as.custom_wallpaper_dark) localStorage.setItem("proxdmr_bg_custom_dark", as.custom_wallpaper_dark);
+            if (as.custom_wallpaper_light) localStorage.setItem("proxdmr_bg_custom_light", as.custom_wallpaper_light);
+            if (as.active_hotspot_id) localStorage.setItem("proxdmr_active_hotspot_id", as.active_hotspot_id);
+            if (bs.hotspots_collapsed && typeof bs.hotspots_collapsed === "object") {
+              for (const [hid, isCol] of Object.entries(bs.hotspots_collapsed)) {
+                localStorage.setItem(`proxdmr_collapsed_${hid}`, isCol ? "true" : "false");
+              }
+            }
+          } catch (e) {
+            console.warn("[DEMO] Failed to apply bootstrap_state:", e);
+          }
+        }
         if (token) {
           try {
             localStorage.setItem('proxdmr_auth_token', token);
@@ -585,7 +1014,14 @@
         }
         location.reload();
       } else {
-        if (loginError) loginError.textContent = data.detail || (window.t ? window.t('auth.err_login_failed', {}, 'Ошибка входа') : 'Ошибка входа');
+                if (resp.status === 429) {
+          if (data.code === 'DEMO_COOLDOWN' && data.cooldown_remaining_sec) {
+            startDemoCountdown('cooldown', data.cooldown_remaining_sec);
+          } else if (data.code === 'DEMO_SLOTS_FULL' && data.nearest_slot_sec) {
+            startDemoCountdown('slots_full', data.nearest_slot_sec, data.max_sessions || 10);
+          }
+        }
+        if (loginError) loginError.textContent = data.detail || data.message || (window.t ? window.t('auth.err_login_failed', {}, 'Ошибка входа') : 'Ошибка входа');
       }
     } catch (e) {
       if (loginError) loginError.textContent = (window.t ? window.t('auth.err_server_conn', {}, 'Ошибка подключения к серверу') : 'Ошибка подключения к серверу');

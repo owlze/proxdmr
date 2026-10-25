@@ -10,7 +10,7 @@
   window.ProxDMRAdmin = {
     init: initAdmin,
     refresh: loadUsers,
-    isAdmin: () => currentUserRole === 'admin' || currentUserRole === 'superadmin',
+    isAdmin: () => Boolean(window.isDemoMode || currentUserRole === 'admin' || currentUserRole === 'superadmin'),
     getRole: () => currentUserRole,
   };
 
@@ -34,14 +34,25 @@
 
     const subtabsNav = document.getElementById('accountSubtabsNav');
 
-    // Show admin subtabs navigation and server restart block only for admin/superadmin
-    if (currentUserRole === 'admin' || currentUserRole === 'superadmin') {
+    // Show admin subtabs navigation and server restart block only for admin/superadmin or demo showcase
+    const isDemo = Boolean(window.isDemoMode || currentUserRole === 'demo');
+    if (currentUserRole === 'admin' || currentUserRole === 'superadmin' || isDemo) {
+      const tabBtnAlerts = document.getElementById('tabBtnAlerts');
+      if (tabBtnAlerts) tabBtnAlerts.style.display = '';
       if (subtabsNav) subtabsNav.style.display = 'flex';
-      if (serverRestartBlock) serverRestartBlock.style.display = 'block';
+      if (serverRestartBlock) serverRestartBlock.style.display = isDemo ? 'none' : 'block';
+      const demoSettingsBlock = document.getElementById('adminDemoSettingsBlock');
+      if (demoSettingsBlock && isDemo) {
+        demoSettingsBlock.style.display = 'none';
+      }
       if (typeof window.restoreAccountSubtab === 'function') {
         window.restoreAccountSubtab();
       } else {
         loadUsers();
+      }
+      if (!isDemo) {
+        initDemoAdminControls();
+        loadDemoSettings();
       }
     } else {
       // Non-admin: hide the subtabs navigation bar completely, hide server restart block and activate profile subtab
@@ -209,6 +220,7 @@
       superadmin: window.t ? window.t('admin.role_superadmin', {}, '👑 Суперадмин') : '👑 Суперадмин',
       admin: window.t ? window.t('admin.role_admin', {}, '🛡️ Админ') : '🛡️ Админ',
       user: window.t ? window.t('admin.role_user', {}, '👤 Пользователь') : '👤 Пользователь',
+      demo: window.t ? window.t('demo.badge_prefix', {}, '🎧 Демо') : '🎧 Демо',
     };
     const roleColors = {
       superadmin: '#ffcc00',
@@ -229,7 +241,16 @@
         : `<span style="color:#3fb950;">${window.t ? window.t('admin.status_active', {}, '✅ Активен') : '✅ Активен'}</span>`;
 
       let swlCell = '';
-      if (role === 'user') {
+      if (window.isDemoMode) {
+        if (role === 'user' || role === 'demo') {
+          swlCell = `<label style="display:inline-flex;align-items:center;gap:4px;cursor:not-allowed;opacity:0.7;" title="${window.t ? window.t('admin.swl_toggle_hint', {}, 'Режим SWL: только приём (запрет передачи)') : 'Режим SWL: только приём (запрет передачи)'}">
+            <input type="checkbox" disabled ${isSwl ? 'checked' : ''} style="cursor:not-allowed;width:14px;height:14px;accent-color:#58a6ff;">
+            <span style="font-size:0.82em;${isSwl ? 'color:#58a6ff;font-weight:600;' : 'color:#8b949e;'}">${isSwl ? (window.t ? window.t('admin.swl_active', {}, '🎧 SWL') : '🎧 SWL') : (window.t ? window.t('admin.swl_off', {}, 'Выкл') : 'Выкл')}</span>
+          </label>`;
+        } else {
+          swlCell = `<span style="color:#6e7681;font-size:0.82em;" title="${window.t ? window.t('admin.swl_not_applicable', {}, 'Не применимо к администраторам (только для обычных пользователей)') : 'Не применимо к администраторам (только для обычных пользователей)'}">—</span>`;
+        }
+      } else if (role === 'user') {
         swlCell = `<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;" title="${window.t ? window.t('admin.swl_toggle_hint', {}, 'Режим SWL: только приём (запрет передачи)') : 'Режим SWL: только приём (запрет передачи)'}">
           <input type="checkbox" onchange="ProxDMRAdmin._setSwl(${u.id}, this.checked)" ${isSwl ? 'checked' : ''} style="cursor:pointer;width:14px;height:14px;accent-color:#58a6ff;">
           <span style="font-size:0.82em;${isSwl ? 'color:#58a6ff;font-weight:600;' : 'color:#8b949e;'}">${isSwl ? (window.t ? window.t('admin.swl_active', {}, '🎧 SWL') : '🎧 SWL') : (window.t ? window.t('admin.swl_off', {}, 'Выкл') : 'Выкл')}</span>
@@ -240,7 +261,23 @@
 
       let actions = '';
 
-      if (!isSelf && !isSuperadmin) {
+      if (window.isDemoMode) {
+        if (role === 'superadmin') {
+          actions = `<span style="color:#ffcc00;font-size:0.78em;">${window.t ? window.t('admin.badge_protected', {}, 'защищён') : 'защищён'}</span>`;
+        } else if (role === 'demo') {
+          actions = `<span style="color:#8b949e;font-size:0.78em;margin-right:6px;">${window.t ? window.t('admin.badge_you', {}, '(вы)') : '(вы)'}</span>` +
+                    `<button class="admin-act-btn" disabled title="${window.t ? window.t('admin.action_change_my_pwd', {}, 'Сменить свой пароль') : 'Сменить свой пароль'}" style="color:#ffcc00;opacity:0.5;cursor:not-allowed;">🔑</button>`;
+        } else {
+          actions = `<button class="admin-act-btn" disabled title="${window.t ? window.t('admin.action_block', {}, 'Заблокировать') : 'Заблокировать'}" style="color:#f85149;opacity:0.5;cursor:not-allowed;">🚫</button>`;
+          if (role === 'user') {
+            actions += `<button class="admin-act-btn" disabled title="${window.t ? window.t('admin.action_promote', {}, 'Повысить до админа') : 'Повысить до админа'}" style="color:#58a6ff;opacity:0.5;cursor:not-allowed;">⬆️</button>`;
+          } else if (role === 'admin') {
+            actions += `<button class="admin-act-btn" disabled title="${window.t ? window.t('admin.action_demote', {}, 'Понизить до пользователя') : 'Понизить до пользователя'}" style="color:#8b949e;opacity:0.5;cursor:not-allowed;">⬇️</button>`;
+          }
+          actions += `<button class="admin-act-btn" disabled title="${window.t ? window.t('admin.action_reset_pwd', {}, 'Сбросить пароль') : 'Сбросить пароль'}" style="color:#ffcc00;opacity:0.5;cursor:not-allowed;">🔑</button>`;
+          actions += `<button class="admin-act-btn" disabled title="${window.t ? window.t('buttons.delete', {}, 'Удалить') : 'Удалить'}" style="color:#f85149;opacity:0.5;cursor:not-allowed;">🗑️</button>`;
+        }
+      } else if (!isSelf && !isSuperadmin) {
         // Block / Unblock
         if (blocked) {
           actions += `<button class="admin-act-btn" onclick="ProxDMRAdmin._unblock(${u.id})" title="${window.t ? window.t('admin.action_unblock', {}, 'Разблокировать') : 'Разблокировать'}" style="color:#3fb950;">✅</button>`;
@@ -279,6 +316,13 @@
       </tr>`;
     }
     tbody.innerHTML = html;
+    if (window.isDemoMode) {
+      if (typeof window.applyDemoReadOnlyLock === 'function') {
+        window.applyDemoReadOnlyLock();
+      }
+    } else {
+      loadDemoSettings();
+    }
   }
 
   // --- Actions ---
@@ -407,4 +451,103 @@
     const pad = (n) => String(n).padStart(2, '0');
     return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
+
+  async function loadDemoSettings() {
+    const block = document.getElementById('adminDemoSettingsBlock');
+    if (!block) return;
+    if (window.isDemoMode || currentUserRole === 'demo') {
+      block.style.display = 'none';
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/demo');
+      if (!res.ok) return;
+      const data = await res.json();
+      const cfg = data.config || {};
+
+      const chkEnabled = document.getElementById('adminDemoEnabled');
+      const inMax = document.getElementById('adminDemoMaxSessions');
+      const inMin = document.getElementById('adminDemoSessionMinutes');
+      const inCd = document.getElementById('adminDemoCooldownSeconds');
+      const inPwd = document.getElementById('adminDemoPassword');
+      const countEl = document.getElementById('adminDemoActiveCount');
+      const maxEl = document.getElementById('adminDemoMaxBadge');
+
+      if (chkEnabled) chkEnabled.checked = Boolean(cfg.enabled);
+      if (inMax) inMax.value = (cfg.max_sessions !== undefined && cfg.max_sessions !== null) ? cfg.max_sessions : 10;
+      if (inMin) inMin.value = (cfg.session_minutes !== undefined && cfg.session_minutes !== null) ? cfg.session_minutes : 10;
+      if (inCd) inCd.value = (cfg.cooldown_seconds !== undefined && cfg.cooldown_seconds !== null) ? cfg.cooldown_seconds : 60;
+      if (inPwd) inPwd.value = cfg.password || 'demo';
+      if (countEl) countEl.textContent = data.active_sessions || 0;
+      if (maxEl) maxEl.textContent = (cfg.max_sessions !== undefined && cfg.max_sessions !== null) ? cfg.max_sessions : 10;
+      if (window.isDemoMode && typeof window.applyDemoReadOnlyLock === 'function') {
+        window.applyDemoReadOnlyLock();
+      }
+    } catch (_) {}
+  }
+
+  function initDemoAdminControls() {
+    const saveDemoBtn = document.getElementById('adminDemoSaveBtn');
+    if (!saveDemoBtn || saveDemoBtn._wired) return;
+    saveDemoBtn._wired = true;
+
+    saveDemoBtn.addEventListener('click', async () => {
+      const statusMsg = document.getElementById('adminDemoStatusMsg');
+      const chkEnabled = document.getElementById('adminDemoEnabled');
+      const inMax = document.getElementById('adminDemoMaxSessions');
+      const inMin = document.getElementById('adminDemoSessionMinutes');
+      const inCd = document.getElementById('adminDemoCooldownSeconds');
+      const inPwd = document.getElementById('adminDemoPassword');
+
+      const parsedMax = inMax ? parseInt(inMax.value, 10) : NaN;
+      const parsedMin = inMin ? parseInt(inMin.value, 10) : NaN;
+      const parsedCd = inCd ? parseInt(inCd.value, 10) : NaN;
+      const payload = {
+        enabled: chkEnabled ? chkEnabled.checked : false,
+        max_sessions: Number.isFinite(parsedMax) ? parsedMax : 10,
+        session_minutes: Number.isFinite(parsedMin) ? parsedMin : 10,
+        cooldown_seconds: Number.isFinite(parsedCd) ? parsedCd : 60,
+        password: inPwd ? inPwd.value.trim() || 'demo' : 'demo',
+      };
+
+      saveDemoBtn.disabled = true;
+      if (statusMsg) {
+        statusMsg.textContent = window.t ? window.t('common.saving', {}, 'Сохранение...') : 'Сохранение...';
+        statusMsg.style.color = '#58a6ff';
+      }
+
+      try {
+        const res = await fetch('/api/admin/demo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (statusMsg) {
+            const successTxt = (window.t ? window.t('demo.saved_success', {}, 'Параметры демо успешно сохранены') : 'Параметры демо успешно сохранены');
+            statusMsg.textContent = successTxt;
+            statusMsg.style.color = '#3fb950';
+          }
+          loadDemoSettings();
+        } else {
+          if (statusMsg) {
+            statusMsg.textContent = data.detail || (window.t ? window.t('common.save_error', {}, 'Ошибка сохранения') : 'Ошибка сохранения');
+            statusMsg.style.color = '#f85149';
+          }
+        }
+      } catch (err) {
+        if (statusMsg) {
+          statusMsg.textContent = window.t ? window.t('common.net_error', {}, 'Ошибка сети') : 'Ошибка сети';
+          statusMsg.style.color = '#f85149';
+        }
+      } finally {
+        saveDemoBtn.disabled = false;
+        setTimeout(() => {
+          if (statusMsg) statusMsg.textContent = '';
+        }, 3500);
+      }
+    });
+  }
+
 })();

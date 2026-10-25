@@ -1729,16 +1729,21 @@ def prepare_text_for_silero(text: str, lang: str = "ru") -> str:
     if not text or not text.strip():
         return ""
 
-    clean_lang = (lang or "ru").lower().strip()
+    clean_lang = (lang or "ru").lower().strip()[:2]
     if clean_lang in ("ua", "uk"):
-        clean_lang = "uk"
-    else:
-        clean_lang = "ru"
-
-    if clean_lang == "ru":
-        text = normalize_for_russian_tts(text)
-    elif clean_lang == "uk":
         text = normalize_for_ukrainian_tts(text)
+    elif clean_lang == "ru":
+        text = normalize_for_russian_tts(text)
+    else:
+        # For non-Cyrillic Silero models (de, en, es, fr):
+        # Do basic character cleanup without Cyrillic transliteration
+        text = re.sub(r"[/\\|]", " ", text)
+        text = re.sub(r"[()\[\]{}<>]", ", ", text)
+        text = re.sub(r"[\"«»“”„']", " ", text)
+        text = re.sub(r"[,:;–-]\s*([,.:;!?])", r"\1", text)
+        text = re.sub(r"[,:;]{2,}", ",", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
     # Final sanitization against Silero vocabulary:
     # Symbols in Silero: _~|!+,-.:;?абвгдежзийклмнопрстуфхцчшщъыьэюяё–… 

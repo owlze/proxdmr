@@ -97,17 +97,30 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 # --- JWT ---
 
-def create_jwt(user_id: int, login: str, remember: bool = True, role: str = "user") -> str:
+def create_jwt(
+    user_id: int,
+    login: str,
+    remember: bool = True,
+    role: str = "user",
+    exp_seconds: int | None = None,
+    extra: dict | None = None,
+) -> str:
     """Create a JWT token for the given user."""
     secret = _get_jwt_secret()
-    exp_days = JWT_EXPIRY_DAYS_REMEMBER if remember else JWT_EXPIRY_DAYS_SESSION
+    if exp_seconds is not None:
+        exp_ts = int(time.time()) + max(1, int(exp_seconds))
+    else:
+        exp_days = JWT_EXPIRY_DAYS_REMEMBER if remember else JWT_EXPIRY_DAYS_SESSION
+        exp_ts = int(time.time()) + (exp_days * 86400)
     payload = {
         "user_id": user_id,
         "login": login,
         "role": role,
-        "exp": int(time.time()) + (exp_days * 86400),
+        "exp": exp_ts,
         "iat": int(time.time()),
     }
+    if extra and isinstance(extra, dict):
+        payload.update(extra)
     if _HAS_PYJWT:
         return pyjwt.encode(payload, secret, algorithm="HS256")
     # HMAC fallback

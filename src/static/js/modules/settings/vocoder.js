@@ -44,6 +44,10 @@ function setupDsdfmeModal() {
       pushNavState("modal", "dsdfmeModal");
     }
   }
+  window.closeDsdfmeModal = () => {
+    try { sendVocoderSettings(); } catch (_) {}
+    closeModal();
+  };
   function closeModal() {
     if (dsdfmeModal && (dsdfmeModal.classList.contains("active") || dsdfmeModal.style.display === "flex")) {
       dsdfmeModal.classList.remove("active");

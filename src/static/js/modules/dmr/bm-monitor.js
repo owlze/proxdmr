@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js';
+import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import { logSelection } from './log-selection.js';
 

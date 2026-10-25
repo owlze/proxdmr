@@ -3,7 +3,7 @@
  * Module: modules/ptt/engine.js
  */
 
-import { getCountryInfo, updateFlagElement } from '../core/formatters.js';
+import { getCountryInfo, updateFlagElement } from '../core/formatters.js?v=2.9.367';
 import { updateAllHotspotRecUI } from '../audio/routing.js';
 import { initAudio, applyTxDspSettings, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js';
 import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js';
@@ -300,6 +300,15 @@ function _isVolumeDownPttEnabled() {
     }
   window.startTransmission = startTransmission;
     if (window.isPttPressed || isTransmissionStarting) return;
+    if (window.isDemoMode) {
+      if (typeof window.showToast === "function") {
+        const msg = window.t
+          ? window.t("ptt.demo_denied_toast", {}, "🎧 Демо-режим: передача отключена (только приём)")
+          : "🎧 Демо-режим: передача отключена (только приём)";
+        window.showToast(msg, 3500);
+      }
+      return;
+    }
     if (window.isSwl) {
       if (typeof window.showToast === "function") {
         const msg = window.t

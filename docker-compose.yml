@@ -3,16 +3,18 @@ services:
     build: .
     container_name: proxdmr
     restart: unless-stopped
+    memswap_limit: 2500M
     ports:
       - "${PORT:-8266}:8266"
       - "${DMR_PORT:-62031}:62031/udp"
     volumes:
       - ./config:/app/config
       - ./data:/app/src/data
+      - ./src:/app/src
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: 2500M
     environment:
       - PORT=8266
       - USE_SSL=${USE_SSL:-true}
@@ -20,3 +22,30 @@ services:
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-proxdmr123}
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
+      - SERVER_LABEL=${SERVER_LABEL:-}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - DEMO_MAX_SESSIONS=${DEMO_MAX_SESSIONS:-10}
+      - DEMO_SESSION_MINUTES=${DEMO_SESSION_MINUTES:-10}
+      - DEMO_COOLDOWN_SECONDS=${DEMO_COOLDOWN_SECONDS:-60}
+
+  proxdmr-watchdog:
+    build: ./watchdog
+    container_name: proxdmr-watchdog
+    restart: unless-stopped
+    memswap_limit: 64M
+    volumes:
+      - ./data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    environment:
+      - SERVER_LABEL=${SERVER_LABEL:-}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - DEMO_MAX_SESSIONS=${DEMO_MAX_SESSIONS:-10}
+      - DEMO_SESSION_MINUTES=${DEMO_SESSION_MINUTES:-10}
+      - DEMO_COOLDOWN_SECONDS=${DEMO_COOLDOWN_SECONDS:-60}
+      - PROXDMR_HOST=proxdmr
+      - PROXDMR_PORT=8266
+    depends_on:
+      - proxdmr

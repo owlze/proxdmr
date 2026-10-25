@@ -1,6 +1,6 @@
-import { refreshAllCardsBmBanner } from '../dmr/bm-banner.js';
+import { refreshAllCardsBmBanner } from '../dmr/bm-banner.js?v=2.9.378';
 import { currentBmStatus, updateBmStatus } from '../dmr/bm-status.js';
-import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.319';
+import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.367';
 
 /**
  * Language Selector & i18n Localization Engine Module
@@ -15,10 +15,16 @@ export function initLanguageManager() {
     optLanguage.value = savedLang;
     optLanguage.addEventListener("change", () => {
       const chosenLang = optLanguage.value;
+      if (window.isDemoMode) {
+        try { localStorage.setItem("proxdmr_demo_language", chosenLang); } catch (_) {}
+      }
       if (window.I18N) {
         window.I18N.setLanguage(chosenLang);
       } else {
         localStorage.setItem("proxdmr_language", chosenLang);
+      }
+      if (window.isDemoMode) {
+        return;
       }
       const ws = window.ws;
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -38,6 +44,20 @@ export function initLanguageManager() {
     window.I18N.onLanguageChange((lang) => {
       // Re-apply static translations
       window.I18N.apply();
+
+      if (window.isDemoMode) {
+        const demoCallTxt = window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной";
+        const optQrzComU = document.getElementById("optQrzComUsername");
+        if (optQrzComU) optQrzComU.value = demoCallTxt;
+        const optHamU = document.getElementById("optHamQthUsername");
+        if (optHamU) optHamU.value = demoCallTxt;
+        const editHsCall = document.getElementById("editHsCallsign");
+        if (editHsCall) editHsCall.value = demoCallTxt;
+
+        const demoNameTxt = window.t ? window.t("demo.your_name", {}, "Ваше имя") : "Ваше имя";
+        const editHsTa = document.getElementById("editHsTalkerAlias");
+        if (editHsTa) editHsTa.value = demoNameTxt;
+      }
       // Update pre-gain badge unit
       const optPreGain = document.getElementById("optPreGain");
       const optPreGainVal = document.getElementById("optPreGainVal");

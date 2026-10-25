@@ -75,7 +75,7 @@ function formatMarkdown(text) {
       // Bold
       content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       // Inline code
-      content = content.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:0.85em;color:#f39c12;">$1</code>');
+      content = content.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius: 0px;font-size:0.85em;color:#f39c12;">$1</code>');
       html += `<li style="margin-bottom: 4px; line-height: 1.45;">${content}</li>`;
       continue;
     }
@@ -94,7 +94,7 @@ function formatMarkdown(text) {
     // Regular line
     let content = escapeHtml(line);
     content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    content = content.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:0.85em;color:#f39c12;">$1</code>');
+    content = content.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius: 0px;font-size:0.85em;color:#f39c12;">$1</code>');
     html += `<p style="margin: 0 0 6px 0; line-height: 1.5;">${content}</p>`;
   }
 
@@ -480,7 +480,7 @@ function showUpdatingOverlay(version) {
   const instRestart = window.t ? window.t("updates.restarting_server", {}, "Перезапуск сервера...") : "Перезапуск сервера...";
 
   overlay.innerHTML = `
-    <div style="background:#161b22;border:1px solid #30363d;padding:28px 24px;border-radius:12px;max-width:420px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.8);">
+    <div style="background:#161b22;border:1px solid #30363d;padding:28px 24px;border-radius: 0px;max-width:420px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.8);">
       <div style="font-size:2.8rem;margin-bottom:14px;animation:spin 2s linear infinite;">🔄</div>
       <h3 style="margin:0 0 10px;font-size:1.2rem;color:#58a6ff;">${escapeHtml(instTitle)}</h3>
       <p style="font-size:0.88rem;color:#8b949e;line-height:1.5;margin-bottom:16px;">

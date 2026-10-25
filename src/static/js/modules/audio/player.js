@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime } from '../core/formatters.js';
+import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 
 export   class RecordingsManager {

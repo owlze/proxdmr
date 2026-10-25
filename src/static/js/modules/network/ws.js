@@ -4,7 +4,7 @@
  * and dispatching 46+ server messages (audio, transcription, status, recordings, etc.).
  */
 
-import { getCountryInfo, renderTgTextHtml, updateFlagElement, formatCallerLocation } from '../core/formatters.js';
+import { getCountryInfo, renderTgTextHtml, updateFlagElement, formatCallerLocation } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import {
   updateGwStatus,
@@ -28,10 +28,10 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.312';
-import { renderTranscriptionSummary } from '../dmr/transcription.js';
-import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.325';
-import { updateApkUpdateUI } from '../core/updater.js?v=2.9.312';
+} from '../dmr/transcriber.js?v=2.9.367';
+import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.367';
+import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.367';
+import { updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js';
 
 // State variables declared in module scope
@@ -286,6 +286,10 @@ export function connectWebSocket(force = false) {
       : `Подключение к шлюзу (попытка ${window.gwConnectAttempt} из 5)...`;
     updateGwStatus(false, attemptText);
 
+    if (window.isDemoExpired) {
+      console.warn("[WS] Reconnect cancelled: demo session expired");
+      return;
+    }
     console.log(`[WS] Connecting to: ${wsUrl} (attempt=${window.gwConnectAttempt}, fast=${window.gwIsFastReconnecting}, force=${force})`);
     try {
       ws = new WebSocket(wsUrl);
@@ -559,6 +563,19 @@ export function handleGwDisconnectFailure(eventOrReason) {
     // Keep ping timer running so packet loss and sparklines update continuously
     startPing();
 
+    // Demo session expired
+    if ((eventOrReason && eventOrReason.code === 4009) || window.isDemoExpired) {
+      console.warn("[WS] Demo session expired (4009)");
+      window.isDemoExpired = true;
+      clearWsReconnectTimer();
+      setWasGwConnected(false);
+      setIsManualGwDisconnect(true);
+      if (typeof window.onDemoSessionExpired === "function") {
+        window.onDemoSessionExpired();
+      }
+      return;
+    }
+
     // Auth rejected by server
     if (eventOrReason && eventOrReason.code === 4001) {
       console.warn("[WS] Auth rejected (4001), showing login modal");
@@ -786,7 +803,26 @@ export function handleServerMessage(msg) {
       updateGwStatus(false, window.t ? window.t("gw.restarting_server", {}, "Перезагрузка сервера...") : "Перезагрузка сервера...");
       return;
     }
+    if (msg.type === "demo_expired") {
+      console.warn("[WS] Demo expired message received");
+      window.isDemoExpired = true;
+      if (typeof window.onDemoSessionExpired === "function") {
+        window.onDemoSessionExpired(msg.cooldown_seconds || 60);
+      }
+      return;
+    }
+
     if (msg.type === "init") {
+      if (msg.is_demo) {
+        window.isDemoMode = true;
+        document.body.classList.add("is-demo-mode");
+        if (typeof window.stopAndReleaseMic === "function") {
+          window.stopAndReleaseMic();
+        }
+        if (typeof window.initDemoHeaderTimer === "function") {
+          window.initDemoHeaderTimer(msg.demo_expires_at, msg.demo_session_minutes, msg.demo_cooldown_seconds);
+        }
+      }
       if (msg.user_id) {
         window.currentUserId = msg.user_id;
       }
@@ -1096,9 +1132,12 @@ export function handleServerMessage(msg) {
           syncThemeBgTabs(typeof window !== "undefined" ? window.currentTheme : "default");
         }
         if (msg.app_settings.language) {
-          const sLang = msg.app_settings.language;
-          if (uid) localStorage.setItem(`proxdmr_u${uid}_language`, sLang);
-          localStorage.setItem("proxdmr_language", sLang);
+          const demoLang = (msg.is_demo || window.isDemoMode) ? localStorage.getItem("proxdmr_demo_language") : null;
+          const sLang = demoLang || msg.app_settings.language;
+          if (!msg.is_demo && !window.isDemoMode) {
+            if (uid) localStorage.setItem(`proxdmr_u${uid}_language`, sLang);
+            localStorage.setItem("proxdmr_language", sLang);
+          }
           const optLanguage = document.getElementById("optLanguage");
           if (optLanguage) optLanguage.value = sLang;
           if (window.I18N && window.I18N.currentLanguage !== sLang) {
@@ -1157,13 +1196,37 @@ export function handleServerMessage(msg) {
           localStorage.setItem("proxdmr_haptic_duration", String(msg.app_settings.haptic_duration));
           setHapticDuration(msg.app_settings.haptic_duration, false);
         }
+        // HAM Web Portals Settings (QRZ.com, HamQTH)
+        const demoCallPlaceholder = window.t ? window.t("demo.your_callsign", {}, "Your CALL") : "Your CALL";
+        const isDemoClient = Boolean(msg.is_demo || window.isDemoMode);
+
+        if (msg.app_settings.qrz_com_username !== undefined) {
+          const opt = document.getElementById("optQrzComUsername");
+          if (opt) {
+            if (isDemoClient) opt.value = demoCallPlaceholder;
+            else if (!opt.value || opt.value === "") opt.value = msg.app_settings.qrz_com_username || "";
+          }
+        }
+        if (msg.app_settings.qrz_com_password !== undefined) {
+          const opt = document.getElementById("optQrzComPassword");
+          if (opt) {
+            if (isDemoClient) opt.value = "••••••••••••";
+            else if (!opt.value || opt.value === "") opt.value = msg.app_settings.qrz_com_password || "";
+          }
+        }
         if (msg.app_settings.hamqth_username !== undefined) {
           const optU = document.getElementById("optHamQthUsername");
-          if (optU && (!optU.value || optU.value === "")) optU.value = msg.app_settings.hamqth_username || "";
+          if (optU) {
+            if (isDemoClient) optU.value = demoCallPlaceholder;
+            else if (!optU.value || optU.value === "") optU.value = msg.app_settings.hamqth_username || "";
+          }
         }
         if (msg.app_settings.hamqth_password !== undefined) {
           const optP = document.getElementById("optHamQthPassword");
-          if (optP && (!optP.value || optP.value === "")) optP.value = msg.app_settings.hamqth_password || "";
+          if (optP) {
+            if (isDemoClient) optP.value = "••••••••••••";
+            else if (!optP.value || optP.value === "") optP.value = msg.app_settings.hamqth_password || "";
+          }
         }
         if (msg.app_settings.quick_mem && typeof msg.app_settings.quick_mem === "object") {
           for (const [k, v] of Object.entries(msg.app_settings.quick_mem)) {
@@ -2091,11 +2154,22 @@ export function handleServerMessage(msg) {
         localStorage.setItem("proxdmr_client_ping_recent", JSON.stringify(clientPingHistory.slice(-500)));
       } catch (_) {}
 
-      document.querySelectorAll(".rtt-display").forEach(el => {
-        el.textContent = `RTT: ${rtt}ms`;
+      document.querySelectorAll(".radio-container").forEach(card => {
+        if (typeof window.updateCardE2eDisplay === "function") {
+          window.updateCardE2eDisplay(card);
+        } else {
+          const rttEl = card.querySelector(".rtt-display");
+          const srvMs = (card._lastServerPingMs !== null && card._lastServerPingMs !== undefined && !isNaN(Number(card._lastServerPingMs)))
+            ? Math.round(Number(card._lastServerPingMs))
+            : 0;
+          const totalMs = rtt + srvMs;
+          if (rttEl) {
+            rttEl.textContent = `E2E: ${totalMs}ms`;
+            rttEl.classList.remove("e2e-good", "e2e-warn", "e2e-bad");
+            rttEl.classList.add(totalMs <= 150 ? "e2e-good" : (totalMs <= 350 ? "e2e-warn" : "e2e-bad"));
+          }
+        }
       });
-      const rttDisplay = document.getElementById("rttDisplay");
-    if (rttDisplay) rttDisplay.textContent = `RTT: ${rtt}ms`;
 
       // Dynamically update UI on cards currently in client mode
       document.querySelectorAll(".radio-container").forEach(card => {

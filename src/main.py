@@ -6,6 +6,8 @@ import os
 import re
 import sys
 import time
+import socket
+from datetime import datetime, timezone
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,8 +36,11 @@ try:
     from dmr.user_db import user_db
     from dmr.hamqth import hamqth_service
     from ping import BMPingService, ClientPingService
+    import memguard
+    import alerts_config
     from ssl_helper import ensure_ssl_certificates
     from transcriber import GeminiTranscriberService, get_tts_test_phrase
+    from demo_mode import demo_manager, mask_hotspot_dict_for_demo, mask_hotspots_list_for_demo, mask_settings_for_demo, mask_call_entry_for_demo
     from version import APP_VERSION, APP_VERSION_DATE, APK_VERSION, APK_VERSION_DATE, get_apk_filename
     from auth import hash_password, verify_password, create_jwt, verify_jwt, validate_login, validate_password, JWT_EXPIRY_DAYS_REMEMBER, LOGIN_MIN_LENGTH, LOGIN_MAX_LENGTH
     from database import (
@@ -58,8 +63,11 @@ except ImportError:
     from src.dmr.user_db import user_db
     from src.dmr.hamqth import hamqth_service
     from src.ping import BMPingService, ClientPingService
+    from src import memguard
+    from src import alerts_config
     from src.ssl_helper import ensure_ssl_certificates
     from src.transcriber import GeminiTranscriberService
+    from src.demo_mode import demo_manager, mask_hotspot_dict_for_demo, mask_hotspots_list_for_demo, mask_settings_for_demo, mask_call_entry_for_demo
     from src.version import APP_VERSION, APP_VERSION_DATE, APK_VERSION, APK_VERSION_DATE, get_apk_filename
     from src.auth import hash_password, verify_password, create_jwt, verify_jwt, validate_login, validate_password, JWT_EXPIRY_DAYS_REMEMBER, LOGIN_MIN_LENGTH, LOGIN_MAX_LENGTH
     from src.database import (
@@ -94,6 +102,7 @@ connected_clients: Set[WebSocket] = set()
 user_clients: Dict[int, Set[WebSocket]] = {}
 ws_user_map: Dict[WebSocket, int] = {}
 ws_active_hotspots: Dict[WebSocket, Set[str]] = {}
+demo_ws_clients: Dict[WebSocket, str] = {}  # ws -> demo_sid
 
 def _prune_dead_ws_clients() -> None:
     dead = {
@@ -104,6 +113,7 @@ def _prune_dead_ws_clients() -> None:
         connected_clients.difference_update(dead)
         for ws_dead in dead:
             ws_active_hotspots.pop(ws_dead, None)
+            demo_ws_clients.pop(ws_dead, None)
             dead_uid = ws_user_map.pop(ws_dead, None)
             if dead_uid and dead_uid in user_clients:
                 user_clients[dead_uid].discard(ws_dead)
@@ -151,6 +161,22 @@ def get_user_radio_state(user_id: int) -> RadioState:
         user_radio_states[user_id] = RadioState()
     return user_radio_states[user_id]
 
+
+def _mask_bm_resp_for_demo(resp: dict, cfg: Optional[Any] = None) -> dict:
+    if not isinstance(resp, dict):
+        return resp
+    out = dict(resp)
+    ssid = 1
+    if cfg:
+        try:
+            ssid = int(getattr(cfg, "bm_ssid", 1) or 1)
+        except Exception:
+            ssid = 1
+    out["device_id"] = f"1234567{ssid:02d}" if ssid > 0 else "1234567"
+    if "callsign" in out:
+        out["callsign"] = "Ваш позывной"
+    return out
+
 async def broadcast_user_json(user_id: int, data: dict, exclude: Optional[WebSocket] = None):
     sockets = user_clients.get(user_id)
     if not sockets:
@@ -158,8 +184,20 @@ async def broadcast_user_json(user_id: int, data: dict, exclude: Optional[WebSoc
     targets = [ws for ws in list(sockets) if ws != exclude and ws.client_state == WebSocketState.CONNECTED]
     if not targets:
         return
-    msg = json.dumps(data)
-    results = await asyncio.gather(*[_send_ws_text(ws, msg) for ws in targets], return_exceptions=True)
+    msg_normal = json.dumps(data)
+    msg_demo = None
+    if any(ws in demo_ws_clients for ws in targets):
+        if isinstance(data.get("hotspot"), dict) or isinstance(data.get("hotspots"), list):
+            demo_data = dict(data)
+            if isinstance(demo_data.get("hotspot"), dict):
+                demo_data["hotspot"] = mask_hotspot_dict_for_demo(demo_data["hotspot"])
+            if isinstance(demo_data.get("hotspots"), list):
+                demo_data["hotspots"] = mask_hotspots_list_for_demo(demo_data["hotspots"])
+            msg_demo = json.dumps(demo_data)
+    results = await asyncio.gather(*[
+        _send_ws_text(ws, (msg_demo if (msg_demo and ws in demo_ws_clients) else msg_normal))
+        for ws in targets
+    ], return_exceptions=True)
     dead_clients = {ws for ws, ok in zip(targets, results) if ok is not True}
     if dead_clients:
         sockets.difference_update(dead_clients)
@@ -358,6 +396,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
         transcriber_service.disable_all_slots()
+    try:
+        await ensure_active_user(1, force_reload=True)
+    except Exception as e:
+        logger.warning(f"[MAIN] Error initializing user 1 settings on startup: {e}")
     # Initialize recorder with user 1 settings if available
     try:
         u1_settings = await load_user_settings(1)
@@ -371,6 +413,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[MAIN] Error initializing user 1 recordings settings: {e}")
     await hotspot_manager.start()
     bm_ping_service.start()
+    memguard.start(BASE_DIR / "data")
 
     # Предзагрузка голоса Piper при старте (когда loop уже активен)
     if transcriber_service and getattr(transcriber_service, "tts_voice", None):
@@ -395,6 +438,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[MAIN] Failed to start xlx_hosts background loop: {e}")
     yield
     bm_ping_service.stop()
+    memguard.stop()
     sync_task.cancel()
     logger.info("[MAIN] Shutting down ProxDMR Gateway...")
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
@@ -453,6 +497,56 @@ async def _get_user_state_cached(user_id: int):
     return blocked, role
 
 
+async def _prepare_demo_hotspot_ssid(uid: int, rt_check):
+    """Records admin collapsed state before demo user expands/connects a hotspot."""
+    if not rt_check:
+        return
+    real_hid = rt_check.config.id
+    s_admin = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    admin_hs_cfg = next((h for h in getattr(s_admin, "hotspots", []) if h.id == real_hid), rt_check.config)
+    demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(admin_hs_cfg, "collapsed", False)))
+
+
+async def _revert_demo_runtime_state():
+    """Restores transcriber and hotspot collapsed states when no demo sessions are active."""
+    if not demo_ws_clients and len(demo_manager.get_active_sessions()) == 0:
+        s_admin = hotspot_manager.user_settings.get(1)
+        if s_admin:
+            _configure_transcriber_from_settings(s_admin)
+            try:
+                await broadcast_json({
+                    "type": "transcriber_settings_change",
+                    "enabled": getattr(s_admin, "transcriber_enabled", False),
+                    "model": getattr(s_admin, "transcriber_model", "gemini-3.5-flash"),
+                    "target_lang": getattr(transcriber_service, "target_lang", "ru"),
+                    "has_key": bool(s_admin.transcriber_api_key or getattr(s_admin, "transcriber_api_keys", [])),
+                    "tts_enabled": getattr(transcriber_service, "tts_enabled", False),
+                    "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
+                    "tts_model": getattr(transcriber_service, "tts_model", "gemini-3.1-flash-tts-preview"),
+                    "tts_voice": getattr(transcriber_service, "tts_voice", "auto"),
+                    "tts_speed": getattr(transcriber_service, "tts_speed", 1.1),
+                    "tts_ducking_level": getattr(transcriber_service, "tts_ducking_level", 0.80),
+                    "tts_pause_ducking_level": getattr(transcriber_service, "tts_pause_ducking_level", 1.0),
+                    "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
+                    "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
+                    "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
+                })
+            except Exception as e:
+                logger.warning(f"[DEMO] Failed to broadcast restored transcriber settings: {e}")
+        collapsed_backups = demo_manager.pop_admin_collapsed_backups()
+        if collapsed_backups:
+            admin_hs_map = {h.id: h for h in getattr(s_admin, "hotspots", [])} if s_admin else {}
+            for hid, was_col in collapsed_backups.items():
+                await hotspot_manager.set_hotspot_collapsed(hid, was_col, user_id=1, persist=False)
+                rt = hotspot_manager.get_runtime(1, hid)
+                if rt and rt.client and hid in admin_hs_map:
+                    admin_ssid = getattr(admin_hs_map[hid], "bm_ssid", getattr(admin_hs_map[hid], "ssid", 1))
+                    if getattr(rt.client, "ssid", admin_ssid) != admin_ssid:
+                        rt.client.ssid = admin_ssid
+                        if not was_col and rt.client.is_connected:
+                            asyncio.create_task(rt.client.connect(force=True))
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
@@ -473,16 +567,55 @@ async def auth_middleware(request: Request, call_next):
     if token:
         payload = verify_jwt(token)
         if payload:
-            uid = payload.get('user_id', 0)
-            blocked, role = await _get_user_state_cached(uid)
-            if blocked:
-                payload = None  # Treat as unauthenticated
-                if path.startswith('/api/') and path not in ('/api/auth/login',):
-                    return JSONResponse({"error": "Аккаунт заблокирован"}, status_code=403)
-            if payload:
-                # Role is loaded from DB (cached for a few seconds) so role changes take effect quickly
-                payload["role"] = role
-                request.state.user = payload
+            if payload.get("is_demo"):
+                demo_sid = payload.get("demo_sid", "")
+                sess = demo_manager.get_session(demo_sid)
+                if not sess or not demo_manager.get_config().get("enabled"):
+                    payload = None
+                    if path.startswith("/api/") and not path.startswith("/api/auth/"):
+                        return JSONResponse({"error": "Demo session expired", "code": "DEMO_EXPIRED"}, status_code=401)
+                else:
+                    payload["role"] = "demo"
+                    payload["is_swl"] = True
+                    payload["demo_expires_at"] = int(sess.expires_at)
+                    request.state.user = payload
+
+                    if request.method not in ("GET", "HEAD", "OPTIONS") and path not in (
+                        "/api/auth/logout",
+                        "/api/auth/login",
+                        "/api/transcriber/tts-test",
+                        "/api/transcriber/settings",
+                        "/api/transcriber/piper/download",
+                    ) and not (
+                        path == "/api/hotspots/active"
+                        or (
+                            path.startswith("/api/hotspots/")
+                            and path.endswith(("/expand", "/collapse", "/connect", "/disconnect", "/reconnect"))
+                        )
+                    ):
+                        return JSONResponse({
+                            "status": "error",
+                            "code": "DEMO_READ_ONLY",
+                            "detail": "🔒 Демо-режим: изменение настроек отключено",
+                            "message": "🔒 Демо-режим: изменение настроек отключено"
+                        }, status_code=403)
+                    if path.startswith("/api/settings/export") or path.startswith("/api/admin/backup"):
+                        return JSONResponse({
+                            "status": "error",
+                            "code": "DEMO_READ_ONLY",
+                            "detail": "🔒 Демо-режим: экспорт и резервные копии недоступны"
+                        }, status_code=403)
+            else:
+                uid = payload.get('user_id', 0)
+                blocked, role = await _get_user_state_cached(uid)
+                if blocked:
+                    payload = None  # Treat as unauthenticated
+                    if path.startswith('/api/') and path not in ('/api/auth/login',):
+                        return JSONResponse({"error": "Доступ заблокирован"}, status_code=403)
+                if payload:
+                    # Role is loaded from DB (cached for a few seconds) so role changes take effect quickly
+                    payload["role"] = role
+                    request.state.user = payload
 
     # Skip 401 check for public paths
     if path in _AUTH_SKIP_EXACT or any(path.startswith(p) for p in _AUTH_SKIP_PREFIXES):
@@ -530,10 +663,40 @@ def _require_recording_access(rec: dict | None, request: Request) -> dict:
     return rec
 
 
+def _configure_transcriber_from_settings(user_app_settings: AppSettings):
+    transcriber_service.configure(
+        enabled=getattr(user_app_settings, "transcriber_enabled", False),
+        api_key=getattr(user_app_settings, "transcriber_api_key", ""),
+        model=getattr(user_app_settings, "transcriber_model", "gemini-3.1-flash-lite"),
+        target_lang=getattr(user_app_settings, "transcriber_target_lang", "ru"),
+        api_keys=getattr(user_app_settings, "transcriber_api_keys", []),
+        tts_enabled=getattr(user_app_settings, "tts_enabled", False),
+        tts_engine=getattr(user_app_settings, "tts_engine", "piper"),
+        tts_model=getattr(user_app_settings, "tts_model", "gemini-3.1-flash-tts-preview"),
+        tts_voice=getattr(user_app_settings, "tts_voice", "ru_RU-terra5871-medium"),
+        tts_speed=getattr(user_app_settings, "tts_speed", 1.1),
+        tts_ducking_level=getattr(user_app_settings, "tts_ducking_level", 0.80),
+        tts_pause_ducking_level=getattr(user_app_settings, "tts_pause_ducking_level", 1.0),
+        tts_mute_others=getattr(user_app_settings, "tts_mute_others", True),
+        tts_announce_callsign=getattr(user_app_settings, "tts_announce_callsign", False),
+        tts_skip_short_callsign=getattr(user_app_settings, "tts_skip_short_callsign", True),
+        tts_style=getattr(user_app_settings, "tts_style", "radio"),
+        transcriber_engine=getattr(user_app_settings, "transcriber_engine", "groq"),
+        translation_engine=getattr(user_app_settings, "translation_engine", "groq"),
+        groq_api_key=getattr(user_app_settings, "groq_api_key", ""),
+        groq_api_keys=getattr(user_app_settings, "groq_api_keys", []),
+        deepgram_api_key=getattr(user_app_settings, "deepgram_api_key", ""),
+        gemini_use_first_key_only=getattr(user_app_settings, "gemini_use_first_key_only", False),
+        groq_use_first_key_only=getattr(user_app_settings, "groq_use_first_key_only", False),
+    )
+
+
 async def ensure_active_user(user_id: int, login: str = "", force_reload: bool = False) -> AppSettings:
     """Ensure hotspot_manager has initialized the specified user's runtimes and settings without disrupting other users."""
     existing_sett = hotspot_manager.user_settings.get(user_id)
     if not force_reload and existing_sett is not None and user_id in hotspot_manager.user_runtimes:
+        if user_id == 1 and getattr(existing_sett, "transcriber_enabled", False) and not transcriber_service.is_enabled():
+            _configure_transcriber_from_settings(existing_sett)
         return existing_sett
     raw_s = await load_user_settings(user_id)
     if not raw_s:
@@ -554,36 +717,13 @@ async def ensure_active_user(user_id: int, login: str = "", force_reload: bool =
         rt = hotspot_manager.get_runtime(user_id, hs_cfg.id)
         if rt:
             rt.config.auto_record = getattr(hs_cfg, "auto_record", False)
-    rec_s = getattr(user_app_settings, "recordings_settings", {}) or (raw_s.get("recordings_settings", {}) if raw_s else {})
-    if rec_s and hasattr(hotspot_manager, "recorder") and hotspot_manager.recorder:
-        hotspot_manager.recorder.apply_settings(rec_s)
 
-    if hotspot_manager.active_user_id == user_id or hotspot_manager.active_user_id == 1:
-        transcriber_service.configure(
-            enabled=getattr(user_app_settings, "transcriber_enabled", False),
-            api_key=getattr(user_app_settings, "transcriber_api_key", ""),
-            model=getattr(user_app_settings, "transcriber_model", "gemini-3.1-flash-lite"),
-            target_lang=getattr(user_app_settings, "transcriber_target_lang", "ru"),
-            api_keys=getattr(user_app_settings, "transcriber_api_keys", []),
-            tts_enabled=getattr(user_app_settings, "tts_enabled", False),
-            tts_engine=getattr(user_app_settings, "tts_engine", "piper"),
-            tts_model=getattr(user_app_settings, "tts_model", "gemini-3.1-flash-tts-preview"),
-            tts_voice=getattr(user_app_settings, "tts_voice", "ru_RU-terra5871-medium"),
-            tts_speed=getattr(user_app_settings, "tts_speed", 1.1),
-            tts_ducking_level=getattr(user_app_settings, "tts_ducking_level", 0.80),
-            tts_pause_ducking_level=getattr(user_app_settings, "tts_pause_ducking_level", 1.0),
-            tts_mute_others=getattr(user_app_settings, "tts_mute_others", True),
-            tts_announce_callsign=getattr(user_app_settings, "tts_announce_callsign", False),
-            tts_skip_short_callsign=getattr(user_app_settings, "tts_skip_short_callsign", True),
-            tts_style=getattr(user_app_settings, "tts_style", "radio"),
-            transcriber_engine=getattr(user_app_settings, "transcriber_engine", "groq"),
-            translation_engine=getattr(user_app_settings, "translation_engine", "groq"),
-            groq_api_key=getattr(user_app_settings, "groq_api_key", ""),
-            groq_api_keys=getattr(user_app_settings, "groq_api_keys", []),
-            deepgram_api_key=getattr(user_app_settings, "deepgram_api_key", ""),
-            gemini_use_first_key_only=getattr(user_app_settings, "gemini_use_first_key_only", False),
-            groq_use_first_key_only=getattr(user_app_settings, "groq_use_first_key_only", False),
-        )
+    if user_id == 1:
+        rec_s = getattr(user_app_settings, "recordings_settings", {}) or (raw_s.get("recordings_settings", {}) if raw_s else {})
+        if rec_s and hasattr(hotspot_manager, "recorder") and hotspot_manager.recorder:
+            hotspot_manager.recorder.apply_settings(rec_s)
+        _configure_transcriber_from_settings(user_app_settings)
+
     return user_app_settings
 
 
@@ -604,11 +744,13 @@ class AuthLoginRequest(BaseModel):
 
 
 @app.get("/api/auth/status")
-async def api_auth_status():
+async def api_auth_status(request: Request):
     uc = await user_count()
+    client_ip = demo_manager.get_client_ip(request)
     return {
         "is_first_run": (uc == 0),
         "allow_registration": False,
+        "demo": demo_manager.get_public_status(client_ip),
     }
 
 
@@ -696,6 +838,96 @@ async def auth_register(body: AuthRegisterRequest, request: Request, response: R
 
 @app.post("/api/auth/login")
 async def auth_login(body: AuthLoginRequest, request: Request, response: Response):
+    client_ip = demo_manager.get_client_ip(request)
+    demo_cfg = demo_manager.get_config()
+    req_login = (body.login or "").strip()
+    if req_login.lower() == demo_cfg.get("login", "demo").lower():
+        if body.password != demo_cfg.get("password", "demo"):
+            raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+        prev_sid = None
+        old_tok = request.cookies.get("proxdmr_token")
+        if old_tok:
+            old_p = verify_jwt(old_tok)
+            if old_p and old_p.get("is_demo"):
+                prev_sid = old_p.get("demo_sid")
+        sess, err = demo_manager.start_session(client_ip, existing_sid=prev_sid)
+        if err:
+            st_code = 429 if err.get("code") in ("DEMO_COOLDOWN", "DEMO_SLOTS_FULL") else 403
+            return JSONResponse({"status": "error", **err}, status_code=st_code)
+        showcase_uid = demo_cfg.get("showcase_user_id", 1)
+        await ensure_active_user(showcase_uid, "admin")
+        rem_sec = max(1, int(sess.expires_at - time.time()))
+        token = create_jwt(
+            showcase_uid,
+            "demo",
+            remember=False,
+            role="demo",
+            exp_seconds=rem_sec,
+            extra={
+                "is_demo": True,
+                "is_swl": True,
+                "demo_sid": sess.sid,
+                "demo_expires_at": int(sess.expires_at),
+            },
+        )
+        response.set_cookie(
+            key="proxdmr_token",
+            value=token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=rem_sec,
+            path="/",
+        )
+        s_admin = hotspot_manager.user_settings.get(showcase_uid, hotspot_manager.settings)
+        if len(demo_manager.get_active_sessions()) <= 1 and s_admin:
+            _configure_transcriber_from_settings(s_admin)
+        admin_rts = list(hotspot_manager.get_user_runtimes(showcase_uid).values())
+        hs_collapsed_map = {}
+        for idx_rt, rt in enumerate(admin_rts):
+            hid = rt.config.id
+            orig_col = demo_manager._admin_collapsed_backup.get(hid, bool(getattr(rt.config, "collapsed", idx_rt > 0)))
+            hs_collapsed_map[hid] = orig_col
+            if idx_rt == 0:
+                hs_collapsed_map["default"] = orig_col
+            if len(demo_manager.get_active_sessions()) <= 1 and getattr(rt.config, "collapsed", None) != orig_col:
+                await hotspot_manager.set_hotspot_collapsed(hid, orig_col, user_id=showcase_uid, persist=False)
+
+        wp_dir = STATIC_DIR / "img" / "wallpapers"
+        c_dark = f"/static/img/wallpapers/bg-custom-u{showcase_uid}-dark.jpg?v={int((wp_dir / f'bg-custom-u{showcase_uid}-dark.jpg').stat().st_mtime)}" if (wp_dir / f"bg-custom-u{showcase_uid}-dark.jpg").exists() else (f"/static/img/bg-custom-dark.jpg?v={int((STATIC_DIR / 'img' / 'bg-custom-dark.jpg').stat().st_mtime)}" if (STATIC_DIR / "img" / "bg-custom-dark.jpg").exists() else None)
+        c_light = f"/static/img/wallpapers/bg-custom-u{showcase_uid}-light.jpg?v={int((wp_dir / f'bg-custom-u{showcase_uid}-light.jpg').stat().st_mtime)}" if (wp_dir / f"bg-custom-u{showcase_uid}-light.jpg").exists() else (f"/static/img/bg-custom-light.jpg?v={int((STATIC_DIR / 'img' / 'bg-custom-light.jpg').stat().st_mtime)}" if (STATIC_DIR / "img" / "bg-custom-light.jpg").exists() else None)
+
+        bootstrap_state = {
+            "app_settings": {
+                "theme": getattr(s_admin, "theme", "dark") or "dark",
+                "language": getattr(s_admin, "language", "ru") or "ru",
+                "bg_type_dark": "color" if getattr(s_admin, "bg_type_dark", "pattern") == "color" else "pattern",
+                "bg_color_dark": getattr(s_admin, "bg_color_dark", "#0f1115") or "#0f1115",
+                "bg_type_light": "color" if getattr(s_admin, "bg_type_light", "pattern") == "color" else "pattern",
+                "bg_color_light": getattr(s_admin, "bg_color_light", "#f4f6f8") or "#f4f6f8",
+                "custom_wallpaper_dark": c_dark,
+                "custom_wallpaper_light": c_light,
+                "active_hotspot_id": getattr(s_admin, "active_hotspot_id", "default") or "default",
+                "simultaneous_slots": getattr(s_admin, "simultaneous_slots", True),
+            },
+            "client_settings": getattr(s_admin, "client_settings", None) or getattr(hotspot_manager.settings, "client_settings", {}) or {},
+            "hotspots_collapsed": hs_collapsed_map,
+        }
+        return {
+            "status": "ok",
+            "user": {
+                "id": showcase_uid,
+                "login": "demo",
+                "role": "demo",
+                "is_swl": True,
+                "is_demo": True,
+                "demo_expires_at": int(sess.expires_at),
+                "demo_session_minutes": demo_cfg.get("session_minutes", 10),
+            },
+            "token": token,
+            "bootstrap_state": bootstrap_state,
+        }
+
     ip = request.client.host if request.client else "unknown"
     if _check_rate_limit(ip):
         raise HTTPException(status_code=429, detail="Слишком много попыток. Подождите минуту")
@@ -773,9 +1005,21 @@ async def auth_import_config(
                     )
                 user_id = existing_user["id"]
             else:
+                u1 = await get_user_by_id(1)
+                u1_sett = await load_user_settings(1) if u1 else {}
+                u1_hs = (u1_sett or {}).get("hotspots") or []
+                u1_is_empty = bool(u1 and len(u1_hs) <= 1 and int((u1_hs[0] if u1_hs else {}).get("dmr_id") or 0) == 0)
                 pw_hash = sa_acc.get("password_hash") or (await asyncio.to_thread(hash_password, password))
-                user_id = await create_user(clean_login, pw_hash)
-                await set_user_role(user_id, "superadmin")
+                if u1_is_empty:
+                    import aiosqlite
+                    from database import DB_FILE
+                    async with aiosqlite.connect(str(DB_FILE)) as db:
+                        await db.execute("UPDATE users SET login = ?, password_hash = ?, role = 'superadmin' WHERE id = 1", (clean_login.lower(), pw_hash))
+                        await db.commit()
+                    user_id = 1
+                else:
+                    user_id = await create_user(clean_login, pw_hash)
+                    await set_user_role(user_id, "superadmin")
 
             res = await restore_backup_data(backup_data, user_id, mode="all_users")
             client_storage_to_return = res.get("client_storage", {})
@@ -876,7 +1120,17 @@ async def auth_import_config(
 
 
 @app.post("/api/auth/logout")
-async def auth_logout(response: Response):
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get("proxdmr_token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if token:
+        payload = verify_jwt(token)
+        if payload and payload.get("is_demo") and payload.get("demo_sid"):
+            demo_manager.end_session(payload.get("demo_sid"), apply_cooldown=True)
+            await _revert_demo_runtime_state()
     response.delete_cookie(
         key="proxdmr_token",
         path="/",
@@ -980,6 +1234,32 @@ async def auth_me(request: Request, response: Response):
     payload = verify_jwt(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Token expired")
+    if payload.get("is_demo"):
+        demo_sid = payload.get("demo_sid", "")
+        sess = demo_manager.get_session(demo_sid)
+        if not sess or not demo_manager.get_config().get("enabled"):
+            raise HTTPException(status_code=401, detail="Demo session expired")
+        rem_sec = max(1, int(sess.expires_at - time.time()))
+        response.set_cookie(
+            key="proxdmr_token",
+            value=token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=rem_sec,
+            path="/",
+        )
+        return {
+            "user": {"id": payload.get("user_id", 1), "login": "demo", "role": "demo", "is_swl": True},
+            "user_id": payload.get("user_id", 1),
+            "login": "demo",
+            "role": "demo",
+            "is_swl": True,
+            "is_demo": True,
+            "demo_expires_at": int(sess.expires_at),
+            "demo_cooldown_seconds": demo_manager.get_config().get("cooldown_seconds", 60),
+            "token": token,
+        }
     user = await get_user_by_id(payload["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -1009,12 +1289,168 @@ def _require_admin(request: Request) -> dict:
     return user
 
 
+@app.get("/api/admin/diag")
+async def admin_diag(request: Request):
+    _require_admin(request)
+    _prune_dead_ws_clients()
+
+    hs_total = hs_online = 0
+    history_total = active_calls_total = 0
+    try:
+        for rts in hotspot_manager.user_runtimes.values():
+            hs_total += len(rts)
+            for rt in rts.values():
+                if getattr(rt.status, "value", str(rt.status)).lower() == "online":
+                    hs_online += 1
+        history_total = sum(len(v) for v in hotspot_manager.user_call_history.values())
+        active_calls_total = sum(len(v) for v in hotspot_manager.user_active_calls.values())
+    except Exception:
+        pass
+
+    rec = getattr(hotspot_manager, "recorder", None)
+    rx_buffers = len(getattr(rec, "_rx_buffers", {}) or {}) if rec else 0
+
+    diag_info = memguard.get_diag_dict()
+    return {
+        "version": APP_VERSION,
+        "uptime_sec": diag_info["uptime_sec"],
+        "started_at": diag_info["started_at"],
+        "memory": diag_info["memory"],
+        "asyncio_tasks": diag_info["asyncio_tasks"],
+        "warnings": diag_info.get("warnings", []),
+        "manager_bg_tasks": len(getattr(hotspot_manager, "_bg_tasks", ()) or ()),
+        "ws": {
+            "connected": len(connected_clients),
+            "users": len(user_clients),
+            "ws_user_map": len(ws_user_map),
+            "ws_active_hotspots": len(ws_active_hotspots),
+        },
+        "hotspots": {"total": hs_total, "online": hs_online},
+        "calls": {"history_entries": history_total, "active": active_calls_total},
+        "recorder": {"rx_buffers": rx_buffers},
+    }
+
+
+# --- Admin Telegram Alerts API ---
+
+class AdminAlertTestRequest(BaseModel):
+    force_direct: bool = False
+
+
+@app.get("/api/admin/alerts")
+async def admin_get_alerts(request: Request):
+    user = _get_user_from_request(request)
+    if not user or (not user.get("is_demo") and user.get("role") not in ("admin", "superadmin")):
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    data_dir = BASE_DIR / "data"
+    cfg = alerts_config.load_alerts_config(data_dir)
+    wd = alerts_config.read_watchdog_status(data_dir)
+    ui_cfg = alerts_config.sanitize_for_ui(cfg)
+    if user.get("is_demo"):
+        ui_cfg["enabled"] = False
+        ui_cfg["chat_id"] = "0123456789"
+        ui_cfg["message_thread_id"] = ""
+    return {
+        "config": ui_cfg,
+        "watchdog": wd,
+    }
+
+
+@app.post("/api/admin/alerts")
+async def admin_save_alerts(request: Request):
+    _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    data_dir = BASE_DIR / "data"
+    existing = alerts_config.load_alerts_config(data_dir)
+    merged = alerts_config.merge_ui_update(existing, body)
+    alerts_config.save_alerts_config(data_dir, merged)
+    logger.info("[ALERTS] Configuration updated via admin API")
+    return {
+        "status": "ok",
+        "config": alerts_config.sanitize_for_ui(merged),
+    }
+
+
+@app.post("/api/admin/alerts/test")
+async def admin_test_alert(request: Request, body: Optional[AdminAlertTestRequest] = None):
+    _require_admin(request)
+    data_dir = BASE_DIR / "data"
+    force_direct = body.force_direct if body else False
+    wd = alerts_config.read_watchdog_status(data_dir)
+
+    if not force_direct and wd.get("status") == "online":
+        test_id = alerts_config.request_watchdog_test(data_dir)
+        return {"mode": "watchdog", "test_id": test_id}
+    else:
+        cfg = alerts_config.load_alerts_config(data_dir)
+        fallback_label = os.environ.get("SERVER_LABEL") or socket.gethostname()
+        srv_prefix = alerts_config.format_server_prefix(cfg, fallback_label)
+        effective_label = str(cfg.get("server_label") or "").strip() or fallback_label
+        utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        msg = (
+            f"<b>{srv_prefix} 🧪 Тестовое оповещение</b>\n\n"
+            f"Режим: <code>Direct (ProxDMR Fallback)</code>\n"
+            f"Хост: <code>{effective_label}</code>\n"
+            f"Версия ProxDMR: <code>{APP_VERSION}</code>\n"
+            f"Статус: <code>OK</code>\n\n"
+            f"<i>⏱ {utc_now}</i>"
+        )
+        ok, err = alerts_config.send_telegram_direct(cfg, msg)
+        return {"mode": "direct", "ok": ok, "error": err}
+
+
+@app.get("/api/admin/alerts/test/{test_id}")
+async def admin_test_alert_status(test_id: str, request: Request):
+    _require_admin(request)
+    data_dir = BASE_DIR / "data"
+    res = alerts_config.read_test_result(data_dir, test_id)
+    if res:
+        return {"status": "done", "result": res}
+    return {"status": "pending"}
+
+
 @app.get("/api/admin/users")
 async def admin_list_users(request: Request):
-    _require_admin(request)
+    user = _get_user_from_request(request)
+    if not user or (not user.get("is_demo") and user.get("role") not in ("admin", "superadmin")):
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    if user.get("is_demo"):
+        return {"users": [
+            {"id": 101, "login": "call1", "role": "superadmin", "is_swl": False, "is_blocked": False, "created_at": 1728000000, "last_login": 1728540000},
+            {"id": 102, "login": "call2", "role": "admin", "is_swl": False, "is_blocked": False, "created_at": 1728100000, "last_login": 1728543600},
+            {"id": 103, "login": "call3", "role": "user", "is_swl": True, "is_blocked": False, "created_at": 1728200000, "last_login": 1728547200},
+            {"id": 0,   "login": "demo",  "role": "demo", "is_swl": True, "is_blocked": False, "created_at": 1728300000, "last_login": int(time.time())},
+        ]}
     users = await list_users()
     return {"users": users}
 
+
+@app.get("/api/admin/demo")
+async def admin_get_demo(request: Request):
+    user = _get_user_from_request(request)
+    if not user or (not user.get("is_demo") and user.get("role") not in ("admin", "superadmin")):
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    cfg = demo_manager.get_config()
+    if user.get("is_demo"):
+        cfg["password"] = "••••••••••••"
+    return {
+        "status": "ok",
+        "config": cfg,
+        "active_sessions": len(demo_manager.sessions),
+    }
+
+@app.post("/api/admin/demo")
+async def admin_save_demo(request: Request):
+    _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    saved = demo_manager.save_config(body)
+    return {"status": "ok", "config": saved}
 
 class AdminCreateUserRequest(BaseModel):
     login: str
@@ -1171,6 +1607,8 @@ async def get_user_settings_api(request: Request):
     if not user:
         raise HTTPException(status_code=401)
     settings = await load_user_settings(user["user_id"])
+    if user.get("is_demo"):
+        return mask_settings_for_demo(settings)
     return settings
 
 
@@ -1428,9 +1866,27 @@ async def get_index(request: Request):
         language = s.language
         simultaneous_slots = getattr(s, "simultaneous_slots", True)
         check_mic_on_tx = getattr(s, "check_mic_on_tx", True)
+        qrz_com_username = getattr(s, "qrz_com_username", "") or ""
+        qrz_com_password = getattr(s, "qrz_com_password", "") or ""
         hamqth_username = getattr(s, "hamqth_username", "") or ""
         hamqth_password = getattr(s, "hamqth_password", "") or ""
         disable_update_notifications = bool(getattr(s, "disable_update_notifications", False))
+
+        if user and user.get("is_demo"):
+            qrz_com_username = "Your CALL"
+            qrz_com_password = "••••••••••••"
+            hamqth_username = "Your CALL"
+            hamqth_password = "••••••••••••"
+            callsign = "Ваш позывной"
+            dmr_id = 1234567
+            if cfg:
+                cfg = cfg.model_copy(update={
+                    "callsign": "Ваш позывной",
+                    "dmr_id": 1234567,
+                    "talker_alias": "Your Name" if getattr(cfg, "talker_alias", "") else "",
+                    "bm_password": "••••••••••••" if getattr(cfg, "bm_password", "") else "",
+                    "bm_api_key": "••••••••••••••••" if getattr(cfg, "bm_api_key", "") else "",
+                })
 
         wp_dir = STATIC_DIR / "img" / "wallpapers"
         custom_bg_dark = (wp_dir / f"bg-custom-u{uid}-dark.jpg").exists()
@@ -1483,6 +1939,8 @@ async def get_index(request: Request):
         language = "ru"
         simultaneous_slots = True
         check_mic_on_tx = True
+        qrz_com_username = ""
+        qrz_com_password = ""
         hamqth_username = ""
         hamqth_password = ""
         disable_update_notifications = False
@@ -1524,6 +1982,8 @@ async def get_index(request: Request):
             "language": language,
             "simultaneous_slots": simultaneous_slots,
             "check_mic_on_tx": check_mic_on_tx,
+            "qrz_com_username": qrz_com_username,
+            "qrz_com_password": qrz_com_password,
             "hamqth_username": hamqth_username,
             "hamqth_password": hamqth_password,
             "disable_update_notifications": disable_update_notifications,
@@ -1555,7 +2015,7 @@ async def list_hotspots(request: Request):
     rts = hotspot_manager.get_user_runtimes(uid)
     return {
         "active_hotspot_id": getattr(user_sett, "active_hotspot_id", "default"),
-        "hotspots": [rt.to_dict() for rt in rts.values()]
+        "hotspots": [(mask_hotspot_dict_for_demo(rt.to_dict(), index=idx) if (user and user.get("is_demo")) else rt.to_dict()) for idx, rt in enumerate(rts.values())]
     }
 
 @app.post("/api/hotspots")
@@ -1747,6 +2207,8 @@ class GeneralSettingsUpdate(BaseModel):
     haptic_duration: Optional[int] = None
     loopback_mode: Optional[bool] = None
     quick_mem: Optional[Dict[str, Any]] = None
+    qrz_com_username: Optional[str] = None
+    qrz_com_password: Optional[str] = None
     hamqth_username: Optional[str] = None
     hamqth_password: Optional[str] = None
     disable_update_notifications: Optional[bool] = None
@@ -1780,8 +2242,10 @@ async def get_general_settings(request: Request):
             "haptic_duration": getattr(s, "haptic_duration", 45),
             "loopback_mode": s.loopback_mode,
             "quick_mem": s.quick_mem,
-            "hamqth_username": getattr(s, "hamqth_username", "") or "",
-            "hamqth_password": getattr(s, "hamqth_password", "") or "",
+            "qrz_com_username": ("Your CALL" if (user and user.get("is_demo")) else (getattr(s, "qrz_com_username", "") or "")),
+            "qrz_com_password": ("••••••••••••" if (user and user.get("is_demo")) else (getattr(s, "qrz_com_password", "") or "")),
+            "hamqth_username": ("Your CALL" if (user and user.get("is_demo")) else (getattr(s, "hamqth_username", "") or "")),
+            "hamqth_password": ("••••••••••••" if (user and user.get("is_demo")) else (getattr(s, "hamqth_password", "") or "")),
             "disable_update_notifications": getattr(s, "disable_update_notifications", False),
         }
     }
@@ -1890,10 +2354,16 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         s.quick_mem = update.quick_mem
         changed = True
         await broadcast_user_json(uid, {"type": "quick_mem_change", "all_quick_mem": s.quick_mem})
-    if update.hamqth_username is not None and update.hamqth_username != getattr(s, "hamqth_username", ""):
+    if update.qrz_com_username is not None and update.qrz_com_username not in ("Your CALL", "Ваш позывной") and update.qrz_com_username != getattr(s, "qrz_com_username", ""):
+        s.qrz_com_username = update.qrz_com_username.strip()
+        changed = True
+    if update.qrz_com_password is not None and update.qrz_com_password != "••••••••••••" and update.qrz_com_password != getattr(s, "qrz_com_password", ""):
+        s.qrz_com_password = update.qrz_com_password.strip()
+        changed = True
+    if update.hamqth_username is not None and update.hamqth_username not in ("Your CALL", "Ваш позывной") and update.hamqth_username != getattr(s, "hamqth_username", ""):
         s.hamqth_username = update.hamqth_username.strip()
         changed = True
-    if update.hamqth_password is not None and update.hamqth_password != getattr(s, "hamqth_password", ""):
+    if update.hamqth_password is not None and update.hamqth_password != "••••••••••••" and update.hamqth_password != getattr(s, "hamqth_password", ""):
         s.hamqth_password = update.hamqth_password.strip()
         changed = True
     if update.disable_update_notifications is not None and update.disable_update_notifications != getattr(s, "disable_update_notifications", False):
@@ -1920,6 +2390,8 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
             "sync_system_volume": getattr(s, "sync_system_volume", True),
             "loopback_mode": s.loopback_mode,
             "quick_mem": s.quick_mem,
+            "qrz_com_username": getattr(s, "qrz_com_username", "") or "",
+            "qrz_com_password": getattr(s, "qrz_com_password", "") or "",
             "hamqth_username": getattr(s, "hamqth_username", "") or "",
             "hamqth_password": getattr(s, "hamqth_password", "") or "",
         }
@@ -1932,6 +2404,12 @@ class ContactsUpdate(BaseModel):
 @app.get("/api/contacts")
 async def get_contacts(request: Request):
     user = _get_user_from_request(request)
+    if user and user.get("is_demo"):
+        return {
+            "status": "ok",
+            "contacts": [],
+            "gateway": {"hotspot_id": "default", "slot": 2}
+        }
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
@@ -2026,35 +2504,37 @@ class RecordingTtsTranslateRequest(BaseModel):
 @app.get("/api/transcriber/settings")
 async def get_transcriber_settings(request: Request):
     user = _get_user_from_request(request)
+    is_demo = bool(user and user.get("is_demo"))
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
+    live_ts = transcriber_service
     return {
         "status": "ok",
         "settings": {
             "enabled": getattr(s, "transcriber_enabled", False),
-            "api_key": getattr(s, "transcriber_api_key", ""),
-            "api_keys": getattr(s, "transcriber_api_keys", []) or [],
+            "api_key": ("••••••••••••" if (is_demo and getattr(s, "transcriber_api_key", "")) else getattr(s, "transcriber_api_key", "")),
+            "api_keys": (["••••••••••••"] if (is_demo and getattr(s, "transcriber_api_keys", [])) else (getattr(s, "transcriber_api_keys", []) or [])),
             "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
             "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
             "translation_engine": getattr(s, "translation_engine", "groq"),
-            "target_lang": getattr(s, "transcriber_target_lang", "ru"),
-            "groq_api_key": getattr(s, "groq_api_key", ""),
-            "groq_api_keys": getattr(s, "groq_api_keys", []) or [],
+            "target_lang": getattr(live_ts, "target_lang", None) or getattr(s, "transcriber_target_lang", "ru"),
+            "groq_api_key": ("••••••••••••" if (is_demo and getattr(s, "groq_api_key", "")) else getattr(s, "groq_api_key", "")),
+            "groq_api_keys": (["••••••••••••"] if (is_demo and getattr(s, "groq_api_keys", [])) else (getattr(s, "groq_api_keys", []) or [])),
             "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
             "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
-            "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
-            "tts_enabled": getattr(s, "tts_enabled", False),
-            "tts_engine": getattr(s, "tts_engine", "piper"),
-            "tts_model": getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
-            "tts_voice": getattr(s, "tts_voice", "ru_RU-terra5871-medium"),
-            "tts_speed": getattr(s, "tts_speed", 1.1),
-            "tts_ducking_level": getattr(s, "tts_ducking_level", 0.80),
-            "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
-            "tts_mute_others": getattr(s, "tts_mute_others", True),
-            "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
-            "tts_skip_short_callsign": getattr(s, "tts_skip_short_callsign", True),
-            "tts_style": getattr(s, "tts_style", "radio")
+            "deepgram_api_key": ("••••••••••••" if (is_demo and getattr(s, "deepgram_api_key", "")) else getattr(s, "deepgram_api_key", "")),
+            "tts_enabled": getattr(live_ts, "tts_enabled", getattr(s, "tts_enabled", False)),
+            "tts_engine": getattr(live_ts, "tts_engine", None) or getattr(s, "tts_engine", "piper"),
+            "tts_model": getattr(live_ts, "tts_model", None) or getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
+            "tts_voice": getattr(live_ts, "tts_voice", None) or getattr(s, "tts_voice", "ru_RU-terra5871-medium"),
+            "tts_speed": getattr(live_ts, "tts_speed", None) or getattr(s, "tts_speed", 1.1),
+            "tts_ducking_level": getattr(live_ts, "tts_ducking_level", getattr(s, "tts_ducking_level", 0.80)),
+            "tts_pause_ducking_level": getattr(live_ts, "tts_pause_ducking_level", getattr(s, "tts_pause_ducking_level", 1.0)),
+            "tts_mute_others": getattr(live_ts, "tts_mute_others", getattr(s, "tts_mute_others", True)),
+            "tts_announce_callsign": getattr(live_ts, "tts_announce_callsign", getattr(s, "tts_announce_callsign", False)),
+            "tts_skip_short_callsign": getattr(live_ts, "tts_skip_short_callsign", getattr(s, "tts_skip_short_callsign", True)),
+            "tts_style": getattr(live_ts, "tts_style", None) or getattr(s, "tts_style", "radio")
         }
     }
 
@@ -2064,6 +2544,108 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
+    is_demo = bool(user and user.get("is_demo"))
+    if is_demo:
+        if update.target_lang is not None:
+            transcriber_service.target_lang = update.target_lang
+        if update.tts_enabled is not None:
+            transcriber_service.tts_enabled = bool(update.tts_enabled)
+        if update.tts_engine is not None:
+            transcriber_service.tts_engine = update.tts_engine
+        if update.tts_model is not None:
+            transcriber_service.tts_model = update.tts_model
+        if update.tts_speed is not None:
+            transcriber_service.tts_speed = float(update.tts_speed)
+        if update.tts_ducking_level is not None:
+            transcriber_service.tts_ducking_level = float(update.tts_ducking_level)
+        if update.tts_pause_ducking_level is not None:
+            transcriber_service.tts_pause_ducking_level = float(update.tts_pause_ducking_level)
+        if update.tts_mute_others is not None:
+            transcriber_service.tts_mute_others = bool(update.tts_mute_others)
+        if update.tts_announce_callsign is not None:
+            transcriber_service.tts_announce_callsign = bool(update.tts_announce_callsign)
+        if update.tts_skip_short_callsign is not None:
+            transcriber_service.tts_skip_short_callsign = bool(update.tts_skip_short_callsign)
+        if update.tts_style is not None:
+            transcriber_service.tts_style = update.tts_style
+
+        effective_engine = getattr(transcriber_service, "tts_engine", "piper")
+        eff_l = (getattr(transcriber_service, "target_lang", "ru") or "ru").lower().strip()
+        if update.tts_voice is not None and (effective_engine != "piper" or update.tts_voice != "auto"):
+            transcriber_service.tts_voice = update.tts_voice
+
+        if effective_engine == "piper" and eff_l != "none":
+            from piper_service import PiperService
+            psrv = PiperService.get_instance()
+            cur_v = getattr(transcriber_service, "tts_voice", None)
+            cur_v_lang = psrv.get_voice_lang(cur_v)
+            if not cur_v or cur_v in ("auto", "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Zephyr", "Despina", "Achernar", "Orus", "Iapetus") or cur_v_lang != eff_l:
+                new_v = psrv.get_installed_voice_for_lang(eff_l) or psrv.get_default_voice_for_lang(eff_l)
+                if new_v:
+                    transcriber_service.tts_voice = new_v
+            try:
+                target_v = getattr(transcriber_service, "tts_voice", None)
+                if target_v:
+                    if not psrv.is_voice_installed(target_v):
+                        logger.info(f"[PIPER][DEMO] Starting background download of voice '{target_v}' for language '{eff_l}'...")
+                        psrv.start_download(target_v)
+                    else:
+                        asyncio.create_task(psrv.preload_voice_async(target_v))
+            except Exception as pe:
+                logger.warning(f"[PIPER][DEMO] Could not auto-download or preload voice: {pe}")
+
+        await broadcast_json({
+            "type": "transcriber_settings_change",
+            "enabled": getattr(s, "transcriber_enabled", False),
+            "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
+            "target_lang": getattr(transcriber_service, "target_lang", "ru"),
+            "has_key": bool(s.transcriber_api_key or getattr(s, "transcriber_api_keys", [])),
+            "tts_enabled": getattr(transcriber_service, "tts_enabled", False),
+            "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
+            "tts_model": getattr(transcriber_service, "tts_model", "gemini-3.1-flash-tts-preview"),
+            "tts_voice": getattr(transcriber_service, "tts_voice", "auto"),
+            "tts_speed": getattr(transcriber_service, "tts_speed", 1.1),
+            "tts_ducking_level": getattr(transcriber_service, "tts_ducking_level", 0.80),
+            "tts_pause_ducking_level": getattr(transcriber_service, "tts_pause_ducking_level", 1.0),
+            "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
+            "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
+            "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
+            "tts_style": getattr(transcriber_service, "tts_style", "radio"),
+            "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
+            "translation_engine": getattr(s, "translation_engine", "groq"),
+            "has_groq_key": bool(getattr(s, "groq_api_key", "")),
+            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", ""))
+        })
+
+        return {
+            "status": "ok",
+            "settings": {
+                "enabled": getattr(s, "transcriber_enabled", False),
+                "api_key": ("••••••••••••" if getattr(s, "transcriber_api_key", "") else ""),
+                "api_keys": (["••••••••••••"] if getattr(s, "transcriber_api_keys", []) else []),
+                "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
+                "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
+                "translation_engine": getattr(s, "translation_engine", "groq"),
+                "target_lang": getattr(transcriber_service, "target_lang", "ru"),
+                "groq_api_key": ("••••••••••••" if getattr(s, "groq_api_key", "") else ""),
+                "groq_api_keys": (["••••••••••••"] if getattr(s, "groq_api_keys", []) else []),
+                "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
+                "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
+                "deepgram_api_key": ("••••••••••••" if getattr(s, "deepgram_api_key", "") else ""),
+                "tts_enabled": getattr(transcriber_service, "tts_enabled", False),
+                "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
+                "tts_model": getattr(transcriber_service, "tts_model", "gemini-3.1-flash-tts-preview"),
+                "tts_voice": getattr(transcriber_service, "tts_voice", "auto"),
+                "tts_speed": getattr(transcriber_service, "tts_speed", 1.1),
+                "tts_ducking_level": getattr(transcriber_service, "tts_ducking_level", 0.80),
+                "tts_pause_ducking_level": getattr(transcriber_service, "tts_pause_ducking_level", 1.0),
+                "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
+                "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
+                "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
+                "tts_style": getattr(transcriber_service, "tts_style", "radio"),
+            }
+        }
+
     changed = False
     if update.enabled is not None and update.enabled != s.transcriber_enabled:
         s.transcriber_enabled = update.enabled
@@ -2167,31 +2749,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         await save_user_settings(uid, s.model_dump())
         if uid == 1:
             save_app_settings(s)
-        transcriber_service.configure(
-            enabled=s.transcriber_enabled,
-            api_key=s.transcriber_api_key,
-            model=s.transcriber_model,
-            target_lang=s.transcriber_target_lang,
-            api_keys=getattr(s, "transcriber_api_keys", []),
-            tts_enabled=getattr(s, "tts_enabled", False),
-            tts_engine=getattr(s, "tts_engine", "gemini"),
-            tts_model=getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
-            tts_voice=getattr(s, "tts_voice", "auto"),
-            tts_speed=getattr(s, "tts_speed", 1.1),
-            tts_ducking_level=getattr(s, "tts_ducking_level", 0.80),
-            tts_pause_ducking_level=getattr(s, "tts_pause_ducking_level", 1.0),
-            tts_mute_others=getattr(s, "tts_mute_others", True),
-            tts_announce_callsign=getattr(s, "tts_announce_callsign", False),
-            tts_skip_short_callsign=getattr(s, "tts_skip_short_callsign", True),
-            tts_style=getattr(s, "tts_style", "radio"),
-            transcriber_engine=getattr(s, "transcriber_engine", "gemini"),
-            translation_engine=getattr(s, "translation_engine", "gemini"),
-            groq_api_key=getattr(s, "groq_api_key", ""),
-            groq_api_keys=getattr(s, "groq_api_keys", []),
-            deepgram_api_key=getattr(s, "deepgram_api_key", ""),
-            gemini_use_first_key_only=getattr(s, "gemini_use_first_key_only", False),
-            groq_use_first_key_only=getattr(s, "groq_use_first_key_only", False)
-        )
+            _configure_transcriber_from_settings(s)
         # Proactively ensure Piper voice is downloaded/preloaded if Piper TTS is active
         if effective_engine == "piper" and eff_l != "none":
             try:
@@ -2345,15 +2903,18 @@ async def test_transcriber_tts(req: TtsTestRequest, request: Request):
     test_text = (req.text or "").strip()
     if not test_text or test_text in TTS_TEST_PHRASES.values():
         test_text = get_tts_test_phrase(target_lang)
+    eff_api_key = req.api_key
+    if (user and user.get("is_demo")) or (eff_api_key and "•" in eff_api_key):
+        eff_api_key = None
     wav_bytes, err = await transcriber_service.synthesize_speech(
         text=test_text,
         model=req.model,
         voice=req.voice,
-        api_key=req.api_key,
+        api_key=eff_api_key,
         target_lang=target_lang,
         engine=req_engine,
         speed=req.speed or 1.0,
-        callsign=req.callsign or "RX6AWG",
+        callsign="DEMO" if (user and user.get("is_demo")) else (req.callsign or "RX6AWG"),
         announce_callsign=bool(req.announce_callsign),
         style=req.tts_style
     )
@@ -3085,9 +3646,13 @@ async def connect_hotspot(hotspot_id: str, request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    is_demo = bool(user and user.get("is_demo"))
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
-    success = await hotspot_manager.connect_hotspot(target_id, user_id=uid)
+    rt_check = hotspot_manager.get_runtime(uid, target_id)
+    if is_demo and rt_check:
+        await _prepare_demo_hotspot_ssid(uid, rt_check)
+    success = await hotspot_manager.connect_hotspot(target_id, user_id=uid, persist=not is_demo)
     rt = hotspot_manager.get_runtime(uid, target_id)
     return {"status": "ok" if success else "error", "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
 
@@ -3097,8 +3662,16 @@ async def disconnect_hotspot(hotspot_id: str, request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    is_demo = bool(user and user.get("is_demo"))
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
+    rt_check = hotspot_manager.get_runtime(uid, target_id)
+    real_hid = rt_check.config.id if rt_check else target_id
+    if is_demo:
+        if rt_check:
+            demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(rt_check.config, "collapsed", False)))
+        if _is_hotspot_open_on_any_client(uid, real_hid):
+            return {"status": "ok", "bm_status": "DISCONNECTED", "detail": "Отключено"}
     success = await hotspot_manager.disconnect_hotspot(target_id, user_id=uid)
     rt = hotspot_manager.get_runtime(uid, target_id)
     return {"status": "ok" if success else "error", "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
@@ -3109,9 +3682,13 @@ async def reconnect_hotspot_api(hotspot_id: str, request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    is_demo = bool(user and user.get("is_demo"))
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
-    success = await hotspot_manager.reconnect_hotspot(target_id, user_id=uid)
+    rt_check = hotspot_manager.get_runtime(uid, target_id)
+    if is_demo and rt_check:
+        await _prepare_demo_hotspot_ssid(uid, rt_check)
+    success = await hotspot_manager.reconnect_hotspot(target_id, user_id=uid, persist=not is_demo)
     rt = hotspot_manager.get_runtime(uid, target_id)
     return {"status": "ok" if success else "error", "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
 
@@ -3121,13 +3698,18 @@ async def collapse_hotspot_api(hotspot_id: str, request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    is_demo = bool(user and user.get("is_demo"))
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
     rt_check = hotspot_manager.get_runtime(uid, target_id)
     real_hid = rt_check.config.id if rt_check else target_id
+    if is_demo and rt_check:
+        s_admin = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        admin_hs_cfg = next((h for h in getattr(s_admin, "hotspots", []) if h.id == real_hid), rt_check.config)
+        demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(admin_hs_cfg, "collapsed", False)))
     if _is_hotspot_open_on_any_client(uid, real_hid):
         return {"status": "ok", "collapsed": True, "bm_status": "OFFLINE", "detail": "Свернут / отключен"}
-    success = await hotspot_manager.set_hotspot_collapsed(target_id, True, user_id=uid)
+    success = await hotspot_manager.set_hotspot_collapsed(target_id, True, user_id=uid, persist=not is_demo)
     if success:
         rt = hotspot_manager.get_runtime(uid, target_id)
         return {"status": "ok", "collapsed": True, "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
@@ -3139,9 +3721,13 @@ async def expand_hotspot_api(hotspot_id: str, request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    is_demo = bool(user and user.get("is_demo"))
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
-    success = await hotspot_manager.set_hotspot_collapsed(target_id, False, user_id=uid)
+    rt_check = hotspot_manager.get_runtime(uid, target_id)
+    if is_demo and rt_check:
+        await _prepare_demo_hotspot_ssid(uid, rt_check)
+    success = await hotspot_manager.set_hotspot_collapsed(target_id, False, user_id=uid, persist=not is_demo)
     if success:
         rt = hotspot_manager.get_runtime(uid, target_id)
         return {"status": "ok", "collapsed": False, "bm_status": rt.status.value if rt else "ONLINE", "detail": rt.detail if rt else ""}
@@ -3154,6 +3740,8 @@ async def set_active_hotspot(payload: dict, request: Request):
     if user:
         await ensure_active_user(uid, user.get("login", ""))
     hid = payload.get("id")
+    if user and user.get("is_demo"):
+        return {"status": "ok", "active_hotspot_id": hid or "default"}
     if not hid or not hotspot_manager.set_active_hotspot(hid, user_id=uid):
         raise HTTPException(status_code=404, detail="Хотспот не найден")
     return {"status": "ok", "active_hotspot_id": hid}
@@ -3165,7 +3753,7 @@ async def set_radio_tg(payload: dict, request: Request = None):
     if user:
         await ensure_active_user(uid, user.get("login", ""))
 
-    u_radio_state = hotspot_manager.get_user_tx_state(user_id=uid)
+    u_radio_state = get_user_radio_state(uid)
     slot = int(payload.get("slot", u_radio_state.tx_slot))
     new_tg = int(payload.get("tg", u_radio_state.active_tg))
     hid = payload.get("hotspot_id")
@@ -3267,7 +3855,8 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, allow_fallback=False, user_id=uid)
     net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower() if cfg else "bm"
     if not api_key:
-        return {"status": "NO_KEY", "detail": err or "Ключ не задан", "device_id": device_id, "network_type": net_type}
+        res_nk = {"status": "NO_KEY", "detail": err or "Ключ не задан", "device_id": device_id, "network_type": net_type}
+        return _mask_bm_resp_for_demo(res_nk, cfg) if (user and user.get("is_demo")) else res_nk
 
     def _check():
         import urllib.request, urllib.error
@@ -3341,7 +3930,10 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
         except Exception as e:
             return {"status": "OFFLINE", "network_type": "bm", "detail": "Сервер BM недоступен", "device_id": device_id}
 
-    return await asyncio.to_thread(_check)
+    res = await asyncio.to_thread(_check)
+    if user and user.get("is_demo") and isinstance(res, dict):
+        res = _mask_bm_resp_for_demo(res, cfg)
+    return res
 
 @app.get("/api/tg/names")
 async def get_tg_names(network: str = "bm"):
@@ -3503,6 +4095,14 @@ async def manual_sync_dmr_databases():
 
 @app.get("/api/bm/static-groups")
 async def get_bm_static_groups(hotspot_id: Optional[str] = None, request: Request = None):
+    resp = await _get_bm_static_groups_impl(hotspot_id, request)
+    user = _get_user_from_request(request) if request else None
+    if user and user.get("is_demo") and isinstance(resp, dict):
+        cfg_chk, _, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=user["user_id"])
+        resp = _mask_bm_resp_for_demo(resp, cfg_chk)
+    return resp
+
+async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: Request = None):
     user = _get_user_from_request(request) if request else None
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
@@ -3989,13 +4589,26 @@ from src.dmr.bm_import import (
 )
 
 async def _execute_bm_import(task: BmImportTask, device_id: str, api_key: str):
-    await _execute_bm_import_fn(
-        task=task,
-        device_id=device_id,
-        api_key=api_key,
-        broadcast_fn=broadcast_user_json,
-        reconnect_fn=schedule_bm_reconnect_after_group_mod
-    )
+    try:
+        await _execute_bm_import_fn(
+            task=task,
+            device_id=device_id,
+            api_key=api_key,
+            broadcast_fn=broadcast_user_json,
+            reconnect_fn=schedule_bm_reconnect_after_group_mod,
+            hotspot_manager=hotspot_manager
+        )
+    except Exception as e:
+        logger.error(f"[BM_TASK] Unhandled error in background task {task.task_id}: {e}")
+        task.status = "error"
+        task.message = f"Ошибка фоновой операции: {e}"
+        task.finished_at = time.time()
+        if _user_active_bm_import.get(task.user_id) == task.task_id:
+            _user_active_bm_import.pop(task.user_id, None)
+        try:
+            await broadcast_user_json(task.user_id, {"type": "bm_import_finished", "task": task.to_dict()})
+        except Exception:
+            pass
 
 
 @app.post("/api/bm/static-groups")
@@ -4354,6 +4967,22 @@ async def get_bm_static_groups_import_status(hotspot_id: Optional[str] = None, r
     active_tid = _user_active_bm_import.get(uid)
     if active_tid and active_tid in _bm_import_tasks:
         t = _bm_import_tasks[active_tid]
+        now_ts = time.time()
+        # Предохранитель от зависших/зомби задач
+        if t.status == "running" and (
+            t.cancelled
+            or (now_ts - t.started_at > 180.0)
+            or (t.current == 0 and now_ts - t.started_at > 15.0)
+        ):
+            t.cancel()
+            t.finished_at = now_ts
+            _user_active_bm_import.pop(uid, None)
+            return {"status": "idle", "task": None}
+        if t.status != "running" and t.finished_at and (now_ts - t.finished_at > 10.0):
+            _user_active_bm_import.pop(uid, None)
+            return {"status": "idle", "task": None}
+        if hotspot_id and t.hotspot_id and str(t.hotspot_id) != str(hotspot_id):
+            return {"status": "idle", "task": None}
         return {"status": "ok", "task": t.to_dict()}
     return {"status": "idle", "task": None}
 
@@ -4367,9 +4996,14 @@ async def cancel_bm_static_groups_import(request: Request = None):
     active_tid = _user_active_bm_import.get(uid)
     if active_tid and active_tid in _bm_import_tasks:
         t = _bm_import_tasks[active_tid]
-        if t.status == "running":
-            t.cancelled = True
-            return {"status": "ok", "message": "Запрос на отмену отправлен"}
+        t.cancel()
+        t.finished_at = time.time()
+        _user_active_bm_import.pop(uid, None)
+        try:
+            await broadcast_user_json(uid, {"type": "bm_import_finished", "task": t.to_dict()})
+        except Exception:
+            pass
+        return {"status": "ok", "task": t.to_dict(), "message": "Операция отменена"}
     return {"status": "not_running", "message": "Нет активной операции"}
 
 
@@ -5266,7 +5900,11 @@ async def get_health():
         "status": "online",
         "hotspots_online": total_online,
         "hotspots_total": total_hs,
-        "clients_connected": len(connected_clients)
+        "clients_connected": len(connected_clients),
+        "version": APP_VERSION,
+        "uptime": memguard.uptime_sec(),
+        "rss_mb": memguard.read_rss_mb(),
+        "started_at": memguard.started_at_iso(),
     }
 
 @app.get("/api/status")
@@ -5277,7 +5915,7 @@ async def get_status(request: Request = None):
         await ensure_active_user(uid, user.get("login", ""))
     active_hs = hotspot_manager.get_active_runtime(uid)
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings) if uid else hotspot_manager.settings
-    u_radio_state = hotspot_manager.get_user_tx_state(user_id=uid)
+    u_radio_state = get_user_radio_state(uid)
     cfg = active_hs.config if active_hs else (user_sett.get_active_hotspot() if hasattr(user_sett, "get_active_hotspot") else HotspotConfig())
     apk_meta = get_current_apk_metadata()
     return {
@@ -5295,7 +5933,7 @@ async def get_status(request: Request = None):
         "tx_slot": u_radio_state.tx_slot,
         "active_tg": u_radio_state.active_tg,
         "loopback_mode": getattr(user_sett, "loopback_mode", app_settings.loopback_mode),
-        "active_hotspot": active_hs.to_dict() if active_hs else None,
+        "active_hotspot": (mask_hotspot_dict_for_demo(active_hs.to_dict()) if (user and user.get("is_demo") and active_hs) else (active_hs.to_dict() if active_hs else None)),
         "bm_status": active_hs.status.value if active_hs else "OFFLINE",
         "bm_detail": active_hs.detail if active_hs else "Отключен",
         "bm_master": f"{cfg.bm_master_host}:{cfg.bm_master_port}" if cfg else "---",
@@ -5379,6 +6017,7 @@ async def apply_update_endpoint(request: Request, payload: Optional[ApplyUpdateR
 # --- HamQTH.com XML API Endpoints ---
 
 class HamQthTestRequest(BaseModel):
+    portal: Optional[str] = "hamqth"
     username: Optional[str] = None
     password: Optional[str] = None
     session_key: Optional[str] = None
@@ -5390,11 +6029,17 @@ async def test_hamqth_connection(payload: Optional[HamQthTestRequest] = None, re
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
 
-    username = (payload.username if payload and payload.username is not None else getattr(s, "hamqth_username", "")) or ""
-    password = (payload.password if payload and payload.password is not None else getattr(s, "hamqth_password", "")) or ""
+    portal = (payload.portal if payload and payload.portal else "hamqth").lower()
+    if portal == "qrz_com":
+        username = (payload.username if payload and payload.username is not None else getattr(s, "qrz_com_username", "")) or ""
+        password = (payload.password if payload and payload.password is not None else getattr(s, "qrz_com_password", "")) or ""
+    else:  # hamqth
+        username = (payload.username if payload and payload.username is not None else getattr(s, "hamqth_username", "")) or ""
+        password = (payload.password if payload and payload.password is not None else getattr(s, "hamqth_password", "")) or ""
+
     session_key = (payload.session_key if payload and payload.session_key is not None else "") or ""
 
-    res = await hamqth_service.test_connection(username, password, session_key)
+    res = await hamqth_service.test_connection(username, password, session_key, portal=portal)
     return res
 
 @app.get("/api/callsign/hamqth/{query}")
@@ -5404,15 +6049,19 @@ async def lookup_callsign_hamqth(query: str, request: Request):
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
 
-    username = getattr(s, "hamqth_username", "") or ""
-    password = getattr(s, "hamqth_password", "") or ""
+    sett_u1 = hotspot_manager.user_settings.get(1) or hotspot_manager.settings
 
-    if not username or not password:
-        # Fallback to system / admin settings (user 1 or hotspot_manager.settings)
-        sett_u1 = hotspot_manager.user_settings.get(1) or hotspot_manager.settings
-        if sett_u1:
-            username = username or getattr(sett_u1, "hamqth_username", "") or ""
-            password = password or getattr(sett_u1, "hamqth_password", "") or ""
+    qrz_com_u = getattr(s, "qrz_com_username", "") or (getattr(sett_u1, "qrz_com_username", "") if sett_u1 else "") or ""
+    qrz_com_p = getattr(s, "qrz_com_password", "") or (getattr(sett_u1, "qrz_com_password", "") if sett_u1 else "") or ""
+
+    hamqth_u = getattr(s, "hamqth_username", "") or (getattr(sett_u1, "hamqth_username", "") if sett_u1 else "") or ""
+    hamqth_p = getattr(s, "hamqth_password", "") or (getattr(sett_u1, "hamqth_password", "") if sett_u1 else "") or ""
+
+
+    creds = {
+        "qrz_com": (qrz_com_u, qrz_com_p),
+        "hamqth": (hamqth_u, hamqth_p),
+    }
 
     target = query.strip()
     # Strip SSID suffix if present (e.g., UB3DLP-7 -> UB3DLP)
@@ -5458,7 +6107,7 @@ async def lookup_callsign_hamqth(query: str, request: Request):
                 "message": f"DMR ID {query.strip()} не найден в базе RadioID, невозможно определить позывной для запроса к HamQTH.com"
             }
 
-    res = await hamqth_service.lookup_callsign(target, username=username, password=password)
+    res = await hamqth_service.lookup_callsign_multi(target, creds)
     return res
 
 @app.get("/api/config")
@@ -5469,9 +6118,11 @@ async def get_config(request: Request = None):
         await ensure_active_user(uid, user.get("login", ""))
     active_hs = hotspot_manager.get_active_runtime(uid)
     if active_hs:
-        return active_hs.config.model_dump()
+        res = active_hs.config.model_dump()
+        return mask_hotspot_dict_for_demo(res) if (user and user.get("is_demo")) else res
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings) if uid else hotspot_manager.settings
-    return user_sett.hotspots[0].model_dump() if user_sett.hotspots else HotspotConfig().model_dump()
+    res = user_sett.hotspots[0].model_dump() if user_sett.hotspots else HotspotConfig().model_dump()
+    return mask_hotspot_dict_for_demo(res) if (user and user.get("is_demo")) else res
 
 @app.post("/api/config")
 async def update_config(payload: dict, request: Request = None):
@@ -5534,8 +6185,11 @@ async def get_recent_calls(request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    raw_calls = [e.to_dict() for e in hotspot_manager.get_calls_history(user_id=uid)]
+    if user and user.get("is_demo"):
+        raw_calls = [mask_call_entry_for_demo(c) for c in raw_calls]
     return {
-        "calls": [e.to_dict() for e in hotspot_manager.get_calls_history(user_id=uid)]
+        "calls": raw_calls
     }
 
 
@@ -6186,23 +6840,40 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 ws_user_map.pop(ws_s, None)
 
     _prune_stale_ws()
+    ws_is_demo = bool(ws_user.get("is_demo"))
+    ws_demo_sid = ws_user.get("demo_sid", "")
+    demo_sess = None
+    if ws_is_demo:
+        demo_sess = demo_manager.get_session(ws_demo_sid)
+        if not demo_sess or not demo_manager.get_config().get("enabled"):
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "demo_expired",
+                    "cooldown_seconds": demo_manager.get_config().get("cooldown_seconds", 60),
+                }))
+                await websocket.close(code=4009, reason="Demo session expired")
+            except Exception:
+                pass
+            return
+
     MAX_CONNECTIONS_PER_USER = 3
-    if len(user_clients.get(ws_user_id, set())) >= MAX_CONNECTIONS_PER_USER:
+    non_demo_active = [s for s in user_clients.get(ws_user_id, set()) if s not in demo_ws_clients]
+    if not ws_is_demo and len(non_demo_active) >= MAX_CONNECTIONS_PER_USER:
         # Short grace yield in case a page refresh (F5) is closing an existing tab socket right now
         await asyncio.sleep(0.12)
         _prune_stale_ws()
+        non_demo_active = [s for s in user_clients.get(ws_user_id, set()) if s not in demo_ws_clients]
 
-    active_user_sockets = user_clients.get(ws_user_id, set())
-    if len(active_user_sockets) >= MAX_CONNECTIONS_PER_USER:
+    if not ws_is_demo and len(non_demo_active) >= MAX_CONNECTIONS_PER_USER:
         logger.warning(
             f"[WS] Connection rejected for {client_id} (user={ws_login}, id={ws_user_id}): "
-            f"limit {MAX_CONNECTIONS_PER_USER} reached ({len(active_user_sockets)} active)"
+            f"limit {MAX_CONNECTIONS_PER_USER} reached ({len(non_demo_active)} active)"
         )
         try:
             await websocket.send_text(json.dumps({
                 "type": "session_limit_exceeded",
                 "max_connections": MAX_CONNECTIONS_PER_USER,
-                "active_connections": len(active_user_sockets),
+                "active_connections": len(non_demo_active),
                 "login": ws_login
             }))
         except Exception:
@@ -6218,7 +6889,9 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         user_clients[ws_user_id] = set()
     user_clients[ws_user_id].add(websocket)
     ws_user_map[websocket] = ws_user_id
-    logger.info(f"[WS] Client connected: {client_id} (user={ws_login}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
+    if ws_is_demo:
+        demo_ws_clients[websocket] = ws_demo_sid
+    logger.info(f"[WS] Client connected: {client_id} (user={ws_login}, demo={ws_is_demo}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
 
     user_settings = await ensure_active_user(ws_user_id, ws_login)
     ws_active_hotspots[websocket] = {
@@ -6238,99 +6911,151 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     custom_wp_dark = f"/static/img/wallpapers/bg-custom-u{ws_user_id}-dark.jpg?v={int((wp_dir / f'bg-custom-u{ws_user_id}-dark.jpg').stat().st_mtime)}" if (wp_dir / f"bg-custom-u{ws_user_id}-dark.jpg").exists() else (f"/static/img/bg-custom-dark.jpg?v={int((STATIC_DIR / 'img' / 'bg-custom-dark.jpg').stat().st_mtime)}" if ws_user_id == 1 and (STATIC_DIR / "img" / "bg-custom-dark.jpg").exists() else None)
     custom_wp_light = f"/static/img/wallpapers/bg-custom-u{ws_user_id}-light.jpg?v={int((wp_dir / f'bg-custom-u{ws_user_id}-light.jpg').stat().st_mtime)}" if (wp_dir / f"bg-custom-u{ws_user_id}-light.jpg").exists() else (f"/static/img/bg-custom-light.jpg?v={int((STATIC_DIR / 'img' / 'bg-custom-light.jpg').stat().st_mtime)}" if ws_user_id == 1 and (STATIC_DIR / "img" / "bg-custom-light.jpg").exists() else None)
 
-    ws_role = await get_user_role(ws_user_id)
-    ws_is_swl = await is_user_swl(ws_user_id)
+    ws_role = "demo" if ws_is_demo else await get_user_role(ws_user_id)
+    ws_is_swl = True if ws_is_demo else await is_user_swl(ws_user_id)
 
-    await websocket.send_text(json.dumps({
-        "type": "init",
-        "user_id": ws_user_id,
-        "login": ws_login,
-        "role": ws_role,
-        "is_swl": ws_is_swl,
-        "version": APP_VERSION,
-        "version_date": APP_VERSION_DATE,
-        "apk_version": apk_meta["apk_version"],
-        "apk_version_date": apk_meta["apk_version_date"],
-        "apk_filename": apk_meta["apk_filename"],
-        "apk_path": apk_meta["apk_path"],
-        "apk_url": apk_meta["apk_url"],
-        "server_time": time.time() * 1000,
-        "active_hotspot_id": user_settings.active_hotspot_id,
-        "active_hotspot": active_hs.to_dict() if active_hs else None,
-        "hotspots": [rt.to_dict() for rt in hotspot_manager.get_user_runtimes(ws_user_id).values()],
-        "bm_pings": bm_ping_service.cached_pings,
-        "bm_host_pings": bm_ping_service.cached_host_pings,
-        "bm_losses": bm_ping_service.cached_losses,
-        "bm_host_losses": bm_ping_service.cached_host_losses,
-        "bm_ping_history": bm_ping_service.get_history_dict(hours=24.0),
-        "bm_benchmark_results": bm_ping_service.get_benchmark_results(),
-        "bm_benchmark_running": bm_ping_service.is_benchmark_running(),
-        "server_probe_cache": server_probe_service._cache,
-        "server_probe_running": server_probe_service.is_probe_running(),
-        "client_ping_history": client_ping_service.get_history_list(hours=6.0),
-        "client_rtt": client_ping_service.current_rtt,
-        "client_packet_loss": client_ping_service.get_packet_loss(),
-        "calls": [e.to_dict() for e in hotspot_manager.get_calls_history(user_id=ws_user_id)],
-        "app_settings": {
-            "theme": getattr(user_settings, "theme", "dark") or "dark",
-            "bg_type": "color" if getattr(user_settings, "bg_type", "pattern") == "color" else "pattern",
-            "bg_color": user_settings.bg_color or "#0f1115",
-            "bg_type_dark": "color" if getattr(user_settings, "bg_type_dark", "pattern") == "color" else "pattern",
-            "bg_color_dark": getattr(user_settings, "bg_color_dark", "#0f1115") or "#0f1115",
-            "bg_type_light": "color" if getattr(user_settings, "bg_type_light", "pattern") == "color" else "pattern",
-            "bg_color_light": getattr(user_settings, "bg_color_light", "#f4f6f8") or "#f4f6f8",
-            "custom_wallpaper_dark": custom_wp_dark,
-            "custom_wallpaper_light": custom_wp_light,
-            "language": user_settings.language,
-            "simultaneous_slots": user_settings.simultaneous_slots,
-            "mute_on_ptt": user_settings.mute_on_ptt,
-            "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
-            "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
-            "sync_hotspot_volume": getattr(user_settings, "sync_hotspot_volume", True),
-            "sync_system_volume": getattr(user_settings, "sync_system_volume", True),
-            "haptic_feedback": getattr(user_settings, "haptic_feedback", True),
-            "haptic_duration": getattr(user_settings, "haptic_duration", 45),
-            "hamqth_username": getattr(user_settings, "hamqth_username", "") or "",
-            "hamqth_password": getattr(user_settings, "hamqth_password", "") or "",
-            "loopback_mode": user_settings.loopback_mode,
-            "quick_mem": user_settings.quick_mem,
-        },
-        "client_settings": getattr(user_settings, "client_settings", None) or getattr(hotspot_manager.settings, "client_settings", {}) or {},
-        "state": {
-            "tx_slot": u_radio_state.tx_slot,
-            "active_tg": active_tg,
-            "tg_ts1": tg_ts1,
-            "tg_ts2": tg_ts2,
-            "is_tx": u_radio_state.is_transmitting,
-            "is_rx": u_radio_state.is_rx,
-            "loopback_mode": user_settings.loopback_mode,
-            "mute_on_ptt": user_settings.mute_on_ptt,
-            "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
-            "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
-            "haptic_feedback": getattr(user_settings, "haptic_feedback", True),
-            "haptic_duration": getattr(user_settings, "haptic_duration", 45),
-            "bm_status": active_hs.status.value if active_hs else "OFFLINE",
-            "bm_detail": active_hs.detail if active_hs else "Отключен",
-            "agc": hotspot_manager.get_agc_settings(user_id=ws_user_id),
-        }
-    }))
-
+    demo_timer_task = None
     try:
-        for hid, runner in offline_transcribe_manager.runners.items():
-            if runner.is_running:
-                await websocket.send_text(json.dumps({
-                    "type": "offline_transcribe_state",
-                    "hotspot_id": hid,
-                    "active": True,
-                    "status": "running",
-                    "stats": runner.stats
-                }))
-    except Exception:
-        pass
+        await websocket.send_text(json.dumps({
+            "type": "init",
+            "user_id": ws_user_id,
+            "login": ws_login,
+            "role": ws_role,
+            "is_swl": ws_is_swl,
+            "version": APP_VERSION,
+            "version_date": APP_VERSION_DATE,
+            "apk_version": apk_meta["apk_version"],
+            "apk_version_date": apk_meta["apk_version_date"],
+            "apk_filename": apk_meta["apk_filename"],
+            "apk_path": apk_meta["apk_path"],
+            "apk_url": apk_meta["apk_url"],
+            "server_time": time.time() * 1000,
+            "active_hotspot_id": user_settings.active_hotspot_id,
+            "is_demo": ws_is_demo,
+            "demo_expires_at": int(demo_sess.expires_at) if (ws_is_demo and demo_sess) else None,
+            "demo_session_minutes": demo_manager.get_config()["session_minutes"] if ws_is_demo else None,
+            "demo_cooldown_seconds": demo_manager.get_config()["cooldown_seconds"] if ws_is_demo else None,
+            "active_hotspot": (mask_hotspot_dict_for_demo(active_hs.to_dict()) if (ws_is_demo and active_hs) else (active_hs.to_dict() if active_hs else None)),
+            "hotspots": [(mask_hotspot_dict_for_demo(rt.to_dict(), index=idx) if ws_is_demo else rt.to_dict()) for idx, rt in enumerate(hotspot_manager.get_user_runtimes(ws_user_id).values())],
+            "bm_pings": bm_ping_service.cached_pings,
+            "bm_host_pings": bm_ping_service.cached_host_pings,
+            "bm_losses": bm_ping_service.cached_losses,
+            "bm_host_losses": bm_ping_service.cached_host_losses,
+            "bm_ping_history": bm_ping_service.get_history_dict(hours=24.0),
+            "bm_benchmark_results": bm_ping_service.get_benchmark_results(),
+            "bm_benchmark_running": bm_ping_service.is_benchmark_running(),
+            "server_probe_cache": server_probe_service._cache,
+            "server_probe_running": server_probe_service.is_probe_running(),
+            "client_ping_history": client_ping_service.get_history_list(hours=6.0),
+            "client_rtt": client_ping_service.current_rtt,
+            "client_packet_loss": client_ping_service.get_packet_loss(),
+            "calls": [mask_call_entry_for_demo(e.to_dict()) if ws_is_demo else e.to_dict() for e in hotspot_manager.get_calls_history(user_id=ws_user_id)],
+            "app_settings": {
+                "theme": getattr(user_settings, "theme", "dark") or "dark",
+                "bg_type": "color" if getattr(user_settings, "bg_type", "pattern") == "color" else "pattern",
+                "bg_color": user_settings.bg_color or "#0f1115",
+                "bg_type_dark": "color" if getattr(user_settings, "bg_type_dark", "pattern") == "color" else "pattern",
+                "bg_color_dark": getattr(user_settings, "bg_color_dark", "#0f1115") or "#0f1115",
+                "bg_type_light": "color" if getattr(user_settings, "bg_type_light", "pattern") == "color" else "pattern",
+                "bg_color_light": getattr(user_settings, "bg_color_light", "#f4f6f8") or "#f4f6f8",
+                "custom_wallpaper_dark": custom_wp_dark,
+                "custom_wallpaper_light": custom_wp_light,
+                "language": user_settings.language,
+                "simultaneous_slots": user_settings.simultaneous_slots,
+                "mute_on_ptt": user_settings.mute_on_ptt,
+                "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
+                "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
+                "sync_hotspot_volume": getattr(user_settings, "sync_hotspot_volume", True),
+                "sync_system_volume": getattr(user_settings, "sync_system_volume", True),
+                "haptic_feedback": getattr(user_settings, "haptic_feedback", True),
+                "haptic_duration": getattr(user_settings, "haptic_duration", 45),
+                "qrz_com_username": ("Your CALL" if ws_is_demo else (getattr(user_settings, "qrz_com_username", "") or "")),
+                "qrz_com_password": ("••••••••••••" if ws_is_demo else (getattr(user_settings, "qrz_com_password", "") or "")),
+                "hamqth_username": ("Your CALL" if ws_is_demo else (getattr(user_settings, "hamqth_username", "") or "")),
+                "hamqth_password": ("••••••••••••" if ws_is_demo else (getattr(user_settings, "hamqth_password", "") or "")),
+                "loopback_mode": user_settings.loopback_mode,
+                "quick_mem": user_settings.quick_mem,
+            },
+            "client_settings": getattr(user_settings, "client_settings", None) or getattr(hotspot_manager.settings, "client_settings", {}) or {},
+            "state": {
+                "tx_slot": u_radio_state.tx_slot,
+                "active_tg": active_tg,
+                "tg_ts1": tg_ts1,
+                "tg_ts2": tg_ts2,
+                "is_tx": u_radio_state.is_transmitting,
+                "is_rx": u_radio_state.is_rx,
+                "loopback_mode": user_settings.loopback_mode,
+                "mute_on_ptt": user_settings.mute_on_ptt,
+                "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
+                "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
+                "haptic_feedback": getattr(user_settings, "haptic_feedback", True),
+                "haptic_duration": getattr(user_settings, "haptic_duration", 45),
+                "bm_status": active_hs.status.value if active_hs else "OFFLINE",
+                "bm_detail": active_hs.detail if active_hs else "Отключен",
+                "agc": hotspot_manager.get_agc_settings(user_id=ws_user_id),
+            }
+        }))
 
-    try:
+        try:
+            for hid, runner in offline_transcribe_manager.runners.items():
+                if runner.is_running:
+                    await websocket.send_text(json.dumps({
+                        "type": "offline_transcribe_state",
+                        "hotspot_id": hid,
+                        "active": True,
+                        "status": "running",
+                        "stats": runner.stats
+                    }))
+        except Exception:
+            pass
+
+        if ws_is_demo and demo_sess:
+            async def _watch_demo_expiry():
+                try:
+                    rem = max(0.5, demo_sess.expires_at - time.time())
+                    await asyncio.sleep(rem)
+                    demo_manager.end_session(ws_demo_sid, apply_cooldown=True)
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "demo_expired",
+                            "cooldown_seconds": demo_manager.get_config().get("cooldown_seconds", 60),
+                        }))
+                        await websocket.close(code=4009, reason="Demo session expired")
+                    except Exception:
+                        pass
+                except asyncio.CancelledError:
+                    pass
+            demo_timer_task = asyncio.create_task(_watch_demo_expiry())
+
         while True:
             message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            if ws_is_demo and "bytes" in message:
+                continue
+            if ws_is_demo and "text" in message:
+                try:
+                    d_check = json.loads(message["text"])
+                    m_type = d_check.get("type")
+                except Exception:
+                    continue
+                if m_type in ("ping", "client_ping"):
+                    pass  # let handle below
+                elif m_type in ("set_transcribe_slot", "set_tts_slot"):
+                    pass  # allow demo client to turn ON slot transcription and TTS speech synthesis
+                elif m_type in ("hotspot_collapse", "bm_connect", "bm_disconnect", "bm_reconnect", "set_active_hotspot"):
+                    pass  # allow demo client to expand/collapse/connect hotspots in-memory
+                else:
+                    if m_type == "ptt_press":
+                        try:
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "message": "🎧 Демо-режим: передача отключена (только приём)",
+                                "code": "DEMO_DENIED"
+                            }))
+                        except Exception:
+                            pass
+                    continue
             if "text" in message:
                 try:
                     data = json.loads(message["text"])
@@ -6843,20 +7568,28 @@ async def websocket_radio_endpoint(websocket: WebSocket):
 
                 elif msg_type == "set_active_hotspot":
                     hid = data.get("id")
-                    if hid:
+                    if hid and not ws_is_demo:
                         hotspot_manager.set_active_hotspot(hid, user_id=ws_user_id)
 
                 elif msg_type == "bm_connect":
                     hid = data.get("hotspot_id")
                     target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
                     if target_hs:
-                        await hotspot_manager.connect_hotspot(target_hs.config.id, user_id=ws_user_id)
+                        if ws_is_demo:
+                            await _prepare_demo_hotspot_ssid(ws_user_id, target_hs)
+                            ws_active_hotspots.setdefault(websocket, set()).add(target_hs.config.id)
+                        await hotspot_manager.connect_hotspot(target_hs.config.id, user_id=ws_user_id, persist=not ws_is_demo)
 
                 elif msg_type == "bm_disconnect":
                     hid = data.get("hotspot_id")
                     target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
                     if target_hs:
-                        await hotspot_manager.disconnect_hotspot(target_hs.config.id, user_id=ws_user_id)
+                        real_hid = target_hs.config.id
+                        if ws_is_demo:
+                            ws_active_hotspots.setdefault(websocket, set()).discard(real_hid)
+                            if _is_hotspot_open_on_any_client(ws_user_id, real_hid, exclude_ws=websocket):
+                                continue
+                        await hotspot_manager.disconnect_hotspot(real_hid, user_id=ws_user_id)
 
                 elif msg_type == "hotspot_collapse":
                     hid = data.get("hotspot_id")
@@ -6867,11 +7600,17 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         hset = ws_active_hotspots.setdefault(websocket, set())
                         if collapsed:
                             hset.discard(real_hid)
+                            if ws_is_demo:
+                                s_admin = hotspot_manager.user_settings.get(ws_user_id, hotspot_manager.settings)
+                                admin_hs_cfg = next((h for h in getattr(s_admin, "hotspots", []) if h.id == real_hid), target_hs.config)
+                                demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(admin_hs_cfg, "collapsed", False)))
                             if not _is_hotspot_open_on_any_client(ws_user_id, real_hid, exclude_ws=websocket):
-                                await hotspot_manager.set_hotspot_collapsed(real_hid, True, user_id=ws_user_id)
+                                await hotspot_manager.set_hotspot_collapsed(real_hid, True, user_id=ws_user_id, persist=not ws_is_demo)
                         else:
+                            if ws_is_demo:
+                                await _prepare_demo_hotspot_ssid(ws_user_id, target_hs)
                             hset.add(real_hid)
-                            await hotspot_manager.set_hotspot_collapsed(real_hid, False, user_id=ws_user_id)
+                            await hotspot_manager.set_hotspot_collapsed(real_hid, False, user_id=ws_user_id, persist=not ws_is_demo)
                             try:
                                 await websocket.send_text(json.dumps({
                                     "type": "bm_status",
@@ -6936,7 +7675,9 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     hid = data.get("hotspot_id")
                     target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
                     if target_hs:
-                        await hotspot_manager.reconnect_hotspot(target_hs.config.id, user_id=ws_user_id)
+                        if ws_is_demo:
+                            await _prepare_demo_hotspot_ssid(ws_user_id, target_hs)
+                        await hotspot_manager.reconnect_hotspot(target_hs.config.id, user_id=ws_user_id, persist=not ws_is_demo)
 
                 elif msg_type in ("ping", "client_ping"):
                     seq = data.get("seq")
@@ -6978,18 +7719,31 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"[WS] Error on {client_id}: {e}")
     finally:
+        if demo_timer_task and not demo_timer_task.done():
+            demo_timer_task.cancel()
+        was_demo = (websocket in demo_ws_clients)
+        demo_sid_disc = demo_ws_clients.pop(websocket, None)
+        if was_demo and demo_sid_disc:
+            async def _delayed_demo_release(sid_to_check: str):
+                await asyncio.sleep(15.0)
+                if sid_to_check not in demo_ws_clients.values():
+                    demo_manager.end_session(sid_to_check, apply_cooldown=False)
+                await _revert_demo_runtime_state()
+            asyncio.create_task(_delayed_demo_release(demo_sid_disc))
         connected_clients.discard(websocket)
+        if not connected_clients and transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
+            transcriber_service.disable_all_slots()
         removed_hids = ws_active_hotspots.pop(websocket, set())
         disc_uid = ws_user_map.pop(websocket, None)
         if disc_uid and disc_uid in user_clients:
             user_clients[disc_uid].discard(websocket)
             if not user_clients[disc_uid]:
                 user_clients.pop(disc_uid, None)
-            else:
+            elif not was_demo:
                 for r_hid in list(removed_hids):
                     if not _is_hotspot_open_on_any_client(disc_uid, r_hid):
                         await hotspot_manager.set_hotspot_collapsed(r_hid, True, user_id=disc_uid)
-        if u_radio_state.transmitting_client_id == client_id:
+        if not was_demo and u_radio_state.transmitting_client_id == client_id:
             await hotspot_manager.stop_tx(user_id=ws_user_id)
             u_radio_state.is_transmitting = False
             u_radio_state.transmitting_client_id = None

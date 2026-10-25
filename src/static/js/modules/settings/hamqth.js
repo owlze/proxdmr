@@ -1,19 +1,28 @@
 /**
- * ProxDMR - HamQTH.com Settings & Connection Test Subsystem
+ * ProxDMR - HAM Web Portals Settings & Connection Test Subsystem
+ * Supports QRZ.com and HamQTH.com
  */
 
 import { showToast } from "../core/toast.js";
 
 export function initHamQthSettings() {
-  const optUsername = document.getElementById("optHamQthUsername");
-  const optPassword = document.getElementById("optHamQthPassword");
-  const btnTogglePw = document.getElementById("btnToggleHamQthPassword");
-  const btnTest = document.getElementById("btnTestHamQth");
-  const testStatus = document.getElementById("hamQthTestStatus");
-  const btnOpenFromModal = document.getElementById("btnOpenHamQthSettings");
   const frame = document.getElementById("hamQthSettingsFrame");
   const toggle = document.getElementById("hamQthSettingsToggle");
+  const btnOpenFromModal = document.getElementById("btnOpenHamQthSettings");
 
+  // 1. QRZ.com elements
+  const optQrzComUser = document.getElementById("optQrzComUsername");
+  const optQrzComPass = document.getElementById("optQrzComPassword");
+  const btnToggleQrzCom = document.getElementById("btnToggleQrzComPassword");
+  const btnTestQrzCom = document.getElementById("btnTestQrzCom");
+  const statusQrzCom = document.getElementById("qrzComTestStatus");
+
+  // 2. HamQTH.com elements
+  const optHamQthUser = document.getElementById("optHamQthUsername");
+  const optHamQthPass = document.getElementById("optHamQthPassword");
+  const btnToggleHamQth = document.getElementById("btnToggleHamQthPassword");
+  const btnTestHamQth = document.getElementById("btnTestHamQth");
+  const statusHamQth = document.getElementById("hamQthTestStatus");
   // Collapsible frame toggle
   if (frame && toggle && !toggle._wired) {
     toggle._wired = true;
@@ -22,84 +31,95 @@ export function initHamQthSettings() {
     });
   }
 
-  // Toggle password visibility
-  if (btnTogglePw && optPassword) {
-    btnTogglePw.addEventListener("click", () => {
-      if (optPassword.type === "password") {
-        optPassword.type = "text";
-        btnTogglePw.textContent = "🙈";
+  // Password visibility helper
+  function wirePasswordToggle(inputEl, btnEl) {
+    if (!inputEl || !btnEl || btnEl._wired) return;
+    btnEl._wired = true;
+    btnEl.addEventListener("click", () => {
+      if (inputEl.type === "password") {
+        inputEl.type = "text";
+        btnEl.textContent = "🙈";
       } else {
-        optPassword.type = "password";
-        btnTogglePw.textContent = "👁️";
+        inputEl.type = "password";
+        btnEl.textContent = "👁️";
       }
     });
   }
 
+  wirePasswordToggle(optQrzComPass, btnToggleQrzCom);
+  wirePasswordToggle(optHamQthPass, btnToggleHamQth);
+
   // Save helper function
   async function saveHamQthSettings(showNotify = false) {
-    const username = optUsername ? optUsername.value.trim() : "";
-    const password = optPassword ? optPassword.value.trim() : "";
+    if (window.isDemoMode) {
+      return { status: "demo_blocked" };
+    }
+
+    const payload = {
+      qrz_com_username: optQrzComUser ? optQrzComUser.value.trim() : "",
+      qrz_com_password: optQrzComPass ? optQrzComPass.value.trim() : "",
+      hamqth_username: optHamQthUser ? optHamQthUser.value.trim() : "",
+      hamqth_password: optHamQthPass ? optHamQthPass.value.trim() : "",
+    };
 
     try {
       const resp = await fetch("/api/settings/general", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          hamqth_username: username,
-          hamqth_password: password
-        })
+        body: JSON.stringify(payload)
       });
       const data = await resp.json();
-      if (showNotify && data.status === "ok") {
-        showToast(window.t ? window.t("hamqth.settings_saved", {}, "✓ Настройки HamQTH сохранены") : "✓ Настройки HamQTH сохранены", 2500);
+      if (showNotify && data && data.status === "ok") {
+        showToast(window.t ? window.t("hamqth.settings_saved", {}, "✓ Настройки HAM порталов сохранены") : "✓ Настройки HAM порталов сохранены", 2500);
       }
       return data;
     } catch (err) {
-      console.warn("[HamQTH] Failed to save settings:", err);
+      console.warn("[HAM Portals] Failed to save settings:", err);
       if (showNotify) {
-        showToast(window.t ? window.t("hamqth.settings_save_err", {}, "⚠️ Ошибка сохранения настроек HamQTH") : "⚠️ Ошибка сохранения настроек HamQTH", 3000);
+        showToast(window.t ? window.t("hamqth.settings_save_err", {}, "⚠️ Ошибка сохранения настроек HAM порталов") : "⚠️ Ошибка сохранения настроек HAM порталов", 3000);
       }
       return null;
     }
   }
 
-  // Auto-save on change / blur
-  if (optUsername) {
-    optUsername.addEventListener("change", () => saveHamQthSettings(false));
-    optUsername.addEventListener("blur", () => saveHamQthSettings(false));
-  }
-  if (optPassword) {
-    optPassword.addEventListener("change", () => saveHamQthSettings(false));
-    optPassword.addEventListener("blur", () => saveHamQthSettings(false));
-  }
+  // Auto-save on change / blur for all 6 inputs
+  [optQrzComUser, optQrzComPass, optHamQthUser, optHamQthPass].forEach(input => {
+    if (!input || input._wiredAutoSave) return;
+    input._wiredAutoSave = true;
+    input.addEventListener("change", () => saveHamQthSettings(false));
+    input.addEventListener("blur", () => saveHamQthSettings(false));
+  });
 
-  // Test connection button
-  if (btnTest) {
-    btnTest.addEventListener("click", async () => {
-      const username = optUsername ? optUsername.value.trim() : "";
-      const password = optPassword ? optPassword.value.trim() : "";
+  // Universal test connection helper
+  function wirePortalTest(btnEl, statusEl, userEl, passEl, portalName, portalLabel) {
+    if (!btnEl || btnEl._wiredTest) return;
+    btnEl._wiredTest = true;
+
+    btnEl.addEventListener("click", async () => {
+      const username = userEl ? userEl.value.trim() : "";
+      const password = passEl ? passEl.value.trim() : "";
 
       if (!username || !password) {
-        if (testStatus) {
-          testStatus.style.display = "block";
-          testStatus.style.color = "#f85149";
-          testStatus.textContent = window.t ? window.t("hamqth.err_specify_creds", {}, "⚠️ Укажите логин и пароль") : "⚠️ Укажите логин и пароль";
+        if (statusEl) {
+          statusEl.style.display = "block";
+          statusEl.style.color = "#f85149";
+          statusEl.textContent = window.t ? window.t("hamqth.err_specify_creds", {}, "⚠️ Укажите логин и пароль") : "⚠️ Укажите логин и пароль";
         }
-        showToast(window.t ? window.t("hamqth.err_fill_creds", {}, "⚠️ Заполните логин и пароль HamQTH") : "⚠️ Заполните логин и пароль HamQTH", 3000);
+        showToast(`⚠️ Заполните логин и пароль ${portalLabel}`, 3000);
         return;
       }
 
       // Save first
       await saveHamQthSettings(false);
 
-      btnTest.disabled = true;
-      const originalText = btnTest.innerHTML;
-      btnTest.innerHTML = `<span>${window.t ? window.t("hamqth.checking", {}, "⏳ Проверка...") : "⏳ Проверка..."}</span>`;
+      btnEl.disabled = true;
+      const originalText = btnEl.innerHTML;
+      btnEl.innerHTML = `<span>${window.t ? window.t("hamqth.checking", {}, "⏳ Проверка...") : "⏳ Проверка..."}</span>`;
 
-      if (testStatus) {
-        testStatus.style.display = "block";
-        testStatus.style.color = "#58a6ff";
-        testStatus.textContent = window.t ? window.t("hamqth.checking_auth", {}, "Проверка авторизации на HamQTH.com...") : "Проверка авторизации на HamQTH.com...";
+      if (statusEl) {
+        statusEl.style.display = "block";
+        statusEl.style.color = "#58a6ff";
+        statusEl.textContent = `Проверка авторизации на ${portalLabel}...`;
       }
 
       try {
@@ -107,46 +127,49 @@ export function initHamQthSettings() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            portal: portalName,
             username: username,
             password: password
           })
         });
         const resJson = await resp.json();
 
-        if (resJson.status === "ok") {
-          if (testStatus) {
-            testStatus.style.color = "#3fb950";
-            testStatus.textContent = "✓ " + (resJson.message || (window.t ? window.t("hamqth.conn_success", {}, "Успешно подключено") : "Успешно подключено"));
+        if (resJson && resJson.status === "ok") {
+          if (statusEl) {
+            statusEl.style.color = "#3fb950";
+            statusEl.textContent = "✓ " + (resJson.message || "Успешно подключено");
           }
-          showToast(window.t ? window.t("hamqth.auth_success", {}, "✓ Успешная авторизация на HamQTH.com") : "✓ Успешная авторизация на HamQTH.com", 3000);
+          showToast(`✓ Успешная авторизация на ${portalLabel}`, 3000);
         } else {
-          if (testStatus) {
-            testStatus.style.color = "#f85149";
-            testStatus.textContent = "✕ " + (resJson.message || (window.t ? window.t("hamqth.auth_err", {}, "Ошибка авторизации") : "Ошибка авторизации"));
+          if (statusEl) {
+            statusEl.style.color = "#f85149";
+            statusEl.textContent = "✕ " + (resJson.message || "Ошибка авторизации");
           }
-          showToast(`✕ HamQTH: ${resJson.message || (window.t ? window.t("common.error", {}, "Ошибка") : "Ошибка")}`, 4000);
+          showToast(`✕ ${portalLabel}: ${resJson.message || "Ошибка"}`, 4000);
         }
       } catch (err) {
-        if (testStatus) {
-          testStatus.style.color = "#f85149";
-          testStatus.textContent = window.t ? window.t("hamqth.net_err", { err: err.message }, `✕ Сетевая ошибка: ${err.message}`) : `✕ Сетевая ошибка: ${err.message}`;
+        if (statusEl) {
+          statusEl.style.color = "#f85149";
+          statusEl.textContent = `✕ Сетевая ошибка: ${err.message}`;
         }
         showToast(window.t ? window.t("hamqth.server_unreachable", {}, "✕ Не удалось связаться с сервером") : "✕ Не удалось связаться с сервером", 3500);
       } finally {
-        btnTest.disabled = false;
-        btnTest.innerHTML = originalText;
+        btnEl.disabled = false;
+        btnEl.innerHTML = originalText;
       }
     });
   }
 
-  // Handle open settings button from HamQTH empty state in bmInfoModal
-  if (btnOpenFromModal) {
+  wirePortalTest(btnTestQrzCom, statusQrzCom, optQrzComUser, optQrzComPass, "qrz_com", "QRZ.com");
+  wirePortalTest(btnTestHamQth, statusHamQth, optHamQthUser, optHamQthPass, "hamqth", "HamQTH.com");
+
+  // Handle open settings button from HAM portals empty state in bmInfoModal
+  if (btnOpenFromModal && !btnOpenFromModal._wired) {
+    btnOpenFromModal._wired = true;
     btnOpenFromModal.addEventListener("click", () => {
-      // Close bmInfoModal
       if (typeof window.closeBmInfoModal === "function") {
         window.closeBmInfoModal();
       }
-      // Open settings modal and activate tab-general
       if (typeof window.openHotspotSettings === "function") {
         window.openHotspotSettings(null, "tab-general");
       }
@@ -154,7 +177,7 @@ export function initHamQthSettings() {
         if (frame && frame.classList.contains("collapsed")) {
           frame.classList.remove("collapsed");
         }
-        if (optUsername) optUsername.focus();
+        if (optQrzComUser) optQrzComUser.focus();
       }, 250);
     });
   }

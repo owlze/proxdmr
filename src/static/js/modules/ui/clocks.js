@@ -8,7 +8,7 @@ import {
   getHistoryTimeMode,
   setHistoryTimeMode,
   updateClockBarActiveState
-} from "../core/formatters.js";
+} from "../core/formatters.js?v=2.9.367";
 import { showToast } from "../core/toast.js";
 
 /**

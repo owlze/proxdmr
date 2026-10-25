@@ -69,13 +69,19 @@ export function switchAccountSubtab(targetId, save = true) {
   if (targetId === "account-subtab-users" && window.ProxDMRAdmin && typeof window.ProxDMRAdmin.refresh === "function") {
     window.ProxDMRAdmin.refresh();
   }
+  if (window.isDemoMode && typeof window.applyDemoReadOnlyLock === "function") {
+    setTimeout(window.applyDemoReadOnlyLock, 50);
+  }
 }
 
 export function restoreAccountSubtab() {
   const nav = document.getElementById("accountSubtabsNav");
-  const isAdmin = window.ProxDMRAdmin && typeof window.ProxDMRAdmin.isAdmin === "function"
-    ? window.ProxDMRAdmin.isAdmin()
-    : (nav && nav.style.display !== "none");
+  const isAdmin = Boolean(
+    window.isDemoMode ||
+    (window.ProxDMRAdmin && typeof window.ProxDMRAdmin.isAdmin === "function"
+      ? window.ProxDMRAdmin.isAdmin()
+      : (nav && nav.style.display !== "none"))
+  );
 
   if (!isAdmin) {
     switchAccountSubtab("account-subtab-profile", false);

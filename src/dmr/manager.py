@@ -942,7 +942,7 @@ class HotspotManager:
             return True
         return False
 
-    async def connect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None) -> bool:
+    async def connect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None, persist: bool = True) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         rt = self.get_runtime(uid, hotspot_id)
         if not rt or not rt.client:
@@ -952,13 +952,14 @@ class HotspotManager:
             return True
         if rt.config.collapsed:
             rt.config.collapsed = False
-            settings = self.user_settings.get(uid, self.settings)
-            for hs_cfg in settings.hotspots:
-                if hs_cfg.id == hotspot_id:
-                    hs_cfg.collapsed = False
-                    break
-            if uid == 1:
-                save_app_settings(settings)
+            if persist:
+                settings = self.user_settings.get(uid, self.settings)
+                for hs_cfg in settings.hotspots:
+                    if hs_cfg.id == hotspot_id:
+                        hs_cfg.collapsed = False
+                        break
+                if uid == 1:
+                    save_app_settings(settings)
             self._notify_async({
                 "type": "hotspot_collapse",
                 "hotspot_id": hotspot_id,
@@ -981,7 +982,7 @@ class HotspotManager:
         await rt.client.disconnect()
         return True
 
-    async def reconnect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None) -> bool:
+    async def reconnect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None, persist: bool = True) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         rt = self.get_runtime(uid, hotspot_id)
         if not rt or not rt.client:
@@ -990,13 +991,14 @@ class HotspotManager:
         logger.info(f"[MANAGER] Reconnecting hotspot '{rt.config.name}' (id={hotspot_id}, user={uid}) to BM...")
         if rt.config.collapsed:
             rt.config.collapsed = False
-            settings = self.user_settings.get(uid, self.settings)
-            for hs_cfg in settings.hotspots:
-                if hs_cfg.id == hotspot_id:
-                    hs_cfg.collapsed = False
-                    break
-            if uid == 1:
-                save_app_settings(settings)
+            if persist:
+                settings = self.user_settings.get(uid, self.settings)
+                for hs_cfg in settings.hotspots:
+                    if hs_cfg.id == hotspot_id:
+                        hs_cfg.collapsed = False
+                        break
+                if uid == 1:
+                    save_app_settings(settings)
             self._notify_async({
                 "type": "hotspot_collapse",
                 "hotspot_id": hotspot_id,
@@ -1011,7 +1013,7 @@ class HotspotManager:
         await asyncio.sleep(0.5)
         return await rt.client.connect(force=True)
 
-    async def set_hotspot_collapsed(self, hotspot_id: str, collapsed: bool, user_id: Optional[int] = None) -> bool:
+    async def set_hotspot_collapsed(self, hotspot_id: str, collapsed: bool, user_id: Optional[int] = None, persist: bool = True) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         rt = self.get_runtime(uid, hotspot_id)
         if not rt and (hotspot_id == "default" or hotspot_id == "active"):
@@ -1030,13 +1032,14 @@ class HotspotManager:
                 return True
 
         rt.config.collapsed = collapsed
-        settings = self.user_settings.get(uid, self.settings)
-        for hs_cfg in settings.hotspots:
-            if hs_cfg.id == hotspot_id:
-                hs_cfg.collapsed = collapsed
-                break
-        if uid == 1 and was_collapsed != bool(collapsed):
-            save_app_settings(settings)
+        if persist:
+            settings = self.user_settings.get(uid, self.settings)
+            for hs_cfg in settings.hotspots:
+                if hs_cfg.id == hotspot_id:
+                    hs_cfg.collapsed = collapsed
+                    break
+            if uid == 1 and was_collapsed != bool(collapsed):
+                save_app_settings(settings)
         self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
         if collapsed:
             logger.info(f"[MANAGER] Hotspot '{rt.config.name}' (ID {hotspot_id}, user {uid}) collapsed -> disconnecting BM & disabling transcriber...")

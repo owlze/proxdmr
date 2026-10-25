@@ -1,6 +1,6 @@
 import { showToast } from '../core/toast.js';
 import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js';
-import { attachTgLivePreview } from '../core/formatters.js';
+import { attachTgLivePreview } from '../core/formatters.js?v=2.9.367';
 
 /**
  * ProxDMR BrandMeister Static & Dynamic TalkGroups Manager Module
@@ -201,6 +201,37 @@ const POPULAR_XLX_PRESETS = [
   }
 ];
 
+function resolveNetworkInfo(taskOrHsOrNetType, fallbackHs = null) {
+  let netType = "";
+  if (typeof taskOrHsOrNetType === "string") {
+    netType = taskOrHsOrNetType;
+  } else if (taskOrHsOrNetType && typeof taskOrHsOrNetType === "object") {
+    netType = taskOrHsOrNetType.network_type || "";
+    if (!netType && taskOrHsOrNetType.hotspot_id) {
+      const foundHs = (window.currentHotspots || []).find(h => h.id === taskOrHsOrNetType.hotspot_id);
+      if (foundHs) netType = foundHs.network_type || "";
+    }
+  }
+  if (!netType && fallbackHs) {
+    netType = fallbackHs.network_type || "";
+  }
+  if (!netType) {
+    const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
+    if (curHs) netType = curHs.network_type || "";
+  }
+  netType = (netType || "bm").toLowerCase();
+
+  const isTgif = (netType === "tgif");
+  const isFreeDmr = (netType === "freedmr");
+  const isXlx = (netType === "xlx");
+  const isBm = (!isTgif && !isFreeDmr && !isXlx);
+
+  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isXlx ? "XLX" : "BM"));
+  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isXlx ? "XLX Reflector" : "BrandMeister"));
+
+  return { netType, isTgif, isFreeDmr, isXlx, isBm, netShort, netFull };
+}
+
 function populatePresetSelects(netType = "bm") {
   const isTgif = (netType === "tgif");
   const isFreeDmr = (netType === "freedmr");
@@ -298,20 +329,29 @@ function applyManagerNetworkBranding(netType, hs, apiData = null) {
 
   const progressTitleEl = document.getElementById("bmImportProgressTitleText");
   if (progressTitleEl && currentBmImportTask) {
+    const taskInfo = resolveNetworkInfo(currentBmImportTask, hs);
     const act = currentBmImportTask.action === "delete" ? "Удаление" : "Импорт";
     const prep = currentBmImportTask.action === "delete" ? "из" : "в";
-    progressTitleEl.textContent = `${act} TalkGroups ${prep} ${netFull}`;
+    progressTitleEl.textContent = `${act} TalkGroups ${prep} ${taskInfo.netFull}`;
   }
 
   populatePresetSelects(netType);
 }
 
-let staticTgsTs1 = [];
-let staticTgsTs2 = [];
-let dynamicTgsTs1 = [];
-let dynamicTgsTs2 = [];
-let selectedTs1 = new Set();
-let selectedTs2 = new Set();
+window.__bmStaticState = window.__bmStaticState || {
+  staticTgsTs1: [],
+  staticTgsTs2: [],
+  dynamicTgsTs1: [],
+  dynamicTgsTs2: [],
+  selectedTs1: new Set(),
+  selectedTs2: new Set()
+};
+let staticTgsTs1 = window.__bmStaticState.staticTgsTs1;
+let staticTgsTs2 = window.__bmStaticState.staticTgsTs2;
+let dynamicTgsTs1 = window.__bmStaticState.dynamicTgsTs1;
+let dynamicTgsTs2 = window.__bmStaticState.dynamicTgsTs2;
+let selectedTs1 = window.__bmStaticState.selectedTs1;
+let selectedTs2 = window.__bmStaticState.selectedTs2;
 let isBmTgLoading = false;
 let currentStaticModalHotspotId = null;
 let currentBmTgActiveTab = "static";
@@ -427,14 +467,16 @@ async function loadBmTgStaticGroups(targetHid) {
   const hid = targetHid || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : "default");
   const curHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
   const hs = curHotspots.find(h => h.id === hid) || curHotspots[0];
-  const netTypeInitial = ((hs && hs.network_type) || "bm").toLowerCase();
-  const isTgifInitial = (netTypeInitial === "tgif");
-  const netShortInitial = isTgifInitial ? "TGIF" : "BM";
+  const { isTgif: isTgifInitial, isFreeDmr: isFreeDmrInitial, isXlx: isXlxInitial, netShort: netShortInitial } = resolveNetworkInfo(hs);
 
   if (bmModalStatusText) {
     bmModalStatusText.textContent = isTgifInitial
       ? (window.t ? window.t("bmtg_static.requesting_tgif", {}, "Запрос к TGIF API...") : "Запрос к TGIF API...")
-      : (window.t ? window.t("bmtg_static.requesting", {}, "Запрос к BM API...") : "Запрос к BM API...");
+      : (isFreeDmrInitial
+        ? (window.t ? window.t("bmtg_static.requesting_freedmr", {}, "Запрос к FreeDMR...") : "Запрос к FreeDMR...")
+        : (isXlxInitial
+          ? (window.t ? window.t("bmtg_static.requesting_xlx", {}, "Запрос к XLX...") : "Запрос к XLX...")
+          : (window.t ? window.t("bmtg_static.requesting", {}, "Запрос к BM API...") : "Запрос к BM API...")));
   }
 
   if (bmModalDeviceBadge && hs) {
@@ -502,6 +544,14 @@ async function loadBmTgStaticGroups(targetHid) {
     dynamicTgsTs2 = data.dynamic_ts2 || [];
     selectedTs1.clear();
     selectedTs2.clear();
+    if (window.__bmStaticState) {
+      window.__bmStaticState.staticTgsTs1 = staticTgsTs1;
+      window.__bmStaticState.staticTgsTs2 = staticTgsTs2;
+      window.__bmStaticState.dynamicTgsTs1 = dynamicTgsTs1;
+      window.__bmStaticState.dynamicTgsTs2 = dynamicTgsTs2;
+      window.__bmStaticState.selectedTs1 = selectedTs1;
+      window.__bmStaticState.selectedTs2 = selectedTs2;
+    }
 
     renderSlotList(1);
     renderSlotList(2);
@@ -550,8 +600,8 @@ async function loadBmTgStaticGroups(targetHid) {
 
 function renderSlotList(slot) {
   const isSlot1 = slot === 1;
-  const items = isSlot1 ? staticTgsTs1 : staticTgsTs2;
-  const selectedSet = isSlot1 ? selectedTs1 : selectedTs2;
+  const items = isSlot1 ? (window.__bmStaticState?.staticTgsTs1 || staticTgsTs1) : (window.__bmStaticState?.staticTgsTs2 || staticTgsTs2);
+  const selectedSet = isSlot1 ? (window.__bmStaticState?.selectedTs1 || selectedTs1) : (window.__bmStaticState?.selectedTs2 || selectedTs2);
   const listEl = isSlot1 ? bmTs1List : bmTs2List;
   const countEl = isSlot1 ? bmTs1Count : bmTs2Count;
   const chkAllEl = isSlot1 ? chkSelectAllTs1 : chkSelectAllTs2;
@@ -586,10 +636,10 @@ function renderSlotList(slot) {
     if (chkAllEl) { chkAllEl.checked = false; chkAllEl.disabled = true; }
 
     let gridHtml = `
-      <div style="margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.22); border-radius:6px;">
+      <div style="margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.22); border-radius: 0px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <span style="font-size:0.75rem; font-weight:700; color:#fbbf24;">⚡ МОДУЛИ XLX (A–Z) НА TS2:</span>
-          <button type="button" class="btn-xlx-unlink" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius:4px; padding:3px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" title="Отключить модуль (TG 4000)">🔌 Отключить (4000)</button>
+          <button type="button" class="btn-xlx-unlink" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius: 0px; padding:3px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" title="Отключить модуль (TG 4000)">🔌 Отключить (4000)</button>
         </div>
         <div class="xlx-modules-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(44px, 1fr)); gap:5px;">
     `;
@@ -601,7 +651,7 @@ function renderSlotList(slot) {
       const bgStyle = isActive
         ? "background:#f59e0b; color:#000; font-weight:800; border:1px solid #d97706; box-shadow:0 0 8px rgba(245,158,11,0.5);"
         : "background:rgba(255,255,255,0.06); color:var(--text-primary); border:1px solid rgba(255,255,255,0.14);";
-      gridHtml += `<button type="button" class="btn-xlx-mod-tile" data-module="${letter}" data-tg="${tgNum}" style="${bgStyle} border-radius:4px; padding:6px 2px; font-size:0.75rem; cursor:pointer; text-align:center; transition:all 0.15s ease;">${letter}<br><span style="font-size:0.6rem; opacity:0.85;">${tgNum}</span></button>`;
+      gridHtml += `<button type="button" class="btn-xlx-mod-tile" data-module="${letter}" data-tg="${tgNum}" style="${bgStyle} border-radius: 0px; padding:6px 2px; font-size:0.75rem; cursor:pointer; text-align:center; transition:all 0.15s ease;">${letter}<br><span style="font-size:0.6rem; opacity:0.85;">${tgNum}</span></button>`;
     }
     gridHtml += `</div>
       <div style="font-size:0.68rem; color:var(--text-muted); margin-top:8px; line-height:1.35;">
@@ -730,7 +780,7 @@ function renderSlotList(slot) {
       const n = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
         ? window.getNetworkRawTgName(tg, netType)
         : (window.TG_NAMES || {})[tg];
-      return !n || n === "Группа BrandMeister" || n === "Группа BM" || n === `TG ${tg}`;
+      return !n || n === "Группа BrandMeister" || n === "Группа BM" || n === "Группа FreeDMR" || n === "Группа TGIF" || n === `TG ${tg}`;
     });
 
   if (unknownTgs.length > 0) {
@@ -746,6 +796,10 @@ function renderSlotList(slot) {
             if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
             Object.assign(window.TGIF_TG_NAMES, res.names);
             try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+          } else if (netType === "freedmr") {
+            if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+            Object.assign(window.FREEDMR_TG_NAMES, res.names);
+            try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
           } else {
             Object.assign((window.TG_NAMES || {}), res.names);
             try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
@@ -762,26 +816,33 @@ function renderSlotList(slot) {
   }
 }
 
-if (chkSelectAllTs1) {
-  chkSelectAllTs1.addEventListener("change", () => {
-    if (chkSelectAllTs1.checked) {
-      staticTgsTs1.forEach(item => selectedTs1.add(item.talkgroup));
-    } else {
-      selectedTs1.clear();
-    }
-    renderSlotList(1);
-  });
-}
+if (!window.__bmStaticManagerSelectAllAttached) {
+  window.__bmStaticManagerSelectAllAttached = true;
+  if (chkSelectAllTs1) {
+    chkSelectAllTs1.addEventListener("change", () => {
+      const items = window.__bmStaticState ? window.__bmStaticState.staticTgsTs1 : staticTgsTs1;
+      const sel = window.__bmStaticState ? window.__bmStaticState.selectedTs1 : selectedTs1;
+      if (chkSelectAllTs1.checked) {
+        items.forEach(item => sel.add(item.talkgroup));
+      } else {
+        sel.clear();
+      }
+      renderSlotList(1);
+    });
+  }
 
-if (chkSelectAllTs2) {
-  chkSelectAllTs2.addEventListener("change", () => {
-    if (chkSelectAllTs2.checked) {
-      staticTgsTs2.forEach(item => selectedTs2.add(item.talkgroup));
-    } else {
-      selectedTs2.clear();
-    }
-    renderSlotList(2);
-  });
+  if (chkSelectAllTs2) {
+    chkSelectAllTs2.addEventListener("change", () => {
+      const items = window.__bmStaticState ? window.__bmStaticState.staticTgsTs2 : staticTgsTs2;
+      const sel = window.__bmStaticState ? window.__bmStaticState.selectedTs2 : selectedTs2;
+      if (chkSelectAllTs2.checked) {
+        items.forEach(item => sel.add(item.talkgroup));
+      } else {
+        sel.clear();
+      }
+      renderSlotList(2);
+    });
+  }
 }
 
 if (btnDeleteSelectedTs1) {
@@ -856,7 +917,7 @@ async function executeDeleteTgs(slot, tgs) {
         showBmTgAlert(res.message || "Операция с группами уже выполняется", "info");
       } else {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
-        const netShort = ((curHs && curHs.network_type) === "tgif") ? "TGIF" : "BM";
+        const { netShort } = resolveNetworkInfo(curHs);
         showBmTgAlert("Ошибка запуска удаления: " + (res.detail || res.message || `Неизвестная ошибка ${netShort}`), "error");
       }
     } catch (err) {
@@ -937,7 +998,7 @@ async function executeBatchAddTgs(slot, tgs, sourceTitle = "") {
         showBmTgAlert(res.message || "Операция с группами уже выполняется", "info");
       } else {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
-        const netShort = ((curHs && curHs.network_type) === "tgif") ? "TGIF" : "BM";
+        const { netShort } = resolveNetworkInfo(curHs);
         showBmTgAlert("Ошибка запуска добавления: " + (res.detail || res.message || `Неизвестная ошибка ${netShort}`), "error");
       }
     } catch (err) {
@@ -990,7 +1051,7 @@ async function executeAddTg(slot, tg) {
       await loadBmTgStaticGroups(currentStaticModalHotspotId);
     } else {
       const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
-      const netShort = ((curHs && curHs.network_type) === "tgif") ? "TGIF" : "BM";
+      const { netShort } = resolveNetworkInfo(curHs);
       showBmTgAlert(res.detail || `Ошибка добавления группы в ${netShort}`, "error");
     }
   } catch (err) {
@@ -1135,10 +1196,8 @@ function exportSlotTgsToFile(slot) {
   const hs = (window.currentHotspots || []).find(h => h.id === curHid) || window.currentHotspots[0] || {};
   const hsName = hs.name ? hs.name.replace(/[^\w\d_-]+/g, "_") : "hotspot";
   const dmrId = hs.dmr_id || "";
-  const netType = ((hs && hs.network_type) || "bm").toLowerCase();
-  const isTgif = (netType === "tgif");
-  const netFilePrefix = isTgif ? "tgif" : "bm";
-  const netFullName = isTgif ? "TGIF Network" : "BrandMeister";
+  const { isTgif, isFreeDmr, isXlx, netFull: netFullName } = resolveNetworkInfo(hs);
+  const netFilePrefix = isTgif ? "tgif" : (isFreeDmr ? "freedmr" : (isXlx ? "xlx" : "bm"));
 
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
@@ -1155,7 +1214,7 @@ function exportSlotTgsToFile(slot) {
 
   // Sort by TG ID numerically
   const sorted = [...items].sort((a, b) => Number(a.talkgroup) - Number(b.talkgroup));
-  const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (window.TG_NAMES || {});
+  const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (window.TG_NAMES || {}));
   sorted.forEach(it => {
     const tg = it.talkgroup;
     const name = it.name || nameMap[tg] || "";
@@ -1205,9 +1264,8 @@ function handleFileSelected(slot, file) {
 
     const curHid = currentStaticModalHotspotId || window.activeHotspotId || "default";
     const hs = (window.currentHotspots || []).find(h => h.id === curHid) || {};
-    const netType = ((hs && hs.network_type) || "bm").toLowerCase();
-    const isTgif = (netType === "tgif");
-    const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (window.TG_NAMES || {});
+    const { netType, isTgif, isFreeDmr, isXlx } = resolveNetworkInfo(hs);
+    const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (window.TG_NAMES || {}));
 
     const currentGroups = (slot === 1 ? staticTgsTs1 : staticTgsTs2).map(g => Number(g.talkgroup));
     const currentSet = new Set(currentGroups);
@@ -1256,6 +1314,10 @@ function handleFileSelected(slot, file) {
                   if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
                   Object.assign(window.TGIF_TG_NAMES, res.names);
                   try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+                } else if (isFreeDmr) {
+                  if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+                  Object.assign(window.FREEDMR_TG_NAMES, res.names);
+                  try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
                 } else {
                   Object.assign((window.TG_NAMES || {}), res.names);
                   try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
@@ -1410,9 +1472,7 @@ function updateBmImportUI(task) {
   const actGen = isDelete ? "удаления" : "импорта";
 
   const curHs = (window.currentHotspots || []).find(h => h.id === (task.hotspot_id || currentStaticModalHotspotId)) || null;
-  const isTgifTask = (task.network_type === "tgif" || ((curHs && curHs.network_type) === "tgif"));
-  const netShort = isTgifTask ? "TGIF" : "BM";
-  const netFull = isTgifTask ? "TGIF Network" : "BrandMeister";
+  const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(task, curHs);
 
   const current = task.current !== undefined ? task.current : (task.processed || 0);
   const total = task.total || 0;
@@ -1453,6 +1513,11 @@ function updateBmImportUI(task) {
 
   // 2. Modal Progress Card
   if (bmImportProgressCard) {
+    const isSameHotspot = !task.hotspot_id || !currentStaticModalHotspotId || (resolveHotspotId(task.hotspot_id) === resolveHotspotId(currentStaticModalHotspotId));
+    if (!isSameHotspot) {
+      bmImportProgressCard.classList.add("hidden");
+      return;
+    }
     if (task.status === "running" || task.status === "completed" || task.status === "cancelled" || isErr) {
       bmImportProgressCard.classList.remove("hidden");
     }
@@ -1548,26 +1613,42 @@ function onBmImportFinished(data) {
   const isErr = data.status === "error" || data.status === "failed";
 
   const curHs = (window.currentHotspots || []).find(h => h.id === (data.hotspot_id || currentStaticModalHotspotId)) || null;
-  const isTgifTask = (data.network_type === "tgif" || ((curHs && curHs.network_type) === "tgif"));
-  const netShort = isTgifTask ? "TGIF" : "BM";
-  const netFull = isTgifTask ? "TGIF Network" : "BrandMeister";
+  const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(data, curHs);
 
   // Toast feedback
   if (data.status === "completed") {
-    const msg = isDelete
-      ? ((typeof window !== "undefined" && window.t) ? window.t(isTgifTask ? "bmtg.toast_delete_completed_tgif" : "bmtg.toast_delete_completed", { count: doneCount, slot: data.slot }, `Удаление из ${netFull} завершено: удалено ${doneCount} групп в TS${data.slot}`) : `Удаление из ${netFull} завершено: удалено ${doneCount} групп в TS${data.slot}`)
-      : ((typeof window !== "undefined" && window.t) ? window.t(isTgifTask ? "bmtg.toast_import_completed_tgif" : "bmtg.toast_import_completed", { count: doneCount, slot: data.slot }, `Импорт в ${netFull} завершено: добавлено ${doneCount} групп в TS${data.slot}`) : `Импорт в ${netFull} завершено: добавлено ${doneCount} групп в TS${data.slot}`);
+    const toastKey = isDelete
+      ? (isTgifTask ? "bmtg.toast_delete_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_completed_freedmr" : "bmtg.toast_delete_completed"))
+      : (isTgifTask ? "bmtg.toast_import_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_import_completed_freedmr" : "bmtg.toast_import_completed"));
+    const defMsg = isDelete
+      ? `Удаление из ${netFull} завершено: удалено ${doneCount} групп в TS${data.slot}`
+      : `Импорт в ${netFull} завершено: добавлено ${doneCount} групп в TS${data.slot}`;
+    const msg = (typeof window !== "undefined" && window.t)
+      ? window.t(toastKey, { count: doneCount, slot: data.slot }, defMsg)
+      : defMsg;
     showToast(msg, 4000);
   } else if (data.status === "cancelled") {
-    const msg = isDelete
-      ? ((typeof window !== "undefined" && window.t) ? window.t(isTgifTask ? "bmtg.toast_delete_cancelled_tgif" : "bmtg.toast_delete_cancelled", { current, total }, `Удаление из ${netFull} остановлено (${current}/${total} обработано)`) : `Удаление из ${netFull} остановлено (${current}/${total} обработано)`)
-      : ((typeof window !== "undefined" && window.t) ? window.t(isTgifTask ? "bmtg.toast_import_cancelled_tgif" : "bmtg.toast_import_cancelled", { current, total }, `Импорт в ${netFull} остановлено (${current}/${total} обработано)`) : `Импорт в ${netFull} остановлено (${current}/${total} обработано)`);
+    const toastKey = isDelete
+      ? (isTgifTask ? "bmtg.toast_delete_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_cancelled_freedmr" : "bmtg.toast_delete_cancelled"))
+      : (isTgifTask ? "bmtg.toast_import_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_import_cancelled_freedmr" : "bmtg.toast_import_cancelled"));
+    const defMsg = isDelete
+      ? `Удаление из ${netFull} остановлено (${current}/${total} обработано)`
+      : `Импорт в ${netFull} остановлено (${current}/${total} обработано)`;
+    const msg = (typeof window !== "undefined" && window.t)
+      ? window.t(toastKey, { current, total }, defMsg)
+      : defMsg;
     showToast(msg, 3000);
   } else if (isErr) {
     const errMsg = data.message || data.error_message || "Неизвестная ошибка";
-    const msg = isDelete
-      ? ((typeof window !== "undefined" && window.t) ? window.t(isTgifTask ? "bmtg.toast_delete_error_tgif" : "bmtg.toast_delete_error", { error: errMsg }, `Ошибка удаления в ${netShort}: ${errMsg}`) : `Ошибка удаления в ${netShort}: ${errMsg}`)
-      : ((typeof window !== "undefined" && window.t) ? window.t(isTgifTask ? "bmtg.toast_import_error_tgif" : "bmtg.toast_import_error", { error: errMsg }, `Ошибка импорта в ${netShort}: ${errMsg}`) : `Ошибка импорта в ${netShort}: ${errMsg}`);
+    const toastKey = isDelete
+      ? (isTgifTask ? "bmtg.toast_delete_error_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_error_freedmr" : "bmtg.toast_delete_error"))
+      : (isTgifTask ? "bmtg.toast_import_error_tgif" : (isFreeDmrTask ? "bmtg.toast_import_error_freedmr" : "bmtg.toast_import_error"));
+    const defMsg = isDelete
+      ? `Ошибка удаления в ${netShort}: ${errMsg}`
+      : `Ошибка импорта в ${netShort}: ${errMsg}`;
+    const msg = (typeof window !== "undefined" && window.t)
+      ? window.t(toastKey, { error: errMsg }, defMsg)
+      : defMsg;
     showToast(msg, 5000);
   }
 
@@ -1583,17 +1664,17 @@ function onBmImportFinished(data) {
 
 async function checkBmImportStatus() {
   try {
-    const resp = await fetch("/api/bm/static-groups/import/status");
+    const hidParam = currentStaticModalHotspotId ? `?hotspot_id=${encodeURIComponent(currentStaticModalHotspotId)}` : "";
+    const resp = await fetch(`/api/bm/static-groups/import/status${hidParam}`);
     if (!resp.ok) return;
     const res = await resp.json();
     if (res.status === "ok" && res.task && res.task.status === "running") {
       currentBmImportTask = res.task;
       updateBmImportUI(res.task);
     } else {
-      if (!currentBmImportTask || currentBmImportTask.status !== "running") {
-        hideAllBmUploadIndicators();
-        if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
-      }
+      currentBmImportTask = null;
+      hideAllBmUploadIndicators();
+      if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
     }
   } catch (e) {
     // Non-fatal network glitch
@@ -1636,7 +1717,7 @@ if (btnConfirmFileImport) {
         showBmTgAlert(res.message || "Импорт уже выполняется", "info");
       } else {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
-        const netShort = ((curHs && curHs.network_type) === "tgif") ? "TGIF" : "BM";
+        const { netShort } = resolveNetworkInfo(curHs);
         showBmTgAlert("Ошибка запуска импорта: " + (res.detail || res.message || `Неизвестная ошибка ${netShort}`), "error");
       }
     } catch (err) {
@@ -1676,17 +1757,26 @@ if (btnMinimizeBmImport) {
 
 if (btnCancelBmImport) {
   btnCancelBmImport.addEventListener("click", async () => {
-    if (!currentBmImportTask || currentBmImportTask.status !== "running") return;
+    if (!currentBmImportTask) {
+      if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+      return;
+    }
     btnCancelBmImport.disabled = true;
     btnCancelBmImport.textContent = "Отмена...";
     try {
-      await fetch("/api/bm/static-groups/import/cancel", {
+      const resp = await fetch("/api/bm/static-groups/import/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task_id: currentBmImportTask.task_id })
       });
+      const res = await resp.json().catch(() => ({}));
+      const finishedTask = (res && res.task) ? res.task : { ...currentBmImportTask, status: "cancelled" };
+      onBmImportFinished(finishedTask);
     } catch (e) {
       console.error("[BM Import] Cancel error:", e);
+      if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+      hideAllBmUploadIndicators();
+      currentBmImportTask = null;
     }
   });
 }
@@ -1714,18 +1804,21 @@ function renderDynamicSlotList(slot) {
   }
 
   const curHs = (window.currentHotspots || []).find(h => h.id === (currentStaticModalHotspotId || window.activeHotspotId)) || null;
-  const netType = ((curHs && curHs.network_type) || "bm").toLowerCase();
-  const isTgif = (netType === "tgif");
+  const { netType, isTgif, isFreeDmr, isXlx } = resolveNetworkInfo(curHs);
 
   listEl.innerHTML = "";
   items.forEach(item => {
     const tg = item.talkgroup;
     const defTgName = isTgif
       ? (window.t ? window.t("bmtg_static.default_group_name_tgif", {}, "Группа TGIF") : "Группа TGIF")
-      : (window.t ? window.t("bmtg_static.default_group_name", {}, "Группа BM") : "Группа BM");
+      : (isFreeDmr
+        ? (window.t ? window.t("bmtg_static.default_group_name_freedmr", {}, "Группа FreeDMR") : "Группа FreeDMR")
+        : (isXlx
+          ? (window.t ? window.t("bmtg_static.default_group_name_xlx", {}, "Модуль XLX") : "Модуль XLX")
+          : (window.t ? window.t("bmtg_static.default_group_name", {}, "Группа BM") : "Группа BM")));
     const rawLookup = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
       ? window.getNetworkRawTgName(tg, netType)
-      : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]);
+      : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]));
     const tgName = item.name || rawLookup || defTgName;
     const tuneText = window.t ? window.t("bmtg.btn_tune", {}, "--->PTT") : "--->PTT";
 

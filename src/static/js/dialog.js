@@ -22,12 +22,12 @@
     const modal = document.createElement('div');
     modal.id = 'appDialogModal';
     modal.className = 'modal app-dialog-modal';
-    modal.style.cssText = 'z-index: 11000; display: none;';
+    modal.style.cssText = 'z-index: 11000; display: none; filter: none !important;';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
 
     modal.innerHTML = `
-      <div class="modal-content app-dialog-content" style="max-width: 420px; width: 92%; box-sizing: border-box; padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.65); animation: appDialogFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);">
+      <div class="modal-content app-dialog-content" style="max-width: 420px; width: 92%; box-sizing: border-box; padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; border-radius: 0px; box-shadow: 0 16px 40px rgba(0,0,0,0.65); animation: appDialogFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);">
         <!-- Header -->
         <div style="display: flex; align-items: flex-start; gap: 12px;">
           <span id="appDialogIcon" style="font-size: 1.8rem; line-height: 1; flex-shrink: 0; user-select: none;">💬</span>
@@ -35,7 +35,7 @@
             <div id="appDialogTitle" style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary, #fff); line-height: 1.3;" data-i18n="dialog.confirm_title">Подтверждение</div>
             <div id="appDialogSubtitle" style="font-size: 0.78rem; color: var(--text-muted, #8b949e); margin-top: 3px; display: none;"></div>
           </div>
-          <button type="button" id="appDialogCloseBtn" class="icon-btn" style="background: none; border: none; font-size: 1.15rem; cursor: pointer; color: var(--text-secondary, #8b949e); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; padding: 0; margin: -2px -2px 0 0;" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+          <button type="button" id="appDialogCloseBtn" class="icon-btn" style="background: none; border: none; font-size: 1.15rem; cursor: pointer; color: var(--text-secondary, #8b949e); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 0px; padding: 0; margin: -2px -2px 0 0;" title="Закрыть" data-i18n-title="buttons.close">✕</button>
         </div>
 
         <!-- Message Body -->
@@ -44,16 +44,16 @@
         <!-- Input for Prompt -->
         <div id="appDialogInputWrap" style="display: none; margin-top: 2px;">
           <div style="position: relative; display: flex; align-items: center;">
-            <input type="text" id="appDialogInput" class="form-input" style="width: 100%; padding: 8px 36px 8px 12px; border-radius: 6px; border: 1px solid var(--border-color, #444); background: var(--bg-input, #2a2a2e); color: var(--text-primary, #fff); font-size: 0.94rem; box-sizing: border-box;" autocomplete="off">
-            <button type="button" id="appDialogTogglePwd" style="position: absolute; right: 6px; background: none; border: none; font-size: 1rem; cursor: pointer; color: var(--text-secondary, #8b949e); display: none; padding: 4px; border-radius: 4px;" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
+            <input type="text" id="appDialogInput" class="form-input" style="width: 100%; padding: 8px 36px 8px 12px; border-radius: 0px; border: 1px solid var(--border-color, #444); background: var(--bg-input, #2a2a2e); color: var(--text-primary, #fff); font-size: 0.94rem; box-sizing: border-box;" autocomplete="off">
+            <button type="button" id="appDialogTogglePwd" style="position: absolute; right: 6px; background: none; border: none; font-size: 1rem; cursor: pointer; color: var(--text-secondary, #8b949e); display: none; padding: 4px; border-radius: 0px;" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
           </div>
           <div id="appDialogInputError" style="color: #f85149; font-size: 0.8rem; min-height: 1.1em; margin-top: 4px; display: none;"></div>
         </div>
 
         <!-- Action Buttons Footer -->
         <div id="appDialogFooter" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
-          <button type="button" id="appDialogCancelBtn" class="btn-secondary" style="padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; min-width: 80px;" data-i18n="buttons.cancel">Отмена</button>
-          <button type="button" id="appDialogConfirmBtn" class="btn-primary" style="padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px;" data-i18n="buttons.ok">ОК</button>
+          <button type="button" id="appDialogCancelBtn" class="btn-secondary" style="padding: 7px 16px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; min-width: 80px;" data-i18n="buttons.cancel">Отмена</button>
+          <button type="button" id="appDialogConfirmBtn" class="btn-primary" style="padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px;" data-i18n="buttons.ok">ОК</button>
         </div>
       </div>
     `;
@@ -184,11 +184,11 @@
       confirmBtn.textContent = confirmText;
       confirmBtn.className = 'btn-' + confirmStyle;
       if (confirmStyle === 'danger') {
-        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #da3633; color: #fff; border: 1px solid #f85149;';
+        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #da3633; color: #fff; border: 1px solid #f85149;';
       } else if (confirmStyle === 'success') {
-        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #238636; color: #fff; border: 1px solid #2ea043;';
+        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #238636; color: #fff; border: 1px solid #2ea043;';
       } else {
-        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #1f6feb; color: #fff; border: 1px solid #388bfd;';
+        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #1f6feb; color: #fff; border: 1px solid #388bfd;';
       }
 
       confirmBtn.onclick = function () {
@@ -247,7 +247,7 @@
 
     if (confirmBtn) {
       confirmBtn.textContent = confirmText;
-      confirmBtn.style.cssText = 'padding: 7px 22px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #1f6feb; color: #fff; border: 1px solid #388bfd;';
+      confirmBtn.style.cssText = 'padding: 7px 22px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #1f6feb; color: #fff; border: 1px solid #388bfd;';
       confirmBtn.onclick = function () {
         closeDialog(true);
       };
@@ -327,9 +327,9 @@
     if (confirmBtn) {
       confirmBtn.textContent = confirmText;
       if (confirmStyle === 'danger') {
-        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #da3633; color: #fff; border: 1px solid #f85149;';
+        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #da3633; color: #fff; border: 1px solid #f85149;';
       } else {
-        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #1f6feb; color: #fff; border: 1px solid #388bfd;';
+        confirmBtn.style.cssText = 'padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px; background: #1f6feb; color: #fff; border: 1px solid #388bfd;';
       }
 
       confirmBtn.onclick = function () {
@@ -436,34 +436,6 @@
     }
     if (!modalContent) return;
 
-    const shouldCloseSettings = Boolean(options.closeSettings || (inSettingsModal && options.isFooterSave));
-
-    if (shouldCloseSettings) {
-      const sModal = document.getElementById('settingsModal') || modalContent.closest('.modal');
-      if (!modalContent.classList.contains('modal-save-fadeout')) {
-        modalContent.classList.remove('modal-save-pulse', 'modal-save-fadeout');
-        if (sModal) sModal.classList.remove('modal-backdrop-fadeout');
-        void modalContent.offsetWidth; // Force reflow
-        modalContent.classList.add('modal-save-fadeout');
-        if (sModal) sModal.classList.add('modal-backdrop-fadeout');
-      }
-
-      if (modalContent._savePulseTimer) {
-        clearTimeout(modalContent._savePulseTimer);
-      }
-      modalContent._savePulseTimer = setTimeout(() => {
-        clearSettingsModalFade();
-      }, 1050);
-
-      if (!window._settingsModalAutoCloseTimer) {
-        window._settingsModalAutoCloseTimer = setTimeout(() => {
-          window._settingsModalAutoCloseTimer = null;
-          closeSettingsModal();
-        }, 950);
-      }
-      return;
-    }
-
     modalContent.classList.remove('modal-save-pulse', 'modal-save-fadeout');
     void modalContent.offsetWidth; // Force reflow to restart animation from 0%
     modalContent.classList.add('modal-save-pulse');
@@ -503,17 +475,7 @@
         (btn.id && btn.id.toLowerCase().includes('save'));
 
       if (isSaveBtn) {
-        const isSettings = Boolean(btn.closest('#settingsModal'));
-        const isFooterSave = isSettings && (
-          Boolean(btn.closest('.modal-footer')) ||
-          btn.id === 'btnSaveGeneralSettings' ||
-          i18n === 'buttons.save_settings' ||
-          i18n === 'hs_edit.btn_save' ||
-          text.includes('сохранить настройки') ||
-          text.includes('сохранить хотспот')
-        );
-
-        triggerModalSavePulse(btn, { isFooterSave: isFooterSave });
+        triggerModalSavePulse(btn, { isFooterSave: false, closeSettings: false });
       }
     }, true);
 
@@ -523,8 +485,7 @@
       if (!form) return;
       const modal = form.closest ? form.closest('#settingsModal, .modal') : null;
       if (modal) {
-        const isSettings = Boolean(modal.id === 'settingsModal' || modal.closest('#settingsModal'));
-        triggerModalSavePulse(form, { isFooterSave: isSettings });
+        triggerModalSavePulse(form, { isFooterSave: false, closeSettings: false });
       }
     }, true);
   }

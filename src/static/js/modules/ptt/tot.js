@@ -467,7 +467,7 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
       </label>
     </div>
     <div style="margin-top: 8px;">
-      <input type="text" id="txtRogerBeepPattern" class="rec-text-input" value="${currentRogerPattern}" placeholder="600-110-33, 840-50-15" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; font-family: monospace; font-size: 0.85rem; transition: opacity 0.15s ease; ${currentRogerBeep ? '' : 'opacity: 0.55;'}">
+      <input type="text" id="txtRogerBeepPattern" class="rec-text-input" value="${currentRogerPattern}" placeholder="600-110-33, 840-50-15" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 0px; font-family: monospace; font-size: 0.85rem; transition: opacity 0.15s ease; ${currentRogerBeep ? '' : 'opacity: 0.55;'}">
       <div class="tot-config-desc" style="margin-top: 5px; font-size: 0.72rem; color: var(--text-muted, #8b949e); line-height: 1.3;">
         ${window.t ? window.t("ptt.roger_beep_hint", {}, "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)") : "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)"}
       </div>

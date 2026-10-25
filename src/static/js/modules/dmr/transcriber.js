@@ -1,10 +1,10 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay } from '../core/formatters.js';
+import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import {
   formatCaptionHtml,
   renderTranscriptionSummary,
   updateLogTranscriptionPopoverIfActive
-} from './transcription.js';
+} from './transcription.js?v=2.9.367';
 import {
   getHotspotMute,
   getPersistentHotspotMute,
@@ -1037,17 +1037,25 @@ function syncTtsSoloMode() {
   });
 
   // 2.5. Restore pre-TTS audio mode for any hotspot that no longer has an active TTS slot
-  if (window._preTtsAudioModes) {
-    Object.keys(window._preTtsAudioModes).forEach(h => {
-      if (!activeTtsHids.has(h)) {
-        const prevMode = window._preTtsAudioModes[h];
+  hidSet.forEach(h => {
+    if (!activeTtsHids.has(h)) {
+      let prevMode = null;
+      if (window._preTtsAudioModes && window._preTtsAudioModes[h]) {
+        prevMode = window._preTtsAudioModes[h];
         delete window._preTtsAudioModes[h];
-        if (prevMode && typeof setHotspotTsAudioMode === "function") {
-          setHotspotTsAudioMode(h, prevMode);
-        }
       }
-    });
-  }
+      try {
+        const stored = localStorage.getItem("proxdmr_pre_tts_ts_mode_" + h);
+        if (stored) {
+          if (!prevMode) prevMode = stored;
+          localStorage.removeItem("proxdmr_pre_tts_ts_mode_" + h);
+        }
+      } catch (_) {}
+      if (prevMode && ["solo", "doubl", "auto"].includes(prevMode) && typeof setHotspotTsAudioMode === "function") {
+        setHotspotTsAudioMode(h, prevMode);
+      }
+    }
+  });
 
   // 3. Enforce Solo mode & slot mutes on every hotspot that has an active TTS slot
   activeTtsSlots.forEach(({ hid, slot }) => {
@@ -1076,6 +1084,11 @@ function syncTtsSoloMode() {
       if (!window._preTtsAudioModes[hid]) {
         window._preTtsAudioModes[hid] = curMode;
       }
+      try {
+        if (!localStorage.getItem("proxdmr_pre_tts_ts_mode_" + hid)) {
+          localStorage.setItem("proxdmr_pre_tts_ts_mode_" + hid, curMode);
+        }
+      } catch (_) {}
       if (curMode !== "solo") {
         setHotspotTsAudioMode(hid, "solo");
       }
@@ -1136,7 +1149,7 @@ function syncTtsSoloMode() {
           const wasPersistentMuted = (typeof getPersistentHotspotMute === "function")
             ? getPersistentHotspotMute(hid, slot)
             : false;
-          setHotspotMute(hid, slot, wasPersistentMuted, true);
+          setHotspotMute(hid, slot, wasPersistentMuted, false);
         }
       });
       if (typeof updateHotspotCardMuteUI === "function") {
@@ -1387,8 +1400,10 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
         { id: "en_0", name: "Voice 0 (Female)" },
         { id: "en_1", name: "Voice 1 (Male)" }
       ] : (cleanLang === "de" ? [
-        { id: "eva", name: "Eva (Weiblich)" },
-        { id: "karl", name: "Karl (Männlich)" }
+        { id: "eva_k", name: "Eva (Женский)" },
+        { id: "karlsson", name: "Karlsson (Мужской)" },
+        { id: "bernd_ungerer", name: "Bernd (Мужской)" },
+        { id: "friedrich", name: "Friedrich (Мужской)" }
       ] : (cleanLang === "es" ? [
         { id: "es_0", name: "Voz 0 (Femenino)" }
       ] : (cleanLang === "fr" ? [
@@ -2015,6 +2030,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
 
   positionTtsQuickSettingsPopover(popup, targetBadge);
 
+
+
   if (_lastTtsDownloadState && _lastTtsDownloadState.status === "running") {
     const qInd = popup.querySelector("#quickTtsUploadIndicator");
     if (qInd) {
@@ -2468,6 +2485,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
 
       btnSave.disabled = true;
       btnSave.textContent = "⏳...";
+
+
 
       // Stop active TTS audio queue if target language changed
       if (chosenTargetLang !== s.target_lang && window.ttsAudioQueueManager) {
@@ -3024,6 +3043,7 @@ class TtsAudioQueueManager {
 
   enqueue(item) {
     if (!item) return;
+    if (window._isHistoryTtsPaused) return;
     this.queue.push(item);
     if (!this.isPlaying) {
       this.playNext();
@@ -3687,6 +3707,8 @@ function handleCallTranscription(msg) {
 
   // A. Always update call log, markers, and transcription summary first!
   const callEntry = updateCallLogTranscription(msg);
+
+  if (window._isHistoryTtsPaused) return;
 
   // B. Live VFO Card & teleprompter display (only if card and has-transcribe is active on this slot)
   const targetHid = resolveHotspotId(msg.hotspot_id);
@@ -4431,11 +4453,24 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
 
   positionTtsQuickSettingsPopover(popup, targetBadge);
 
+  if (window.isDemoMode) {
+    popup.querySelectorAll("select, input").forEach(el => {
+      if (
+        el.id !== "btnTxtQuickClose" &&
+        el.id !== "txtQuickTargetLang" &&
+        el.id !== "txtQuickNoTranslate"
+      ) {
+        el.disabled = true;
+      }
+    });
+  }
+
   // Save handler
   const btnSave = footer.querySelector("#btnTxtQuickSave");
   if (btnSave) {
     btnSave.addEventListener("click", async (e) => {
       e.stopPropagation();
+
       btnSave.disabled = true;
       btnSave.textContent = "⏳ Сохранение...";
 
@@ -5682,6 +5717,17 @@ function syncAllTranscribeSlotsToServer() {
         try {
           ws.send(JSON.stringify({
             type: "set_transcribe_slot",
+            hotspot_id: hid,
+            slot: slot,
+            enabled: true
+          }));
+        } catch (_) {}
+      }
+      const isTtsActive = isSlotTtsActive(hid, slot);
+      if (isTtsActive) {
+        try {
+          ws.send(JSON.stringify({
+            type: "set_tts_slot",
             hotspot_id: hid,
             slot: slot,
             enabled: true
@@ -7215,7 +7261,7 @@ function initTranscriberSettings() {
           }
           showToast(window.t ? window.t("transcriber.settings_saved", {}, "✓ Настройки AI Транскрибатора сохранены") : "✓ Настройки AI Транскрибатора сохранены", 3000);
           if (typeof window.triggerModalSavePulse === "function") {
-            window.triggerModalSavePulse(form, { closeSettings: true });
+            window.triggerModalSavePulse(form, { closeSettings: false });
           }
         }
       } catch (err) {

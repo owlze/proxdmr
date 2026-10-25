@@ -5,7 +5,7 @@
  */
 
 import { resolveHotspotId } from "../network/ping-sparklines.js";
-import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.312";
+import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.367";
 
 let clientSettingsSyncTimer = null;
 
@@ -102,6 +102,7 @@ function isTransientTranscribeOrTtsKey(k) {
     return false;
   }
   return (
+    k.startsWith("proxdmr_pre_tts_ts_mode_") ||
     k === "proxdmr_transcribe_ts1" ||
     k === "proxdmr_transcribe_ts2" ||
     k.startsWith("proxdmr_max_transcribe_") ||
@@ -123,11 +124,9 @@ function isTransientTranscribeOrTtsKey(k) {
           !k.startsWith("proxdmr_client_ping_") &&
           !k.startsWith("proxdmr_tg_names_") &&
           !k.startsWith("proxdmr_user_callsigns_") &&
-          !k.startsWith("proxdmr_collapsed_") &&
           !k.startsWith("proxdmr_gw_disconnected_") &&
           !isTransientTranscribeOrTtsKey(k) &&
-          k !== "proxdmr_log_visible" &&
-          k !== "proxdmr_log_hotspot") {
+          k !== "proxdmr_demo_language") {
         storageDump[k] = localStorage.getItem(k);
       }
     }
@@ -145,6 +144,7 @@ function isTransientTranscribeOrTtsKey(k) {
  * Debounced push of current client settings to server via WebSocket
  */
 export function scheduleSyncClientSettings() {
+  if (typeof window !== "undefined" && window.isDemoMode) return;
   if (clientSettingsSyncTimer) clearTimeout(clientSettingsSyncTimer);
   clientSettingsSyncTimer = setTimeout(() => {
     clientSettingsSyncTimer = null;
@@ -175,11 +175,9 @@ export function applyServerClientSettings(cs) {
     try {
       for (const [k, v] of Object.entries(cs.storage_dump)) {
         if (k && k.startsWith("proxdmr_") && v !== null && v !== undefined &&
-            !k.startsWith("proxdmr_collapsed_") &&
-            !k.startsWith("proxdmr_gw_disconnected_") &&
+              !k.startsWith("proxdmr_gw_disconnected_") &&
             !isTransientTranscribeOrTtsKey(k) &&
-            k !== "proxdmr_log_visible" &&
-            k !== "proxdmr_log_hotspot") {
+            k !== "proxdmr_demo_language") {
           localStorage.setItem(k, String(v));
         }
       }
@@ -366,6 +364,9 @@ export function applyServerClientSettings(cs) {
 
   if (typeof window !== "undefined" && typeof window.updateAllVolumeAndMuteUI === "function") {
     window.updateAllVolumeAndMuteUI();
+  }
+  if (typeof window !== "undefined" && typeof window.updateAllHotspotTsAudioModeUI === "function") {
+    window.updateAllHotspotTsAudioModeUI();
   }
 
   // Ensure VFO rows not actively in live transcribe mode stay in standard view with TXT/TTS off

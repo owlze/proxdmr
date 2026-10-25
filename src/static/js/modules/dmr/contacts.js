@@ -5,7 +5,7 @@
  * contact creation/editing modals, JSON import/export, and gateway settings.
  */
 
-import { escapeHtml, attachTgLivePreview } from '../core/formatters.js?v=2.9.310';
+import { escapeHtml, attachTgLivePreview } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 import { resolveHotspotId } from '../core/state.js';

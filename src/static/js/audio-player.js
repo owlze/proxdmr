@@ -933,7 +933,8 @@ class DMRAudioPlayer {
     const ttsGain = this.audioCtx.createGain();
 
     // Check mute states
-    const isTest = Boolean(options && (options.isTest || options.bypassMute));
+    const useDirectBus = Boolean(options && (options.isTest || options.bypassMute || options.useRecordingsBus));
+    const isTest = useDirectBus;
     const bypassSlotMute = isTest || Boolean(options && options.bypassSlotMute);
     const isSlotMuted = bypassSlotMute ? false : ((slotObj && slotObj.isMuted) || ch.isSlotMuted(s));
     const isChannelMuted = isTest
@@ -950,14 +951,10 @@ class DMRAudioPlayer {
 
     source.connect(ttsGain);
 
-    // If this is an independent test, bypass slot and hotspot channel nodes completely
-    // and route directly to master rxInputBus so HS/slot mute cannot silence it!
-    if (isTest) {
-      if (this.rxInputBus) {
-        ttsGain.connect(this.rxInputBus);
-      } else {
-        ttsGain.connect(this.audioCtx.destination);
-      }
+    // If this is an independent test or history read (useDirectBus), route directly to recordingsInputBus
+    // which bypasses rxInputBus and hotspot slot mutes completely!
+    if (useDirectBus) {
+      ttsGain.connect(this.recordingsInputBus || this.masterLimiter || this.audioCtx.destination);
     } else if (slotObj && slotObj.useChannelMerger && slotObj.panLeftGain && slotObj.panRightGain) {
       ttsGain.connect(slotObj.panLeftGain);
       ttsGain.connect(slotObj.panRightGain);

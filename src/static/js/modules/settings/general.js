@@ -22,7 +22,7 @@ import {
 import {
   isCheckMicOnTxEnabled,
   setCheckMicOnTxEnabled
-} from "../ptt/engine.js?v=2.9.310";
+} from "../ptt/engine.js?v=2.9.367";
 import { setHapticEnabled, setHapticDuration } from "../core/haptic.js";
 
 export function initGeneralSettings() {
@@ -114,7 +114,7 @@ export function initGeneralSettings() {
       if (data && data.status === "ok") {
         showToast(window.t ? window.t("general.settings_saved", {}, "✓ Настройки успешно сохранены") : "✓ Настройки успешно сохранены", "success");
         if (typeof window.triggerModalSavePulse === "function") {
-          window.triggerModalSavePulse(btnSave, { closeSettings: true });
+          window.triggerModalSavePulse(btnSave, { closeSettings: false });
         }
       } else {
         showToast(window.t ? window.t("general.settings_save_err", {}, "⚠️ Ошибка сохранения настроек") : "⚠️ Ошибка сохранения настроек", "warning");

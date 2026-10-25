@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, getHistoryTimeMode } from '../core/formatters.js';
+import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, getHistoryTimeMode } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 
 /**
@@ -417,10 +417,14 @@ export class SummaryTtsReader {
           const wasMuted = (typeof window.getHotspotMute === "function") ? window.getHotspotMute(hid, slot) : false;
           this.soloMuteSnapshot.set(key, wasMuted);
           if (!wasMuted && typeof window.setHotspotMute === "function") {
-            window.setHotspotMute(hid, slot, true);
+            window.setHotspotMute(hid, slot, true, true);
           }
         });
       });
+      const player = window.dmrAudioPlayer || window.audioPlayer;
+      if (player && typeof player.setSoloMuted === "function") {
+        player.setSoloMuted(true);
+      }
       if (typeof window.updateHotspotCardMuteUI === "function") {
         window.updateHotspotCardMuteUI(null);
       }
@@ -435,10 +439,14 @@ export class SummaryTtsReader {
           const slot = parseInt(key.substring(idx + 3), 10) || 1;
           const curMute = (typeof window.getHotspotMute === "function") ? window.getHotspotMute(hid, slot) : false;
           if (curMute !== wasMuted && typeof window.setHotspotMute === "function") {
-            window.setHotspotMute(hid, slot, wasMuted);
+            window.setHotspotMute(hid, slot, wasMuted, true);
           }
         }
       });
+      const player = window.dmrAudioPlayer || window.audioPlayer;
+      if (player && typeof player.setSoloMuted === "function") {
+        player.setSoloMuted(false);
+      }
       if (typeof window.updateHotspotCardMuteUI === "function") {
         window.updateHotspotCardMuteUI(null);
       }
@@ -503,11 +511,13 @@ export class SummaryTtsReader {
   }
 
   start() {
-    if (typeof window.isAnySlotTtsActive === "function" && window.isAnySlotTtsActive()) {
-      if (typeof showToast === "function") {
-        showToast(window.t ? window.t("transcriber.live_tts_active_err", {}, "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для чтения стенограммы.") : "⚠️ Активен голосовой синтез на канале эфира. Отключите синтез TS для чтения стенограммы.", 3000);
-      }
-      return;
+    if (this._resumeLiveTimer) {
+      clearTimeout(this._resumeLiveTimer);
+      this._resumeLiveTimer = null;
+    }
+
+    if (window.recordingsManager && typeof window.recordingsManager.stop === "function") {
+      try { window.recordingsManager.stop(); } catch (_) {}
     }
 
     const playlist = this.getChronologicalPlaylist();
@@ -519,18 +529,47 @@ export class SummaryTtsReader {
       return;
     }
 
+    window._isHistoryTtsPaused = true;
+    if (window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.stopAll === "function") {
+      try { window.ttsAudioQueueManager.stopAll(); } catch (_) {}
+    }
+
+    if (!this.pausedLiveSlots) this.pausedLiveSlots = [];
+    const allHids = this.getAllHotspotIds();
+    allHids.forEach(hid => {
+      [1, 2].forEach(slot => {
+        const isTxt = (typeof window.isSlotTranscribeActive === "function") && window.isSlotTranscribeActive(hid, slot);
+        const isTts = (typeof window.isSlotTtsActive === "function") && window.isSlotTtsActive(hid, slot);
+        if (isTxt || isTts) {
+          if (!this.pausedLiveSlots.some(p => p.hid === hid && p.slot === slot)) {
+            this.pausedLiveSlots.push({ hid, slot, transcribe: isTxt, tts: isTts });
+            if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+              try {
+                if (isTts) window.ws.send(JSON.stringify({ type: "set_tts_slot", hotspot_id: hid, slot: slot, enabled: false }));
+                if (isTxt) window.ws.send(JSON.stringify({ type: "set_transcribe_slot", hotspot_id: hid, slot: slot, enabled: false }));
+              } catch (_) {}
+            }
+          }
+        }
+      });
+    });
+
     this.isPlaying = true;
     this.playToken++;
     this.updateButtonUi();
 
-    // User Request #3: start from selected item (clicked by mouse/finger) or last read item
     let startIndex = 0;
-    const targetId = this.selectedCallId || this.lastReadCallId;
-    if (targetId) {
-      const foundIdx = playlist.findIndex(c => c.id === targetId);
-      if (foundIdx !== -1) {
-        startIndex = foundIdx;
+    if (this.lastReadCallId !== null) {
+      const idx = playlist.findIndex(item => item.id === this.lastReadCallId);
+      if (idx !== -1) {
+        startIndex = (idx >= playlist.length - 1) ? 0 : idx;
+      } else {
+        const nextIdx = playlist.findIndex(item => item.id > this.lastReadCallId);
+        startIndex = nextIdx !== -1 ? nextIdx : 0;
       }
+    } else if (this.selectedCallId !== null) {
+      const sIdx = playlist.findIndex(item => item.id === this.selectedCallId);
+      if (sIdx !== -1) startIndex = sIdx;
     }
 
     const firstCall = playlist[startIndex];
@@ -539,12 +578,8 @@ export class SummaryTtsReader {
     this.activeHotspotId = (typeof window.resolveHotspotId === "function") ? window.resolveHotspotId(initialHid) : initialHid;
     this.activeSlot = parseInt(initialSlot, 10) || 1;
 
-    // Apply Solo mode if enabled (mutes all audio channels across all hotspots)
-    const s = window.transcriberSettings || {};
-    const soloMode = (s.tts_mute_others !== false);
-    if (soloMode) {
-      this.applySoloMute(true);
-    }
+    // Always mute all other audio channels across all hotspots during History TTS Read
+    this.applySoloMute(true);
 
     this.applyDucking(true);
     this.playItemAtIndex(startIndex, playlist, this.playToken);
@@ -584,6 +619,29 @@ export class SummaryTtsReader {
 
     this.updateButtonUi();
     this.updateDomHighlight();
+
+    if (window._isHistoryTtsPaused || (this.pausedLiveSlots && this.pausedLiveSlots.length > 0)) {
+      if (this._resumeLiveTimer) clearTimeout(this._resumeLiveTimer);
+      this._resumeLiveTimer = setTimeout(() => {
+        this._resumeLiveTimer = null;
+        if (this.isPlaying) return;
+        window._isHistoryTtsPaused = false;
+        const toResume = Array.isArray(this.pausedLiveSlots) ? [...this.pausedLiveSlots] : [];
+        this.pausedLiveSlots = [];
+        for (const item of toResume) {
+          if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+            try {
+              if (item.transcribe && window.isSlotTranscribeActive && window.isSlotTranscribeActive(item.hid, item.slot)) {
+                window.ws.send(JSON.stringify({ type: "set_transcribe_slot", hotspot_id: item.hid, slot: item.slot, enabled: true }));
+              }
+              if (item.tts && window.isSlotTtsActive && window.isSlotTtsActive(item.hid, item.slot)) {
+                window.ws.send(JSON.stringify({ type: "set_tts_slot", hotspot_id: item.hid, slot: item.slot, enabled: true }));
+              }
+            } catch (_) {}
+          }
+        }
+      }, 3000);
+    }
   }
 
   stopCurrentAudioOnly() {
@@ -673,6 +731,46 @@ export class SummaryTtsReader {
     });
   }
 
+  buildTtsRequestPayload(item, rawText) {
+    const s = window.transcriberSettings || {};
+    const engineEl = document.getElementById("optTtsEngine");
+    const engine = s.tts_engine || (engineEl ? engineEl.value : "gemini");
+    let voice = "auto";
+    let targetLang = s.translate_lang || s.target_lang || "ru";
+    if (targetLang === "none" || !targetLang) targetLang = "ru";
+
+    if (engine === "piper") {
+      const pv = document.getElementById("optPiperVoice")?.value || s.tts_voice || "";
+      voice = (pv === "__download__" || !pv) ? "" : pv;
+    } else if (engine === "silero") {
+      const sl = document.getElementById("optSileroLang")?.value || s.silero_lang || targetLang || "ru";
+      targetLang = sl;
+      const sv = document.getElementById("optSileroVoice")?.value || s.tts_voice || "auto";
+      voice = sv || "auto";
+    } else if (engine === "edge") {
+      const ev = document.getElementById("optEdgeVoice")?.value || s.edge_voice || "auto";
+      voice = ev || "auto";
+    } else {
+      const gv = document.getElementById("optTtsVoice")?.value || s.tts_voice || "auto";
+      voice = (!gv || gv === "auto") ? "auto" : gv;
+    }
+
+    const modelEl = document.getElementById("optTtsModel");
+    const apiKeyEl = document.getElementById("optGeminiKey");
+    return {
+      text: rawText,
+      engine: engine,
+      model: s.tts_model || (modelEl ? modelEl.value : "gemini-2.5-flash-preview-tts"),
+      voice: voice,
+      api_key: apiKeyEl ? apiKeyEl.value.trim() : "",
+      gender: item.gender || "UNKNOWN",
+      callsign: item.callsign || "",
+      target_lang: targetLang,
+      lang: targetLang,
+      speed: 1.1
+    };
+  }
+
   prefetchNext(nextCall) {
     if (!nextCall || !nextCall.id || this.prefetchedAudio.has(nextCall.id)) return;
     const s = window.transcriberSettings || {};
@@ -685,16 +783,11 @@ export class SummaryTtsReader {
     if (!rawText) return;
 
     const callId = nextCall.id;
+    const payload = this.buildTtsRequestPayload(nextCall, rawText);
     fetch("/api/transcriber/tts-test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: rawText,
-        engine: eng,
-        voice: (eng === "piper") ? ((s.tts_voice === "__download__" || !s.tts_voice) ? "" : s.tts_voice) : (s.tts_voice === "auto" ? "Puck" : (s.tts_voice || "Puck")),
-        speed: 1.1,
-        target_lang: (s.target_lang && s.target_lang !== "none") ? s.target_lang : "ru"
-      })
+      body: JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(res => {
@@ -712,6 +805,7 @@ export class SummaryTtsReader {
       if (typeof showToast === "function") {
         showToast(window.t ? window.t("live.tts_finished", {}, "📖 Чтение стенограммы завершено") : "📖 Чтение стенограммы завершено", 2500);
       }
+      this.lastReadCallId = null;
       this.stop(false);
       return;
     }
@@ -768,16 +862,11 @@ export class SummaryTtsReader {
     let audioBase64 = this.prefetchedAudio.get(call.id);
     if (!audioBase64) {
       try {
+        const payload = this.buildTtsRequestPayload(call, rawText);
         const resp = await fetch("/api/transcriber/tts-test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: rawText,
-            engine: engine,
-            voice: (engine === "piper") ? ((voice === "__download__" || !voice) ? "" : voice) : (voice === "auto" ? "Puck" : voice),
-            speed: speed,
-            target_lang: targetLang
-          })
+          body: JSON.stringify(payload)
         });
         const res = await resp.json();
         if (!this.isPlaying || token !== this.playToken || this.currentCallId !== call.id) return;
@@ -822,7 +911,7 @@ export class SummaryTtsReader {
         const hid = targetHid || this.activeHotspotId || "default";
         const slot = parseInt(targetSlot || this.activeSlot, 10) || 1;
 
-        player.playTtsAudio(hid, slot, bytes.buffer, effectiveRate, cb, { bypassSlotMute: true })
+        player.playTtsAudio(hid, slot, bytes.buffer, effectiveRate, cb, { bypassSlotMute: true, useRecordingsBus: true })
           .then(handle => {
             if (!this.isPlaying) {
               if (handle && handle.stop) handle.stop();

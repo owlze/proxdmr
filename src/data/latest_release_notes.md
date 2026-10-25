@@ -1,55 +1,48 @@
 <!-- lang:ru -->
-# ProxDMR v1.44 — Список изменений
+# ProxDMR v1.57 — Список изменений
 
-* Поддержка FreeDMR, TGIF, DMR+ / IPSC2, XLX Рефлекторы (D-Star / DMR Gateway)
-* Зондирование и мультисетевой бенчмарк серверов (Server Probe & Benchmark)
-* Контакты и адресная книга (Contacts & XLX Modules). Привязка контактов к сетям.
-* Управление сессиями и стабильность шлюза. Ограничение одновременных веб-сессий: лимит до 3 активных подключений на одну учетную запись для защиты от исчерпания памяти и дублирования аудиопотоков.
+* Гостевой демо-режим (онлайн-демо: https://proxdmr.duckdns.org).
+* Оповещения в Telegram о технических проблемах на сервере.
+* Доработка UI и мелких багов.
 
 <!-- lang:en -->
-# ProxDMR v1.44 — Release Notes
+# ProxDMR v1.57 — Release Notes
 
-* Support for FreeDMR, TGIF, DMR+ / IPSC2, and XLX Reflectors (D-Star / DMR Gateway)
-* Server Probe & Multi-network Benchmark
-* Contacts & Address Book (Contacts & XLX Modules) with network-specific contact binding
-* Session management and gateway stability: limit of up to 3 active web sessions per account to prevent memory exhaustion and audio stream duplication
+* Guest demo mode (live online demo: https://proxdmr.duckdns.org).
+* Telegram alerts for server technical issues.
+* UI improvements and minor bug fixes.
 
 <!-- lang:uk -->
-# ProxDMR v1.44 — Список змін
+# ProxDMR v1.57 — Список змін
 
-* Підтримка FreeDMR, TGIF, DMR+ / IPSC2, XLX Рефлектори (D-Star / DMR Gateway)
-* Зондування та мультимережевий бенчмарк серверів (Server Probe & Benchmark)
-* Контакти та адресна книга (Contacts & XLX Modules). Прив'язка контактів до мереж.
-* Керування сесіями та стабільність шлюзу. Обмеження одночасних веб-сесій: ліміт до 3 активних підключень на один обліковий запис для захисту від вичерпання пам'яті та дублювання аудіопотоків.
+* Гостьовий демо-режим (онлайн-демо: https://proxdmr.duckdns.org).
+* Сповіщення в Telegram про технічні проблеми на сервері.
+* Доопрацювання UI та виправлення дрібних помилок.
 
 <!-- lang:de -->
-# ProxDMR v1.44 — Änderungsprotokoll
+# ProxDMR v1.57 — Änderungsprotokoll
 
-* Unterstützung für FreeDMR, TGIF, DMR+ / IPSC2 und XLX-Reflektoren (D-Star / DMR Gateway)
-* Server-Sondierung und Multi-Netzwerk-Benchmark (Server Probe & Benchmark)
-* Kontakte und Adressbuch (Contacts & XLX Modules) mit netzwerkspezifischer Kontaktbindung
-* Sitzungsverwaltung und Gateway-Stabilität: Begrenzung auf maximal 3 aktive Web-Sitzungen pro Konto zum Schutz vor Speicherüberlastung und Duplizierung von Audiostreams
+* Gast-Demomodus (Live-Online-Demo: https://proxdmr.duckdns.org).
+* Telegram-Benachrichtigungen bei technischen Serverproblemen.
+* UI-Verbesserungen und kleinere Fehlerbehebungen.
 
 <!-- lang:es -->
-# ProxDMR v1.44 — Registro de cambios
+# ProxDMR v1.57 — Registro de cambios
 
-* Soporte para FreeDMR, TGIF, DMR+ / IPSC2 y reflectores XLX (D-Star / DMR Gateway)
-* Sondeo y banco de pruebas multired de servidores (Server Probe & Benchmark)
-* Contactos y libreta de direcciones (Contacts & XLX Modules) con vinculación a redes específicas
-* Gestión de sesiones y estabilidad del gateway: límite de hasta 3 sesiones web activas por cuenta para evitar el agotamiento de memoria y la duplicación de flujos de audio
+* Modo demo para invitados (demostración en vivo: https://proxdmr.duckdns.org).
+* Alertas de Telegram sobre problemas técnicos en el servidor.
+* Mejoras en la interfaz de usuario y corrección de errores menores.
 
 <!-- lang:fr -->
-# ProxDMR v1.44 — Notes de version
+# ProxDMR v1.57 — Notes de version
 
-* Prise en charge de FreeDMR, TGIF, DMR+ / IPSC2 et des réflecteurs XLX (D-Star / DMR Gateway)
-* Sondage et benchmark multi-réseaux des serveurs (Server Probe & Benchmark)
-* Contacts et carnet d'adresses (Contacts & XLX Modules) avec association des contacts aux réseaux
-* Gestion des sessions et stabilité de la passerelle : limitation à 3 sessions web actives par compte pour éviter la saturation de mémoire et la duplication des flux audio
+* Mode démo invité (démo en ligne: https://proxdmr.duckdns.org).
+* Alertes Telegram pour les problèmes techniques du serveur.
+* Améliorations de l'interface utilisateur et corrections de bugs mineurs.
 
 <!-- lang:it -->
-# ProxDMR v1.44 — Registro delle modifiche
+# ProxDMR v1.57 — Registro delle modifiche
 
-* Supporto per FreeDMR, TGIF, DMR+ / IPSC2 e riflettori XLX (D-Star / DMR Gateway)
-* Scansione e benchmark multi-rete dei server (Server Probe & Benchmark)
-* Contatti e rubrica (Contacts & XLX Modules) con associazione dei contatti alle reti
-* Gestione delle sessioni e stabilità del gateway: limite di 3 sessioni web attive per account per prevenire l'esaurimento della memoria e la duplicazione dei flussi audio
+* Modalità demo ospite (demo online: https://proxdmr.duckdns.org).
+* Avvisi Telegram per problemi tecnici del server.
+* Miglioramenti dell'interfaccia utente e correzioni di bug minori.

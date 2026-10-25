@@ -68,6 +68,15 @@ export function getPersistentHotspotMute(hid, slot) {
     if (vLeg !== null) return vLeg === "true";
   }
 
+  // If in Solo mode by default and neither slot has been explicitly set:
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode === "solo") {
+    if (isXlxHotspot(cid)) {
+      return s === 1; // TS1 muted (true), TS2 unmuted (false)
+    }
+    return s === 2; // TS1 unmuted (false), TS2 muted (true)
+  }
+
   // Default: unmuted
   return false;
 }
@@ -104,17 +113,15 @@ export function setHotspotMute(hid, slot, muted, isTemporary = false) {
     saveSoloMutedSet(soloSet);
   } else {
     // User explicitly changed mute: update persistent storage and sync to server
-    if (!muted) {
-      if (soloSet && soloSet.size > 0) {
-        soloSet.delete(slotKey);
-        soloSet.delete(`default_ts${s}`);
-        const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
-        const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
-        if (isPrimary && hsList && hsList[0] && hsList[0].id) {
-          soloSet.delete(`${_resolveHotspotId(hsList[0].id)}_ts${s}`);
-        }
-        saveSoloMutedSet(soloSet);
+    if (soloSet && soloSet.size > 0) {
+      soloSet.delete(slotKey);
+      soloSet.delete(`default_ts${s}`);
+      const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+      const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
+      if (isPrimary && hsList && hsList[0] && hsList[0].id) {
+        soloSet.delete(`${_resolveHotspotId(hsList[0].id)}_ts${s}`);
       }
+      saveSoloMutedSet(soloSet);
     }
 
     localStorage.setItem(`proxdmr_mute_${cid}_ts${s}`, val);
@@ -231,10 +238,8 @@ export function getHotspotTsAudioMode(hid) {
   if (isPrimary) {
     const vDef = localStorage.getItem("proxdmr_ts_mode_default");
     if (vDef && ["solo", "doubl", "auto"].includes(vDef)) return vDef;
-    const legacy = localStorage.getItem("proxdmr_simultaneous_slots");
-    if (legacy === "false") return "solo";
   }
-  return "doubl";
+  return "solo";
 }
 
 export function setHotspotTsAudioMode(hid, mode) {
@@ -244,7 +249,7 @@ export function setHotspotTsAudioMode(hid, mode) {
     updateHotspotTsAudioModeUI(cid);
     return;
   }
-  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
+  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "solo";
   localStorage.setItem(`proxdmr_ts_mode_${cid}`, safeMode);
 
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
@@ -256,6 +261,9 @@ export function setHotspotTsAudioMode(hid, mode) {
 
   if (safeMode === "solo") {
     enforceSoloTsMute(cid);
+  } else if (safeMode === "doubl") {
+    setHotspotMute(cid, 1, false);
+    setHotspotMute(cid, 2, false);
   } else if (safeMode === "auto") {
     resetAutoSlotState(cid);
   }
@@ -318,16 +326,44 @@ export function enforceSingleTsMute(hid) {
 export function toggleHotspotMute(hid, slot) {
   const s = parseInt(slot, 10) || 1;
   const cid = _resolveHotspotId(hid);
-  const cur = getHotspotMute(cid, s);
-  const newMute = !cur;
   const mode = getHotspotTsAudioMode(cid);
 
   if (mode === "solo") {
-    // Solo rule: TS1 and TS2 always have different/opposite mute states
-    const otherS = (s === 1) ? 2 : 1;
-    setHotspotMute(cid, s, newMute);
-    setHotspotMute(cid, otherS, !newMute);
-  } else if (mode === "auto") {
+    if (isXlxHotspot(cid)) {
+      enforceSoloTsMute(cid);
+      return;
+    }
+    // 1. Fully clear any temporary soloSet flags for this hotspot
+    const soloSet = getSoloMutedSet();
+    if (soloSet && soloSet.size > 0) {
+      [1, 2].forEach(sl => {
+        soloSet.delete(`${cid}_ts${sl}`);
+        soloSet.delete(`default_ts${sl}`);
+      });
+      saveSoloMutedSet(soloSet);
+    }
+
+    const curM1 = getPersistentHotspotMute(cid, 1);
+    const curM2 = getPersistentHotspotMute(cid, 2);
+
+    if (curM1 !== curM2) {
+      // Normal Solo state (one slot unmuted, other muted):
+      // Clicking either slot toggles them!
+      setHotspotMute(cid, 1, !curM1);
+      setHotspotMute(cid, 2, !curM2);
+    } else {
+      // If both were in the same state somehow:
+      const otherS = (s === 1) ? 2 : 1;
+      setHotspotMute(cid, s, false);
+      setHotspotMute(cid, otherS, true);
+    }
+    return;
+  }
+
+  const cur = getHotspotMute(cid, s);
+  const newMute = !cur;
+
+  if (mode === "auto") {
     // In Auto mode: user manual override sets chosen slot unmuted and other muted
     const otherS = (s === 1) ? 2 : 1;
     const st = _getAutoState(cid);
@@ -566,7 +602,7 @@ export function renderTsAudioModeBtnContent(btn, mode, isXlx = false) {
   btn.classList.remove("ts-mode-locked");
   btn.style.cursor = "";
 
-  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "doubl";
+  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "solo";
   badge.classList.remove("ts-mode-solo", "ts-mode-doubl", "ts-mode-auto");
   badge.classList.add(`ts-mode-${safeMode}`);
 
@@ -599,6 +635,9 @@ export function updateCardTsAudioModeUI(card, hid) {
   const isXlx = isXlxHotspot(cid, card);
   const mode = isXlx ? "solo" : getHotspotTsAudioMode(cid);
   renderTsAudioModeBtnContent(btn, mode, isXlx);
+  if (mode === "solo") {
+    enforceSoloTsMute(cid);
+  }
 }
 
 export function updateHotspotTsAudioModeUI(hid) {

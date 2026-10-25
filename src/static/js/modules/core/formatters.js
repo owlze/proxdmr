@@ -272,6 +272,13 @@
   }
 
   export function formatCallerDisplay(callsign, name, talkerAlias, dmrId, rawCallerDisplay = "") {
+    const isDemo = typeof window !== "undefined" && ((typeof window.isDemoMode === "function") ? window.isDemoMode() : Boolean(window.isDemoMode));
+    if (isDemo && typeof window.localizeDemoText === "function") {
+      callsign = window.localizeDemoText(callsign);
+      name = window.localizeDemoText(name);
+      talkerAlias = window.localizeDemoText(talkerAlias);
+      rawCallerDisplay = window.localizeDemoText(rawCallerDisplay);
+    }
     let main = "";
     const myCall = ((typeof window !== "undefined" && window.radioState && window.radioState.callsign) || "").trim().toUpperCase();
     const myDmrId = (typeof window !== "undefined" && window.radioState && window.radioState.dmr_id) || "";
@@ -428,8 +435,17 @@
     "96": { en: "Oceania", ru: "Океания", uk: "Океанія", de: "Ozeanien", es: "Oceanía", fr: "Océanie", it: "Oceania" },
     "97": { en: "Africa", ru: "Африка", uk: "Африка", de: "Afrika", es: "África", fr: "Afrique", it: "Africa" },
     "113": { en: "English WW", ru: "English WW", uk: "English WW", de: "English WW", es: "English WW", fr: "English WW", it: "English WW" },
-    "250": { en: "Russia (CIS)", ru: "Россия (Общий / CIS)", uk: "Росія (Загальний / CIS)", de: "Russland (GUS)", es: "Rusia (CEI)", fr: "Russie (CEI)", it: "Russia (CSI)" },
+    "98": { en: "Radio Test", ru: "Radio Test (Тестовая)", uk: "Radio Test (Тестова)", de: "Funktest (Radio Test)", es: "Prueba de radio", fr: "Test radio", it: "Test radio" },
+    "250": { en: "Russia (General / CIS)", ru: "Россия (Общий / CIS)", uk: "Росія (Загальний / CIS)", de: "Russland (Allgemein / GUS)", es: "Rusia (General / CEI)", fr: "Russie (Général / CEI)", it: "Russia (Generale / CSI)" },
     "2501": { en: "Russia 1 (National)", ru: "Россия 1 (National)", uk: "Росія 1 (National)", de: "Russland 1 (National)", es: "Rusia 1 (Nacional)", fr: "Russie 1 (National)", it: "Russia 1 (Nazionale)" },
+    "2502": { en: "Moscow & Moscow Region", ru: "Москва и Московская обл.", uk: "Москва та Московська обл.", de: "Moskau & Gebiet Moskau", es: "Moscú y Región de Moscú", fr: "Moscou et Région de Moscou", it: "Mosca e Regione di Mosca" },
+    "2503": { en: "St. Petersburg & NWFO", ru: "Санкт-Петербург и СЗФО", uk: "Санкт-Петербург та ПЗФО", de: "St. Petersburg & NWFO", es: "San Petersburgo y NWFO", fr: "Saint-Pétersbourg et NWFO", it: "San Pietroburgo e NWFO" },
+    "2504": { en: "Central Federal District (RU)", ru: "Центральный ФО", uk: "Центральний ФО", de: "Zentraler Föderationskreis (RU)", es: "Distrito Federal Central (RU)", fr: "District fédéral central (RU)", it: "Circondario federale centrale (RU)" },
+    "2505": { en: "Southern & Caucasian FD (RU)", ru: "Южный & Кавказский ФО", uk: "Південний та Кавказький ФО", de: "Südlicher & Kaukasischer FK (RU)", es: "Distrito Federal Sur y Cáucaso (RU)", fr: "District fédéral du Sud et Caucase (RU)", it: "Circondario federale meridionale (RU)" },
+    "2506": { en: "Volga Federal District (RU)", ru: "Приволжский ФО", uk: "Приволзький ФО", de: "Föderationskreis Wolga (RU)", es: "Distrito Federal del Volga (RU)", fr: "District fédéral de la Volga (RU)", it: "Circondario federale del Volga (RU)" },
+    "2507": { en: "Ural Federal District (RU)", ru: "Уральский ФО", uk: "Уральський ФО", de: "Föderationskreis Ural (RU)", es: "Distrito Federal de los Urales (RU)", fr: "District fédéral de l'Oural (RU)", it: "Circondario federale degli Urali (RU)" },
+    "2508": { en: "Siberian Federal District (RU)", ru: "Сибирский ФО", uk: "Сибірський ФО", de: "Föderationskreis Sibirien (RU)", es: "Distrito Federal de Siberia (RU)", fr: "District fédéral de Sibérie (RU)", it: "Circondario federale siberiano (RU)" },
+    "2509": { en: "Far Eastern Federal District (RU)", ru: "Дальневосточный ФО", uk: "Далекосхідний ФО", de: "Fernöstlicher Föderationskreis (RU)", es: "Distrito Federal del Lejano Oriente (RU)", fr: "District fédéral extrême-oriental (RU)", it: "Circondario federale dell'Estremo Oriente (RU)" },
     "9990": { en: "Parrot (Echo)", ru: "Parrot (Эхо-тест)", uk: "Parrot (Ехо-тест)", de: "Parrot (Echo-Test)", es: "Parrot (Eco)", fr: "Parrot (Écho)", it: "Parrot (Echo)" },
     "4000": { en: "Unlink", ru: "Отключение (Unlink)", uk: "Відключення (Unlink)", de: "Trennen (Unlink)", es: "Desconectar (Unlink)", fr: "Déconnexion (Unlink)", it: "Disconnetti (Unlink)" }
   };

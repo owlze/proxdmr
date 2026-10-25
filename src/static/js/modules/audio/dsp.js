@@ -71,6 +71,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         _notifyNavClosed();
       }
     }
+    window.closeAudioRxModal = closeModal;
 
     document.addEventListener("click", (e) => {
       const trigger = e.target.closest(".btn-audio-rx-trigger") || (e.target.id === "btnAudioRxMain" ? e.target : null);
@@ -596,6 +597,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         _notifyNavClosed();
       }
     }
+    window.closeAudioTxModal = closeModal;
 
     document.addEventListener("click", (e) => {
       const trigger = e.target.closest(".btn-audio-tx-trigger") || (e.target.id === "btnAudioTxMain" ? e.target : null);
@@ -1052,6 +1054,20 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
       await window.audioPlayer.init(window.audioCtx);
 
+      // В демо-режиме, режиме SWL и пока открыто окно входа (#authModal) —
+      // микрофон (getUserMedia) НЕ запрашиваем вообще (нужен только приём audioPlayer)
+      const authModalEl = document.getElementById("authModal");
+      const isAuthModalOpen = Boolean(authModalEl && authModalEl.classList.contains("active"));
+      if (
+        window.isDemoMode ||
+        window.isUserSwl ||
+        document.body.classList.contains("is-demo-mode") ||
+        isAuthModalOpen
+      ) {
+        isAudioReady = false;
+        return false;
+      }
+
       try {
         await window.audioCtx.audioWorklet.addModule("/static/js/audio-processor.js");
       } catch (modErr) {
@@ -1160,6 +1176,21 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       isAudioInitializing = false;
     }
   }
+
+  function stopAndReleaseMic() {
+    if (window.micSourceNode) {
+      try { window.micSourceNode.disconnect(); } catch (_) {}
+      window.micSourceNode = null;
+    }
+    if (window.micStream) {
+      try {
+        window.micStream.getTracks().forEach(t => t.stop());
+      } catch (_) {}
+      window.micStream = null;
+    }
+    isAudioReady = false;
+  }
+  window.stopAndReleaseMic = stopAndReleaseMic;
 
   // --- Per-Hotspot & Per-Timeslot Smooth VU Meter Engine (Peak Attack, Ballistic Release, Peak Hold) ---
   const VU_PEAK_HOLD_MS = 1000;

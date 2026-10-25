@@ -5,7 +5,7 @@
  * and database statistics.
  */
 
-import { safeEscapeHtml } from '../core/formatters.js';
+import { safeEscapeHtml, getCleanTgDesc, getLocalizedCountryName, DMR_MCC_MAP, emojiToIso } from '../core/formatters.js?v=2.9.380';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 
@@ -448,6 +448,83 @@ async function handleTgAddTs2(tg, name, btnEl) {
   }
 }
 
+let _lastTgSearchItems = [];
+
+function localizeTgSearchCountry(tg, rawCountry, curLang) {
+  const sTg = String(tg || "").trim();
+  const isCyr = (curLang === "ru" || curLang === "uk");
+  const cStr = String(rawCountry || "").trim();
+
+  if (sTg === "91" || sTg === "92" || sTg === "93" || sTg === "94" || sTg === "95" || sTg === "98" || cStr.includes("Международная")) {
+    const mapGlobal = {
+      ru: "Международная (Global)",
+      uk: "Міжнародна (Global)",
+      de: "International (Global)",
+      es: "Internacional (Global)",
+      fr: "International (Global)",
+      it: "Internazionale (Global)",
+      en: "International (Global)"
+    };
+    return mapGlobal[curLang] || mapGlobal.en;
+  }
+  if (sTg === "9990" || cStr.includes("Служебная")) {
+    const mapSrv = {
+      ru: "Служебная (Audio Test)",
+      uk: "Службова (Audio Test)",
+      de: "Dienstgruppe (Audio Test)",
+      es: "Servicio (Audio Test)",
+      fr: "Service (Audio Test)",
+      it: "Servizio (Audio Test)",
+      en: "Service (Audio Test)"
+    };
+    return mapSrv[curLang] || mapSrv.en;
+  }
+  if (sTg.startsWith("250") || cStr.includes("Россия (Общий")) {
+    const mapRu = {
+      ru: "Россия (Общий / CIS)",
+      uk: "Росія (Загальний / CIS)",
+      de: "Russland (Allgemein / GUS)",
+      es: "Rusia (General / CEI)",
+      fr: "Russie (Général / CEI)",
+      it: "Russia (Generale / CSI)",
+      en: "Russia (General / CIS)"
+    };
+    return mapRu[curLang] || mapRu.en;
+  }
+  if (sTg.length >= 3) {
+    const mcc = sTg.slice(0, 3);
+    if (DMR_MCC_MAP && DMR_MCC_MAP[mcc]) {
+      const mInfo = DMR_MCC_MAP[mcc];
+      const iso = emojiToIso(mInfo.flag);
+      const loc = iso ? getLocalizedCountryName(iso, isCyr ? mInfo.name : mInfo.name_en, curLang) : (isCyr ? mInfo.name : mInfo.name_en);
+      if (loc) return loc;
+    }
+  }
+  if (!isCyr && cStr) {
+    const m = cStr.match(/^([^(]+)\s*\(([^)]+)\)$/);
+    if (m && /[а-яА-ЯёЁ]/.test(m[1]) && /[a-zA-Z]/.test(m[2])) {
+      return m[2].trim();
+    }
+  }
+  return cStr || "BM";
+}
+
+function localizeTgSearchName(tg, rawName, curLang, netType) {
+  const sTg = String(tg || "").trim();
+  const isCyr = (curLang === "ru" || curLang === "uk");
+  const raw = String(rawName || "").trim();
+  if (isCyr) return raw || `TG ${sTg}`;
+
+  const cleaned = getCleanTgDesc(sTg, raw, curLang, netType);
+  if (cleaned) {
+    if (raw.startsWith("Россия / ") && cleaned === raw) {
+      return raw.replace(/^Россия\s*\/\s*/, "Russia / ");
+    }
+    return cleaned;
+  }
+  return raw || `TG ${sTg}`;
+}
+
 export function renderTgSearchResults(items) {
     ensureElements();
     if (!tgSearchResultsList) return;
@@ -466,26 +543,33 @@ export function renderTgSearchResults(items) {
           : "bm");
     const isXlx = netType === "xlx";
 
-    tgSearchResultsList.innerHTML = items.map(item => `
-      <div class="search-result-card" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(item.name || '')}">
+    const curLang = (typeof window !== "undefined" && ((window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang)))) || "ru";
+    _lastTgSearchItems = Array.isArray(items) ? items : [];
+
+    tgSearchResultsList.innerHTML = items.map(item => {
+      const dispName = localizeTgSearchName(item.tg, item.name, curLang, netType);
+      const dispCountry = localizeTgSearchCountry(item.tg, item.country, curLang);
+      return `
+      <div class="search-result-card" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}">
         <div class="search-result-left">
           <span class="card-badge-id card-badge-tg">TG ${safeEscapeHtml(String(item.tg))}</span>
           <div class="card-info-col">
-            <span class="card-primary-title">${safeEscapeHtml(item.name || `TG ${item.tg}`)}</span>
-            <span class="card-secondary-details">${safeEscapeHtml(item.country || 'BM')}</span>
+            <span class="card-primary-title">${safeEscapeHtml(dispName)}</span>
+            <span class="card-secondary-details">${safeEscapeHtml(dispCountry)}</span>
           </div>
         </div>
         <div class="card-actions-group">
           ${!isXlx ? `
-            <button type="button" class="btn-tg-slot-add btn-tg-add-ts1" data-slot="1" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(item.name || '')}" title="${window.t ? window.t('tgtx.title_add_ts1', { tg: item.tg }, `Установить TG ${item.tg} на TS1 хотспота`) : `Установить TG ${item.tg} на TS1 хотспота`}">+ in TS1</button>
-            <button type="button" class="btn-tg-slot-add btn-tg-add-ts2" data-slot="2" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(item.name || '')}" title="${window.t ? window.t('tgtx.title_add_ts2', { tg: item.tg }, `Добавить TG ${item.tg} в статические группы TS2`) : `Добавить TG ${item.tg} в статические группы TS2`}">+ in TS2</button>
+            <button type="button" class="btn-tg-slot-add btn-tg-add-ts1" data-slot="1" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}" title="${window.t ? window.t('tgtx.title_add_ts1', { tg: item.tg }, `Установить TG ${item.tg} на TS1 хотспота`) : `Установить TG ${item.tg} на TS1 хотспота`}">+ in TS1</button>
+            <button type="button" class="btn-tg-slot-add btn-tg-add-ts2" data-slot="2" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}" title="${window.t ? window.t('tgtx.title_add_ts2', { tg: item.tg }, `Добавить TG ${item.tg} в статические группы TS2`) : `Добавить TG ${item.tg} в статические группы TS2`}">+ in TS2</button>
           ` : ''}
           <div class="card-select-action">
             <span>${window.t ? window.t("tgtx.btn_select") : "Выбрать"}</span> ➔
           </div>
         </div>
       </div>
-    `).join("");
+    `;
+    }).join("");
 
     tgSearchResultsList.querySelectorAll(".btn-tg-add-ts1").forEach(btn => {
       btn.addEventListener("click", (e) => {
@@ -865,4 +949,12 @@ if (typeof document !== "undefined") {
   } else {
     initSearchManager();
   }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("languageChanged", () => {
+    if (_lastTgSearchItems && _lastTgSearchItems.length > 0) {
+      renderTgSearchResults(_lastTgSearchItems);
+    }
+  });
 }

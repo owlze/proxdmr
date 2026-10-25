@@ -141,7 +141,7 @@ body {
   flex: 0 0 436px;
   background: var(--bg-card);
   border: 2px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   padding: 4px 5px 10px 5px;
   display: flex;
@@ -170,7 +170,7 @@ body {
   flex: 0 0 auto !important;
   padding: 4px 8px !important;
   gap: 0 !important;
-  border-radius: 12px !important;
+  border-radius: 0px !important;
   border: 2px solid rgba(0, 229, 255, 0.7) !important;
   box-shadow: 0 0 16px rgba(0, 229, 255, 0.18), 0 8px 24px rgba(0, 0, 0, 0.5) !important;
   display: inline-flex !important;
@@ -234,7 +234,7 @@ body {
 .radio-container.collapsed .hotspot-name-badge {
   display: inline-flex !important;
   align-items: center !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   padding: 2px 8px !important;
   font-size: 0.8rem !important;
   font-weight: 600 !important;
@@ -270,7 +270,7 @@ body {
   justify-content: center;
   color: #ff3b30;
   transition: transform 0.2s ease, color 0.15s ease, background 0.15s ease;
-  border-radius: 6px;
+  border-radius: 0px;
   margin: 0 4px 0 0;
   flex: 0 0 auto;
   line-height: 1;
@@ -329,7 +329,7 @@ body {
   font-size: 0.8rem;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   line-height: 1;
   transition: all 0.15s ease;
 }
@@ -362,7 +362,7 @@ body {
 .theme-toggle-btn {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: 0px;
   color: #ffd600;
   cursor: pointer;
   display: inline-flex;
@@ -446,7 +446,7 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   background: rgba(0, 0, 0, 0.35);
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   user-select: none;
   margin-left: auto;
@@ -478,7 +478,7 @@ body {
 .fullscreen-toggle-btn {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: 0px;
   color: #8b949e;
   cursor: pointer;
   display: inline-flex;
@@ -519,7 +519,7 @@ body {
 .header-settings-btn {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: 0px;
   color: #8b949e;
   cursor: pointer;
   display: inline-flex;
@@ -719,7 +719,7 @@ body.is-apk-mode #groupVolumeDownPtt {
   color: #fff;
   font-size: 0.65rem;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 800;
   letter-spacing: 1.2px;
   box-shadow: 0 2px 8px rgba(255, 87, 34, 0.35);
@@ -733,7 +733,7 @@ body.is-apk-mode #groupVolumeDownPtt {
   font-size: 0.58rem; /* Уменьшено на 2 пункта (было 0.70rem) */
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 600;
   letter-spacing: 0.5px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -747,7 +747,7 @@ body.is-apk-mode #groupVolumeDownPtt {
   font-size: 0.56rem; /* Уменьшено на 2 пункта (было 0.68rem) */
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 500;
   border: 1px solid rgba(88, 166, 255, 0.22);
   display: inline-block;
@@ -771,7 +771,7 @@ body.is-apk-mode .badge-about-apk-date {
   font-size: 0.84rem; /* Увеличено на 2 пункта (было 0.70rem) */
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 600;
   letter-spacing: 0.5px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -809,7 +809,7 @@ body.is-apk-mode .badge-about-apk-date {
   align-items: center;
   gap: 4px;
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: 0px;
   font-size: 0.72rem;
   font-weight: 800;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -921,7 +921,7 @@ body.is-apk-mode .badge-about-apk-date {
 #hotspotEditForm.hs-edit-dynamic-panel {
   position: relative;
   padding: 12px 14px 10px 14px;
-  border-radius: 12px;
+  border-radius: 0px;
   border: 1.5px solid rgba(255, 107, 43, 0.34);
   background: linear-gradient(160deg, rgba(255, 107, 43, 0.10) 0%, rgba(255, 107, 43, 0.03) 55%, rgba(18, 22, 28, 0.45) 100%);
   box-shadow: inset 0 1px 0 rgba(255, 140, 90, 0.12), 0 4px 18px rgba(0, 0, 0, 0.22);
@@ -1022,7 +1022,7 @@ body.is-apk-mode .badge-about-apk-date {
   color: var(--text-muted, #8b949e);
   background: rgba(0, 0, 0, 0.22);
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   white-space: nowrap;
 }
@@ -1061,7 +1061,7 @@ body.is-apk-mode .badge-about-apk-date {
   font-size: 0.82rem;
   font-weight: 600;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: 0px;
   cursor: pointer;
   outline: none;
   transition: all 0.2s;
@@ -1099,7 +1099,7 @@ body.is-apk-mode .badge-about-apk-date {
   color: var(--text-muted);
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: 0px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1123,7 +1123,7 @@ body.is-apk-mode .badge-about-apk-date {
   height: 44px;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 4px 8px;
   box-sizing: border-box;
   user-select: none;
@@ -1146,7 +1146,7 @@ body.is-apk-mode .badge-about-apk-date {
   position: relative;
   cursor: pointer;
   padding: 1px 5px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: #238142 !important;
   border: 1px solid #1c6634 !important;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -1175,7 +1175,7 @@ body.is-apk-mode .badge-about-apk-date {
 .bm-server-flag img {
   width: 16px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: 0px;
   display: block;
 }
 
@@ -1314,7 +1314,7 @@ select option:focus {
   position: relative;
   cursor: pointer;
   background: rgba(0, 0, 0, 0.35);
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 1px 2px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-sizing: border-box;
@@ -1360,7 +1360,7 @@ select option:focus {
   color: #8b949e;
   background: rgba(15, 17, 21, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
+  border-radius: 0px;
   padding: 1px 4px;
   line-height: 1.1;
   pointer-events: auto;
@@ -1386,7 +1386,7 @@ select option:focus {
   background: #161b22;
   color: #e6edf3;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   padding: 2px 7px;
   font-size: 0.68rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1484,7 +1484,7 @@ select option:focus {
   color: #2ecc71;
   background: rgba(15, 17, 21, 0.45);
   border: 1px solid rgba(46, 204, 113, 0.4);
-  border-radius: 3px;
+  border-radius: 0px;
   padding: 1px 4px;
   line-height: 1.1;
   pointer-events: auto;
@@ -1542,7 +1542,7 @@ select option:focus {
 .radio-screen {
   background: var(--bg-display);
   border: 3px solid #1f6feb;
-  border-radius: 10px;
+  border-radius: 0px;
   padding: 4px !important;
   display: flex;
   flex-direction: column;
@@ -1586,7 +1586,7 @@ select option:focus {
   gap: 3px;
   cursor: pointer;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   transition: all 0.15s ease;
   user-select: none;
   border: 1px solid transparent;
@@ -1657,7 +1657,7 @@ select option:focus {
   max-height: 7px;
   background-color: #1c2534;
   border: none !important;
-  border-radius: 0;
+  border-radius: 0px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: none !important;
@@ -1792,7 +1792,18 @@ select option:focus {
   font-size: 0.68rem;
   color: var(--text-muted);
   font-family: monospace;
-  opacity: 0.85;
+  opacity: 0.95;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+.rtt-display.e2e-good {
+  color: #10b981 !important;
+}
+.rtt-display.e2e-warn {
+  color: #fbbf24 !important;
+}
+.rtt-display.e2e-bad {
+  color: #ef4444 !important;
 }
 
 .mode-badge {
@@ -1812,7 +1823,7 @@ select option:focus {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-radius: 4px;
+  border-radius: 0px;
 }
 
 .mode-standby { background: #21262d; color: #8b949e; }
@@ -1901,7 +1912,7 @@ select option:focus {
   justify-content: center;
   cursor: pointer;
   user-select: none;
-  border-radius: 4px;
+  border-radius: 0px;
   width: 74px;
   flex: 0 0 74px;
   box-sizing: border-box;
@@ -1971,7 +1982,7 @@ select option:focus {
   font-size: 0.62rem;
   font-weight: 700;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 0px;
   letter-spacing: 0.1px;
   white-space: nowrap;
   display: inline-flex;
@@ -2049,7 +2060,7 @@ select option:focus {
   flex: 1 1 0;
   min-width: 0;
   height: 22px;
-  border-radius: 4px;
+  border-radius: 0px;
   overflow: visible !important;
   /* 3D Raised control pair effect */
   box-shadow:
@@ -2070,7 +2081,7 @@ select option:focus {
   justify-content: center;
   
   padding: 0 6px;
-  border-radius: 4px 0 0 4px;
+  border-radius: 0px;
   font-size: 0.68rem;
   font-weight: 700;
   cursor: pointer;
@@ -2111,7 +2122,7 @@ select option:focus {
   justify-content: center;
   gap: 2px;
   padding: 0 5px;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0px;
   border-left: none !important;
   font-size: 0.68rem;
   font-weight: 700;
@@ -2224,7 +2235,7 @@ select option:focus {
   width: auto !important;
   background: #238142 !important;
   border: 1px solid rgba(255, 255, 255, 0.25) !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65) !important;
   padding: 3px !important;
   z-index: 1250 !important;
@@ -2258,7 +2269,7 @@ select option:focus {
   padding: 0 4px !important;
   height: 22px !important;
   min-width: 30px !important;
-  border-radius: 4px !important;
+  border-radius: 0px !important;
   font-size: 0.68rem !important;
   font-weight: 700 !important;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important;
@@ -2322,7 +2333,7 @@ select option:focus {
   background: rgba(33, 38, 45, 0.85);
   border: 1px solid rgba(88, 166, 255, 0.25);
   color: #c9d1d9;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.72rem;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -2357,7 +2368,7 @@ select option:focus {
   align-items: center;
   gap: 6px;
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: 0px;
   min-width: 0;
   line-height: 1.25;
   transition: all 0.15s ease;
@@ -2382,7 +2393,7 @@ select option:focus {
   font-size: 0.62rem;
   font-weight: 700;
   padding: 1px 3px;
-  border-radius: 3px;
+  border-radius: 0px;
   letter-spacing: 0.2px;
   white-space: nowrap;
   width: 100%;
@@ -2494,7 +2505,7 @@ select option:focus {
   gap: 2px;
   background: rgba(0, 0, 0, 0.35);
   padding: 3px 6px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid #21262d;
 }
 
@@ -2516,7 +2527,7 @@ select option:focus {
   height: 12px;
   background: #111418;
   border: 1px solid #30363d;
-  border-radius: 4px;
+  border-radius: 0px;
   overflow: hidden;
   display: flex;
   position: relative;
@@ -2574,7 +2585,7 @@ select option:focus {
   background: #0d2818;
   background: linear-gradient(180deg, #0e291b 0%, #06150c 100%);
   border: 2px solid #1f6feb;
-  border-radius: 10px;
+  border-radius: 0px;
   box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.8), 0 0 8px rgba(31, 111, 235, 0.25);
   padding: 4px 2px 4px 2px;
   display: flex;
@@ -2643,7 +2654,7 @@ select option:focus {
   width: 12px;
   background: #0d131c;
   border: 1px solid rgba(255, 107, 43, 0.45);
-  border-radius: 6px;
+  border-radius: 0px;
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.75);
   pointer-events: none;
   z-index: 1;
@@ -2658,7 +2669,7 @@ select option:focus {
   max-height: calc(100% - 14px);
   width: 6px;
   background: #ff6b2b;
-  border-radius: 3px;
+  border-radius: 0px;
   box-shadow: 0 0 6px rgba(255, 107, 43, 0.75);
   pointer-events: none;
   z-index: 2;
@@ -2746,7 +2757,7 @@ select option:focus {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: rgba(0, 214, 62, 0.14);
   border: 1px solid rgba(0, 214, 62, 0.45);
   color: #00e676;
@@ -2812,7 +2823,7 @@ select option:focus {
 .volume-strip-settings-btn {
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
+  border-radius: 0px;
   color: #94a3b8;
   cursor: pointer;
   display: flex;
@@ -2902,7 +2913,7 @@ select option:focus {
   border: 1px solid var(--border-color);
   color: var(--text-primary);
   padding: 8px 4px;
-  border-radius: 8px;
+  border-radius: 0px;
   font-size: 0.8rem;
   font-weight: bold;
   cursor: pointer;
@@ -2928,7 +2939,7 @@ select option:focus {
   flex: 1;
   background: #21262d;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0px;
   color: #fff;
   padding: 8px 12px;
   font-size: 0.85rem;
@@ -2945,7 +2956,7 @@ select option:focus {
   border: 2px solid var(--border-color);
   color: #fff;
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: 0px;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
@@ -2999,7 +3010,7 @@ select option:focus {
   box-sizing: border-box !important;
   background: #161b22;
   border: 2px solid #1f6feb;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 4px 6px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 0 8px rgba(31, 111, 235, 0.25);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -3055,7 +3066,7 @@ select option:focus {
   gap: 2px;
   background: #238636;
   border: 1px solid rgba(46, 160, 67, 0.6);
-  border-radius: 6px;
+  border-radius: 0px;
   color: #ffffff;
   font-family: inherit;
   font-size: 0.76rem;
@@ -3087,7 +3098,7 @@ select option:focus {
   box-sizing: border-box;
   background: #161b22;
   border: 2px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #e6edf3;
   font-family: inherit;
   font-size: 0.75rem;
@@ -3136,7 +3147,7 @@ select option:focus {
   box-sizing: border-box !important;
   background: #161b22;
   border: 2px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #e6edf3;
   font-family: inherit;
   font-size: 0.80rem;
@@ -3195,7 +3206,7 @@ select option:focus {
   max-width: 100% !important;
   min-width: 0 !important;
   height: 96px !important;
-  border-radius: 12px;
+  border-radius: 0px;
   background: radial-gradient(circle, #383e4a 0%, #21262d 100%);
   border: 3px solid #1f6feb;
   color: #c9d1d9;
@@ -3448,16 +3459,24 @@ select option:focus {
   z-index: 9999;
   backdrop-filter: blur(12px);
 }
-body.auth-locked > *:not(.auth-modal) {
+body.auth-locked > *:not(.auth-modal):not(.app-dialog-modal):not(#appDialogModal):not(.toast-container):not(#toastContainer) {
   pointer-events: none;
   filter: blur(3px);
   user-select: none;
+}
+body.auth-locked .app-dialog-modal,
+body.auth-locked #appDialogModal,
+body.auth-locked .toast-container,
+body.auth-locked #toastContainer {
+  pointer-events: auto !important;
+  filter: none !important;
+  user-select: auto !important;
 }
 
 .modal-content {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 0px;
   max-width: 440px;
   width: 100%;
   padding: 20px;
@@ -3608,8 +3627,8 @@ body.auth-locked > *:not(.auth-modal) {
   background: var(--bg-card);
   flex-shrink: 0 !important;
   z-index: 10;
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
+  border-top-left-radius: 0px;
+  border-top-right-radius: 0px;
   box-sizing: border-box;
 }
 
@@ -3700,7 +3719,7 @@ body.auth-locked > *:not(.auth-modal) {
   padding: 6px 14px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 0px;
   color: #8b949e;
   font-size: 0.84rem;
   font-weight: 600;
@@ -3782,7 +3801,7 @@ body.auth-locked > *:not(.auth-modal) {
 /* ── Gemini API Keys & TTS Collapsible Frames ─────────────────────────── */
 .apikeys-frame {
   border: 1px solid rgba(56, 139, 253, 0.35);
-  border-radius: 10px;
+  border-radius: 0px;
   margin-bottom: 16px;
   overflow: hidden;
   background: #12365a;
@@ -3852,7 +3871,7 @@ body.auth-locked > *:not(.auth-modal) {
   padding: 2px 10px;
   font-size: 0.75rem;
   font-weight: 600;
-  border-radius: 5px;
+  border-radius: 0px;
   border: 1px solid rgba(63, 185, 80, 0.5);
   background: rgba(63, 185, 80, 0.14);
   color: #3fb950;
@@ -3901,7 +3920,7 @@ body.auth-locked > *:not(.auth-modal) {
 /* ── Light Theme: Gemini API Keys & TTS Collapsible Frames ──────────────── */
 [data-theme="light"] .apikeys-frame {
   border: 1px solid #b6d3f7;
-  border-radius: 10px;
+  border-radius: 0px;
   background: #edf4fe;
   box-shadow: 0 2px 10px rgba(9, 105, 218, 0.08), inset 0 1px 0 #ffffff;
 }
@@ -4011,7 +4030,7 @@ body.auth-locked > *:not(.auth-modal) {
   gap: 7px;
   background: rgba(114, 18, 48, 0.28);
   border: 1px solid rgba(225, 29, 72, 0.45);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 8px 10px;
   margin-top: 6px;
   margin-bottom: 4px;
@@ -4192,7 +4211,7 @@ body.auth-locked > *:not(.auth-modal) {
 .form-input {
   background: #21262d;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 8px 12px;
   color: #fff;
   font-size: 0.9rem;
@@ -4259,7 +4278,7 @@ textarea::placeholder {
   font-size: 0.72rem;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -4278,7 +4297,7 @@ textarea::placeholder {
   background: #161b22;
   border: 1px solid #30363d;
   border-left: 3px solid var(--color-cyan);
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 4px 12px;
   font-size: 0.78rem;
   color: #c9d1d9;
@@ -4336,7 +4355,7 @@ textarea::placeholder {
   margin-top: 8px;
   padding: 6px 8px;
   background: rgba(255, 255, 255, 0.04);
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.72rem;
   color: #8b949e;
   line-height: 1.4;
@@ -4359,7 +4378,7 @@ textarea::placeholder {
   background: rgba(0, 229, 255, 0.12);
   border: 1px solid rgba(0, 229, 255, 0.3);
   padding: 2px 10px;
-  border-radius: 4px;
+  border-radius: 0px;
   letter-spacing: 0.5px;
 }
 
@@ -4368,7 +4387,7 @@ textarea::placeholder {
   appearance: none;
   height: 6px;
   background: #21262d;
-  border-radius: 3px;
+  border-radius: 0px;
   outline: none;
   border: 1px solid #30363d;
 }
@@ -4410,7 +4429,7 @@ textarea::placeholder {
   background: #238636;
   color: #fff;
   border: 1px solid #2ea043;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px;
   font-weight: bold;
   cursor: pointer;
@@ -4426,7 +4445,7 @@ textarea::placeholder {
   background: #21262d;
   border: 1px solid var(--border-color);
   color: var(--text-muted);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px;
   font-weight: bold;
   cursor: pointer;
@@ -4448,7 +4467,7 @@ textarea::placeholder {
   background: #1f6feb;
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 16px;
   font-weight: bold;
   cursor: pointer;
@@ -4463,7 +4482,7 @@ textarea::placeholder {
   background: #dc2626;
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 16px;
   font-weight: bold;
   cursor: pointer;
@@ -4497,7 +4516,7 @@ textarea::placeholder {
     justify-content: flex-start;
     padding: 8px 56px 8px 10px;
     border: 1.5px solid #444c56;
-    border-radius: 8px;
+    border-radius: 0px;
     /* 3D Raised / Elevated effect: light highlight top-left, dark shadow bottom-right */
     box-shadow:
       -2px -2px 5px rgba(255, 255, 255, 0.06),
@@ -4522,7 +4541,7 @@ textarea::placeholder {
     content: "";
     position: absolute;
     inset: 0;
-    border-radius: inherit;
+    border-radius: 0px;
     background: linear-gradient(180deg, #22272e 0%, #1c2128 100%);
     z-index: -1;
     transition: background 0.15s ease;
@@ -4554,7 +4573,7 @@ textarea::placeholder {
     height: 18px !important;
     padding: 0 !important;
     box-sizing: border-box !important;
-    border-radius: 4px;
+    border-radius: 0px;
     background: rgba(22, 27, 34, 0.85);
     border: 1px solid rgba(88, 166, 255, 0.35);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
@@ -4788,7 +4807,7 @@ textarea::placeholder {
     height: 26px !important;
     min-height: 26px !important;
     max-height: 26px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     background: #09130d;
     border: 1.5px solid #00c853;
     color: #ffffff;
@@ -4942,7 +4961,7 @@ textarea::placeholder {
     justify-content: center;
     width: 24px;
     height: 16px;
-    border-radius: 3px;
+    border-radius: 0px;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -4975,7 +4994,7 @@ textarea::placeholder {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
     display: inline-block;
     padding: 0;
-    border-radius: 0;
+    border-radius: 0px;
     background: none;
     border: none;
     cursor: pointer;
@@ -5080,7 +5099,7 @@ textarea::placeholder {
     font-weight: 700;
     color: #ffffff;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: 0px;
     background: rgba(255, 255, 255, 0.12);
     border: 1px solid rgba(255, 255, 255, 0.35);
     cursor: pointer;
@@ -5408,7 +5427,7 @@ textarea::placeholder {
     font-weight: 500;
     overflow: hidden;
     position: relative;
-    border-radius: 4px;
+    border-radius: 0px;
     padding: 0 6px;
     margin-right: 26px; /* Reserves space for vertical VU meter (16px + 5px right + 5px gap) */
     box-sizing: border-box;
@@ -5447,7 +5466,7 @@ textarea::placeholder {
     margin-right: 3px;
     background: rgba(56, 189, 248, 0.12);
     border: 1px solid rgba(56, 189, 248, 0.28);
-    border-radius: 3px;
+    border-radius: 0px;
     vertical-align: middle;
     line-height: 13px;
     white-space: nowrap;
@@ -5465,7 +5484,7 @@ textarea::placeholder {
   .vfo-caption-badge .flag-badge {
     width: 15px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: 0px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     border: 1px solid rgba(255, 255, 255, 0.25);
     display: inline-flex;
@@ -5528,7 +5547,7 @@ textarea::placeholder {
     max-height: 26px !important;
     padding: 0 2px !important;
     box-sizing: border-box !important;
-    border-radius: 4px;
+    border-radius: 0px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5686,7 +5705,7 @@ textarea::placeholder {
     max-height: 26px !important;
     padding: 0 2px !important;
     box-sizing: border-box !important;
-    border-radius: 4px;
+    border-radius: 0px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5832,7 +5851,7 @@ textarea::placeholder {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: 9px;
     color: #8b949e;
     background: transparent;
     opacity: 0.45;
@@ -6009,7 +6028,7 @@ textarea::placeholder {
     max-width: calc(100vw - 20px);
     background: var(--bg-card, #181b22);
     border: 1px solid var(--border-color, #30363d);
-    border-radius: 10px;
+    border-radius: 0px;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
@@ -6050,7 +6069,7 @@ textarea::placeholder {
     line-height: 1;
     cursor: pointer;
     color: var(--text-muted, #8b949e);
-    border-radius: 4px;
+    border-radius: 0px;
     padding: 2px 6px;
     transition: color 0.12s ease, background 0.12s ease;
   }
@@ -6153,7 +6172,7 @@ textarea::placeholder {
     font-size: 0.62rem;
     font-weight: 700;
     padding: 1px 5px;
-    border-radius: 9999px;
+    border-radius: 0px;
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -6290,7 +6309,7 @@ textarea::placeholder {
     max-width: calc(100vw - 20px);
     background: var(--bg-card, #181b22);
     border: 1px solid var(--border-color, #30363d);
-    border-radius: 10px;
+    border-radius: 0px;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
@@ -6331,7 +6350,7 @@ textarea::placeholder {
     line-height: 1;
     cursor: pointer;
     color: var(--text-muted, #8b949e);
-    border-radius: 4px;
+    border-radius: 0px;
     padding: 2px 6px;
     transition: color 0.12s ease, background 0.12s ease;
   }
@@ -6381,7 +6400,7 @@ textarea::placeholder {
     background: #238142 !important;
     color: #ffffff !important;
     border: 1px solid #1c6634 !important;
-    border-radius: 6px;
+    border-radius: 0px;
     padding: 5px 8px;
     font-size: 0.76rem;
     cursor: pointer;
@@ -6455,7 +6474,7 @@ textarea::placeholder {
     border: 1px solid rgba(0, 176, 255, 0.4);
     color: #80e5ff;
     padding: 4px 10px;
-    border-radius: 5px;
+    border-radius: 0px;
     font-size: 0.74rem;
     font-weight: 600;
     cursor: pointer;
@@ -6473,7 +6492,7 @@ textarea::placeholder {
     border: 1px solid #00b0ff;
     color: #ffffff;
     padding: 4px 12px;
-    border-radius: 5px;
+    border-radius: 0px;
     font-size: 0.74rem;
     font-weight: 600;
     cursor: pointer;
@@ -6534,7 +6553,7 @@ textarea::placeholder {
     bottom: 4px;
     width: 16px;
     height: auto; /* Extends from top of AI button to the very bottom */
-    border-radius: 2px;
+    border-radius: 0px;
     background-color: #161e28;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9);
@@ -6699,7 +6718,7 @@ textarea::placeholder {
     width: calc(100% - 50px) !important; /* Dedicated right gutter for action buttons */
     margin: 0 !important;
     padding: 0 !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     background: rgba(0, 0, 0, 0.45) !important;
     border: 1.5px solid rgba(0, 229, 255, 0.32) !important;
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7) !important;
@@ -6746,7 +6765,7 @@ textarea::placeholder {
     align-items: center;
     gap: 3px;
     padding: 2px 5px;
-    border-radius: 12px;
+    border-radius: 0px;
     background: rgba(13, 17, 23, 0.78);
     border: 1px solid rgba(255, 255, 255, 0.14);
     backdrop-filter: blur(4px);
@@ -6774,7 +6793,7 @@ textarea::placeholder {
     font-weight: 700;
     padding: 1px 4px;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: 0px;
     line-height: 14px;
     transition: all 0.15s ease;
   }
@@ -6890,7 +6909,7 @@ textarea::placeholder {
   .vfo-caption-stream::-webkit-scrollbar-thumb,
   .vfo-caption-box::-webkit-scrollbar-thumb {
     background: rgba(0, 217, 255, 0.3);
-    border-radius: 2px;
+    border-radius: 0px;
   }
   .vfo-caption-stream::-webkit-scrollbar-thumb:hover,
   .vfo-caption-box::-webkit-scrollbar-thumb:hover {
@@ -6928,7 +6947,7 @@ textarea::placeholder {
 .hotspot-card {
   background: #161b22;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 4px 12px;
   display: flex;
   flex-direction: column;
@@ -6973,7 +6992,7 @@ textarea::placeholder {
   color: var(--text-primary);
   font-size: 0.72rem;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
 }
 
@@ -7022,7 +7041,7 @@ textarea::placeholder {
   width: 28px;
   height: 28px;
   font-size: 0.8rem;
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 /* =========================================================
@@ -7035,7 +7054,7 @@ textarea::placeholder {
   flex: 0 0 436px;
   background: var(--bg-monitor, #1c2823);
   border: 2px solid var(--border-monitor, #2b3a32);
-  border-radius: 16px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   padding: 12px 3px 8px 3px;
   display: flex;
@@ -7078,7 +7097,7 @@ textarea::placeholder {
     max-height: var(--mobile-log-height, none) !important;
     box-sizing: border-box !important;
     position: static !important;
-    border-radius: 14px !important;
+    border-radius: 0px !important;
     padding: 8px 4px 6px 4px !important;
     overflow-x: hidden !important;
   }
@@ -7126,7 +7145,7 @@ textarea::placeholder {
     flex: 0 0 40px !important;
     width: 40px !important;
     padding: 4px 1px 4px 1px !important;
-    border-radius: 9px !important;
+    border-radius: 0px !important;
     align-items: center !important;
     gap: 2px !important;
   }
@@ -7143,12 +7162,12 @@ textarea::placeholder {
 
   .volume-slider-v-wrap::before {
     width: 16px !important;
-    border-radius: 8px !important;
+    border-radius: 0px !important;
   }
 
   .volume-slider-v-wrap::after {
     width: 8px !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
   }
 
   .volume-slider-v {
@@ -7168,7 +7187,7 @@ textarea::placeholder {
   .volume-icon-v {
     width: 32px !important;
     height: 32px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     margin: 0 auto !important;
     padding: 0 !important;
     align-self: center !important;
@@ -7184,7 +7203,7 @@ textarea::placeholder {
   .vertical-volume-strip .volume-strip-settings-btn {
     width: 32px !important;
     height: 32px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     margin: 1px auto 0 auto !important;
     align-self: center !important;
   }
@@ -7300,7 +7319,7 @@ textarea::placeholder {
     height: 26px !important;
     padding: 3px 6px !important;
     font-size: 0.72rem !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     min-width: 0 !important;
     width: 100% !important;
     box-sizing: border-box !important;
@@ -7320,7 +7339,7 @@ textarea::placeholder {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
     border: 1px solid rgba(255, 255, 255, 0.35) !important;
     box-shadow: 0 0 6px rgba(255, 87, 34, 0.4) !important;
   }
@@ -7401,7 +7420,7 @@ textarea::placeholder {
     padding: 0 !important;
     font-size: 0.64rem !important;
     font-weight: 800 !important;
-    border-radius: 5px !important;
+    border-radius: 0px !important;
     box-sizing: border-box !important;
   }
 
@@ -7503,7 +7522,7 @@ textarea::placeholder {
   font-size: 0.68rem;
   font-weight: 700;
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   margin-left: 0;
   vertical-align: middle;
   line-height: 1;
@@ -7621,7 +7640,7 @@ textarea::placeholder {
   background: #161b22;
   border: 1px solid #30363d;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 0px;
   width: 30px;
   height: 30px;
   cursor: pointer;
@@ -7666,7 +7685,7 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   box-sizing: border-box;
@@ -7728,7 +7747,7 @@ textarea::placeholder {
   background: #161b22;
   border: 1px solid #30363d;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 0px;
   width: 30px;
   height: 30px;
   cursor: pointer;
@@ -7785,7 +7804,7 @@ textarea::placeholder {
   font-size: 0.72rem;
   font-weight: 700;
   padding: 4px 9px;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -7808,7 +7827,7 @@ textarea::placeholder {
   background: rgba(0, 229, 255, 0.12);
   color: var(--color-cyan);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   margin-left: 5px;
   display: inline-block;
   vertical-align: middle;
@@ -7825,7 +7844,7 @@ textarea::placeholder {
   width: 100%;
   background: var(--bg-monitor-table, #141c18);
   border: 1px solid var(--border-monitor, #2b3a32);
-  border-radius: 8px;
+  border-radius: 0px;
   color: #e6edf3;
   font-size: 0.8rem;
   padding: 8px 12px;
@@ -7872,7 +7891,7 @@ body.is-apk-mode .log-search-input {
   height: 28px !important;
   padding: 4px 8px !important;
   font-size: 0.74rem !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   box-sizing: border-box !important;
 }
 
@@ -7890,7 +7909,7 @@ body.is-apk-mode .log-count-badge {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 4px !important;
+  border-radius: 0px !important;
   border: 1px solid rgba(255, 255, 255, 0.35) !important;
   box-shadow: 0 0 6px rgba(255, 87, 34, 0.4) !important;
 }
@@ -7969,7 +7988,7 @@ body.is-apk-mode .log-filter-btn[data-filter="2"] {
   padding: 0 !important;
   font-size: 0.70rem !important;
   font-weight: 800 !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   box-sizing: border-box !important;
 }
 
@@ -8007,7 +8026,7 @@ body.is-apk-mode .log-hotspot-tabs {
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid var(--border-monitor, #2b3a32);
-  border-radius: 8px;
+  border-radius: 0px;
   background: var(--bg-monitor-table, #0f1512);
   box-sizing: border-box;
   touch-action: pan-y;
@@ -8020,11 +8039,11 @@ body.is-apk-mode .log-hotspot-tabs {
 }
 .live-table-scroll-wrap::-webkit-scrollbar-track {
   background: var(--bg-monitor-table, #0f1512);
-  border-radius: 3px;
+  border-radius: 0px;
 }
 .live-table-scroll-wrap::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
   cursor: grab;
 }
 .live-table-scroll-wrap::-webkit-scrollbar-thumb:hover,
@@ -8083,7 +8102,7 @@ body.is-apk-mode .log-hotspot-tabs {
   flex-direction: column;
   gap: 0;
   border: none;
-  border-radius: 0;
+  border-radius: 0px;
   background: transparent;
   min-width: 320px;
 }
@@ -8096,7 +8115,7 @@ body.is-apk-mode .log-hotspot-tabs {
 }
 .live-activity-list::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 2px;
+  border-radius: 0px;
 }
 
 .log-empty-msg {
@@ -8113,7 +8132,7 @@ body.is-apk-mode .log-hotspot-tabs {
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--border-monitor, #2b3a32);
-  border-radius: 8px;
+  border-radius: 0px;
   background: var(--bg-monitor-table, #0f1512);
   box-sizing: border-box;
   overflow: hidden;
@@ -8168,7 +8187,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.64rem;
   font-weight: 800;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 0px;
   cursor: pointer;
   user-select: none;
   transition: all 0.15s ease;
@@ -8207,7 +8226,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.69rem;
   font-weight: 700;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -8260,7 +8279,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.69rem;
   font-weight: 700;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   display: inline-flex;
@@ -8286,7 +8305,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.76rem;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -8380,7 +8399,7 @@ body.is-apk-mode .log-hotspot-tabs {
 }
 .log-tx-summary-body::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
 }
 .log-tx-summary-body::-webkit-scrollbar-thumb:hover {
   background: #ff5722;
@@ -8390,7 +8409,7 @@ body.is-apk-mode .log-hotspot-tabs {
   background: #101319;
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-left: 3px solid #58a6ff;
-  border-radius: 5px;
+  border-radius: 0px;
   padding: 5px 8px;
   box-sizing: border-box;
   cursor: pointer;
@@ -8468,7 +8487,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.72rem;
   cursor: pointer;
   padding: 0 3px;
-  border-radius: 3px;
+  border-radius: 0px;
   transition: all 0.15s ease;
   user-select: none;
 }
@@ -8496,7 +8515,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.65rem;
   font-weight: 800;
   padding: 1.5px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   background: #238636 !important;
   color: #ffffff !important;
   border: 1px solid rgba(46, 160, 67, 0.4);
@@ -8641,7 +8660,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0.5px;
-  border-radius: 3px;
+  border-radius: 0px;
   background: #ff3344;
   color: #ffffff;
   box-shadow: 0 0 6px rgba(255, 51, 68, 0.6);
@@ -8692,7 +8711,7 @@ body.is-apk-mode .log-hotspot-tabs {
 .station-flag .flag-badge {
   width: 20px;
   height: 13px;
-  border-radius: 2px;
+  border-radius: 0px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -8711,7 +8730,7 @@ body.is-apk-mode .log-hotspot-tabs {
   display: inline-block;
   width: 3.5px;
   height: 13px;
-  border-radius: 2px;
+  border-radius: 0px;
   background: #00e676;
   box-shadow: 0 0 6px rgba(0, 230, 118, 0.85);
   margin-left: -3px;
@@ -8845,7 +8864,7 @@ body.is-apk-mode .log-hotspot-tabs {
 .cell-tg .tg-flag .flag-badge {
   width: 16px;
   height: 11px;
-  border-radius: 2px;
+  border-radius: 0px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.2);
   display: inline-flex;
@@ -8971,7 +8990,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.68rem;
   font-weight: 700;
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   margin-left: 0;
   vertical-align: middle;
   line-height: 1;
@@ -9016,7 +9035,7 @@ body.is-apk-mode .log-hotspot-tabs {
   opacity: 0.85;
   cursor: pointer;
   transition: all 0.15s ease;
-  border-radius: 3px;
+  border-radius: 0px;
   padding: 0 2px;
 }
 
@@ -9070,7 +9089,7 @@ body.is-apk-mode .log-hotspot-tabs {
   margin: 1px 0 2px 0;
   background: rgba(0, 217, 255, 0.04);
   border-left: 2px solid rgba(0, 217, 255, 0.45);
-  border-radius: 0 3px 3px 0;
+  border-radius: 0px;
   font-size: 0.70rem;
   line-height: 1.25;
   color: #c9d1d9;
@@ -9085,7 +9104,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 8.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  border-radius: 2px;
+  border-radius: 0px;
   background: rgba(0, 217, 255, 0.15);
   color: #00e5ff;
   border: 1px solid rgba(0, 217, 255, 0.35);
@@ -9115,7 +9134,7 @@ body.is-apk-mode .log-hotspot-tabs {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(0, 230, 118, 0.45);
-  border-radius: 8px;
+  border-radius: 0px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 14px rgba(0, 230, 118, 0.22);
   padding: 9px 12px 11px 12px;
   color: #e6edf3;
@@ -9165,7 +9184,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 8.5px;
   font-weight: 800;
   letter-spacing: 0.5px;
-  border-radius: 3px;
+  border-radius: 0px;
   background: rgba(0, 230, 118, 0.16);
   color: #00e676;
   border: 1px solid rgba(0, 230, 118, 0.45);
@@ -9198,7 +9217,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 15px;
   line-height: 1;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: 0px;
   transition: color 0.12s ease, background-color 0.12s ease;
   flex-shrink: 0;
   margin-left: 4px;
@@ -9225,7 +9244,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-weight: 700;
   background: rgba(255, 209, 102, 0.14);
   padding: 0 3px;
-  border-radius: 2px;
+  border-radius: 0px;
 }
 
 @media (max-width: 768px) {
@@ -9376,7 +9395,7 @@ body.is-apk-mode .log-hotspot-tabs {
     width: 100% !important;
     min-width: 0 !important;
     height: 30px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     flex-shrink: 0 !important;
   }
   .rec-tool-btn svg {
@@ -9450,7 +9469,7 @@ body.is-apk-mode .log-hotspot-tabs {
     border: 1px solid rgba(255, 255, 255, 0.35);
     color: #ffffff;
     padding: 1px 5px;
-    border-radius: 6px;
+    border-radius: 0px;
     font-size: 0.68rem;
     font-weight: 700;
     display: inline-flex;
@@ -9476,7 +9495,7 @@ body.is-apk-mode .log-hotspot-tabs {
   .mobile-tg-pill .tg-flag .flag-badge {
     width: 14px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: 0px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     border: 1px solid rgba(255, 255, 255, 0.2);
     display: inline-flex;
@@ -9564,7 +9583,7 @@ body.is-apk-mode .log-hotspot-tabs {
   box-sizing: border-box !important;
   background: #161b22;
   border: 2px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #e6edf3;
   font-family: inherit;
   font-size: 0.72rem;
@@ -9694,7 +9713,7 @@ body.is-apk-mode .log-hotspot-tabs {
   padding: 2px 7px;
   background: rgba(56, 139, 253, 0.12);
   border: 1px solid rgba(56, 139, 253, 0.3);
-  border-radius: 4px;
+  border-radius: 0px;
   color: #79c0ff;
 }
 
@@ -9702,7 +9721,7 @@ body.is-apk-mode .log-hotspot-tabs {
   background: transparent;
   border: 1px solid #30363d;
   color: var(--text-muted);
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 1px 5px;
   cursor: pointer;
   font-size: 0.75rem;
@@ -9722,7 +9741,7 @@ body.is-apk-mode .log-hotspot-tabs {
   padding: 8px 12px;
   background: rgba(56, 139, 253, 0.08);
   border: 1px solid rgba(56, 139, 253, 0.25);
-  border-radius: 8px;
+  border-radius: 0px;
   color: #79c0ff;
   font-size: 0.78rem;
 }
@@ -9743,7 +9762,7 @@ body.is-apk-mode .log-hotspot-tabs {
 
 .bm-modal-alert {
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 0px;
   font-size: 0.78rem;
   line-height: 1.4;
 }
@@ -9780,7 +9799,7 @@ body.is-apk-mode .log-hotspot-tabs {
 .bm-slot-col {
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 10px;
+  border-radius: 0px;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -9809,7 +9828,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.68rem;
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -9846,7 +9865,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.74rem;
   background: #161b22;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid #21262d;
   flex-shrink: 0;
 }
@@ -9872,7 +9891,7 @@ body.is-apk-mode .log-hotspot-tabs {
   background: #da3633;
   color: #ffffff;
   border: 1px solid rgba(248, 81, 73, 0.4);
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -9914,7 +9933,7 @@ body.is-apk-mode .log-hotspot-tabs {
   padding: 6px 8px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   transition: all 0.15s ease;
 }
 
@@ -9965,7 +9984,7 @@ body.is-apk-mode .log-hotspot-tabs {
   color: #8b949e;
   cursor: pointer;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.75rem;
   transition: all 0.15s ease;
   flex-shrink: 0;
@@ -10008,7 +10027,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.75rem;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #c9d1d9;
   font-family: inherit;
   outline: none;
@@ -10026,7 +10045,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.75rem;
   background: #238142 !important;
   border: 1px solid #1c6634 !important;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #ffffff !important;
   font-family: inherit;
   outline: none;
@@ -10051,7 +10070,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-weight: 600;
   background: #238636;
   border: 1px solid rgba(46, 160, 67, 0.4);
-  border-radius: 6px;
+  border-radius: 0px;
   color: #ffffff;
   cursor: pointer;
   white-space: nowrap;
@@ -10105,7 +10124,7 @@ body.is-apk-mode .log-hotspot-tabs {
   padding: 5px 8px;
   font-size: 0.73rem;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -10174,13 +10193,13 @@ body.is-apk-mode .log-hotspot-tabs {
   width: 100%;
   gap: 12px;
   padding: 18px 22px;
-  border-radius: 14px;
+  border-radius: 0px;
 }
 
 .bm-file-stat-summary {
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -10214,7 +10233,7 @@ body.is-apk-mode .log-hotspot-tabs {
 .bm-stat-card {
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 8px 4px;
   text-align: center;
 }
@@ -10259,7 +10278,7 @@ body.is-apk-mode .log-hotspot-tabs {
   overflow-y: auto;
   background: #0d1117;
   border: 1px solid #21262d;
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 6px;
   display: flex;
   flex-wrap: wrap;
@@ -10271,7 +10290,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-size: 0.72rem;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 2px 6px;
   color: #79c0ff;
 }
@@ -10314,7 +10333,7 @@ body.is-apk-mode .log-hotspot-tabs {
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -10341,7 +10360,7 @@ body.is-apk-mode .log-hotspot-tabs {
   object-fit: contain;
   display: block;
   pointer-events: none;
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .header-bm-upload-indicator .bm-upload-percent {
@@ -10385,7 +10404,7 @@ body.is-apk-mode .log-hotspot-tabs {
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -10413,7 +10432,7 @@ body.is-apk-mode .log-hotspot-tabs {
   object-fit: contain;
   display: block;
   pointer-events: none;
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .header-tts-upload-indicator .tts-upload-percent {
@@ -10449,7 +10468,7 @@ body.is-apk-mode .log-hotspot-tabs {
 .bm-import-progress-card {
   background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
   border: 1px solid rgba(88, 166, 255, 0.4);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -10497,7 +10516,7 @@ body.is-apk-mode .log-hotspot-tabs {
   width: 100%;
   height: 8px;
   background: #21262d;
-  border-radius: 4px;
+  border-radius: 0px;
   overflow: hidden;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
@@ -10506,7 +10525,7 @@ body.is-apk-mode .log-hotspot-tabs {
   height: 100%;
   width: 0%;
   background: linear-gradient(90deg, #1f6feb 0%, #58a6ff 50%, #3fb950 100%);
-  border-radius: 4px;
+  border-radius: 0px;
   transition: width 0.25s ease;
 }
 
@@ -10541,7 +10560,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-weight: 600;
   background: #21262d;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   color: #c9d1d9;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -10559,7 +10578,7 @@ body.is-apk-mode .log-hotspot-tabs {
   font-weight: 600;
   background: rgba(248, 81, 73, 0.15);
   border: 1px solid rgba(248, 81, 73, 0.4);
-  border-radius: 5px;
+  border-radius: 0px;
   color: #ff7b72;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -10592,7 +10611,7 @@ body.is-apk-mode .log-hotspot-tabs {
   box-sizing: border-box;
   background: #161b22;
   border: 2px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #e6edf3;
   font-family: inherit;
   font-size: 0.82rem;
@@ -10674,7 +10693,7 @@ body.is-apk-mode .log-hotspot-tabs {
   overflow: hidden;
   background: #161b22;
   border: 2px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   font-family: inherit;
   user-select: none;
   -webkit-user-select: none;
@@ -10699,7 +10718,7 @@ body.is-apk-mode .log-hotspot-tabs {
   justify-content: center;
   height: 35px;
   padding: 0 3px;
-  border-radius: 5px;
+  border-radius: 0px;
   transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
   cursor: pointer;
   flex: 1 1 0;
@@ -10790,7 +10809,7 @@ body.is-apk-mode .log-hotspot-tabs {
   justify-content: center !important;
   border-color: #3884e8 !important;
   position: relative !important;
-  border-radius: 8px !important;
+  border-radius: 0px !important;
   background: #4b99fd !important;
   border: 2px solid #3884e8 !important;
   color: #ffffff;
@@ -10980,7 +10999,7 @@ body.is-apk-mode .log-hotspot-tabs {
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: #21262d;
   border: 1px solid #30363d;
   color: #8b949e;
@@ -11042,7 +11061,7 @@ body.is-apk-mode .log-hotspot-tabs {
     padding: 0 !important;
     gap: 0 !important;
     overflow: hidden !important;
-    border-radius: 12px !important;
+    border-radius: 0px !important;
   }
 }
 
@@ -11065,7 +11084,7 @@ body.is-apk-mode .log-hotspot-tabs {
     padding: 0 !important;
     margin: 0 !important;
     border: none !important;
-    border-radius: 0 !important;
+    border-radius: 0px !important;
     align-items: stretch !important;
     justify-content: stretch !important;
     background: #0d1117 !important;
@@ -11095,7 +11114,7 @@ body.is-apk-mode .log-hotspot-tabs {
     min-height: 100dvh !important;
     max-height: 100vh !important;
     max-height: 100dvh !important;
-    border-radius: 0 !important;
+    border-radius: 0px !important;
     margin: 0 !important;
     border: none !important;
     box-shadow: none !important;
@@ -11109,7 +11128,7 @@ body.is-apk-mode .log-hotspot-tabs {
   }
 
   #myContactsModal .contacts-modal-header {
-    border-radius: 0 !important;
+    border-radius: 0px !important;
     padding: max(10px, env(safe-area-inset-top)) 14px 6px 14px !important;
     border-bottom: 1px solid #21262d !important;
     flex-shrink: 0 !important;
@@ -11176,7 +11195,7 @@ body.is-apk-mode .log-hotspot-tabs {
   }
 
   #myContactsModal .contacts-modal-footer {
-    border-radius: 0 !important;
+    border-radius: 0px !important;
     padding: 8px 12px max(10px, env(safe-area-inset-bottom)) 12px !important;
     gap: 6px !important;
     margin-top: auto !important;
@@ -11211,7 +11230,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   width: 100vw !important;
   height: 100vh !important;
   height: 100dvh !important;
-  border-radius: 0 !important;
+  border-radius: 0px !important;
   padding: 0 !important;
   margin: 0 !important;
 }
@@ -11283,7 +11302,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center !important;
   justify-content: center !important;
   gap: 5px !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   white-space: nowrap !important;
   background: #21262d !important;
   color: #c9d1d9 !important;
@@ -11312,7 +11331,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center !important;
   justify-content: center !important;
   gap: 4px !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   white-space: nowrap !important;
   background: #1f6feb !important;
   color: #ffffff !important;
@@ -11340,8 +11359,8 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 10px 16px !important;
   border-top: 1px solid #30363d !important;
   background: #161b22 !important;
-  border-bottom-left-radius: 12px;
-  border-bottom-right-radius: 12px;
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
 }
 
 .contacts-footer-left {
@@ -11359,14 +11378,14 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
 }
 
 .badge-contacts-count {
   font-size: 0.86rem;
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: 0px;
   background: rgba(56, 189, 248, 0.2);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.4);
@@ -11379,7 +11398,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 5px 11px;
   background: #21262d;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #e6edf3;
   font-size: 0.90rem;
   font-weight: 600;
@@ -11411,7 +11430,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   height: 32px;
   background: #21262d;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #c9d1d9;
   cursor: pointer;
   font-size: 1.05rem;
@@ -11471,14 +11490,14 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #238142 !important;
   border: 1px solid #1c6634 !important;
   color: #ffffff !important;
-  border-radius: 5px;
+  border-radius: 0px;
   color-scheme: dark;
 }
 
 .slot-toggle-group {
   display: inline-flex;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   overflow: hidden;
 }
 
@@ -11504,7 +11523,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 4px 18px !important;
   font-size: 0.92rem !important;
   font-weight: 600 !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   margin-left: auto !important;
   white-space: nowrap !important;
   display: inline-flex !important;
@@ -11547,7 +11566,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .tree-node-item {
   display: flex;
   flex-direction: column;
-  border-radius: 6px;
+  border-radius: 0px;
   transition: background 0.12s ease;
 }
 
@@ -11556,7 +11575,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   justify-content: space-between;
   padding: 3px 6px !important;
-  border-radius: 4px;
+  border-radius: 0px;
   user-select: none;
   transition: all 0.12s ease;
 }
@@ -11613,7 +11632,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   color: #8b949e;
   background: #21262d;
   padding: 1px 5px;
-  border-radius: 6px;
+  border-radius: 0px;
   line-height: 1.2;
 }
 
@@ -11658,7 +11677,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   color: #8b949e;
   background: rgba(110, 118, 129, 0.15);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   line-height: 1.2;
 }
 
@@ -11666,7 +11685,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.68rem;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   background: #1f6feb;
   color: #fff;
   line-height: 1.2;
@@ -11688,7 +11707,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: none;
   border: none;
   padding: 2px 4px;
-  border-radius: 3px;
+  border-radius: 0px;
   cursor: pointer;
   font-size: 0.76rem;
   color: #8b949e;
@@ -11751,7 +11770,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   border: none !important;
   color: #8b949e !important;
   cursor: pointer !important;
-  border-radius: 4px !important;
+  border-radius: 0px !important;
   padding: 0 !important;
   transition: all 0.15s ease !important;
 }
@@ -11788,7 +11807,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   justify-content: center;
   padding: 7px 6px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: #21262d;
   border: 1px solid #30363d;
   color: #8b949e;
@@ -11826,7 +11845,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 14px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   margin-bottom: 14px;
 }
 
@@ -11872,7 +11891,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .proposal-routing-box {
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 12px;
 }
 
@@ -11905,14 +11924,14 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #238142 !important;
   border: 1px solid #1c6634 !important;
   color: #ffffff !important;
-  border-radius: 5px;
+  border-radius: 0px;
   color-scheme: dark;
 }
 
 .proposal-slot-buttons {
   display: inline-flex;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   overflow: hidden;
 }
 
@@ -12018,7 +12037,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 2px 7px;
   font-size: 0.74rem;
   color: #8b949e;
@@ -12070,7 +12089,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 4px 10px;
   margin-bottom: 8px;
 }
@@ -12129,7 +12148,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #161b22;
   border: 1px solid #30363d;
   color: #c9d1d9;
-  border-radius: 14px;
+  border-radius: 0px;
   padding: 3px 10px;
   font-size: 0.75rem;
   cursor: pointer;
@@ -12167,7 +12186,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   justify-content: space-between;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 8px 12px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -12191,7 +12210,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 800;
   font-size: 0.88rem;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 0px;
   min-width: 80px;
   text-align: center;
 }
@@ -12271,7 +12290,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 0px;
   background: rgba(88, 166, 255, 0.1);
   border: 1px solid transparent;
 }
@@ -12295,7 +12314,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   
   padding: 4px 9px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: rgba(56, 189, 248, 0.12);
   border: 1px solid rgba(56, 189, 248, 0.35);
   color: #38bdf8;
@@ -12323,7 +12342,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 12px;
   background: #1f2937;
   border: 1px dashed #38bdf8;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 14px;
   margin-top: 8px;
 }
@@ -12416,14 +12435,14 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 .log-hotspot-tabs::-webkit-scrollbar-thumb {
   background: var(--border-color, #30363d);
-  border-radius: 2px;
+  border-radius: 0px;
 }
 
 .log-hs-tab-btn {
   background: #21262d;
   color: var(--text-muted, #8b949e);
   border: 1px solid var(--border-color, #30363d);
-  border-radius: 12px;
+  border-radius: 0px;
   padding: 3px 10px;
   font-size: 0.72rem;
   font-weight: 500;
@@ -12461,7 +12480,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-family: monospace;
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   border: 1px solid rgba(56, 189, 248, 0.3);
   margin-left: 8px;
   flex-shrink: 0;
@@ -12471,7 +12490,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .dsdfme-section {
   background: rgba(22, 27, 34, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 12px 14px;
 }
 
@@ -12513,7 +12532,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.72rem;
   font-weight: 700;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: 0px;
   min-width: 20px;
   text-align: center;
 }
@@ -12540,7 +12559,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 6px;
   background: rgba(13, 17, 23, 0.6);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -12576,7 +12595,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .eq-col {
   background: transparent;
   border: none;
-  border-radius: 0;
+  border-radius: 0px;
   padding: 0;
   min-width: 0;
   display: flex;
@@ -12609,7 +12628,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.72rem;
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: 0px;
   min-width: 24px;
   text-align: center;
 }
@@ -12627,7 +12646,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 10px;
   background: rgba(13, 17, 23, 0.75);
   border: 1px solid rgba(88, 166, 255, 0.2);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 7px 12px;
   margin-bottom: 14px;
 }
@@ -12657,7 +12676,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #21262d;
   color: #c9d1d9;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   font-size: 0.78rem;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -12690,7 +12709,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(33, 38, 45, 0.9);
   color: #58a6ff;
   border: 1px solid rgba(88, 166, 255, 0.35);
-  border-radius: 5px;
+  border-radius: 0px;
   font-size: 0.75rem;
   font-weight: 600;
   padding: 2px 10px;
@@ -12736,7 +12755,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   justify-content: center;
   font-size: 0.88rem;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: 0px;
   box-sizing: border-box;
   white-space: nowrap;
   line-height: 1;
@@ -12782,7 +12801,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   max-height: 88vh;
   background: var(--bg-card, #161b22);
   border: 1px solid rgba(0, 229, 255, 0.35);
-  border-radius: 16px;
+  border-radius: 0px;
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -12802,7 +12821,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .about-app-icon {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: 0px;
   object-fit: cover;
   flex-shrink: 0;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
@@ -12823,7 +12842,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(255, 170, 0, 0.12);
   border: 1px solid rgba(255, 170, 0, 0.35);
   padding: 3px 9px;
-  border-radius: 12px;
+  border-radius: 0px;
   display: inline-flex;
   align-items: center;
   
@@ -12850,11 +12869,11 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 .about-modal-body::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 3px;
+  border-radius: 0px;
 }
 .about-modal-body::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
 }
 .about-modal-body::-webkit-scrollbar-thumb:hover {
   background: #58a6ff;
@@ -12864,7 +12883,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .about-author-card {
   background: linear-gradient(135deg, rgba(22, 27, 34, 0.95) 0%, rgba(30, 36, 46, 0.95) 100%);
   border: 1px solid rgba(0, 229, 255, 0.3);
-  border-radius: 12px;
+  border-radius: 0px;
   padding: 14px 16px;
   display: flex;
   align-items: center;
@@ -12934,16 +12953,22 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.76rem;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   letter-spacing: 0.5px;
 }
 
 .about-made-in {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
   margin-top: 4px;
+}
+
+.about-made-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
 }
 
 .about-made-arm {
@@ -12955,15 +12980,26 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   line-height: 1.25;
 }
 
+.about-made-en {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #8b949e;
+  letter-spacing: 0.25px;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
 .about-flag-am {
   width: 19px;
   height: 13px;
-  border-radius: 2px;
+  border-radius: 0px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.25);
   display: inline-flex;
   vertical-align: middle;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .about-email-container {
@@ -12979,7 +13015,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.78rem;
   font-weight: 700;
   padding: 2px 9px;
-  border-radius: 5px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -13027,7 +13063,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   background: rgba(13, 17, 23, 0.85);
   border: 1px solid rgba(0, 229, 255, 0.35);
-  border-radius: 5px;
+  border-radius: 0px;
   padding: 2px 8px;
   box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
 }
@@ -13070,11 +13106,11 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 .about-credits-list::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 3px;
+  border-radius: 0px;
 }
 .about-credits-list::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
 }
 .about-credits-list::-webkit-scrollbar-thumb:hover {
   background: #58a6ff;
@@ -13083,7 +13119,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .about-credit-card {
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -13143,7 +13179,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   height: 3px;
   width: 100%;
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
+  border-radius: 0px;
   overflow: hidden;
   margin-top: 4px;
 }
@@ -13194,7 +13230,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-family: monospace;
   font-weight: 700;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   border: 1px solid rgba(0, 229, 255, 0.35);
   margin-left: 8px;
 }
@@ -13209,7 +13245,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 
 .audio-tab-btn {
   flex: 1;
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 8px 12px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -13282,7 +13318,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 10px;
   background: rgba(13, 17, 23, 0.75);
   border: 1px solid rgba(0, 229, 255, 0.25);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 7px 12px;
   margin-bottom: 14px;
 }
@@ -13312,7 +13348,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #21262d;
   color: #c9d1d9;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   font-size: 0.78rem;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -13356,7 +13392,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .audio-section {
   background: rgba(22, 27, 34, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 12px 14px;
 }
 
@@ -13382,7 +13418,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.72rem;
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: 0px;
   min-width: 24px;
   text-align: center;
 }
@@ -13398,7 +13434,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 1px 6px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: 0px;
   color: var(--text-primary, #e6edf3);
   font-size: 0.72rem;
   font-weight: 600;
@@ -13431,7 +13467,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.7rem;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -13478,7 +13514,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   text-align: center;
   background: #21262d;
   border: 1px solid #38414e;
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 8px 6px;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -13570,7 +13606,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .agc-slider-col {
   background: rgba(13, 17, 23, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 8px 10px;
   min-width: 0;
   display: flex;
@@ -13636,7 +13672,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 26px 16px;
   background: rgba(22, 27, 34, 0.65);
   border: 1px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
+  border-radius: 0px;
 }
 
 .tx-reserved-icon {
@@ -13659,7 +13695,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   color: #ffaa00;
   background: rgba(255, 170, 0, 0.15);
   border: 1px solid rgba(255, 170, 0, 0.3);
-  border-radius: 12px;
+  border-radius: 0px;
   padding: 2px 10px;
   margin-bottom: 12px;
 }
@@ -13689,7 +13725,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .tx-preview-card {
   background: rgba(13, 17, 23, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 4px 12px;
   display: flex;
   flex-direction: column;
@@ -13752,7 +13788,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 14px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #8b949e;
   font-size: 0.82rem;
   font-weight: 600;
@@ -13781,7 +13817,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.7rem;
   font-weight: 700;
   padding: 1px 6px;
-  border-radius: 10px;
+  border-radius: 0px;
   background: rgba(255, 255, 255, 0.08);
   color: #8b949e;
 }
@@ -13821,7 +13857,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 10px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #8b949e;
   font-size: 0.78rem;
   font-weight: 600;
@@ -13885,7 +13921,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 12px;
   background: rgba(248, 81, 73, 0.15);
   border: 1px solid #f85149;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #ff7b72;
   font-size: 0.78rem;
   font-weight: 600;
@@ -13919,7 +13955,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 600;
   background: rgba(248, 81, 73, 0.1);
   border: 1px solid rgba(248, 81, 73, 0.35);
-  border-radius: 4px;
+  border-radius: 0px;
   color: #ff7b72;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -13945,7 +13981,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 10px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   transition: all 0.15s ease;
 }
 
@@ -13966,7 +14002,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.65rem;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   text-transform: uppercase;
   background: rgba(56, 139, 253, 0.2);
   color: #79c0ff;
@@ -13979,7 +14015,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 600;
   background: rgba(31, 111, 235, 0.15);
   border: 1px solid rgba(31, 111, 235, 0.4);
-  border-radius: 4px;
+  border-radius: 0px;
   color: #79c0ff;
   cursor: pointer;
   white-space: nowrap;
@@ -14053,7 +14089,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     gap: 6px !important;
     height: 100dvh !important;
     max-height: 100dvh !important;
-    border-radius: 0 !important;
+    border-radius: 0px !important;
   }
 
   .bm-modal-title {
@@ -14191,7 +14227,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     width: 100% !important;
     max-width: 100% !important;
     padding: 8px 8px !important;
-    border-radius: 10px !important;
+    border-radius: 0px !important;
     gap: 8px !important;
     max-height: 96vh !important;
     box-sizing: border-box !important;
@@ -14248,7 +14284,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   .dsdfme-section,
   .audio-section {
     padding: 7px 6px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     margin-bottom: 6px !important;
   }
 
@@ -14279,7 +14315,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     font-size: 0.62rem !important;
     padding: 1px 5px !important;
     min-width: 18px !important;
-    border-radius: 5px !important;
+    border-radius: 0px !important;
   }
 
   .form-hint,
@@ -14296,7 +14332,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     padding: 4px 6px !important;
     margin-bottom: 7px !important;
     gap: 4px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
   }
 
   .dsdfme-presets-title,
@@ -14316,7 +14352,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     min-width: 25px !important;
     height: 22px !important;
     padding: 1px 4px !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
   }
 
   .btn-preset-save,
@@ -14324,7 +14360,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     font-size: 0.65rem !important;
     height: 22px !important;
     padding: 1px 6px !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
     gap: 3px !important;
   }
 
@@ -14365,7 +14401,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     font-size: 0.72rem !important;
     height: 28px !important;
     padding: 2px 8px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
   }
 
   /* Audio Tabs */
@@ -14385,7 +14421,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     max-width: 100% !important;
     padding: 0 !important;
     gap: 0 !important;
-    border-radius: 10px !important;
+    border-radius: 0px !important;
     max-height: 96vh !important;
     overflow: hidden !important;
     display: flex !important;
@@ -14395,8 +14431,8 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 
   #settingsModal .settings-modal-header {
     padding: 6px 10px 0 10px !important;
-    border-top-left-radius: 10px !important;
-    border-top-right-radius: 10px !important;
+    border-top-left-radius: 0px !important;
+    border-top-right-radius: 0px !important;
     gap: 6px !important;
   }
 
@@ -14447,7 +14483,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     padding: 3px 6px !important;
     font-size: 0.76rem !important;
     height: 28px !important;
-    border-radius: 5px !important;
+    border-radius: 0px !important;
     width: 100% !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
@@ -14517,7 +14553,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     flex: 0 0 40px !important;
     width: 40px !important;
     padding: 4px 1px 4px 1px !important;
-    border-radius: 9px !important;
+    border-radius: 0px !important;
     align-items: center !important;
     gap: 2px !important;
   }
@@ -14535,12 +14571,12 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 
   .volume-slider-v-wrap::before {
     width: 16px !important;
-    border-radius: 8px !important;
+    border-radius: 0px !important;
   }
 
   .volume-slider-v-wrap::after {
     width: 8px !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
   }
 
   .volume-slider-v {
@@ -14561,7 +14597,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   .volume-icon-v {
     width: 32px !important;
     height: 32px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     margin: 0 auto !important;
     padding: 0 !important;
     align-self: center !important;
@@ -14578,7 +14614,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   .vertical-volume-strip .volume-strip-settings-btn {
     width: 32px !important;
     height: 32px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     margin: 1px auto 0 auto !important;
     align-self: center !important;
   }
@@ -14772,7 +14808,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     min-height: 34px !important;
     max-height: 34px !important;
     font-size: 0.74rem !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -14789,7 +14825,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     min-height: 34px !important;
     max-height: 34px !important;
     font-size: 0.74rem !important;
-    border-radius: 4px !important;
+    border-radius: 0px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -14805,7 +14841,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 34px !important;
     min-height: 34px !important;
     max-height: 34px !important;
-    border-radius: 7px !important;
+    border-radius: 0px !important;
     display: grid !important;
     grid-template-columns: 1fr auto 1fr !important;
     align-items: center !important;
@@ -14847,6 +14883,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 28px !important;
     min-width: 28px !important;
     min-height: 28px !important;
+    border-radius: 10px !important;
   }
   .vfo-pipeline-icon .pipeline-svg {
     width: 20px !important;
@@ -14938,7 +14975,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     width: calc(100% - 38px) !important;
     margin: 0 0 0 -5px !important;
     padding: 0 !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
     overflow: hidden !important;
   }
   .radio-container .vfo-caption-stream {
@@ -15075,7 +15112,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 28px !important;
     font-size: 0.66rem !important;
     padding: 0 3px !important;
-    border-radius: 5px !important;
+    border-radius: 0px !important;
   }
 
   .btn-bm-static-edit .bm-action-label {
@@ -15110,7 +15147,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 45px !important;
     flex: 0 0 45px !important;
     padding: 4px 6px !important;
-    border-radius: 8px !important;
+    border-radius: 0px !important;
     box-sizing: border-box !important;
   }
 
@@ -15124,7 +15161,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 33px !important;
     font-size: 0.74rem !important;
     padding: 0 6px !important;
-    border-radius: 6px !important;
+    border-radius: 0px !important;
   }
 
   .quick-actions-row .quick-tg-box,
@@ -15139,7 +15176,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 45px !important;
     font-size: 0.78rem !important;
     padding: 2px 4px !important;
-    border-radius: 8px !important;
+    border-radius: 0px !important;
     gap: 5px !important;
     box-sizing: border-box !important;
   }
@@ -15179,7 +15216,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     height: 45px !important;
     font-size: 0.74rem !important;
     padding: 0 3px !important;
-    border-radius: 8px !important;
+    border-radius: 0px !important;
     box-sizing: border-box !important;
   }
 
@@ -15197,7 +15234,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     min-width: 0 !important;
     height: 96px !important;
     padding: 4px 4px !important;
-    border-radius: 10px !important;
+    border-radius: 0px !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
@@ -15250,7 +15287,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   flex: 0 0 auto !important;
   padding: 4px 8px !important;
   gap: 0 !important;
-  border-radius: 12px !important;
+  border-radius: 0px !important;
   border: 2px solid rgba(0, 229, 255, 0.7) !important;
   box-shadow: 0 0 16px rgba(0, 229, 255, 0.18), 0 8px 20px rgba(0, 0, 0, 0.5) !important;
   display: inline-flex !important;
@@ -15331,7 +15368,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .radio-container.collapsed .hotspot-name-badge {
   display: inline-flex !important;
   align-items: center !important;
-  border-radius: 6px !important;
+  border-radius: 0px !important;
   padding: 2px 7px !important;
   font-size: 0.78rem !important;
   font-weight: 600 !important;
@@ -15541,7 +15578,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 12px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 14px;
+  border-radius: 0px;
   padding: 24px 20px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 229, 255, 0.1);
   animation: shieldBoxPop 0.25s ease-out;
@@ -15627,7 +15664,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   color: #8b949e;
   font-size: 0.78rem;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -15642,7 +15679,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .android-apk-banner {
   background: linear-gradient(135deg, rgba(31, 111, 235, 0.18) 0%, rgba(56, 139, 253, 0.12) 100%);
   border: 1px solid rgba(56, 139, 253, 0.4);
-  border-radius: 10px;
+  border-radius: 0px;
   margin: 10px 12px 14px 12px;
   padding: 10px 14px;
   display: flex;
@@ -15725,7 +15762,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #238636;
   color: #ffffff !important;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 0.82rem;
   font-weight: 600;
   text-decoration: none;
@@ -15748,7 +15785,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #8b949e;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   font-size: 0.9rem;
   transition: color 0.15s ease, background 0.15s ease;
@@ -15800,7 +15837,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   width: 94%;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 14px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(0, 229, 255, 0.15);
   overflow: hidden;
   display: flex;
@@ -15849,7 +15886,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 10px 14px;
   background: rgba(22, 27, 34, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 10px;
+  border-radius: 0px;
   cursor: pointer;
   text-align: left;
   width: 100%;
@@ -15872,7 +15909,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .tile-icon-box {
   width: 38px;
   height: 38px;
-  border-radius: 9px;
+  border-radius: 0px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -15995,7 +16032,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   width: 94%;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 14px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(168, 85, 247, 0.15);
   overflow: hidden;
   display: flex;
@@ -16039,7 +16076,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   width: 94%;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 14px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 229, 255, 0.15);
   overflow: hidden;
   display: flex;
@@ -16063,7 +16100,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   flex-wrap: wrap;
   background: rgba(22, 27, 34, 0.75);
   border: 1px solid rgba(0, 229, 255, 0.25);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 12px;
 }
 
@@ -16074,7 +16111,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 10px 12px;
   background: rgba(22, 27, 34, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 0px;
   cursor: pointer;
   user-select: none;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -16121,7 +16158,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 4px 12px;
   background: rgba(56, 189, 248, 0.08);
   border: 1px solid rgba(56, 189, 248, 0.2);
-  border-radius: 8px;
+  border-radius: 0px;
   font-size: 0.75rem;
   color: #c9d1d9;
   line-height: 1.35;
@@ -16148,7 +16185,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   max-height: calc(100dvh - 32px);
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 14px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 20px rgba(0, 240, 255, 0.12);
   overflow: hidden;
   display: flex;
@@ -16197,13 +16234,13 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .quick-assign-body::-webkit-scrollbar-track,
 .bm-pills-scroll-box::-webkit-scrollbar-track {
   background: rgba(13, 17, 23, 0.5);
-  border-radius: 3px;
+  border-radius: 0px;
 }
 
 .quick-assign-body::-webkit-scrollbar-thumb,
 .bm-pills-scroll-box::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
 }
 
 .quick-assign-body::-webkit-scrollbar-thumb:hover,
@@ -16223,7 +16260,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.4);
   color: #ffffff;
@@ -16268,7 +16305,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(56, 189, 248, 0.06);
   border: 1px solid rgba(56, 189, 248, 0.28);
   border-left: 3.5px solid #38bdf8 !important;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 14px;
   margin: 0;
   box-sizing: border-box;
@@ -16294,7 +16331,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #0d1117;
   border: 1px solid #30363d;
   color: #e6edf3;
-  border-radius: 6px;
+  border-radius: 0px;
   min-width: 140px;
 }
 
@@ -16335,7 +16372,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 10px 14px;
   background: #0d1117;
   border: 1px solid #21262d;
-  border-radius: 9px;
+  border-radius: 0px;
   transition: border-color 0.18s, background 0.18s;
 }
 
@@ -16411,7 +16448,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   min-width: 58px;
   height: 36px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 0.88rem;
   font-weight: 800;
   cursor: pointer;
@@ -16476,7 +16513,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(245, 158, 11, 0.06);
   border: 1px solid rgba(245, 158, 11, 0.28);
   border-left: 3.5px solid #f59e0b !important;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 14px;
   margin: 0;
   box-sizing: border-box;
@@ -16515,7 +16552,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.70rem;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 12px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   line-height: 1.2;
@@ -16557,7 +16594,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 3px 2px;
   background: rgba(13, 17, 23, 0.7);
   border: 1px solid rgba(245, 158, 11, 0.22);
-  border-radius: 7px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -16608,7 +16645,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 0 16px;
   background: #21262d;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #c9d1d9;
   font-size: 0.86rem;
   font-weight: 600;
@@ -16636,7 +16673,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(168, 85, 247, 0.06);
   border: 1px solid rgba(168, 85, 247, 0.28);
   border-left: 3.5px solid #a855f7 !important;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 14px;
   margin: 0;
   box-sizing: border-box;
@@ -16672,7 +16709,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.68rem;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: 10px;
+  border-radius: 0px;
   line-height: 1.2;
 }
 
@@ -16703,7 +16740,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 5px 10px;
   background: rgba(46, 160, 67, 0.1);
   border: 1px solid rgba(46, 160, 67, 0.3);
-  border-radius: 6px;
+  border-radius: 0px;
   min-height: 32px;
   box-sizing: border-box;
 }
@@ -16737,7 +16774,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #21262d;
   color: #8b949e;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: 0px;
   margin-left: 4px;
 }
 
@@ -16747,7 +16784,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #21262d;
   border: 1px solid #30363d;
   color: #c9d1d9;
-  border-radius: 5px;
+  border-radius: 0px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -16796,7 +16833,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.82rem;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #e6edf3;
   box-sizing: border-box;
   transition: border-color 0.15s;
@@ -16818,7 +16855,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.80rem;
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #e6edf3;
   box-sizing: border-box;
   cursor: pointer;
@@ -16844,7 +16881,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 600;
   background: #238636;
   border: 1px solid #2ea043;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #ffffff;
   cursor: pointer;
   display: flex;
@@ -16870,7 +16907,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.95rem;
   background: #21262d;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #8b949e;
   cursor: pointer;
   display: flex;
@@ -16930,7 +16967,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 3px 2px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -17034,7 +17071,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   .btn-card-mem {
     min-height: 32px;
     padding: 2px 1px;
-    border-radius: 4px;
+    border-radius: 0px;
   }
   .btn-card-mem-top .mem-tag {
     font-size: 0.65rem;
@@ -17073,7 +17110,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 8px 6px;
   background: rgba(255, 255, 255, 0.04);
   border: 2px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 0px;
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
   position: relative;
@@ -17105,7 +17142,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bg-option-preview {
   width: 100%;
   height: 50px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   overflow: hidden;
   position: relative;
@@ -17183,7 +17220,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 7px 12px;
   font-size: 0.78rem;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
@@ -17225,7 +17262,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 4px 12px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0px;
 }
 
 .bg-scale-header {
@@ -17262,7 +17299,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 500;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 0px;
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -17322,7 +17359,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(34, 197, 94, 0.05);
   border: 1px solid rgba(34, 197, 94, 0.28);
   border-left: 3.5px solid #22c55e !important;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 14px;
   margin: 0;
   box-sizing: border-box;
@@ -17378,7 +17415,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 0;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 5px;
+  border-radius: 0px;
   color: #8b949e;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -17435,7 +17472,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 4px 12px;
   background: rgba(22, 27, 34, 0.6);
   border: 1px dashed #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 0.76rem;
   color: #8b949e;
   text-align: center;
@@ -17456,7 +17493,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 10px;
   background: rgba(31, 111, 235, 0.08);
   border: 1px solid rgba(56, 139, 253, 0.25);
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .bm-callsign-badge {
@@ -17473,7 +17510,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-family: monospace;
   background: rgba(159, 248, 191, 0.1);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   border: 1px solid rgba(159, 248, 191, 0.25);
 }
 
@@ -17527,7 +17564,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 10px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 0.72rem;
   gap: 3px;
   min-width: 0;
@@ -17635,7 +17672,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   
   background: rgba(13, 17, 23, 0.45);
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 6px 8px;
   min-width: 0;
   box-sizing: border-box;
@@ -17659,7 +17696,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.68rem;
   font-weight: 800;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   background: rgba(56, 139, 253, 0.18);
   border: 1px solid rgba(56, 139, 253, 0.4);
   color: #58a6ff;
@@ -17705,7 +17742,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   gap: 2px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.70rem;
   font-weight: 700;
   background: rgba(56, 139, 253, 0.12);
@@ -17736,7 +17773,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 6px 10px;
   background: rgba(56, 139, 253, 0.08);
   border: 1px solid rgba(56, 139, 253, 0.25);
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .bm-tg-pill-lg {
@@ -17762,7 +17799,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   gap: 3px;
   padding: 2px 7px;
-  border-radius: 10px;
+  border-radius: 0px;
   font-size: 0.68rem;
   font-weight: 700;
   white-space: nowrap;
@@ -17802,7 +17839,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 7px 10px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .bm-hs-sub-info {
@@ -17838,7 +17875,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 0 9px;
   font-size: 0.72rem;
   font-weight: 700;
-  border-radius: 5px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -17897,7 +17934,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 8px 10px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 7px;
+  border-radius: 0px;
   cursor: pointer;
   text-align: left;
   transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
@@ -17983,7 +18020,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #11141a;
   border: 1px solid #30363d;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
-  border-radius: 10px;
+  border-radius: 0px;
 }
 
 .bm-info-modal-header {
@@ -18020,7 +18057,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-self: flex-start;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 0px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #c9d1d9;
@@ -18052,7 +18089,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 3px 10px;
   font-size: 0.78rem;
   font-weight: 700;
-  border-radius: 8px;
+  border-radius: 0px;
   background: rgba(56, 139, 253, 0.16);
   border: 1px solid rgba(56, 139, 253, 0.38);
   color: #58a6ff;
@@ -18099,7 +18136,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 8px 16px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 0px;
   color: #8b949e;
   font-size: 0.86rem;
   font-weight: 600;
@@ -18152,7 +18189,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 10px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px dashed #30363d;
-  border-radius: 10px;
+  border-radius: 0px;
   margin: 8px 0;
 }
 
@@ -18241,7 +18278,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bm-info-card {
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 12px 14px;
 }
 
@@ -18267,7 +18304,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.70rem;
   font-weight: 700;
   padding: 2px 7px;
-  border-radius: 10px;
+  border-radius: 0px;
   text-transform: uppercase;
 }
 
@@ -18336,7 +18373,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(56, 139, 253, 0.14);
   border: 1px solid rgba(56, 139, 253, 0.35);
   color: #58a6ff;
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 2px 7px;
   font-size: 0.72rem;
   font-weight: 600;
@@ -18351,7 +18388,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bm-info-devices-wrap {
   overflow-x: auto;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .bm-info-devices-table {
@@ -18400,7 +18437,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 700;
   line-height: 1;
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   letter-spacing: 0.3px;
   user-select: none;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
@@ -18441,7 +18478,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bm-repeater-tech-card {
   background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 4px 12px;
   display: flex;
   flex-direction: column;
@@ -18479,7 +18516,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(56, 139, 253, 0.15);
   border: 1px solid rgba(56, 139, 253, 0.35);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   text-transform: uppercase;
 }
 
@@ -18513,7 +18550,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(56, 139, 253, 0.15);
   border: 1px solid rgba(56, 139, 253, 0.35);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   text-decoration: none;
   margin-left: 6px;
   display: inline-flex;
@@ -18546,7 +18583,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   white-space: nowrap;
 }
 
@@ -18556,7 +18593,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 10px;
   background: rgba(255, 166, 0, 0.12);
   border: 1px solid rgba(255, 166, 0, 0.35);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 10px 14px;
   color: #ffc107;
   font-size: 0.82rem;
@@ -18597,7 +18634,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #21262d;
   color: #c9d1d9;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 8px 14px;
   font-size: 0.82rem;
   font-weight: 600;
@@ -18623,7 +18660,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 10px 18px;
   font-size: 0.92rem;
   font-weight: 700;
-  border-radius: 8px;
+  border-radius: 0px;
   border: 1px solid #2ea043;
   background: #238636;
   color: #ffffff;
@@ -18651,8 +18688,8 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 12px 18px;
   border-top: 1px solid #21262d;
   background: #13171e;
-  border-bottom-left-radius: 10px;
-  border-bottom-right-radius: 10px;
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
   box-sizing: border-box;
 }
 
@@ -18666,7 +18703,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 0 18px;
   background: #1c2128;
   border: 1px solid rgba(88, 166, 255, 0.45);
-  border-radius: 8px;
+  border-radius: 0px;
   color: #58a6ff;
   font-size: 0.90rem;
   font-weight: 600;
@@ -18712,7 +18749,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 0 24px;
   background: #1f6feb;
   border: 1px solid #388bfd;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #ffffff;
   font-size: 0.90rem;
   font-weight: 600;
@@ -18774,7 +18811,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   background: rgba(0, 0, 0, 0.32);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 2px;
   gap: 3px;
   user-select: none;
@@ -18786,7 +18823,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 4px 10px;
   font-size: 0.76rem;
   font-weight: 700;
-  border-radius: 6px;
+  border-radius: 0px;
   color: var(--text-muted);
   cursor: pointer;
   display: inline-flex;
@@ -19087,6 +19124,15 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 [data-theme="light"] .rtt-display {
   color: #64748b !important;
   text-shadow: none !important;
+}
+[data-theme="light"] .rtt-display.e2e-good {
+  color: #059669 !important;
+}
+[data-theme="light"] .rtt-display.e2e-warn {
+  color: #d97706 !important;
+}
+[data-theme="light"] .rtt-display.e2e-bad {
+  color: #dc2626 !important;
 }
 [data-theme="light"] .mode-standby {
   background: #f1f5f9 !important;
@@ -22597,6 +22643,11 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-weight: 700 !important;
 }
 
+[data-theme="light"] .about-made-en {
+  color: #64748b !important;
+  font-weight: 600 !important;
+}
+
 
 [data-theme="light"] .about-flag-am {
   border-color: rgba(0, 0, 0, 0.15) !important;
@@ -23200,7 +23251,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 0 14px;
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   border: 1px solid #3b82f6;
-  border-radius: 8px;
+  border-radius: 0px;
   color: #ffffff;
   font-size: 13px;
   font-weight: 600;
@@ -23246,7 +23297,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bm-bench-progress-card {
   background: rgba(30, 41, 59, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 0px;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -23275,7 +23326,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bm-bench-server-card {
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(56, 189, 248, 0.2);
-  border-radius: 10px;
+  border-radius: 0px;
   padding: 12px 14px;
   display: flex;
   justify-content: space-between;
@@ -23350,14 +23401,14 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   flex: 1;
   height: 10px;
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 5px;
+  border-radius: 0px;
   overflow: hidden;
 }
 
 .bm-bench-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #3b82f6, #06b6d4, #10b981);
-  border-radius: 5px;
+  border-radius: 0px;
   transition: width 0.2s ease;
 }
 
@@ -23381,7 +23432,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   flex: 1;
   height: 40px;
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: 0px;
   font-size: 0.88rem;
   font-weight: 700;
   display: inline-flex;
@@ -23470,7 +23521,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 12px;
+  border-radius: 0px;
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.3);
@@ -23486,7 +23537,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   max-height: 360px;
   overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 0px;
   background: rgba(15, 23, 42, 0.4);
 }
 
@@ -23590,7 +23641,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .bench-current-tag {
   font-size: 10px;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   background: rgba(59, 130, 246, 0.2);
   color: #60a5fa;
   border: 1px solid rgba(59, 130, 246, 0.4);
@@ -23603,7 +23654,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   justify-content: flex-end;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: 0px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
@@ -23661,7 +23712,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.35);
   color: #60a5fa;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -23866,7 +23917,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   margin-left: auto;
   color: var(--text-primary, #c9d1d9);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -23896,7 +23947,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: 0px;
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -23941,7 +23992,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  border-radius: 7px;
+  border-radius: 0px;
   background: rgba(255, 255, 255, 0.04);
   margin-bottom: 5px;
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -23977,13 +24028,13 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 8px 12px;
   background: rgba(35, 134, 54, 0.1);
   border: 1px solid rgba(63, 185, 80, 0.2);
-  border-radius: 8px;
+  border-radius: 0px;
 }
 
 /* Buttons */
 .btn-xs-primary {
   padding: 4px 12px;
-  border-radius: 5px;
+  border-radius: 0px;
   border: none;
   background: #238636;
   color: #fff;
@@ -23997,7 +24048,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 
 .btn-xs-danger {
   padding: 3px 9px;
-  border-radius: 5px;
+  border-radius: 0px;
   border: none;
   background: rgba(218, 54, 51, 0.2);
   color: #f85149;
@@ -24065,7 +24116,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   height: 28px;
   min-width: 28px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: 0px;
   font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 0.95rem;
   font-weight: 800;
@@ -24243,7 +24294,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  border-radius: 4px !important;
+  border-radius: 0px !important;
   cursor: pointer;
   transition: transform 0.15s ease, filter 0.15s ease;
   margin: 0 auto;
@@ -24259,7 +24310,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   height: 20px;
   display: block;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: 0px;
   pointer-events: none;
 }
 .log-play-btn:hover {
@@ -24288,7 +24339,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   padding: 4px 12px;
   background: var(--bg-monitor-table, #0f1512);
   border: 1px solid var(--border-monitor, #28372f);
-  border-radius: 12px;
+  border-radius: 0px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   flex-shrink: 0;
   transition: all 0.2s ease;
@@ -24373,7 +24424,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.95rem;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: 0px;
   line-height: 1;
   transition: all 0.15s ease;
   margin-left: 2px;
@@ -24430,7 +24481,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   width: 100%;
   min-width: 0;
   height: 36px;
-  border-radius: 8px;
+  border-radius: 0px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-muted, #8b949e);
@@ -24642,7 +24693,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   height: 28px;
   min-width: 28px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: 0px;
   font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 0.95rem;
   font-weight: 800;
@@ -24799,7 +24850,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   position: relative;
   width: 100%;
   height: 14px;
-  border-radius: 4px;
+  border-radius: 0px;
   overflow: hidden;
   isolation: isolate;
   background: #141d18;
@@ -24850,7 +24901,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: rgba(248, 81, 73, 0.12);
   border: 1px solid rgba(248, 81, 73, 0.35);
   color: #f85149;
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 3px 9px;
   font-size: 0.74rem;
   font-weight: 700;
@@ -24889,7 +24940,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   align-items: center;
   background: #0d283c;
   border: 1px solid rgba(56, 189, 248, 0.4);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 2px 8px;
   overflow: hidden;
   box-sizing: border-box;
@@ -24952,7 +25003,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   gap: 3px;
   background: rgba(255, 255, 255, 0.05);
   padding: 2px 4px;
-  border-radius: 8px;
+  border-radius: 0px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 [data-theme="light"] .rec-speed-group {
@@ -24966,7 +25017,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   font-size: 0.74rem;
   font-weight: 700;
   padding: 2px 7px;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -24982,7 +25033,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 
 /* Audio Recording Settings Modal */
 .rec-settings-modal .modal-content {
-  border-radius: 12px;
+  border-radius: 0px;
 }
 .rec-toggle-checkbox {
   width: 18px;
@@ -25010,7 +25061,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #00d2d3;
   border: 1px solid #00b4b5;
   color: #0b0e14;
-  border-radius: 8px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -25021,14 +25072,14 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .rec-settings-modal .rec-clear-btn {
   padding: 4px 10px;
   font-size: 0.8rem;
-  border-radius: 6px;
+  border-radius: 0px;
   vertical-align: middle;
 }
 
 /* Offline Transcribe Confirmation Modal */
 .offline-transcribe-modal-content {
   max-width: 380px !important;
-  border-radius: 12px !important;
+  border-radius: 0px !important;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65) !important;
 }
 
@@ -25039,7 +25090,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   cursor: pointer;
   user-select: none;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 0px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -25074,7 +25125,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   flex: 1;
   min-width: 0;
   height: 6px;
-  border-radius: 2px;
+  border-radius: 0px;
   background: #0f172a;
   border: 1px solid rgba(0, 123, 255, 0.4);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
@@ -25177,7 +25228,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   color: #ffffff !important;
   padding: 6px 14px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 0px;
   font-weight: 600;
   font-size: 0.9rem;
   transition: all 0.1s ease;
@@ -25204,7 +25255,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   min-height: 22px !important;
   width: 26px !important;
   min-width: 26px !important;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   padding: 0 !important;
@@ -25385,7 +25436,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.3);
@@ -25466,7 +25517,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   margin: 0 4px 4px 4px;
   background: rgba(26, 34, 29, 0.95);
   border: 1px solid rgba(234, 179, 8, 0.40);
-  border-radius: 8px;
+  border-radius: 0px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   animation: fadeInSelectionBar 0.18s ease-out;
   box-sizing: border-box;
@@ -25517,7 +25568,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   color: #e2e8f0;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 5px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.12s ease;
   line-height: 1;
@@ -25588,7 +25639,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   min-width: 145px;
   background: #238142 !important;
   border: 1px solid rgba(255, 255, 255, 0.3) !important;
-  border-radius: 9px;
+  border-radius: 0px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -25612,7 +25663,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   color: #ffffff;
   background: rgba(0, 0, 0, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.12s ease;
@@ -25693,7 +25744,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   font-size: 0.62rem;
   font-weight: 800;
   padding: 1px 5px;
-  border-radius: 8px;
+  border-radius: 0px;
   line-height: 1;
   margin-left: auto;
 }
@@ -25733,7 +25784,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   font-size: 0.58rem;
   font-weight: 800;
   padding: 0.5px 3.5px;
-  border-radius: 8px;
+  border-radius: 0px;
   line-height: 1.2;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   pointer-events: none;
@@ -25791,7 +25842,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   max-width: calc(100vw - 28px);
   background: var(--bg-card, #161b22);
   border: 1px solid var(--border-color, #30363d);
-  border-radius: 10px;
+  border-radius: 0px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
@@ -25830,7 +25881,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   line-height: 1;
   cursor: pointer;
   color: var(--text-muted, #8b949e);
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 2px 6px;
   transition: color 0.12s ease, background 0.12s ease;
 }
@@ -25878,7 +25929,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   -webkit-appearance: none;
   appearance: none;
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
   outline: none;
   cursor: pointer;
   margin: 6px 0;
@@ -25936,7 +25987,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   color: #58a6ff;
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.28);
-  border-radius: 6px;
+  border-radius: 0px;
   padding: 5px 8px;
   font-family: monospace, inherit;
   white-space: nowrap;
@@ -25966,7 +26017,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   font-weight: 600;
   padding: 6px 0;
   text-align: center;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.12s ease;
   white-space: nowrap;
@@ -26000,7 +26051,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   border: 1px solid #30363d;
   color: #c9d1d9;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -26017,7 +26068,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   border: 1px solid rgba(240, 246, 252, 0.1);
   color: #ffffff;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 0px;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -26111,7 +26162,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   padding: 8px 10px;
   background: rgba(0, 0, 0, 0.22);
   border: 1px solid var(--border-color, #30363d);
-  border-radius: 6px;
+  border-radius: 0px;
 }
 
 .ptt-mode-title {
@@ -26202,7 +26253,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   width: 100%;
   background: #181b20;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
+  border-radius: 0px;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.65), 0 0 24px rgba(72, 132, 255, 0.12);
   overflow: hidden;
   display: flex;
@@ -26343,7 +26394,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 0px;
   background: #20242c;
   border: 1.5px solid rgba(255, 255, 255, 0.08);
   color: #e2e8f0;
@@ -26371,7 +26422,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   width: 22px;
   height: 16px;
   object-fit: cover;
-  border-radius: 2px;
+  border-radius: 0px;
   flex-shrink: 0;
 }
 
@@ -26396,7 +26447,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
 .onboarding-input {
   width: 100%;
   padding: 9px 12px;
-  border-radius: 6px;
+  border-radius: 0px;
   border: 1px solid #4a5568;
   background: #20242c;
   color: #fff;
@@ -26418,7 +26469,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
 
 .onboarding-error-box {
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 0px;
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.4);
   color: #fca5a5;
@@ -26439,7 +26490,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   padding: 10px 22px;
   font-size: 0.92rem;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -26520,7 +26571,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
   align-items: center;
   justify-content: center;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -26533,7 +26584,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
 .account-swl-badge {
   display: inline-block;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.75rem;
   font-weight: 600;
   background: rgba(88, 166, 255, 0.15);
@@ -26545,7 +26596,7 @@ body.is-apk-mode .log-col-dur-mode-badge {
 .account-role-badge {
   display: inline-block;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.75rem;
   font-weight: 600;
   background: rgba(255, 255, 255, 0.08);
@@ -26573,7 +26624,7 @@ body.is-swl-mode .ptt-button::after,
   color: #58a6ff;
   background: rgba(0, 0, 0, 0.6);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   border: 1px solid rgba(88, 166, 255, 0.4);
   pointer-events: none;
   z-index: 5;
@@ -26618,7 +26669,7 @@ body.is-swl-mode .ptt-button::after,
   box-sizing: border-box;
   background: linear-gradient(155deg, rgba(22, 27, 34, 0.98), rgba(13, 17, 23, 0.98));
   border: 1.5px solid #388bfd;
-  border-radius: 10px;
+  border-radius: 0px;
   padding: 7px 10px 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.68), 0 0 12px rgba(56, 139, 253, 0.28);
   backdrop-filter: blur(8px);
@@ -26687,7 +26738,7 @@ body.is-swl-mode .ptt-button::after,
   display: inline-flex;
   align-items: center;
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: 0px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.77rem;
   font-weight: 800;
@@ -26724,7 +26775,7 @@ body.is-swl-mode .ptt-button::after,
   color: #3fb950;
   background: rgba(46, 160, 67, 0.14);
   border: 1px solid rgba(46, 160, 67, 0.35);
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 1px 5px;
   white-space: nowrap;
 }
@@ -26897,7 +26948,7 @@ body.is-swl-mode .ptt-button::after,
   gap: 6px;
   background: rgba(231, 76, 60, 0.16);
   border: 1px solid rgba(231, 76, 60, 0.45);
-  border-radius: 4px;
+  border-radius: 0px;
   padding: 2px 7px;
   color: #ff6b6b;
   font-size: 0.76rem;
@@ -26943,7 +26994,7 @@ body.is-swl-mode .ptt-button::after,
   padding: 3px 6px;
   background: rgba(18, 22, 28, 0.88);
   border: 1px solid rgba(212, 175, 55, 0.35);
-  border-radius: 5px;
+  border-radius: 0px;
   margin: 3px 0;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   user-select: none;
@@ -26978,7 +27029,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.16);
   color: #d0d7de;
-  border-radius: 3px;
+  border-radius: 0px;
   font-weight: 800;
   font-size: 0.74rem;
   padding: 2px 6px;
@@ -27014,7 +27065,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(52, 152, 219, 0.15);
   border: 1px solid rgba(52, 152, 219, 0.35);
   color: #58a6ff;
-  border-radius: 3px;
+  border-radius: 0px;
   font-weight: 700;
   font-size: 0.72rem;
   padding: 2px 7px;
@@ -27040,7 +27091,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(231, 76, 60, 0.15);
   border: 1px solid rgba(231, 76, 60, 0.35);
   color: #ff6b6b;
-  border-radius: 3px;
+  border-radius: 0px;
   font-weight: 700;
   font-size: 0.70rem;
   padding: 2px 6px;
@@ -27068,7 +27119,7 @@ body.is-swl-mode .ptt-button::after,
   z-index: 1000;
   background: #181c24;
   border: 1px solid rgba(212, 175, 55, 0.45);
-  border-radius: 8px;
+  border-radius: 0px;
   padding: 7px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
   width: 270px;
@@ -27088,7 +27139,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #e6edf3;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 800;
   font-size: 0.82rem;
   padding: 4px 2px;
@@ -27123,7 +27174,7 @@ body.is-swl-mode .ptt-button::after,
   font-size: 0.58rem;
   font-weight: 800;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-left: 5px;
@@ -27188,7 +27239,7 @@ body.is-swl-mode .ptt-button::after,
   max-height: 106px !important;
   flex: 0 0 106px !important;
   border: 1.5px solid rgba(212, 175, 55, 0.42) !important;
-  border-radius: 8px !important;
+  border-radius: 0px !important;
   background: linear-gradient(160deg, rgba(245, 158, 11, 0.12) 0%, rgba(24, 28, 36, 0.95) 45%, rgba(18, 22, 28, 0.98) 100%) !important;
   box-shadow:
     -2px -2px 5px rgba(255, 255, 255, 0.05),
@@ -27294,7 +27345,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(212, 175, 55, 0.12);
   border: 1px solid rgba(212, 175, 55, 0.32);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -27326,7 +27377,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: #d0d7de;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 800;
   font-size: 0.80rem;
   padding: 2px 0;
@@ -27381,7 +27432,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(212, 175, 55, 0.15);
   border: 1px solid rgba(212, 175, 55, 0.38);
   padding: 2px 9px;
-  border-radius: 5px;
+  border-radius: 0px;
   white-space: nowrap;
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -27450,7 +27501,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(52, 152, 219, 0.15);
   border: 1px solid rgba(52, 152, 219, 0.35);
   color: #58a6ff;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 700;
   font-size: 0.72rem;
   padding: 3px 7px;
@@ -27476,7 +27527,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(231, 76, 60, 0.15);
   border: 1px solid rgba(231, 76, 60, 0.35);
   color: #ff6b6b;
-  border-radius: 4px;
+  border-radius: 0px;
   font-weight: 700;
   font-size: 0.72rem;
   padding: 3px 7px;
@@ -27515,7 +27566,7 @@ body.is-swl-mode .ptt-button::after,
   box-sizing: border-box;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 0px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: 1050;
   display: flex;
@@ -27536,7 +27587,7 @@ body.is-swl-mode .ptt-button::after,
   gap: 6px;
   border-bottom: 1px solid #21262d;
   background: #0d1117;
-  border-radius: 7px 7px 0 0;
+  border-radius: 0px;
 }
 
 .srv-combo-search-row {
@@ -27561,7 +27612,7 @@ body.is-swl-mode .ptt-button::after,
   padding: 0 28px 0 28px;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 6px;
+  border-radius: 0px;
   color: #e6edf3;
   font-size: 0.82rem;
   font-family: inherit;
@@ -27634,7 +27685,7 @@ body.is-swl-mode .ptt-button::after,
   background: #21262d;
   color: #8b949e;
   border: 1px solid #30363d;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
@@ -27699,7 +27750,7 @@ body.is-swl-mode .ptt-button::after,
 
 .srv-combo-list::-webkit-scrollbar-thumb {
   background: #30363d;
-  border-radius: 3px;
+  border-radius: 0px;
 }
 
 .srv-combo-item {
@@ -27751,7 +27802,7 @@ body.is-swl-mode .ptt-button::after,
 .srv-item-flag img {
   width: 16px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: 0px;
   display: inline-block;
   vertical-align: middle;
 }
@@ -27783,7 +27834,7 @@ body.is-swl-mode .ptt-button::after,
 .srv-item-ping {
   font-size: 0.70rem;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 0px;
   background: #21262d;
   color: #3fb950;
   font-weight: 600;
@@ -27799,7 +27850,7 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(234, 179, 8, 0.35);
   color: #fbbf24;
   padding: 0 1px;
-  border-radius: 2px;
+  border-radius: 0px;
   font-weight: bold;
 }
 
@@ -27943,7 +27994,7 @@ body.is-swl-mode .ptt-button::after,
     min-width: 100% !important;
     max-width: 100% !important;
     max-height: 65vh !important;
-    border-radius: 14px 14px 0 0 !important;
+    border-radius: 0px !important;
     border-bottom: none !important;
     box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.8) !important;
     z-index: 9999 !important;
@@ -27965,7 +28016,7 @@ body.is-swl-mode .ptt-button::after,
   padding: 8px 10px;
   background: rgba(18, 22, 28, 0.75);
   border: 1px solid rgba(139, 92, 246, 0.35);
-  border-radius: 8px;
+  border-radius: 0px;
   backdrop-filter: blur(4px);
   user-select: none;
 }
@@ -28000,7 +28051,7 @@ body.is-swl-mode .ptt-button::after,
   display: inline-flex;
   align-items: center;
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: 0px;
   font-size: 0.78rem;
   font-weight: 700;
   font-family: var(--font-mono, monospace);
@@ -28026,7 +28077,7 @@ body.is-swl-mode .ptt-button::after,
   border: 1px solid rgba(255, 255, 255, 0.16);
   color: #e6edf3;
   padding: 3px 7px;
-  border-radius: 5px;
+  border-radius: 0px;
   font-size: 0.74rem;
   font-weight: 600;
   cursor: pointer;
@@ -28072,7 +28123,7 @@ body.is-swl-mode .ptt-button::after,
   border: 1px solid rgba(240, 246, 252, 0.12);
   color: #c9d1d9;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.72rem;
   font-family: var(--font-mono, monospace);
   font-weight: 600;
@@ -28149,7 +28200,7 @@ body.is-swl-mode .ptt-button::after,
   border: none;
   cursor: pointer;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
   font-size: 0.95rem;
   line-height: 1;
   opacity: 0.3;
@@ -28210,7 +28261,7 @@ body.is-swl-mode .ptt-button::after,
   font-size: 0.72rem;
   font-weight: 700;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: 0px;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
@@ -28267,4 +28318,48 @@ body.is-swl-mode .ptt-button::after,
   background: rgba(249, 135, 0, 0.12) !important;
   color: #c25e00 !important;
   border-color: rgba(249, 135, 0, 0.6) !important;
+}
+
+
+/* === GLOBAL SHARP CORNERS (0px) EXCEPT STATUS INDICATORS & SLIDER THUMBS === */
+*, *::before, *::after {
+  border-radius: 0px !important;
+}
+
+.live-pulse-dot,
+.live-pulse-dot::after,
+.bm-chip-dot,
+.bm-spinner,
+.bm-summary-spinner,
+.long-press-ring,
+.model-picker-radio,
+.stepper-circle,
+.rank-badge,
+.proposal-avatar,
+.about-avatar-wrap,
+.rec-ctrl-btn,
+.srv-combo-clear,
+.log-selection-toolbar .sel-icon,
+.volume-strip-settings-btn.has-update-badge::after,
+.header-settings-btn.has-update-badge::after,
+.ptt-side-top-row .btn-settings.has-update-badge::after,
+.volume-slider-v::-webkit-slider-thumb,
+.volume-slider-v::-moz-range-thumb,
+.form-slider::-webkit-slider-thumb,
+.form-slider::-moz-range-thumb,
+.tot-range-slider::-webkit-slider-thumb,
+.tot-range-slider::-moz-range-thumb {
+  border-radius: 50% !important;
+}
+
+/* === PIPELINE ICONS SQUIRCLE EXCEPTION === */
+.vfo-pipeline-icon,
+.vfo-row .vfo-pipeline-icon {
+  border-radius: 9px !important;
+}
+@media (max-width: 768px) {
+  .vfo-pipeline-icon,
+  .vfo-row .vfo-pipeline-icon {
+    border-radius: 10px !important;
+  }
 }

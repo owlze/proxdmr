@@ -30,7 +30,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.353">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.378">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -66,6 +66,11 @@
         localStorage.setItem(_uKey + "theme", _savedTheme);
       }
       localStorage.setItem("proxdmr_theme", _savedTheme);
+      var _serverLang = "{{ language if language is defined and language else '' }}";
+      if (_serverLang && !localStorage.getItem("proxdmr_demo_language")) {
+        if (window.currentUserId) localStorage.setItem(_uKey + "language", _serverLang);
+        localStorage.setItem("proxdmr_language", _serverLang);
+      }
 
       var _serverBgTypeDark = "{{ bg_type_dark if bg_type_dark is defined and bg_type_dark else '' }}";
       var _serverBgColorDark = "{{ bg_color_dark if bg_color_dark is defined and bg_color_dark else '' }}";
@@ -298,13 +303,13 @@
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;" data-i18n="auth.login_label">Логин</label>
           <input type="text" id="authLoginInput" autocomplete="username" placeholder="login"
-                 style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
+                 style="width:100%;padding:8px 10px;border-radius: 0px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
         </div>
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;" data-i18n="auth.password_label">Пароль</label>
           <div style="position:relative;display:flex;align-items:center;width:100%;">
             <input type="password" id="authPasswordInput" autocomplete="current-password" placeholder="password"
-                   style="width:100%;padding:8px 38px 8px 10px;border-radius:6px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
+                   style="width:100%;padding:8px 38px 8px 10px;border-radius: 0px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
             <button type="button" id="btnToggleAuthPassword" class="password-toggle-btn"
                     title="Показать/скрыть пароль" data-i18n-title="auth.password_toggle_title" tabindex="-1">👁️</button>
           </div>
@@ -314,11 +319,30 @@
           <label for="authRememberMe" style="font-size:0.85em;opacity:0.8;cursor:pointer;" data-i18n="auth.remember_me">Запомнить меня</label>
         </div>
         <div id="authLoginError" style="color:#ff5555;font-size:0.85em;min-height:1.2em;margin-bottom:8px;"></div>
-        <button id="authLoginBtn" type="button" class="btn-primary" style="width:100%;padding:10px;font-size:1em;border-radius:6px;cursor:pointer;" data-i18n="auth.login_btn">Войти</button>
+        <button id="authLoginBtn" type="button" class="btn-primary" style="width:100%;padding:10px;font-size:1em;border-radius: 0px;cursor:pointer;" data-i18n="auth.login_btn">Войти</button>
         <div style="margin-top:10px;">
-          <button id="authImportConfigBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#242830;border:1px solid #444;color:#ddd;">
+          <button id="authImportConfigBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: 0px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#242830;border:1px solid #444;color:#ddd;">
             <span>📥</span>
             <span data-i18n="account.import_config_file">Загрузить конфигурацию из файла</span>
+          </button>
+        </div>
+        <div id="authServerSettingsRow" style="margin-top:10px; display: none;">
+          <button id="authServerSettingsBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: 0px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#1e2430;border:1px solid rgba(88,166,255,0.4);color:#58a6ff;">
+            <span>⚙️</span>
+            <span data-i18n="auth.server_settings_btn">Настройки сервера</span>
+          </button>
+        </div>
+        <!-- Demo Mode Login Section -->
+        <div id="authDemoSection" style="display: none;" class="auth-demo-box">
+          <div class="auth-demo-header">
+            <div class="auth-demo-title" data-i18n="demo.access_title">🎧 Демонстрационный доступ</div>
+            <div class="auth-demo-desc" data-i18n="demo.access_desc">Только приём, сессия 10 мин, логин/пароль: <code>demo</code> / <code>demo</code></div>
+          </div>
+          <div id="authDemoSlotsInfo" class="auth-demo-slots-info"></div>
+          <div id="authDemoCountdownBox" class="auth-demo-countdown" style="display: none;"></div>
+          <button type="button" id="btnAuthDemoLogin" class="btn btn-secondary auth-demo-btn">
+            <span class="auth-demo-btn-icon">🎧</span>
+            <span id="btnAuthDemoLoginText" data-i18n="demo.login_btn">Войти в демо-режим</span>
           </button>
         </div>
       </div>
@@ -339,8 +363,8 @@
         Вы действительно хотите выйти из аккаунта?
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
-        <button type="button" id="btnCancelLogoutModal" class="btn-secondary" style="padding:7px 16px;border-radius:6px;cursor:pointer;font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
-        <button type="button" id="btnConfirmLogoutModal" class="btn-danger" style="padding:7px 18px;border-radius:6px;cursor:pointer;font-size:0.9em;background:#da3633;color:#fff;border:1px solid #f85149;font-weight:600;" data-i18n="account.logout_btn_confirm">Выйти</button>
+        <button type="button" id="btnCancelLogoutModal" class="btn-secondary" style="padding:7px 16px;border-radius: 0px;cursor:pointer;font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
+        <button type="button" id="btnConfirmLogoutModal" class="btn-danger" style="padding:7px 18px;border-radius: 0px;cursor:pointer;font-size:0.9em;background:#da3633;color:#fff;border:1px solid #f85149;font-weight:600;" data-i18n="account.logout_btn_confirm">Выйти</button>
       </div>
     </div>
   </div>
@@ -359,21 +383,21 @@
         Обнаружен архив суперадмина. Выберите режим восстановления:
       </div>
       <div class="sa-import-options" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">
-        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:6px; border:1px solid var(--border-color, #30363d);">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: 0px; border:1px solid var(--border-color, #30363d);">
           <input type="radio" name="saImportMode" value="superadmin_only" checked style="margin-top:3px;">
           <div>
             <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt1_title">1. Восстановить только суперадмина</strong>
             <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt1_desc">Конфигурация, хотспоты и оперативные данные суперадмина. Другие пользователи в базе не изменяются.</div>
           </div>
         </label>
-        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:6px; border:1px solid var(--border-color, #30363d);">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: 0px; border:1px solid var(--border-color, #30363d);">
           <input type="radio" name="saImportMode" value="all_users" style="margin-top:3px;">
           <div>
             <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt2_title">2. Суперадмин + все пользователи</strong>
             <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt2_desc">Полное восстановление всей базы (учетные записи, пароли, хотспоты и настройки всех пользователей).</div>
           </div>
         </label>
-        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:6px; border:1px solid var(--border-color, #30363d);">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: 0px; border:1px solid var(--border-color, #30363d);">
           <input type="radio" name="saImportMode" value="selected_users" style="margin-top:3px;">
           <div>
             <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt3_title">3. Суперадмин + выбранные пользователи</strong>
@@ -383,7 +407,7 @@
       </div>
 
       <!-- Users checklist block (visible when option 3 is selected) -->
-      <div id="saImportUsersChecklistBlock" style="display:none; margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color, #30363d); border-radius:6px; padding:10px;">
+      <div id="saImportUsersChecklistBlock" style="display:none; margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color, #30363d); border-radius: 0px; padding:10px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:0.8rem;">
           <span style="font-weight:600; color:var(--text-muted);" data-i18n="account.sa_import_select_users">Пользователи для восстановления:</span>
           <div style="display:flex; gap:10px;">
@@ -398,10 +422,17 @@
       </div>
 
       <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
-        <button type="button" id="btnCancelSaImportModal" class="btn-secondary" style="padding:7px 16px; border-radius:6px; cursor:pointer; font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
-        <button type="button" id="btnConfirmSaImportModal" class="btn-primary" style="padding:7px 18px; border-radius:6px; cursor:pointer; font-size:0.9em; font-weight:600;" data-i18n="account.sa_import_apply_btn">Восстановить</button>
+        <button type="button" id="btnCancelSaImportModal" class="btn-secondary" style="padding:7px 16px; border-radius: 0px; cursor:pointer; font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
+        <button type="button" id="btnConfirmSaImportModal" class="btn-primary" style="padding:7px 18px; border-radius: 0px; cursor:pointer; font-size:0.9em; font-weight:600;" data-i18n="account.sa_import_apply_btn">Восстановить</button>
       </div>
     </div>
+  </div>
+
+    <!-- Global Demo Session Countdown Micro-Bar (75% height of collapsed HS) -->
+  <div id="demoHeaderBadge" data-i18n-title="demo.badge_title" class="demo-header-badge" style="display: none;" title="Ознакомительный демо-режим">
+    <span class="demo-header-dot" aria-hidden="true"></span>
+    <span id="demoHeaderTime" class="demo-header-time">Demo: 10.00</span>
+    <button type="button" id="demoHeaderLogoutBtn" class="demo-header-logout" title="Выйти из демо" data-i18n-title="demo.exit">🚪</button>
   </div>
 
   <div class="app-dashboard">
@@ -444,8 +475,8 @@
 
             <div class="brand-title">
               <div class="brand-logo-wrap" tabindex="0">
-                <img src="/static/img/Logo_light.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
-                <img src="/static/img/Logo_dark.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-light">
+                <img src="/static/img/Logo_light.png?v=2.9.367" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
+                <img src="/static/img/Logo_dark.png?v=2.9.367" alt="ProxDMR" class="brand-logo-img brand-logo-light">
               </div>
               <span class="brand-version hotspot-name-badge">Main 📻</span>
               <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
@@ -478,13 +509,13 @@
             </button>
             <!-- BM Upload Background Task Indicator -->
             <div id="headerBmUploadIndicator" class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" data-i18n-title="header.bm_upload_indicator_title" data-i18n-title="header.bm_upload_indicator_title" role="button" tabindex="0">
-              <img src="/static/img/BM_Upload.png?v=2.9.170" alt="BM Upload" class="bm-upload-img">
+              <img src="/static/img/BM_Upload.png?v=2.9.367" alt="BM Upload" class="bm-upload-img">
               <span id="headerBmUploadPercent" class="bm-upload-percent">0%</span>
             </div>
 
             <!-- TTS Voice Upload Background Task Indicator -->
             <div id="headerTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0">
-              <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
+              <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
               <span id="headerTtsUploadPercent" class="tts-upload-percent">0%</span>
             </div>
 
@@ -562,9 +593,10 @@
             <div class="screen-top-bar">
               <span id="modeBadge" class="mode-badge mode-standby">STANDBY</span>
               <span id="vfoSwlBadge" class="vfo-swl-badge" style="display: {{ 'inline-flex' if is_swl else 'none' }};" title="Режим радиоприёмника-наблюдателя (SWL): передача отключена" data-i18n-title="vfo.swl_badge_title">🎧 SWL</span>
+
               <span id="callsignDisplay" class="callsign-display">{{ callsign }}</span>
               <span id="dmrIdDisplay" class="dmr-id-display">ID: {{ dmr_id }}</span>
-              <span id="rttDisplay" class="rtt-display" title="Задержка канала WebSocket (Round-Trip Time)" data-i18n-title="ping.ws_rtt_title">RTT: --ms</span>
+              <span id="rttDisplay" class="rtt-display" title="Сквозная задержка E2E (Клиент ↔ ProxDMR + ProxDMR ↔ Сеть)">E2E: --ms</span>
             </div>
 
             <!-- VFO A: Slot 1 (TS1) -->
@@ -700,7 +732,7 @@
                   <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) -->
                   <div class="status-toggles-group">
                     <div id="tsAudioModeToggleBtn" class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
-                      <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl</span>
+                      <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-solo">TS1/2 Solo</span>
                     </div>
                   </div>
                 </div>
@@ -894,15 +926,15 @@
       <div class="live-monitor-actions">
         <!-- 1. Audio Recordings Archive & Player Button -->
         <button type="button" id="openRecordingsBtn" class="log-recordings-btn" title="Архив записей и аудиоплеер" aria-label="Архив записей" data-i18n-title="recordings.open_btn_title" data-i18n-aria-label="recordings.open_btn_title">
-          <img src="/static/img/Player_Off.png?v=2.9.83" alt="Архив записей" class="btn-icon-img cassette-btn-img player-btn-img">
+          <img src="/static/img/Player_Off.png?v=2.9.367" alt="Архив записей" class="btn-icon-img cassette-btn-img player-btn-img">
         </button>
         <!-- 2. TS Filter Cycle Button (1+2 -> TS1 -> TS2) -->
         <button type="button" id="logFilterTsCycleBtn" class="log-filter-ts-cycle-btn" title="Фильтр TS: оба TS (клик: переключить на TS1)" aria-label="Фильтр таймслотов" data-i18n-title="log.filter_ts_both_title" data-i18n-aria-label="log.filter_ts_aria">
-          <img id="logFilterTsCycleImg" src="/static/img/Bu1+2.png?v=2.9.83" alt="TS1+2" class="log-filter-ts-cycle-img">
+          <img id="logFilterTsCycleImg" src="/static/img/Bu1+2.png?v=2.9.367" alt="TS1+2" class="log-filter-ts-cycle-img">
         </button>
         <!-- 3. 24h Transcription Summary Toggle (TXT On / Off) -->
         <button type="button" id="logTranscriptionSummaryBtn" class="log-tx-summary-btn" title="Сводка распознанного текста за последние 24ч (клик: открыть/закрыть)" aria-label="Сводка распознанного текста" data-i18n-title="live.summary_btn_title" data-i18n-aria-label="live.summary_btn_title">
-          <img id="logTxSummaryImg" src="/static/img/TXT_Off.png?v=2.9.83" alt="TXT Off" class="log-tx-summary-img">
+          <img id="logTxSummaryImg" src="/static/img/TXT_Off.png?v=2.9.367" alt="TXT Off" class="log-tx-summary-img">
         </button>
         <!-- 4. Desktop Height Mode Toggle (Screen / Hotspot) -->
         <button type="button" id="logHeightToggleBtn" class="icon-btn small log-height-toggle-btn is-screen-mode" title="Высота лога: До конца экрана (нажмите для выравнивания по высоте хотспота)" data-i18n-title="live.btn_height_to_hotspot" aria-label="Переключить высоту лога" data-i18n-aria-label="live.btn_height_to_hotspot">
@@ -1011,7 +1043,7 @@
                   <path class="player-btn-icon" d="M691.206,363.037L691.206,363.037c-3.945,0-7.143-3.198-7.143-7.143v-55.163 c0-3.945,3.198-7.143,7.143-7.143l0,0c3.945,0,7.143,3.198,7.143,7.143v55.163C698.35,359.839,695.151,363.037,691.206,363.037z"/>
                 </svg>
               </button>
-              <div id="recSpeedMenu" class="rec-speed-menu" style="display:none; position:absolute; bottom:110%; left:50%; transform:translateX(-50%); background:#238142; border:1px solid rgba(255,255,255,0.25); border-radius:8px; padding:6px; z-index:100; flex-direction:column; gap:4px; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
+              <div id="recSpeedMenu" class="rec-speed-menu" style="display:none; position:absolute; bottom:110%; left:50%; transform:translateX(-50%); background:#238142; border:1px solid rgba(255,255,255,0.25); border-radius: 0px; padding:6px; z-index:100; flex-direction:column; gap:4px; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
                 <button type="button" class="rec-speed-menu-btn active" data-speed="1.0">1x</button>
                 <button type="button" class="rec-speed-menu-btn" data-speed="1.25">1.25x</button>
                 <button type="button" class="rec-speed-menu-btn" data-speed="1.5">1.5x</button>
@@ -1184,13 +1216,13 @@
 
           <!-- BM Upload Background Task Indicator -->
           <div class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" data-i18n-title="header.bm_upload_indicator_title" role="button" tabindex="0">
-            <img src="/static/img/BM_Upload.png?v=2.9.170" alt="BM Upload" class="bm-upload-img">
+            <img src="/static/img/BM_Upload.png?v=2.9.367" alt="BM Upload" class="bm-upload-img">
             <span class="bm-upload-percent">0%</span>
           </div>
 
           <!-- TTS Voice Upload Background Task Indicator -->
           <div class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0">
-            <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
+            <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
             <span class="tts-upload-percent">0%</span>
           </div>
 
@@ -1269,7 +1301,7 @@
             <span class="mode-badge mode-standby">STANDBY</span>
             <span class="callsign-display">N0CALL</span>
             <span class="dmr-id-display">ID: 0</span>
-            <span class="rtt-display" title="Задержка канала WebSocket (Round-Trip Time)" data-i18n-title="ping.ws_rtt_title">RTT: --ms</span>
+            <span class="rtt-display" title="Сквозная задержка E2E (Клиент ↔ ProxDMR + ProxDMR ↔ Сеть)">E2E: --ms</span>
           </div>
 
           <div class="vfo-row vfo-ts1-row" data-slot="1">
@@ -1402,7 +1434,7 @@
                 <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) -->
                 <div class="status-toggles-group">
                   <div class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
-                    <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-doubl">TS1/2 Doubl</span>
+                    <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-solo">TS1/2 Solo</span>
                   </div>
                 </div>
               </div>
@@ -1584,14 +1616,19 @@
       <div class="settings-modal-header">
         <div class="modal-tabs">
           <button type="button" class="tab-btn" data-tab="tab-general" data-i18n="nav.tab_general">Общие</button>
-          <button type="button" class="tab-btn active" data-tab="tab-account" data-i18n="nav.tab_account">👤 Аккаунт</button>
-          <button type="button" class="tab-btn" data-tab="tab-edit-hs" data-i18n="nav.tab_params">DMR Net</button>
-          <button type="button" class="tab-btn" data-tab="tab-transcriber" data-i18n="nav.tab_transcriber">AI перевод</button>
+          <button type="button" class="tab-btn active" data-tab="tab-account" data-i18n="nav.tab_account">Аккаунт</button>
+          <button type="button" class="tab-btn" data-tab="tab-edit-hs" data-i18n="nav.tab_params">HAM Net</button>
+          <button type="button" class="tab-btn" data-tab="tab-transcriber" data-i18n="nav.tab_transcriber">Ai</button>
+          <button type="button" class="tab-btn" data-tab="tab-alerts" data-i18n="nav.tab_alerts" id="tabBtnAlerts" style="display:none;">Оповещения</button>
+
         </div>
         <button id="closeSettingsBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
       </div>
 
       <div class="settings-modal-body">
+        <div class="demo-readonly-banner" style="display: none;" data-i18n="demo.readonly_banner">
+          🔒 Ознакомительный демо-режим: все разделы открыты для просмотра, изменение параметров отключено.
+        </div>
         <!-- Tab 1: Account Settings (Аккаунт) -->
       <div id="tab-account" class="tab-content active">
         <!-- Subtabs Navigation (visible only to admin/superadmin) -->
@@ -1607,7 +1644,7 @@
         <!-- Subtab 1: Profile (Мой аккаунт) -->
         <div id="account-subtab-profile" class="account-subtab-content active">
           <!-- Account Info Card -->
-          <div class="settings-action-block" style="padding: 14px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 8px; margin-bottom: 16px;">
+          <div class="settings-action-block" style="padding: 14px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 0px; margin-bottom: 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 1.8rem; line-height: 1;">👤</span>
@@ -1620,7 +1657,7 @@
                   </div>
                 </div>
               </div>
-              <button type="button" id="btnLogout" class="btn-secondary" style="padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; color: #f85149; border-color: rgba(248, 81, 73, 0.35); background: rgba(248, 81, 73, 0.08); white-space: nowrap;">
+              <button type="button" id="btnLogout" class="btn-secondary" style="padding: 6px 12px; border-radius: 0px; cursor: pointer; font-size: 0.82rem; color: #f85149; border-color: rgba(248, 81, 73, 0.35); background: rgba(248, 81, 73, 0.08); white-space: nowrap;">
                 <span data-i18n="account.logout_btn">🚪 Выйти</span>
               </button>
             </div>
@@ -1635,15 +1672,15 @@
               Смена пароля вашей текущей учетной записи.
             </small>
             <div>
-              <button type="button" id="btnOpenChangePassword" class="btn-secondary" style="width: 100%; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85em; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <button type="button" id="btnOpenChangePassword" class="btn-secondary" style="width: 100%; padding: 9px 12px; border-radius: 0px; cursor: pointer; font-size: 0.85em; display: flex; align-items: center; justify-content: center; gap: 8px;">
                 <span>🔑</span> <span data-i18n="account.change_pwd_btn">Сменить пароль</span>
               </button>
             </div>
 
             <!-- Inline Change Password Panel -->
-            <div id="changePasswordPanel" style="display: none; margin-top: 12px; padding: 14px; background: rgba(88, 166, 255, 0.05); border: 1px solid rgba(88, 166, 255, 0.25); border-radius: 8px;">
+            <div id="changePasswordPanel" style="display: none; margin-top: 12px; padding: 14px; background: rgba(88, 166, 255, 0.05); border: 1px solid rgba(88, 166, 255, 0.25); border-radius: 0px;">
               <!-- Superadmin Prominent Red Warning -->
-              <div id="superadminPasswordWarning" style="display: none; background: rgba(248, 81, 73, 0.16); border: 2px solid #f85149; border-radius: 8px; padding: 14px; margin-bottom: 14px; text-align: center; box-shadow: 0 0 16px rgba(248, 81, 73, 0.25);">
+              <div id="superadminPasswordWarning" style="display: none; background: rgba(248, 81, 73, 0.16); border: 2px solid #f85149; border-radius: 0px; padding: 14px; margin-bottom: 14px; text-align: center; box-shadow: 0 0 16px rgba(248, 81, 73, 0.25);">
                 <div style="color: #ff3b30; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 8px;">
                   <span style="font-size: 1.25rem;">⚠️</span> <span data-i18n="account.superadmin_warn_title">ВНИМАНИЕ: СУПЕРАДМИНИСТРАТОР!</span>
                 </div>
@@ -1657,22 +1694,22 @@
                 <div>
                   <label for="changePwdCurrentInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.current_pwd_label">Текущий пароль:</label>
                   <input type="password" id="changePwdCurrentInput" class="form-input" placeholder="Введите текущий пароль" data-i18n-placeholder="account.current_pwd_placeholder" autocomplete="current-password"
-                    style="width: 100%; padding: 8px 10px; border-radius: 6px; box-sizing: border-box;">
+                    style="width: 100%; padding: 8px 10px; border-radius: 0px; box-sizing: border-box;">
                 </div>
                 <div>
                   <label for="changePwdNewInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.new_pwd_label">Новый пароль:</label>
                   <input type="password" id="changePwdNewInput" class="form-input" placeholder="Новый пароль (мин. 6 символов)" data-i18n-placeholder="account.new_pwd_placeholder" autocomplete="new-password"
-                    style="width: 100%; padding: 8px 10px; border-radius: 6px; box-sizing: border-box;">
+                    style="width: 100%; padding: 8px 10px; border-radius: 0px; box-sizing: border-box;">
                 </div>
                 <div>
                   <label for="changePwdConfirmInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.confirm_pwd_label">Повторите новый пароль:</label>
                   <input type="password" id="changePwdConfirmInput" class="form-input" placeholder="Повторите новый пароль" data-i18n-placeholder="account.confirm_pwd_placeholder" autocomplete="new-password"
-                    style="width: 100%; padding: 8px 10px; border-radius: 6px; box-sizing: border-box;">
+                    style="width: 100%; padding: 8px 10px; border-radius: 0px; box-sizing: border-box;">
                 </div>
                 <div id="changePwdError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em;"></div>
                 <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
-                  <button type="button" id="changePwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
-                  <button type="button" id="changePwdSubmitBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;" data-i18n="account.save_pwd_btn">Сохранить пароль</button>
+                  <button type="button" id="changePwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
+                  <button type="button" id="changePwdSubmitBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="account.save_pwd_btn">Сохранить пароль</button>
                 </div>
               </div>
             </div>
@@ -1687,10 +1724,10 @@
               Экспорт и импорт настроек трансивера и хотспотов в архив .7z. Пароль архива равен паролю вашего аккаунта.
             </small>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button type="button" id="btnExportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button type="button" id="btnExportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius: 0px;cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
                 <span data-i18n="account.export_btn">📦 Экспорт настроек (.7z)</span>
               </button>
-              <button type="button" id="btnImportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button type="button" id="btnImportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius: 0px;cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
                 <span data-i18n="account.import_btn">📥 Импорт настроек (.7z)</span>
               </button>
             </div>
@@ -1704,7 +1741,7 @@
             <p style="font-size: 0.78rem; color: #8b949e; margin: 0 0 10px 0; line-height: 1.4;" data-i18n="account.delete_hint">
               Безвозвратно удалит ваш профиль, все виртуальные хотспоты, ключи и историю вызовов с сервера.
             </p>
-            <button type="button" id="btnDeleteAccount" class="btn-secondary" style="width: 100%; padding: 10px; background: rgba(248, 81, 73, 0.12); border: 1px solid rgba(248, 81, 73, 0.4); color: #f85149; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button type="button" id="btnDeleteAccount" class="btn-secondary" style="width: 100%; padding: 10px; background: rgba(248, 81, 73, 0.12); border: 1px solid rgba(248, 81, 73, 0.4); color: #f85149; border-radius: 0px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -1713,7 +1750,7 @@
               </svg>
               <span data-i18n="account.delete_btn">🗑️ Удалить аккаунт</span>
             </button>
-            <div id="superadminDeleteDisabledHint" style="display: none; margin-top: 8px; padding: 6px 10px; background: rgba(255, 204, 0, 0.08); border: 1px solid rgba(255, 204, 0, 0.25); border-radius: 6px; font-size: 0.8rem; color: #ffcc00; text-align: center; font-weight: 600;" data-i18n="account.superadmin_delete_disabled">
+            <div id="superadminDeleteDisabledHint" style="display: none; margin-top: 8px; padding: 6px 10px; background: rgba(255, 204, 0, 0.08); border: 1px solid rgba(255, 204, 0, 0.25); border-radius: 0px; font-size: 0.8rem; color: #ffcc00; text-align: center; font-weight: 600;" data-i18n="account.superadmin_delete_disabled">
               🛡️ Аккаунт суперадминистратора защищен от удаления
             </div>
           </div>
@@ -1726,22 +1763,22 @@
               <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;" data-i18n="admin.title">
                 🛡️ Управление пользователями
               </div>
-              <button type="button" id="adminAddUserBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; display: flex; align-items: center; gap: 4px;" data-i18n="admin.add_user">
+              <button type="button" id="adminAddUserBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem; display: flex; align-items: center; gap: 4px;" data-i18n="admin.add_user">
                 ＋ Добавить
               </button>
             </div>
 
             <!-- Add User Form (hidden by default) -->
-            <div id="adminAddUserForm" style="display:none; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+            <div id="adminAddUserForm" style="display:none; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 0px; padding: 12px; margin-bottom: 14px;">
               <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; color: #58a6ff;" data-i18n="admin.new_user_title">Новый пользователь</div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                 <input type="text" id="adminNewLogin" placeholder="Логин" autocomplete="off" data-i18n-placeholder="admin.login_placeholder"
-                  style="padding: 7px 10px; border-radius: 6px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
+                  style="padding: 7px 10px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
                 <input type="password" id="adminNewPassword" placeholder="Пароль (мин. 6 символов)" autocomplete="new-password" data-i18n-placeholder="admin.password_placeholder"
-                  style="padding: 7px 10px; border-radius: 6px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
+                  style="padding: 7px 10px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
               </div>
               <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
-                <select id="adminNewRole" style="padding: 7px 10px; border-radius: 6px; border: 1px solid #555; font-size: 0.9em; cursor: pointer;">
+                <select id="adminNewRole" style="padding: 7px 10px; border-radius: 0px; border: 1px solid #555; font-size: 0.9em; cursor: pointer;">
                   <option value="user" data-i18n="admin.role_user">👤 Пользователь</option>
                   <option value="admin" data-i18n="admin.role_admin">🛡️ Администратор</option>
                 </select>
@@ -1752,8 +1789,8 @@
               </div>
               <div id="adminAddError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em; margin-bottom: 6px;"></div>
               <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                <button type="button" id="adminCancelAddBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
-                <button type="button" id="adminConfirmAddBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;" data-i18n="admin.btn_create">Создать</button>
+                <button type="button" id="adminCancelAddBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
+                <button type="button" id="adminConfirmAddBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="admin.btn_create">Создать</button>
               </div>
             </div>
 
@@ -1778,15 +1815,64 @@
           </div>
 
           <!-- Reset Password Modal (inline) -->
-          <div id="adminResetPwdPanel" style="display:none; background: rgba(255, 200, 0, 0.06); border: 1px solid rgba(255, 200, 0, 0.25); border-radius: 8px; padding: 12px; margin-top: 10px;">
+          <div id="adminResetPwdPanel" style="display:none; background: rgba(255, 200, 0, 0.06); border: 1px solid rgba(255, 200, 0, 0.25); border-radius: 0px; padding: 12px; margin-top: 10px;">
             <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; color: #ffcc00;"><span data-i18n="admin.reset_pwd_title">🔑 Сброс пароля:</span> <span id="adminResetPwdUsername" style="color: #58a6ff;"></span></div>
             <input type="hidden" id="adminResetPwdUserId">
             <input type="password" id="adminResetPwdInput" placeholder="Новый пароль (мин. 6 символов)" autocomplete="new-password" data-i18n-placeholder="admin.new_pwd_placeholder"
-              style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box; margin-bottom: 8px;">
+              style="width: 100%; padding: 7px 10px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box; margin-bottom: 8px;">
             <div id="adminResetPwdError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em; margin-bottom: 6px;"></div>
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
-              <button type="button" id="adminResetPwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
-              <button type="button" id="adminResetPwdConfirmBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;" data-i18n="admin.action_reset_pwd">Сбросить пароль</button>
+              <button type="button" id="adminResetPwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
+              <button type="button" id="adminResetPwdConfirmBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="admin.action_reset_pwd">Сбросить пароль</button>
+            </div>
+          </div>
+
+          <!-- Demo Mode Admin Settings -->
+          <div id="adminDemoSettingsBlock" class="settings-action-block" style="margin-top: 18px; padding: 14px; background: rgba(234, 179, 8, 0.05); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: 0px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <div style="font-size: 0.95rem; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 6px;">
+                <span>🎧</span>
+                <span data-i18n="demo.admin_title">Демо-режим (публичная витрина)</span>
+              </div>
+              <span id="adminDemoActiveBadge" style="font-size: 0.82rem; background: rgba(234, 179, 8, 0.15); color: #fbbf24; padding: 3px 8px; border-radius: 0px; font-weight: 600;">
+                <span data-i18n="demo.active_count">Сейчас в демо:</span> <span id="adminDemoActiveCount">0</span> / <span id="adminDemoMaxBadge">10</span>
+              </span>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">
+                <input type="checkbox" id="adminDemoEnabled" style="width: 16px; height: 16px; accent-color: #eab308; cursor: pointer;">
+                <span data-i18n="demo.enable_checkbox">Разрешить демо-вход (demo / demo)</span>
+              </label>
+              <div style="font-size: 0.78rem; opacity: 0.75; margin-top: 3px; margin-left: 24px;" data-i18n="demo.enable_hint">
+                Гости смогут слушать эфир хотспотов администратора без изменения настроек
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px;">
+              <div>
+                <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.max_sessions">Макс. одновременных сессий:</label>
+                <input type="number" id="adminDemoMaxSessions" min="1" max="50" value="10" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.session_minutes">Длительность сессии (мин):</label>
+                <input type="number" id="adminDemoSessionMinutes" min="1" max="120" value="10" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.cooldown_seconds">Пауза перед повторным входом (сек):</label>
+                <input type="number" id="adminDemoCooldownSeconds" min="0" max="3600" value="60" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.password_label">Пароль демо:</label>
+                <input type="text" id="adminDemoPassword" value="demo" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span id="adminDemoStatusMsg" style="font-size: 0.82rem; min-height: 1.2em;"></span>
+              <button type="button" id="adminDemoSaveBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; font-size: 0.85rem; cursor: pointer; background: #d97706; border-color: #b45309;" data-i18n="demo.save_btn">
+                Сохранить параметры демо
+              </button>
             </div>
           </div>
         </div>
@@ -1813,9 +1899,9 @@
                 <!-- Populated dynamically -->
               </select>
               <div class="hs-order-quick-btns" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;">
-                <button type="button" id="btnMoveHsUp" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 6px;" title="Переместить выбранный хотспот выше" data-i18n-title="hotspots.move_up_title">▲</button>
-                <button type="button" id="btnMoveHsDown" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 6px;" title="Переместить выбранный хотспот ниже" data-i18n-title="hotspots.move_down_title">▼</button>
-                <button type="button" id="btnOpenHsOrderModal" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 11px; cursor: pointer; border-radius: 6px; white-space: nowrap;" title="Менеджер последовательности хотспотов" data-i18n-title="hotspots.order_manager_title">⇅ Порядок</button>
+                <button type="button" id="btnMoveHsUp" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 0px;" title="Переместить выбранный хотспот выше" data-i18n-title="hotspots.move_up_title">▲</button>
+                <button type="button" id="btnMoveHsDown" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 0px;" title="Переместить выбранный хотспот ниже" data-i18n-title="hotspots.move_down_title">▼</button>
+                <button type="button" id="btnOpenHsOrderModal" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 11px; cursor: pointer; border-radius: 0px; white-space: nowrap;" title="Менеджер последовательности хотспотов" data-i18n-title="hotspots.order_manager_title" data-i18n="hotspots.order_btn">⇅ Порядок</button>
               </div>
             </div>
           </div>
@@ -1937,11 +2023,11 @@
           </div>
           <div class="form-group-row" id="editHsDmrPlusGroup" style="display: none;">
             <div class="form-group" style="flex: 1;">
-              <label for="editHsDmrPlusRef">Стартовый рефлектор (StartRef)</label>
+              <label for="editHsDmrPlusRef" data-i18n="hs_edit.start_ref_label">Стартовый рефлектор (StartRef)</label>
               <input type="number" id="editHsDmrPlusRef" class="form-input" min="4000" max="4999" value="4530" placeholder="4530">
             </div>
             <div class="form-group" style="flex: 1;">
-              <label for="editHsDmrPlusRelink">Таймаут релинковки (RelinkTime, мин)</label>
+              <label for="editHsDmrPlusRelink" data-i18n="hs_edit.relink_time_label">Таймаут релинковки (RelinkTime, мин)</label>
               <input type="number" id="editHsDmrPlusRelink" class="form-input" min="5" max="999" value="60" placeholder="60">
             </div>
           </div>
@@ -1952,11 +2038,11 @@
             </div>
             <div style="display: flex; gap: 6px; align-items: center;">
               <input type="text" id="editHsRptoOptions" class="form-input" maxlength="255" style="flex: 1;" value="{{ cfg.rpto_options if cfg and cfg.rpto_options is defined else '' }}" placeholder="TS1=2501;TS2=250,2505;DIAL=0;" data-i18n-placeholder="hs_edit.rpto_placeholder">
-              <button type="button" id="btnBuildRptoFromTg" class="btn-secondary" style="padding: 7px 10px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; cursor: pointer;" title="Автоматически сформировать строку RPTO из указанных полей TS1 / TS2 / StartRef">🔄 Из TS1/TS2</button>
+              <button type="button" id="btnBuildRptoFromTg" class="btn-secondary" style="padding: 7px 10px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; cursor: pointer;" title="Автоматически сформировать строку RPTO из указанных полей TS1 / TS2 / StartRef" data-i18n-title="hs_edit.build_rpto_title" data-i18n="hs_edit.build_rpto_btn">🔄 Из TS1/TS2</button>
               <button type="button" id="btnSendRptoNow" class="btn-secondary" style="padding: 7px 11px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; cursor: pointer; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(16, 185, 129, 0.1);" title="Отправить RPTO пакет мастер-серверу без переподключения" data-i18n-title="hs_edit.btn_send_rpto_title" data-i18n="hs_edit.btn_send_rpto">⚡ Применить RPTO</button>
             </div>
             <small class="form-hint" id="editHsRptoHint" data-i18n="hs_edit.rpto_hint">Передаётся в пакете RPTO сразу после подключения (например FreeDMR: TS1=2501;TS2=250;DIAL=0; или DMR+: StartRef=4370;RelinkTime=60;)</small>
-            <div id="freedmrHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #10b981; border-radius:4px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+            <div id="freedmrHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #10b981; border-radius: 0px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
                 <div style="font-weight:700; color:#34d399; margin-bottom:4px;" data-i18n="freedmr_help_title">Настройка хотспота в сети FreeDMR:</div>
                 <ul style="margin:0; padding-left:16px;">
                     <li data-i18n="freedmr_help_step1"><b>Пароль хотспота:</b> по умолчанию большинство серверов используют <code>passw0rd</code>, либо ваш персональный пароль из портала <a href="https://www.freedmr.uk/" target="_blank" rel="noopener noreferrer" style="color:#34d399; text-decoration:underline;">FreeDMR Portal</a>.</li>
@@ -2001,7 +2087,7 @@
               <option value="Z">Module Z (TG 4026 на TS2)</option>
             </select>
             <small class="form-hint" data-i18n="hs_edit.xlx_module_hint">На рефлекторах XLX голосовая работа ведётся в TS2: выбранный модуль A–Z автоматически привязывается к TG 4001–4026 (пароль стандартный: passw0rd)</small>
-            <div id="xlxHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #f59e0b; border-radius:4px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+            <div id="xlxHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #f59e0b; border-radius: 0px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
                 <div style="font-weight:700; color:#fbbf24; margin-bottom:4px;" data-i18n="xlx_help_title">Как работает связь с рефлектором XLX:</div>
                 <ul style="margin:0; padding-left:16px;">
                     <li data-i18n="xlx_help_step1"><b>Порт и пароль:</b> стандартный порт MMDVM для XLX — <code>62030</code>, пароль — <code>passw0rd</code>.</li>
@@ -2058,6 +2144,222 @@
           </div>
         </form>
       </div>
+
+        <!-- Tab 5: Telegram Alerts & Watchdog -->
+        <div id="tab-alerts" class="tab-content">
+          <!-- Watchdog Status Card -->
+          <div class="settings-action-block" style="padding: 14px; background: rgba(56, 139, 253, 0.08); border: 1px solid rgba(56, 139, 253, 0.25); border-radius: 0px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <h4 style="margin: 0; font-size: 15px; color: #58a6ff; display: flex; align-items: center; gap: 8px;">
+                <span data-i18n="alerts.watchdog_card_title">Служба Watchdog</span>
+              </h4>
+              <span id="alertsWdBadge" class="badge" style="padding: 3px 8px; border-radius: 0px; font-size: 12px; font-weight: 600; background: #30363d; color: #8b949e;">...</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; font-size: 12px; color: #c9d1d9;">
+              <div><span style="color: #8b949e;" data-i18n="alerts.version">Версия</span>: <strong id="alertsWdVersion">-</strong></div>
+              <div><span style="color: #8b949e;" data-i18n="alerts.uptime">Аптайм</span>: <strong id="alertsWdUptime">-</strong></div>
+              <div><span style="color: #8b949e;" data-i18n="alerts.last_check">Последняя проверка</span>: <strong id="alertsWdLastCheck">-</strong></div>
+              <div><span style="color: #8b949e;" data-i18n="alerts.alerts_sent">Отправлено алертов</span>: <strong id="alertsWdSentCount">0</strong></div>
+            </div>
+            <div id="alertsWdModeNote" style="margin-top: 10px; font-size: 11px; color: #8b949e;"></div>
+          </div>
+
+          <!-- Telegram Connection Form -->
+          <div class="settings-section">
+            <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; color: #f0f6fc; border-bottom: 1px solid #30363d; padding-bottom: 6px;" data-i18n="alerts.section_tg">Подключение к Telegram</h4>
+            
+            <div class="setting-item" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+              <div>
+                <label for="alertsEnabled" style="font-weight: 600; cursor: pointer;" data-i18n="alerts.enabled">Включить оповещения</label>
+                <div style="font-size: 11px; color: #8b949e;" data-i18n="alerts.enabled_hint">Отправка аварийных сообщений в Telegram при сбоях</div>
+              </div>
+              <input type="checkbox" id="alertsEnabled" style="width: 18px; height: 18px; cursor: pointer; accent-color: #58a6ff;">
+            </div>
+
+            <div class="setting-item" style="margin-bottom: 12px;">
+              <label for="alertsBotToken" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.bot_token">Токен бота (Bot Token)</label>
+              <div style="display: flex; gap: 8px;">
+                <input type="password" id="alertsBotToken" class="input-field" placeholder="123456789:ABCdefGhIjkLmNoPqrStUvWxYz" style="flex: 1; font-family: monospace; font-size: 13px;" readonly>
+                <button type="button" id="btnToggleAlertsToken" class="btn btn-secondary" style="padding: 0 10px;" title="Показать/скрыть">👁️</button>
+                <button type="button" id="btnEditAlertsToken" class="btn btn-secondary" style="padding: 0 12px; font-size: 12px;" data-i18n="alerts.change_token">Изменить</button>
+              </div>
+              <div style="font-size: 11px; color: #8b949e; margin-top: 4px;" data-i18n="alerts.bot_token_hint">Получите у @BotFather в Telegram</div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div class="setting-item">
+                <label for="alertsChatId" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.chat_id">Chat ID</label>
+                <input type="text" id="alertsChatId" class="input-field" placeholder="123456789 или -100123456789" data-i18n-placeholder="alerts.chat_id_placeholder" style="font-family: monospace; font-size: 13px;">
+                <div style="font-size: 11px; color: #8b949e; margin-top: 4px;" data-i18n="alerts.chat_id_hint">Узнайте свой ID через @userinfobot</div>
+              </div>
+              <div class="setting-item">
+                <label for="alertsThreadId" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.thread_id">Thread ID (Topic ID)</label>
+                <input type="text" id="alertsThreadId" class="input-field" placeholder="Опционально" data-i18n-placeholder="alerts.optional_placeholder" style="font-family: monospace; font-size: 13px;">
+                <div style="font-size: 11px; color: #8b949e; margin-top: 4px;" data-i18n="alerts.thread_id_placeholder">Для супергрупп с темами</div>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div class="setting-item">
+                <label for="alertsLanguage" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.language">Язык сообщений</label>
+                <select id="alertsLanguage" class="input-field" style="width: 100%;">
+                  <option value="ru">Русский (ru)</option>
+                  <option value="en">English (en)</option>
+                  <option value="uk">Українська (uk)</option>
+                  <option value="de">Deutsch (de)</option>
+                  <option value="es">Español (es)</option>
+                  <option value="fr">Français (fr)</option>
+                  <option value="it">Italiano (it)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <label for="alertsServerLabel" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.server_label">Метка сервера в заголовке</label>
+                <input type="text" id="alertsServerLabel" class="input-field" placeholder="Например: ProxDMR-Main или ProxDMR-Demo" data-i18n-placeholder="alerts.server_label_placeholder" maxlength="64" style="font-family: monospace; font-size: 13px;">
+              </div>
+            </div>
+
+            <div class="setting-item" style="margin-bottom: 16px;">
+              <label for="alertsServerIcon" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.server_icon">Пиктограмма сервера (в начале сообщения)</label>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <input type="text" id="alertsServerIcon" class="input-field" value="🟦" maxlength="8" style="width: 58px; text-align: center; font-size: 16px; padding: 4px 6px;">
+                <div id="alertsIconPalette" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟦" title="Синий (Основной)" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟦</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟧" title="Оранжевый (Демо)" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟧</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟩" title="Зелёный" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟩</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟥" title="Красный" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟥</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟪" title="Фиолетовый" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟪</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟨" title="Жёлтый" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟨</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="📡" title="Антенна" style="padding: 4px 8px; font-size: 15px; line-height: 1;">📡</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🎭" title="Витрина / Демо" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🎭</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🛡️" title="Щит" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🛡️</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="⚡" title="Молния" style="padding: 4px 8px; font-size: 15px; line-height: 1;">⚡</button>
+                </div>
+              </div>
+              <div style="font-size: 11px; color: #8b949e; margin-top: 4px;" data-i18n="alerts.server_icon_hint">Позволяет с первого взгляда отличать уведомления разных серверов (например: 🟦 для основного и 🟧 для демо)</div>
+            </div>
+          </div>
+
+          <!-- Events to Notify Section -->
+          <div class="settings-section" style="margin-bottom: 16px;">
+            <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; color: #f0f6fc; border-bottom: 1px solid #30363d; padding-bottom: 6px;" data-i18n="alerts.section_events">События для отправки</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; font-size: 13px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyOffline" style="accent-color: #f85149;">
+                <span data-i18n="alerts.event_offline">🔴 ProxDMR недоступен (offline)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyRestart" style="accent-color: #58a6ff;">
+                <span data-i18n="alerts.event_restart">🔄 Перезапуск ProxDMR</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyOom" style="accent-color: #f85149;">
+                <span data-i18n="alerts.event_oom">💥 Падение по OOM / память</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyHang" style="accent-color: #d29922;">
+                <span data-i18n="alerts.event_hang">⏳ Зависание event loop</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyCmemHigh" style="accent-color: #d29922;">
+                <span data-i18n="alerts.event_cmem_high">⚠️ Превышение памяти контейнера</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyLeak" style="accent-color: #d29922;">
+                <span data-i18n="alerts.event_leak_suspected">📈 Подозрение на утечку памяти</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyHostRam" style="accent-color: #8b949e;">
+                <span data-i18n="alerts.event_host_ram_high">🖥 Превышение RAM хоста</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyHostSwap" style="accent-color: #8b949e;">
+                <span data-i18n="alerts.event_host_swap_high">💾 Превышение Swap хоста</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="notifyHostDisk" style="accent-color: #8b949e;">
+                <span data-i18n="alerts.event_host_disk_high">💽 Превышение диска хоста</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Thresholds Section -->
+          <div class="settings-section" style="margin-bottom: 16px;">
+            <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; color: #f0f6fc; border-bottom: 1px solid #30363d; padding-bottom: 6px;" data-i18n="alerts.section_thresholds">Пороги срабатывания</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+              <div class="setting-item">
+                <label for="threshCmem" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.cmem_percent">Память контейнера (%)</label>
+                <input type="number" id="threshCmem" min="50" max="99" class="input-field" style="width: 100%;">
+              </div>
+              <div class="setting-item">
+                <label for="threshLeak" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.leak_mb_per_hour">Рост памяти (МБ/час)</label>
+                <input type="number" id="threshLeak" min="20" max="1000" class="input-field" style="width: 100%;">
+              </div>
+              <div class="setting-item">
+                <label for="threshHostRam" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.host_ram_percent">RAM хоста (%)</label>
+                <input type="number" id="threshHostRam" min="50" max="99" class="input-field" style="width: 100%;">
+              </div>
+              <div class="setting-item">
+                <label for="threshHostSwap" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.host_swap_percent">Swap хоста (%)</label>
+                <input type="number" id="threshHostSwap" min="10" max="99" class="input-field" style="width: 100%;">
+              </div>
+              <div class="setting-item">
+                <label for="threshHostDisk" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.host_disk_percent">Диск хоста (%)</label>
+                <input type="number" id="threshHostDisk" min="50" max="99" class="input-field" style="width: 100%;">
+              </div>
+              <div class="setting-item">
+                <label for="threshHang" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.hang_timeout_sec">Таймаут зависания (сек)</label>
+                <input type="number" id="threshHang" min="15" max="300" class="input-field" style="width: 100%;">
+              </div>
+            </div>
+          </div>
+
+          <!-- Silence Hours & Limits Section -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+            <div class="settings-section">
+              <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; color: #f0f6fc; border-bottom: 1px solid #30363d; padding-bottom: 6px;" data-i18n="alerts.section_silence">Режим тишины</h4>
+              <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; cursor: pointer; font-size: 13px;">
+                <input type="checkbox" id="silenceEnabled" style="accent-color: #58a6ff;">
+                <span data-i18n="alerts.silence_enabled">Включить ночной режим тишины</span>
+              </label>
+              <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                <div style="flex: 1;">
+                  <label style="display: block; font-size: 11px; color: #8b949e; margin-bottom: 2px;" data-i18n="alerts.silence_start">Начало</label>
+                  <input type="time" id="silenceStart" class="input-field" value="23:00" style="width: 100%;">
+                </div>
+                <div style="flex: 1;">
+                  <label style="display: block; font-size: 11px; color: #8b949e; margin-bottom: 2px;" data-i18n="alerts.silence_end">Конец</label>
+                  <input type="time" id="silenceEnd" class="input-field" value="07:00" style="width: 100%;">
+                </div>
+              </div>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: #c9d1d9;">
+                <input type="checkbox" id="silenceAllowCritical" checked style="accent-color: #f85149;">
+                <span data-i18n="alerts.silence_allow_critical">Пропускать критические аварии</span>
+              </label>
+            </div>
+
+            <div class="settings-section">
+              <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; color: #f0f6fc; border-bottom: 1px solid #30363d; padding-bottom: 6px;" data-i18n="alerts.section_limits">Ограничения</h4>
+              <div class="setting-item" style="margin-bottom: 12px;">
+                <label for="alertsRateLimit" style="display: block; font-size: 12px; margin-bottom: 4px;" data-i18n="alerts.rate_limit_per_hour">Макс. сообщений в час</label>
+                <input type="number" id="alertsRateLimit" min="1" max="120" class="input-field" style="width: 100px;" value="10">
+              </div>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: #8b949e;">
+                <input type="checkbox" id="alertsForceDirect" style="accent-color: #58a6ff;">
+                <span data-i18n="alerts.test_direct_toggle">Тест напрямую из ProxDMR (fallback)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Bottom Action Buttons & Feedback -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #30363d; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button type="button" id="btnSaveAlerts" class="btn btn-primary" style="padding: 8px 18px; font-weight: 600;" data-i18n="alerts.btn_save">💾 Сохранить</button>
+              <button type="button" id="btnTestAlert" class="btn btn-secondary" style="padding: 8px 16px;" data-i18n="alerts.btn_test">🧪 Тестовое сообщение</button>
+            </div>
+            <div id="alertsFeedback" style="font-size: 12px; font-weight: 500;"></div>
+          </div>
+        </div>
+
 
       <!-- Tab 3: General Settings (Общие) -->
         <div id="tab-general" class="tab-content">
@@ -2137,7 +2439,7 @@
             </div>
 
             <!-- Scan button & hint -->
-            <div style="font-size: 0.76rem; color: var(--text-secondary); background: rgba(0, 168, 255, 0.08); border: 1px solid rgba(0, 168, 255, 0.2); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; line-height: 1.35;" data-i18n-html="ble.hint_hold">
+            <div style="font-size: 0.76rem; color: var(--text-secondary); background: rgba(0, 168, 255, 0.08); border: 1px solid rgba(0, 168, 255, 0.2); border-radius: 0px; padding: 6px 10px; margin-bottom: 8px; line-height: 1.35;" data-i18n-html="ble.hint_hold">
               💡 <strong>Для режима удержания (Hold-to-Talk):</strong> удалите кнопку из настроек Bluetooth телефона (<em>«Забыть устройство»</em>) и подключайте её напрямую здесь.
             </div>
             <button type="button" id="blePttScanBtn" class="btn-secondary" style="width: 100%; margin-bottom: 8px; font-size: 0.85rem;" data-i18n="ble.scan_btn">
@@ -2203,7 +2505,7 @@
                   <span style="color: var(--text-secondary, #8b949e);" data-i18n="android.haptic_duration">Длительность / сила вибры:</span>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <span id="hapticDurationVal" style="font-weight: 700; color: #58a6ff; font-family: monospace;">{{ haptic_duration | default(45) }} мс</span>
-                    <button type="button" id="btnTestHaptic" title="Проверить виброотклик" data-i18n-title="android.haptic_test_title" style="padding: 2px 8px; font-size: 0.78rem; border-radius: 4px; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
+                    <button type="button" id="btnTestHaptic" title="Проверить виброотклик" data-i18n-title="android.haptic_test_title" style="padding: 2px 8px; font-size: 0.78rem; border-radius: 0px; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
                   </div>
                 </div>
                 <div>
@@ -2243,10 +2545,18 @@
               </div>
             </div>
 
+            <!-- Change Server Settings button (APK only) -->
+            <div style="padding-top: 10px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+              <button type="button" id="btnAndroidServerSettings" class="btn-secondary"
+                      style="width: 100%; padding: 8px 10px; background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.4); color: #58a6ff; border-radius: 0px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <span>⚙️</span>
+                <span data-i18n="auth.server_settings_btn">Настройки сервера</span>
+              </button>
+            </div>
             <!-- Full exit button -->
             <div class="settings-action-block settings-exit-block" style="padding-top: 10px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
               <button type="button" id="btnExitApp" class="btn-app-exit"
-                      style="width: 100%; padding: 9px; background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.4); color: #f85149; border-radius: 6px; font-weight: 700; cursor: pointer;">
+                      style="width: 100%; padding: 9px; background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.4); color: #f85149; border-radius: 0px; font-weight: 700; cursor: pointer;">
                 <span data-i18n="app.quit_title">⏻ Полный выход из приложения</span>
               </button>
               <small class="form-hint" style="display: block; margin-top: 4px; text-align: center;">
@@ -2267,7 +2577,7 @@
           <p style="font-size: 0.78rem; color: #8b949e; margin: 0 0 6px 0; line-height: 1.3;" data-i18n="apk.settings_desc">
             Для стабильного приема радиосигнала в фоновом режиме, автоподключения VPN и использования боковых кнопок как PTT установите APK.
           </p>
-          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkSettings" class="btn-primary" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-decoration: none; padding: 10px; box-sizing: border-box; font-weight: 600; border-radius: 6px;">
+          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkSettings" class="btn-primary" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-decoration: none; padding: 10px; box-sizing: border-box; font-weight: 600; border-radius: 0px;">
             <span data-i18n="apk.btn_download_apk">📥 Скачать {{ apk_filename | default('ProxDMR-1.11.apk') }}</span>
           </a>
         </div>
@@ -2344,55 +2654,77 @@
           </div>
         </div>
 
-        <!-- HamQTH.com Integration Section (Collapsible Frame) -->
+        <!-- HAM Web Portals Integration Section (Collapsible Frame) -->
         <div class="apikeys-frame collapsed" id="hamQthSettingsFrame" style="margin-bottom: 8px;">
           <div class="apikeys-frame-header" id="hamQthSettingsToggle">
             <span class="apikeys-frame-title">
-              <span>🌍</span> <span data-i18n="hamqth.title">База позывных HamQTH.com</span>
+              <span>🌍</span> <span data-i18n="hamqth.title">Информация с HAM веб порталов</span>
             </span>
             <span class="apikeys-frame-actions">
-              <a href="https://www.hamqth.com/register.php" target="_blank" rel="noopener" class="apikeys-get-key-link" onclick="event.stopPropagation()" title="Бесплатная регистрация на HamQTH.com" data-i18n-title="hamqth.reg_title" data-i18n="hamqth.reg_link">
-                Регистрация ↗
-              </a>
               <span class="apikeys-chevron" id="hamQthSettingsChevron">▼</span>
             </span>
           </div>
           <div class="apikeys-frame-body" id="hamQthSettingsBody" style="padding: 10px 12px 10px;">
-            <div style="font-size: 0.76rem; color: #8b949e; margin-bottom: 8px; line-height: 1.35;" data-i18n="hamqth.desc">
-              Подключение к XML API сервиса HamQTH.com для отображения расширенной информации о позывных (имя, город, QTH-локатор, DXCC, фото).
+            <div style="font-size: 0.76rem; color: #8b949e; margin-bottom: 10px; line-height: 1.35;" data-i18n="hamqth.desc">
+              Подключение к официальным XML API порталов QRZ.com и HamQTH.com для получения суммарной информации о позывном (имя, город, QTH-локатор, зоны, QSL, фото).
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px;">
-              <div class="form-group" style="margin-bottom: 0; min-width: 0;">
-                <label for="optHamQthUsername" style="font-size: 0.82rem; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="hamqth.login_label">
-                  Позывной / Логин HamQTH:
-                </label>
-                <input type="text" id="optHamQthUsername" class="form-input" placeholder="например: CALLSIGN" data-i18n-placeholder="hamqth.login_placeholder" autocomplete="off" style="width: 100%; box-sizing: border-box;" value="{{ hamqth_username | default('') }}">
+            <!-- Sub-card 1: QRZ.com -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; padding: 10px; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">1. QRZ.com</span>
+                <a href="https://www.qrz.com/register" target="_blank" rel="noopener" class="apikeys-get-key-link" style="font-size: 0.75rem;" data-i18n="hamqth.reg_qrz_com">Регистрация ↗</a>
               </div>
-
-              <div class="form-group" style="margin-bottom: 0; min-width: 0;">
-                <label for="optHamQthPassword" style="font-size: 0.82rem; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="hamqth.pwd_label">
-                  Пароль / Ключ HamQTH:
-                </label>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                  <input type="password" id="optHamQthPassword" class="form-input" placeholder="Пароль HamQTH.com" data-i18n-placeholder="hamqth.pwd_placeholder" autocomplete="new-password" style="flex: 1; min-width: 0; box-sizing: border-box;" value="{{ hamqth_password | default('') }}">
-                  <button type="button" id="btnToggleHamQthPassword" class="btn-secondary" style="padding: 7px 10px; font-size: 0.84rem; cursor: pointer; flex-shrink: 0;" title="Показать/скрыть пароль" data-i18n-title="hamqth.pwd_toggle_title">
-                    👁️
-                  </button>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">
+                <div class="form-group" style="margin-bottom: 0; min-width: 0;">
+                  <label for="optQrzComUsername" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; display: block;" data-i18n="hamqth.qrz_com_user_label">Позывной / Логин:</label>
+                  <input type="text" id="optQrzComUsername" class="form-input" placeholder="CALLSIGN" autocomplete="off" style="width: 100%; box-sizing: border-box;" value="{{ qrz_com_username | default('') }}">
+                </div>
+                <div class="form-group" style="margin-bottom: 0; min-width: 0;">
+                  <label for="optQrzComPassword" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; display: block;" data-i18n="hamqth.qrz_com_pwd_label">Пароль QRZ.com:</label>
+                  <div style="display: flex; gap: 5px; align-items: center;">
+                    <input type="password" id="optQrzComPassword" class="form-input" placeholder="Пароль" data-i18n-placeholder="auth.password_placeholder" autocomplete="new-password" style="flex: 1; min-width: 0; box-sizing: border-box;" value="{{ qrz_com_password | default('') }}">
+                    <button type="button" id="btnToggleQrzComPassword" class="btn-secondary" style="padding: 7px 10px; font-size: 0.84rem; cursor: pointer; flex-shrink: 0;" title="Показать/скрыть пароль" data-i18n-title="auth.password_toggle_title">👁️</button>
+                  </div>
                 </div>
               </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px;">
+                <button type="button" id="btnTestQrzCom" class="btn-secondary" style="font-size: 0.78rem; padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                  <span data-i18n="hamqth.btn_test">🔌 Проверить</span>
+                </button>
+                <div id="qrzComTestStatus" style="font-size: 0.76rem; font-weight: 600; display: none;"></div>
+              </div>
             </div>
 
-            <small class="form-hint" style="margin-top: 2px; margin-bottom: 8px; display: block; line-height: 1.3;" data-i18n="hamqth.pwd_hint">
-              Пароль вашей учетной записи HamQTH.com или сессионный ключ XML API.
-            </small>
-
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px;">
-              <button type="button" id="btnTestHamQth" class="btn-secondary" style="font-size: 0.82rem; padding: 7px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-                <span data-i18n="hamqth.btn_test">🔌 Проверить подключение</span>
-              </button>
-              <div id="hamQthTestStatus" style="font-size: 0.78rem; font-weight: 600; display: none;"></div>
+            <!-- Sub-card 2: HamQTH.com -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; padding: 10px; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">2. HamQTH.com</span>
+                <a href="https://www.hamqth.com/register.php" target="_blank" rel="noopener" class="apikeys-get-key-link" style="font-size: 0.75rem;" data-i18n="hamqth.reg_link">Регистрация ↗</a>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">
+                <div class="form-group" style="margin-bottom: 0; min-width: 0;">
+                  <label for="optHamQthUsername" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; display: block;" data-i18n="hamqth.login_label">Позывной / Логин:</label>
+                  <input type="text" id="optHamQthUsername" class="form-input" placeholder="CALLSIGN" autocomplete="off" style="width: 100%; box-sizing: border-box;" value="{{ hamqth_username | default('') }}">
+                </div>
+                <div class="form-group" style="margin-bottom: 0; min-width: 0;">
+                  <label for="optHamQthPassword" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; display: block;" data-i18n="hamqth.pwd_label">Пароль HamQTH:</label>
+                  <div style="display: flex; gap: 5px; align-items: center;">
+                    <input type="password" id="optHamQthPassword" class="form-input" placeholder="Пароль" data-i18n-placeholder="auth.password_placeholder" autocomplete="new-password" style="flex: 1; min-width: 0; box-sizing: border-box;" value="{{ hamqth_password | default('') }}">
+                    <button type="button" id="btnToggleHamQthPassword" class="btn-secondary" style="padding: 7px 10px; font-size: 0.84rem; cursor: pointer; flex-shrink: 0;" title="Показать/скрыть пароль" data-i18n-title="auth.password_toggle_title">👁️</button>
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px;">
+                <button type="button" id="btnTestHamQth" class="btn-secondary" style="font-size: 0.78rem; padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                  <span data-i18n="hamqth.btn_test">🔌 Проверить</span>
+                </button>
+                <div id="hamQthTestStatus" style="font-size: 0.76rem; font-weight: 600; display: none;"></div>
+              </div>
             </div>
+
+            
+
           </div>
         </div>
 
@@ -2401,7 +2733,7 @@
           <div class="apikeys-frame-header" id="updateSettingsToggle" style="cursor: pointer;">
             <span class="apikeys-frame-title">
               <span>🔄</span> <span data-i18n="updates.title">Обновление ProxDMR</span>
-              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: 10px; margin-left: 6px;">NEW</span>
+              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: 0px; margin-left: 6px;">NEW</span>
             </span>
             <span class="apikeys-frame-actions">
               <span class="apikeys-chevron" id="updateSettingsChevron">▼</span>
@@ -2424,20 +2756,20 @@
             </div>
 
             <!-- Version Status Card -->
-            <div id="systemUpdateStatusCard" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+            <div id="systemUpdateStatusCard" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; padding: 10px; margin-bottom: 10px;">
               <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                 <div style="font-size: 0.82rem; color: #8b949e;">
                   <span data-i18n="updates.current_ver_label">Текущая версия:</span>
                   <strong style="color: var(--text-primary);" id="systemCurrentVerLabel">v{{ app_version | default('1.41') }}</strong>
                   <span style="font-size: 0.74rem; color: #6e7681;" id="systemCurrentDateLabel">({{ app_version_date | default('') }})</span>
                 </div>
-                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
+                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 0px; background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
                   <span data-i18n="updates.up_to_date">✓ Актуальна</span>
                 </div>
               </div>
 
               <!-- Available update details block (hidden when up to date) -->
-              <div id="systemUpdateAvailableBlock" style="display: none; background: rgba(231, 76, 60, 0.08); border: 1px solid rgba(231, 76, 60, 0.25); border-radius: 6px; padding: 8px 10px; margin-top: 8px;">
+              <div id="systemUpdateAvailableBlock" style="display: none; background: rgba(231, 76, 60, 0.08); border: 1px solid rgba(231, 76, 60, 0.25); border-radius: 0px; padding: 8px 10px; margin-top: 8px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                   <div style="font-size: 0.84rem; font-weight: 700; color: #ff7675;">
                     <span id="systemNewVerLabel">Доступно: v1.42</span>
@@ -2478,7 +2810,7 @@
             🖥️ Сервер ProxDMR
           </div>
           <button type="button" id="btnRestartServer" class="btn-server-restart"
-                  style="width: 100%; padding: 9px; background: rgba(227, 179, 65, 0.15); border: 1px solid rgba(227, 179, 65, 0.4); color: #e3b341; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  style="width: 100%; padding: 9px; background: rgba(227, 179, 65, 0.15); border: 1px solid rgba(227, 179, 65, 0.4); color: #e3b341; border-radius: 0px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
             </svg>
@@ -2521,7 +2853,7 @@
                   🔑 Ключ Gemini API:
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <button type="button" id="btnManageRecApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 6px;">
+                  <button type="button" id="btnManageRecApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 0px;">
                     <span id="btnManageRecApiKeysIcon">🔑</span>
                     <span id="btnManageRecApiKeysText">Gemini API (0)</span>
                   </button>
@@ -2535,7 +2867,7 @@
               </div>
 
               <!-- Item 3: Gemini Recognition Sub-block (Models query & selection) -->
-              <div id="subBlockGeminiRec" style="margin-bottom: 12px; background: rgba(66, 133, 244, 0.05); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: 6px; padding: 10px;">
+              <div id="subBlockGeminiRec" style="margin-bottom: 12px; background: rgba(66, 133, 244, 0.05); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: 0px; padding: 10px;">
                 <label for="optTranscriberModel" data-i18n="transcriber.gemini_model_rec_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
                   🤖 Модель Gemini для транскрибации речи:
                 </label>
@@ -2568,7 +2900,7 @@
                   🔑 Ключи Gemini API (для перевода):
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <button type="button" id="btnManageTransApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 6px;">
+                  <button type="button" id="btnManageTransApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 0px;">
                     <span id="btnManageTransApiKeysIcon">🔑</span>
                     <span id="btnManageTransApiKeysText">Gemini API (0)</span>
                   </button>
@@ -2609,7 +2941,7 @@
               <span class="apikeys-frame-actions">
                 <!-- TTS Voice Upload Background Task Indicator (Settings) -->
                 <div id="settingsTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0" onclick="event.stopPropagation();">
-                  <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
+                  <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
                   <span id="settingsTtsUploadPercent" class="tts-upload-percent">0%</span>
                 </div>
                 <button type="button" id="btnTestTts" class="btn-apikey-test" onclick="event.stopPropagation(); window.testGeminiTts && window.testGeminiTts()" data-i18n="transcriber.tts_btn_test">🔊 Проверить звук</button>
@@ -2804,7 +3136,7 @@
       <div id="bmImportProgressCard" class="bm-import-progress-card hidden">
         <div class="bm-import-progress-head">
           <div class="bm-import-progress-title">
-            <img src="/static/img/BM_Upload.png?v=2.9.170" class="bm-import-title-icon" alt="">
+            <img src="/static/img/BM_Upload.png?v=2.9.367" class="bm-import-title-icon" alt="">
             <span id="bmImportProgressTitleText" data-i18n="bm_import.title">Импорт TalkGroups в BrandMeister</span>
           </div>
           <span id="bmImportProgressPercent" class="bm-import-progress-percent">0%</span>
@@ -3723,7 +4055,7 @@
           <span>📡 BrandMeister</span>
         </button>
         <button type="button" class="bm-info-tab" id="tabBtnBmInfoHamQth" data-pane="paneHamQthInfo">
-          <span>🌍 HamQTH.com</span>
+          <span data-i18n="hamqth.tab_title">🌍 HAM Порталы</span>
         </button>
       </div>
 
@@ -4303,7 +4635,10 @@
             </div>
             <div class="about-made-in">
               <span class="flag-badge about-flag-am" title="Armenia"><img src="/static/flags/am.svg" alt="Armenia" class="flag-img" /></span>
-              <span class="about-made-arm">Արտադրված է Հայաստանում</span>
+              <div class="about-made-text">
+                <span class="about-made-arm">Արտադրված է Հայաստանում</span>
+                <span class="about-made-en">Made in Armenia</span>
+              </div>
             </div>
           </div>
         </div>
@@ -4387,6 +4722,42 @@
               <div class="about-credit-desc" data-i18n="about.desc_piper">Локальный сверхбыстрый нейросетевой голосовой синтезатор речи (TTS) для озвучивания позывных и TG.</div>
             </div>
 
+            <!-- 7. Silero TTS & PyTorch -->
+            <div class="about-credit-card">
+              <div class="about-credit-head">
+                <span class="about-lib-name">Silero TTS &amp; PyTorch</span>
+                <a href="https://github.com/snakers4/silero-models" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/snakers4/silero-models">
+                  github.com/snakers4/silero-models ↗
+                </a>
+              </div>
+              <div class="about-credit-author">Silero Team (Alexander Veysov) &amp; PyTorch Contributors</div>
+              <div class="about-credit-desc" data-i18n="about.desc_silero">Искренняя благодарность за живые, выразительные голоса и быстрый локальный синтез речи, благодаря которым радиоэфир зазвучал естественно без облачных задержек.</div>
+            </div>
+
+            <!-- 8. llama.cpp & Qwen 2.5 -->
+            <div class="about-credit-card">
+              <div class="about-credit-head">
+                <span class="about-lib-name">llama.cpp &amp; Qwen 2.5</span>
+                <a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/ggerganov/llama.cpp">
+                  github.com/ggerganov/llama.cpp ↗
+                </a>
+              </div>
+              <div class="about-credit-author">Georgi Gerganov &amp; Alibaba Cloud Qwen Team</div>
+              <div class="about-credit-desc" data-i18n="about.desc_llamacpp">Спасибо за возможность запускать умный нейросетевой перевод прямо на обычном процессоре — легко, автономно и с отличным пониманием живой разговорной речи.</div>
+            </div>
+
+            <!-- 9. Groq Cloud API -->
+            <div class="about-credit-card">
+              <div class="about-credit-head">
+                <span class="about-lib-name">Groq Cloud API</span>
+                <a href="https://groq.com" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://groq.com">
+                  groq.com ↗
+                </a>
+              </div>
+              <div class="about-credit-author">Groq Inc.</div>
+              <div class="about-credit-desc" data-i18n="about.desc_groq">Особая благодарность за молниеносную скорость распознавания радиоэфира и щедрые бесплатные лимиты, делающие ИИ-транскрибацию доступной каждому радиолюбителю.</div>
+            </div>
+
             <!-- 7. FFmpeg -->
             <div class="about-credit-card">
               <div class="about-credit-head">
@@ -4435,16 +4806,16 @@
               <div class="about-credit-desc" data-i18n="about.desc_uvicorn">Молниеносный сервер ASGI на базе uvloop для обработки асинхронных сетевых запросов.</div>
             </div>
 
-            <!-- 11. websockets -->
+            <!-- Starlette & websockets -->
             <div class="about-credit-card">
               <div class="about-credit-head">
-                <span class="about-lib-name">websockets</span>
-                <a href="https://github.com/python-websockets/websockets" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/python-websockets/websockets">
-                  github.com/python-websockets/websockets ↗
+                <span class="about-lib-name">Starlette &amp; websockets</span>
+                <a href="https://github.com/encode/starlette" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/encode/starlette">
+                  github.com/encode/starlette ↗
                 </a>
               </div>
-              <div class="about-credit-author">Aymeric Augustin</div>
-              <div class="about-credit-desc" data-i18n="about.desc_websockets">Библиотека двунаправленного потокового обмена PCM-аудио и телеметрией в реальном времени.</div>
+              <div class="about-credit-author">Tom Christie (Encode) &amp; Aymeric Augustin</div>
+              <div class="about-credit-desc" data-i18n="about.desc_websockets">Открытый ASGI-тулкит и драйвер WebSocket для двунаправленного потокового обмена PCM-аудио и телеметрией в реальном времени.</div>
             </div>
 
             <!-- 12. aiosqlite & SQLite -->
@@ -4471,16 +4842,16 @@
               <div class="about-credit-desc" data-i18n="about.desc_crypto">Криптографическая защита, генерация SSL/TLS сертификатов и безопасные WSS-соединения.</div>
             </div>
 
-            <!-- 14. Tailscale -->
+            <!-- PyJWT & bcrypt -->
             <div class="about-credit-card">
               <div class="about-credit-head">
-                <span class="about-lib-name">Tailscale</span>
-                <a href="https://tailscale.com" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://tailscale.com">
-                  tailscale.com ↗
+                <span class="about-lib-name">PyJWT &amp; bcrypt</span>
+                <a href="https://github.com/jpadilla/pyjwt" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/jpadilla/pyjwt">
+                  github.com/jpadilla/pyjwt ↗
                 </a>
               </div>
-              <div class="about-credit-author">Tailscale Inc.</div>
-              <div class="about-credit-desc" data-i18n="about.desc_tailscale">Безопасный ячеистый WireGuard VPN для мгновенного удаленного доступа к серверу ProxDMR из любой точки мира.</div>
+              <div class="about-credit-author">José Padilla &amp; Python Cryptographic Authority (PyCA)</div>
+              <div class="about-credit-desc" data-i18n="about.desc_auth">Спасибо за открытые и надёжные инструменты криптостойкого хеширования паролей и защиты пользовательских сессий.</div>
             </div>
 
             <!-- 15. RadioID -->
@@ -4533,7 +4904,7 @@
               <input type="checkbox" id="recOptSeamBeep" class="rec-toggle-checkbox">
               <span data-i18n="recordings.seam_beep">Звуковой маркер склейки</span>
             </label>
-            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 175px; text-align: right; padding: 4px 8px; border-radius: 6px; font-family: monospace;">
+            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 175px; text-align: right; padding: 4px 8px; border-radius: 0px; font-family: monospace;">
           </div>
           <div style="font-size: 0.75rem; color: var(--text-muted, #8b949e); line-height: 1.3;" data-i18n="recordings.seam_beep_hint">
             До 7 пар частота, длительность (Гц, мс) через запятую (напр. 600,80 или 1750,100, 1200,80)
@@ -4550,7 +4921,7 @@
         <div class="rec-setting-row" style="display: flex; align-items: center; justify-content: space-between;">
           <label for="recMinDurationInput" style="font-size: 0.95rem; font-weight: 500;" data-i18n="recordings.min_duration">Мин. длительность записи:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="recMinDurationInput" class="rec-number-input" min="0.1" max="60" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: 6px; box-sizing: border-box;">
+            <input type="number" id="recMinDurationInput" class="rec-number-input" min="0.1" max="60" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: 0px; box-sizing: border-box;">
             <span style="font-size: 0.85rem; color: var(--text-muted, #8b949e);" data-i18n="recordings.sec_unit">сек</span>
           </div>
         </div>
@@ -4559,7 +4930,7 @@
         <div class="rec-setting-row" style="display: flex; align-items: center; justify-content: space-between;">
           <label for="recQuotaGbInput" style="font-size: 0.95rem; font-weight: 500; white-space: nowrap;" data-i18n="recordings.quota_storage">Квота хранилища:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="recQuotaGbInput" class="rec-number-input" min="0.1" max="1000" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: 6px; box-sizing: border-box;">
+            <input type="number" id="recQuotaGbInput" class="rec-number-input" min="0.1" max="1000" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: 0px; box-sizing: border-box;">
             <span style="font-size: 0.85rem; color: var(--text-muted, #8b949e);" data-i18n="recordings.gb_unit">Гб</span>
             <button type="button" id="recClearAllBtn" class="rec-clear-btn" title="Удалить все сохраненные аудиозаписи" aria-label="Очистить все записи" data-i18n-title="recordings.clear_all_title" data-i18n-aria-label="recordings.clear_all_title" style="margin-left: 18px; height: 28px;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
@@ -4590,7 +4961,7 @@
       <div class="modal-body" style="padding: 16px; font-size: 0.86rem; display: flex; flex-direction: column; gap: 14px;">
         <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
           <label for="selOfflineTranscribeHotspot" style="font-size: 0.82rem; color: var(--text-muted, #718096); font-weight: 600;" data-i18n="quick_assign.hotspot_label">Хотспот:</label>
-          <select id="selOfflineTranscribeHotspot" class="form-select" style="width: 100%; padding: 6px 10px; font-size: 0.88rem; border-radius: 6px;"></select>
+          <select id="selOfflineTranscribeHotspot" class="form-select" style="width: 100%; padding: 6px 10px; font-size: 0.88rem; border-radius: 0px;"></select>
         </div>
         <div id="offlineTranscribeInfoText" style="color: var(--text-secondary, #a0aec0); line-height: 1.45;" data-i18n="recordings.offline_transcribe_prompt">
           Запустить транскрибацию накопленных аудиозаписей через Google AI?
@@ -4706,7 +5077,7 @@
       max-width: calc(100vw - 32px);
       background: var(--bg-card, #1c2128);
       border: 1px solid var(--border-color, #30363d);
-      border-radius: 12px;
+      border-radius: 0px;
       box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
       z-index: 9999;
       padding: 14px 16px;
@@ -4747,7 +5118,7 @@
       line-height: 1;
       cursor: pointer;
       padding: 0 2px;
-      border-radius: 4px;
+      border-radius: 0px;
     }
     .system-update-banner-close:hover {
       color: var(--text-primary, #fff);
@@ -4788,7 +5159,7 @@
       max-height: 88vh;
       background: var(--bg-card, #161b22);
       border: 1px solid var(--border-color, #30363d);
-      border-radius: 12px;
+      border-radius: 0px;
       box-shadow: 0 24px 48px rgba(0, 0, 0, 0.7);
       display: flex;
       flex-direction: column;
@@ -4816,7 +5187,7 @@
     }
     .changelog-lang-pill {
       padding: 4px 12px;
-      border-radius: 16px;
+      border-radius: 0px;
       border: 1px solid var(--border-color, #30363d);
       background: #21262d;
       color: #c9d1d9;
@@ -4863,7 +5234,7 @@
         height: 100dvh !important;
         max-width: 100vw !important;
         max-height: 100dvh !important;
-        border-radius: 0 !important;
+        border-radius: 0px !important;
         border: none !important;
         margin: 0 !important;
       }
@@ -4881,16 +5252,213 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.313"></script>
-  <script src="/static/js/audio-player.js?v=2.9.172"></script>
-  <script src="/static/js/dialog.js?v=2.9.308"></script>
-  <script src="/static/js/auth.js?v=2.9.309"></script>
+  <script src="/static/js/i18n.js?v=2.9.380"></script>
+  <script src="/static/js/audio-player.js?v=2.9.367"></script>
+  <script src="/static/js/dialog.js?v=2.9.375"></script>
+  <script src="/static/js/auth.js?v=2.9.376"></script>
   <style>
-    .admin-act-btn{background:none;border:none;cursor:pointer;font-size:1em;padding:2px 4px;border-radius:4px;opacity:0.8;transition:opacity 0.15s;}
+    /* Demo Mode Styles */
+    .auth-demo-box {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      text-align: center;
+    }
+    .auth-demo-header {
+      margin-bottom: 8px;
+    }
+    .auth-demo-title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #fbbf24;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .auth-demo-desc {
+      font-size: 0.78rem;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+    .auth-demo-slots-info {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #60a5fa;
+      margin-bottom: 8px;
+    }
+    .auth-demo-countdown {
+      background: rgba(234, 179, 8, 0.15);
+      border: 1px solid rgba(234, 179, 8, 0.35);
+      color: #fbbf24;
+      border-radius: 0px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .auth-demo-btn {
+      width: 100%;
+      padding: 9px 12px;
+      font-size: 0.92rem;
+      border-radius: 0px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: rgba(234, 179, 8, 0.2);
+      border: 1px solid rgba(234, 179, 8, 0.5);
+      color: #fbbf24;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .auth-demo-btn:hover:not(:disabled) {
+      background: rgba(234, 179, 8, 0.3);
+      color: #fff;
+    }
+    .auth-demo-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      border-color: rgba(255, 255, 255, 0.15);
+      color: #888;
+    }
+    .demo-header-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      height: 27px;
+      min-height: 27px;
+      padding: 2px 10px;
+      margin: 0 0 6px 0;
+      border-radius: 0px;
+      background: var(--bg-card, #11161d);
+      border: 2px solid rgba(234, 179, 8, 0.7);
+      box-shadow: 0 0 14px rgba(234, 179, 8, 0.18), 0 6px 18px rgba(0, 0, 0, 0.45);
+      color: #fbbf24;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      align-self: flex-start;
+      box-sizing: border-box;
+      z-index: 20;
+    }
+    .demo-header-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #fbbf24;
+      box-shadow: 0 0 6px #fbbf24;
+      flex-shrink: 0;
+    }
+    .demo-header-time {
+      letter-spacing: 0.03em;
+    }
+    .demo-header-badge.warning {
+      background: rgba(234, 179, 8, 0.22);
+      color: #fef08a;
+      border-color: #facc15;
+      box-shadow: 0 0 16px rgba(250, 204, 21, 0.28), 0 6px 18px rgba(0, 0, 0, 0.45);
+    }
+    .demo-header-badge.warning .demo-header-dot {
+      background: #facc15;
+      box-shadow: 0 0 8px #facc15;
+    }
+    .demo-header-badge.danger {
+      background: rgba(239, 68, 68, 0.25);
+      color: #fca5a5;
+      border-color: #ef4444;
+      box-shadow: 0 0 18px rgba(239, 68, 68, 0.35), 0 6px 18px rgba(0, 0, 0, 0.45);
+      animation: pulseDemoDanger 1s infinite alternate;
+    }
+    .demo-header-badge.danger .demo-header-dot {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+    @keyframes pulseDemoDanger {
+      from { opacity: 0.75; }
+      to { opacity: 1.0; }
+    }
+    .demo-header-logout {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(234, 179, 8, 0.35);
+      border-radius: 0px;
+      color: inherit;
+      cursor: pointer;
+      font-size: 0.82rem;
+      padding: 1px 5px;
+      line-height: 1;
+      opacity: 0.88;
+      transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+      margin-left: 2px;
+    }
+    .demo-header-logout:hover {
+      opacity: 1.0;
+      background: rgba(234, 179, 8, 0.2);
+      border-color: rgba(234, 179, 8, 0.75);
+    }
+    [data-theme="light"] .demo-header-badge {
+      background: #ffffff;
+      color: #b45309;
+      border-color: #d97706;
+      box-shadow: 0 4px 14px rgba(217, 119, 6, 0.16);
+    }
+    [data-theme="light"] .demo-header-badge.warning {
+      background: #fef9c3;
+      color: #92400e;
+      border-color: #eab308;
+    }
+    [data-theme="light"] .demo-header-badge.danger {
+      background: #fee2e2;
+      color: #b91c1c;
+      border-color: #ef4444;
+    }
+    @media (max-width: 768px) {
+      .demo-header-badge {
+        width: 100% !important;
+        max-width: 100% !important;
+        align-self: stretch !important;
+        justify-content: space-between;
+        margin: 0 0 5px 0 !important;
+        padding: 3px 10px !important;
+      }
+      .demo-header-time {
+        margin-right: auto;
+      }
+    }
+    .demo-readonly-banner {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: rgba(234, 179, 8, 0.12);
+      border: 1px solid rgba(234, 179, 8, 0.35);
+      color: #fbbf24;
+      padding: 8px 12px;
+      border-radius: 0px;
+      margin: 8px 0 12px 0;
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-align: center;
+    }
+    body.is-demo-mode .demo-readonly-banner {
+      display: flex !important;
+    }
+    .demo-disabled-control {
+      opacity: 0.55 !important;
+      cursor: not-allowed !important;
+      filter: grayscale(0.5) !important;
+      pointer-events: none !important;
+    }
+    .admin-act-btn{background:none;border:none;cursor:pointer;font-size:1em;padding:2px 4px;border-radius: 0px;opacity:0.8;transition:opacity 0.15s;}
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
-  <script src="/static/js/admin.js?v=2.9.193"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.353"></script>
+  <script src="/static/js/admin.js?v=2.9.373"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.380"></script>
 </body>
 </html>
 

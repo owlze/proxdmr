@@ -13,7 +13,7 @@ import {
   adjustPttDescFontSize,
   renderTgTextHtml,
   formatCallerLocation
-} from "../core/formatters.js";
+} from "../core/formatters.js?v=2.9.367";
 
 function getActiveHotspotId() {
   return (typeof window !== "undefined" && window.activeHotspotId) || "default";

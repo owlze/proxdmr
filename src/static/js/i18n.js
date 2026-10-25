@@ -21,7 +21,7 @@
   ];
 
   // Cache-busting version — bump when locales JSON changes
-  const LOCALES_VER = "2.9.313";
+  const LOCALES_VER = "2.9.380";
   const LOCALES_BASE = "/static/locales/";
   const FALLBACK_LANG = "en";
 
@@ -56,7 +56,19 @@
         const resp = await fetch(`${LOCALES_BASE}${lang}.json?v=${LOCALES_VER}`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
-        this.translations[lang] = Object.assign({}, this.translations[lang] || {}, data);
+        const flat = {};
+        const flatten = (obj, prefix = "") => {
+          for (const [k, v] of Object.entries(obj || {})) {
+            const key = prefix ? `${prefix}.${k}` : k;
+            if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+              flatten(v, key);
+            } else {
+              flat[key] = v;
+            }
+          }
+        };
+        flatten(data);
+        this.translations[lang] = Object.assign({}, this.translations[lang] || {}, flat);
         this.loadedFiles[lang] = true;
         return true;
       } catch (e) {
@@ -81,6 +93,10 @@
 
     // ── Translate ─────────────────────────────────────────────────────────────
     t(key, params = {}, fallback = "") {
+      if (key === "demo.login_btn" && (!params || typeof params !== "object" || params.minutes === undefined)) {
+        const dynMin = (typeof window !== "undefined" && window._lastDemoSessionMinutes) ? window._lastDemoSessionMinutes : 10;
+        params = Object.assign({ minutes: dynMin }, (params && typeof params === "object") ? params : {});
+      }
       const dict     = this.translations[this.currentLang] || {};
       const fallDict = this.translations[FALLBACK_LANG]    || {};
       let str = dict[key] ?? fallDict[key] ?? fallback ?? key;
@@ -192,6 +208,10 @@
     // ── Event listeners ───────────────────────────────────────────────────────
     onLanguageChange(callback) {
       if (typeof callback === "function") this.listeners.push(callback);
+    }
+
+    onChange(callback) {
+      this.onLanguageChange(callback);
     }
 
     notify() {

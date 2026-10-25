@@ -4,7 +4,7 @@
  * renders benchmark results table, and handles server selection/migration.
  */
 
-import { safeEscapeHtml, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js';
+import { safeEscapeHtml, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 import { ws } from '../network/ws.js';

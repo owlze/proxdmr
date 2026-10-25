@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, cleanName, getCleanTgDesc, escapeHtml, getHotspotNetworkType, getNetworkRawTgName } from '../core/formatters.js';
+import { getCountryInfo, getFlagBadgeHtml, cleanName, getCleanTgDesc, escapeHtml, getHotspotNetworkType, getNetworkRawTgName } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import { showLongPressEffect } from '../ui/long-press.js';
 import { resolveHotspotId, pushNavState, notifyNavClosed, getHotspotSlot } from '../core/state.js';
@@ -3171,14 +3171,16 @@ export function renderHamQthCards(container, d, targetId) {
     <div class="bm-info-card">
       <div class="bm-info-card-header">
         <div class="bm-info-card-title">
-          <span>🌍</span> HamQTH.com Callbook: <strong style="color: #ff6700; margin-left: 4px;">${safeEscapeHtml(callsign)}</strong>
+          <span>🌍</span> HAM Callbook: <strong style="color: #ff6700; margin-left: 4px;">${safeEscapeHtml(callsign)}</strong>
         </div>
-        <span class="bm-info-card-badge bm-info-badge-online">${window.t ? window.t("hamqth.badge_registered", {}, "Зарегистрирован") : "Зарегистрирован"}</span>
+        <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+          ${(Array.isArray(d.sources_found) && d.sources_found.length ? d.sources_found : (d.source ? [d.source] : ["HamQTH.com"])).map(s => `<span style="font-size: 0.70rem; background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid rgba(63,185,80,0.3); border-radius: 0px; padding: 1px 6px; font-weight: 700;">✓ ${safeEscapeHtml(s)}</span>`).join('')}
+        </div>
       </div>
       
       ${metaBadges.length ? `
         <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 12px 10px; border-bottom: 1px solid rgba(255,255,255,0.06);">
-          ${metaBadges.map(b => `<span style="font-size: 0.73rem; background: rgba(88,166,255,0.12); color: #79c0ff; border: 1px solid rgba(88,166,255,0.25); border-radius: 4px; padding: 2px 7px; font-weight: 600;">${b}</span>`).join('')}
+          ${metaBadges.map(b => `<span style="font-size: 0.73rem; background: rgba(88,166,255,0.12); color: #79c0ff; border: 1px solid rgba(88,166,255,0.25); border-radius: 0px; padding: 2px 7px; font-weight: 600;">${b}</span>`).join('')}
         </div>
       ` : ''}
 
@@ -3254,15 +3256,18 @@ export function renderHamQthCards(container, d, targetId) {
       </div>
 
       ${d.bio ? `
-        <div style="margin-top: 12px; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; font-size: 0.80rem; line-height: 1.4; color: #c9d1d9;">
+        <div style="margin-top: 12px; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; font-size: 0.80rem; line-height: 1.4; color: #c9d1d9;">
           <strong style="color: #8b949e; display: block; margin-bottom: 4px; font-size: 0.72rem; text-transform: uppercase;">${window.t ? window.t("hamqth.prop_bio", {}, "Заметка / Bio:") : "Заметка / Bio:"}</strong>
           ${safeEscapeHtml(d.bio)}
         </div>
       ` : ''}
 
-      <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
-        <a href="https://www.hamqth.com/${encodeURIComponent(callsign)}" target="_blank" rel="noopener" class="btn-primary" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; padding: 6px 14px; text-decoration: none; border-radius: 6px;">
-          <span>${window.t ? window.t("hamqth.open_page", {}, "🌐 Открыть страницу на HamQTH.com ↗") : "🌐 Открыть страницу на HamQTH.com ↗"}</span>
+      <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;">
+        <a href="https://www.qrz.com/db/${encodeURIComponent(callsign)}" target="_blank" rel="noopener" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; padding: 5px 10px; text-decoration: none; border-radius: 0px;">
+          <span>🌐 QRZ.com ↗</span>
+        </a>
+        <a href="https://www.hamqth.com/${encodeURIComponent(callsign)}" target="_blank" rel="noopener" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; padding: 5px 10px; text-decoration: none; border-radius: 0px;">
+          <span>🌐 HamQTH.com ↗</span>
         </a>
       </div>
     </div>
@@ -3276,7 +3281,7 @@ export function renderHamQthCards(container, d, targetId) {
         </div>
         <div style="text-align: center; padding: 10px 0;">
           <a href="${safeEscapeHtml(d.qslpic)}" target="_blank" rel="noopener">
-            <img src="${safeEscapeHtml(d.qslpic)}" alt="QSL" style="max-width: 100%; max-height: 280px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 4px 12px rgba(0,0,0,0.5);" onerror="this.parentElement.parentElement.style.display='none'">
+            <img src="${safeEscapeHtml(d.qslpic)}" alt="QSL" style="max-width: 100%; max-height: 280px; border-radius: 0px; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 4px 12px rgba(0,0,0,0.5);" onerror="this.parentElement.parentElement.style.display='none'">
           </a>
         </div>
       </div>
