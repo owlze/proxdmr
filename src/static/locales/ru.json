@@ -950,8 +950,6 @@
   "contacts.xlx_id_hint": "7-значный DMR ID радиолюбителя для валидации в XLX",
   "contacts.xlx_module_select_label": "Модуль рефлектора XLX:",
   "contacts.xlx_slot_locked_note": "(в XLX только TS2)",
-  "demo.access_desc": "Попробуйте интерфейс и послушайте живой эфир, ИИ-перевод и синтез речи без пароля (режим чтения).",
-  "demo.access_title": "Ознакомительный доступ",
   "demo.active_count": "Сейчас в демо:",
   "demo.active_guests": "Активных гостей: {active} / {max}",
   "demo.admin_title": "Ознакомительный демо-режим",

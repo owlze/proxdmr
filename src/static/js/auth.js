@@ -165,11 +165,9 @@
     const updateUI = () => {
       const timeStr = _formatMinSec(rem);
       if (type === 'cooldown') {
-        const text = (window.t ? window.t('demo.cooldown_countdown', { time: timeStr }) : `⏳ Повторный демо-вход будет доступен через ${timeStr}`);
-        if (box) box.textContent = text;
+        if (box) box.textContent = `⏳ Demo re-entry available in ${timeStr}`;
       } else {
-        const text = (window.t ? window.t('demo.slots_full_countdown', { max: maxSessions, time: timeStr }) : `⏳ Все демо-слоты заняты (${maxSessions}/${maxSessions}). Ближайший освободится через ${timeStr}`);
-        if (box) box.textContent = text;
+        if (box) box.textContent = `⏳ All demo slots are busy (${maxSessions}/${maxSessions}). Next free slot in ${timeStr}`;
       }
     };
 
@@ -207,14 +205,11 @@
       window._lastDemoSessionMinutes = sessMin;
       const btnTxt = document.getElementById('btnAuthDemoLoginText');
       if (btnTxt) {
-        btnTxt.textContent = (window.t && typeof window.t === 'function')
-          ? window.t('demo.login_btn', { minutes: sessMin })
-          : `Демо-вход (${sessMin} мин)`;
+        btnTxt.textContent = `Demo Login (${sessMin} min)`;
       }
       const slotsInfo = document.getElementById('authDemoSlotsInfo');
       if (slotsInfo) {
-        const slotsTxt = (window.t ? window.t('demo.slots_free', { free: data.demo.free_slots, max: data.demo.max_sessions }) : `Свободно слотов: ${data.demo.free_slots} из ${data.demo.max_sessions}`);
-        slotsInfo.textContent = slotsTxt;
+        slotsInfo.textContent = `Free slots: ${data.demo.free_slots} of ${data.demo.max_sessions}`;
       }
 
       const btn = document.getElementById('btnAuthDemoLogin');
@@ -309,8 +304,7 @@
       window.isDemoExpiredHandled = false;
       showModal(true);
       if (loginError) {
-        const msg = (window.t ? window.t('demo.session_expired_toast', {}, '⏱️ Время демо-сессии истекло. Повторный вход будет доступен через 01:00.') : '⏱️ Время демо-сессии истекло. Повторный вход будет доступен через 01:00.');
-        loginError.textContent = msg;
+        loginError.textContent = '⏱️ Demo session expired. Re-entry will be available after cooldown.';
       }
       startDemoCountdown('cooldown', cooldownSec);
     }, 150);
@@ -530,8 +524,8 @@
     const onLangUpdate = () => {
       updateAccountUI();
       const btnTxt = document.getElementById('btnAuthDemoLoginText');
-      if (btnTxt && window.t) {
-        btnTxt.textContent = window.t('demo.login_btn', { minutes: window._lastDemoSessionMinutes || 10 });
+      if (btnTxt) {
+        btnTxt.textContent = `Demo Login (${window._lastDemoSessionMinutes || 10} min)`;
       }
     };
 
@@ -932,7 +926,7 @@
     const remember = isApkMode() ? true : (document.getElementById('authRememberMe')?.checked ?? true);
 
     if (!login || !password) {
-      if (loginError) loginError.textContent = (window.t ? window.t('auth.err_enter_login_pwd', {}, 'Введите логин и пароль') : 'Введите логин и пароль');
+      if (loginError) loginError.textContent = 'Please enter login and password';
       return;
     }
 
@@ -1021,10 +1015,14 @@
             startDemoCountdown('slots_full', data.nearest_slot_sec, data.max_sessions || 10);
           }
         }
-        if (loginError) loginError.textContent = data.detail || data.message || (window.t ? window.t('auth.err_login_failed', {}, 'Ошибка входа') : 'Ошибка входа');
+        if (loginError) {
+          let errText = data.detail || data.message || 'Login failed';
+          if (errText === 'Неверный логин или пароль') errText = 'Invalid login or password';
+          loginError.textContent = errText;
+        }
       }
     } catch (e) {
-      if (loginError) loginError.textContent = (window.t ? window.t('auth.err_server_conn', {}, 'Ошибка подключения к серверу') : 'Ошибка подключения к серверу');
+      if (loginError) loginError.textContent = 'Server connection error';
     } finally {
       if (loginBtn) loginBtn.disabled = false;
     }
@@ -1434,7 +1432,6 @@
 
   async function doImportConfigFromLoginScreen() {
     clearErrors();
-    const t = (k, p, d) => (window.i18n && typeof window.i18n.t === 'function') ? window.i18n.t(k, p, d) : (typeof p === 'string' ? p : d);
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.7z';
@@ -1444,26 +1441,24 @@
 
       let password = document.getElementById('authPasswordInput')?.value;
       if (!password) {
-        const promptMsg = t('account.import_prompt', {}, 'Введите пароль от архива (пароль вашего аккаунта):');
         password = await showAppPrompt({
-          title: t('auth.import_config_title', {}, 'Импорт конфигурации'),
+          title: 'Import Configuration',
           icon: '🔑',
-          message: promptMsg,
+          message: 'Enter archive password (your account password):',
           isPassword: true,
-          confirmText: t('auth.continue_btn', {}, 'Продолжить')
+          confirmText: 'Continue'
         });
         if (!password) return;
       }
 
       let login = document.getElementById('authLoginInput')?.value?.trim() || '';
       if (!login) {
-        const promptLogin = t('account.prompt_backup_login', {}, 'Введите логин аккаунта для восстановления (оставьте пустым для автоопределения из файла):');
         const enteredLogin = await showAppPrompt({
-          title: t('auth.restore_account_title', {}, 'Восстановление аккаунта'),
+          title: 'Account Recovery',
           icon: '👤',
-          message: promptLogin,
-          placeholder: t('auth.restore_login_placeholder', {}, 'логин (необязательно)'),
-          confirmText: t('auth.continue_btn', {}, 'Продолжить')
+          message: 'Enter account login to restore (leave empty to auto-detect):',
+          placeholder: 'login (optional)',
+          confirmText: 'Continue'
         });
         if (enteredLogin !== null) {
           login = enteredLogin.trim();
@@ -1503,7 +1498,7 @@
           if (data.client_storage) {
             restoreClientStorageSnapshot(data.client_storage);
           }
-          await showAppAlert(t('account.import_success', {}, 'Настройки успешно импортированы. Страница будет перезагружена.'), { title: 'Успешно', icon: '✅' });
+          await showAppAlert('Settings imported successfully. Reloading...', { title: 'Success', icon: '✅' });
           if (token) {
             try {
               localStorage.setItem('proxdmr_auth_token', token);
@@ -1512,14 +1507,14 @@
           }
           location.reload();
         } else {
-          const errDetail = data.detail || t('account.import_error', {}, 'Ошибка импорта');
+          const errDetail = data.detail || 'Import error';
           if (loginError) loginError.textContent = errDetail;
-          await showAppAlert(errDetail, { title: t('auth.err_import_title', {}, 'Ошибка импорта'), icon: '⚠️' });
+          await showAppAlert(errDetail, { title: 'Import Error', icon: '⚠️' });
         }
       } catch (e) {
-        const connErr = t('account.import_conn_error', {}, 'Ошибка при импорте настроек');
+        const connErr = 'Error importing settings';
         if (loginError) loginError.textContent = connErr;
-        await showAppAlert(connErr, { title: t('auth.err_conn_title', {}, 'Ошибка связи'), icon: '⚠️' });
+        await showAppAlert(connErr, { title: 'Connection Error', icon: '⚠️' });
       } finally {
         if (importBtn) importBtn.disabled = false;
       }

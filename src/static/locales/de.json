@@ -950,8 +950,6 @@
   "contacts.xlx_id_hint": "7-stellige DMR-ID zur Validierung in XLX",
   "contacts.xlx_module_select_label": "XLX-Reflektor Modul:",
   "contacts.xlx_slot_locked_note": "(nur TS2 in XLX)",
-  "demo.access_desc": "Testen Sie die Oberfläche und hören Sie Live-Funkverkehr, KI-Übersetzung und Sprachsynthese ohne Passwort (Lese-Modus).",
-  "demo.access_title": "Demo-Zugang",
   "demo.active_count": "Aktuell in Demo:",
   "demo.active_guests": "Aktive Gäste: {active} / {max}",
   "demo.admin_title": "Gast-Demo-Modus",

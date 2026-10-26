@@ -950,8 +950,6 @@
   "contacts.xlx_id_hint": "7-digit amateur radio DMR ID for validation in XLX",
   "contacts.xlx_module_select_label": "XLX Reflector Module:",
   "contacts.xlx_slot_locked_note": "(TS2 only in XLX)",
-  "demo.access_desc": "Try the interface and listen to live traffic, AI translation, and speech synthesis without a password (read-only mode).",
-  "demo.access_title": "Demo Access",
   "demo.active_count": "Active in demo:",
   "demo.active_guests": "Active guests: {active} / {max}",
   "demo.admin_title": "Guest Demo Mode",

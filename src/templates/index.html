@@ -298,51 +298,47 @@
       <div class="modal-header" style="justify-content:center;">
         <span style="font-size:1.2em;font-weight:600;">🔐 ProxDMR</span>
       </div>
-      <!-- Login Form -->
+      <!-- Login Form (Always English) -->
       <div id="authLoginForm" style="padding:16px 20px 20px;">
         <div style="margin-bottom:12px;">
-          <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;" data-i18n="auth.login_label">Логин</label>
+          <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;">Login</label>
           <input type="text" id="authLoginInput" autocomplete="username" placeholder="login"
                  style="width:100%;padding:8px 10px;border-radius: 0px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
         </div>
         <div style="margin-bottom:12px;">
-          <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;" data-i18n="auth.password_label">Пароль</label>
+          <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;">Password</label>
           <div style="position:relative;display:flex;align-items:center;width:100%;">
             <input type="password" id="authPasswordInput" autocomplete="current-password" placeholder="password"
                    style="width:100%;padding:8px 38px 8px 10px;border-radius: 0px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
             <button type="button" id="btnToggleAuthPassword" class="password-toggle-btn"
-                    title="Показать/скрыть пароль" data-i18n-title="auth.password_toggle_title" tabindex="-1">👁️</button>
+                    title="Show/hide password" tabindex="-1">👁️</button>
           </div>
         </div>
         <div id="authRememberRow" style="margin-bottom:14px;display:flex;align-items:center;gap:8px;">
           <input type="checkbox" id="authRememberMe" checked>
-          <label for="authRememberMe" style="font-size:0.85em;opacity:0.8;cursor:pointer;" data-i18n="auth.remember_me">Запомнить меня</label>
+          <label for="authRememberMe" style="font-size:0.85em;opacity:0.8;cursor:pointer;">Remember me</label>
         </div>
         <div id="authLoginError" style="color:#ff5555;font-size:0.85em;min-height:1.2em;margin-bottom:8px;"></div>
-        <button id="authLoginBtn" type="button" class="btn-primary" style="width:100%;padding:10px;font-size:1em;border-radius: 0px;cursor:pointer;" data-i18n="auth.login_btn">Войти</button>
+        <button id="authLoginBtn" type="button" class="btn-primary" style="width:100%;padding:10px;font-size:1em;border-radius: 0px;cursor:pointer;">Sign In</button>
         <div style="margin-top:10px;">
           <button id="authImportConfigBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: 0px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#242830;border:1px solid #444;color:#ddd;">
             <span>📥</span>
-            <span data-i18n="account.import_config_file">Загрузить конфигурацию из файла</span>
+            <span>Load configuration from file</span>
           </button>
         </div>
         <div id="authServerSettingsRow" style="margin-top:10px; display: none;">
           <button id="authServerSettingsBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: 0px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#1e2430;border:1px solid rgba(88,166,255,0.4);color:#58a6ff;">
             <span>⚙️</span>
-            <span data-i18n="auth.server_settings_btn">Настройки сервера</span>
+            <span>Server Settings</span>
           </button>
         </div>
-        <!-- Demo Mode Login Section -->
+        <!-- Demo Mode Login Section (No Header/Description, Always English) -->
         <div id="authDemoSection" style="display: none;" class="auth-demo-box">
-          <div class="auth-demo-header">
-            <div class="auth-demo-title" data-i18n="demo.access_title">🎧 Демонстрационный доступ</div>
-            <div class="auth-demo-desc" data-i18n="demo.access_desc">Только приём, сессия 10 мин, логин/пароль: <code>demo</code> / <code>demo</code></div>
-          </div>
           <div id="authDemoSlotsInfo" class="auth-demo-slots-info"></div>
           <div id="authDemoCountdownBox" class="auth-demo-countdown" style="display: none;"></div>
           <button type="button" id="btnAuthDemoLogin" class="btn btn-secondary auth-demo-btn">
             <span class="auth-demo-btn-icon">🎧</span>
-            <span id="btnAuthDemoLoginText" data-i18n="demo.login_btn">Войти в демо-режим</span>
+            <span id="btnAuthDemoLoginText">Demo Login (10 min)</span>
           </button>
         </div>
       </div>
@@ -5252,10 +5248,10 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.380"></script>
+  <script src="/static/js/i18n.js?v=2.9.381"></script>
   <script src="/static/js/audio-player.js?v=2.9.367"></script>
   <script src="/static/js/dialog.js?v=2.9.375"></script>
-  <script src="/static/js/auth.js?v=2.9.376"></script>
+  <script src="/static/js/auth.js?v=2.9.381"></script>
   <style>
     /* Demo Mode Styles */
     .auth-demo-box {
@@ -5263,23 +5259,6 @@
       padding-top: 12px;
       border-top: 1px solid rgba(255, 255, 255, 0.1);
       text-align: center;
-    }
-    .auth-demo-header {
-      margin-bottom: 8px;
-    }
-    .auth-demo-title {
-      font-size: 0.92rem;
-      font-weight: 700;
-      color: #fbbf24;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-    .auth-demo-desc {
-      font-size: 0.78rem;
-      opacity: 0.8;
-      margin-top: 2px;
     }
     .auth-demo-slots-info {
       font-size: 0.8rem;
@@ -5458,7 +5437,7 @@
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.380"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.381"></script>
 </body>
 </html>
 

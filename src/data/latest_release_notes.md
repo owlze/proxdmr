@@ -1,48 +1,48 @@
 <!-- lang:ru -->
-# ProxDMR v1.57 — Список изменений
+# ProxDMR v1.58 — Список изменений
 
-* Гостевой демо-режим (онлайн-демо: https://proxdmr.duckdns.org).
-* Оповещения в Telegram о технических проблемах на сервере.
-* Доработка UI и мелких багов.
+* Доработка демо-режима: улучшена локализация и таймеры сессий на странице входа.
+* Обновление стилей и интерфейса экрана авторизации.
+* Устранение мелких ошибок и оптимизация скриптов.
 
 <!-- lang:en -->
-# ProxDMR v1.57 — Release Notes
+# ProxDMR v1.58 — Release Notes
 
-* Guest demo mode (live online demo: https://proxdmr.duckdns.org).
-* Telegram alerts for server technical issues.
-* UI improvements and minor bug fixes.
+* Demo mode improvements: enhanced localization and session timers on the login screen.
+* Updated styles and UI layout for authentication.
+* Minor bug fixes and script optimizations.
 
 <!-- lang:uk -->
-# ProxDMR v1.57 — Список змін
+# ProxDMR v1.58 — Список змін
 
-* Гостьовий демо-режим (онлайн-демо: https://proxdmr.duckdns.org).
-* Сповіщення в Telegram про технічні проблеми на сервері.
-* Доопрацювання UI та виправлення дрібних помилок.
+* Доопрацювання демо-режиму: покращено локалізацію та таймери сесій на сторінці входу.
+* Оновлення стилів та інтерфейсу екрана авторизації.
+* Усунення дрібних помилок та оптимізація скриптів.
 
 <!-- lang:de -->
-# ProxDMR v1.57 — Änderungsprotokoll
+# ProxDMR v1.58 — Änderungsprotokoll
 
-* Gast-Demomodus (Live-Online-Demo: https://proxdmr.duckdns.org).
-* Telegram-Benachrichtigungen bei technischen Serverproblemen.
-* UI-Verbesserungen und kleinere Fehlerbehebungen.
+* Verbesserungen des Demomodus: verbesserte Lokalisierung und Sitzungstimer auf dem Anmeldebildschirm.
+* Aktualisierte Stile und Benutzeroberfläche für die Authentifizierung.
+* Kleinere Fehlerbehebungen und Skriptoptimierungen.
 
 <!-- lang:es -->
-# ProxDMR v1.57 — Registro de cambios
+# ProxDMR v1.58 — Registro de cambios
 
-* Modo demo para invitados (demostración en vivo: https://proxdmr.duckdns.org).
-* Alertas de Telegram sobre problemas técnicos en el servidor.
-* Mejoras en la interfaz de usuario y corrección de errores menores.
+* Mejoras en el modo demo: localización mejorada y temporizadores de sesión en la pantalla de inicio de sesión.
+* Estilos y diseño de interfaz actualizados para la autenticación.
+* Corrección de errores menores y optimización de scripts.
 
 <!-- lang:fr -->
-# ProxDMR v1.57 — Notes de version
+# ProxDMR v1.58 — Notes de version
 
-* Mode démo invité (démo en ligne: https://proxdmr.duckdns.org).
-* Alertes Telegram pour les problèmes techniques du serveur.
-* Améliorations de l'interface utilisateur et corrections de bugs mineurs.
+* Améliorations du mode démo : localisation améliorée et minuteries de session sur l'écran de connexion.
+* Styles et interface utilisateur mis à jour pour l'authentification.
+* Corrections de bugs mineurs et optimisations de scripts.
 
 <!-- lang:it -->
-# ProxDMR v1.57 — Registro delle modifiche
+# ProxDMR v1.58 — Registro delle modifiche
 
-* Modalità demo ospite (demo online: https://proxdmr.duckdns.org).
-* Avvisi Telegram per problemi tecnici del server.
-* Miglioramenti dell'interfaccia utente e correzioni di bug minori.
+* Miglioramenti alla modalità demo: localizzazione migliorata e timer di sessione nella schermata di accesso.
+* Stili e interfaccia utente aggiornati per l'autenticazione.
+* Correzioni di bug minori e ottimizzazioni degli script.
