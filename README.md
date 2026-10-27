@@ -1,8 +1,10 @@
 # ProxDMR
 
-ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to amateur radio networks — **BrandMeister**, **TGIF**, **FreeDMR**, **DMR+ / IPSC2**, and **XLX Reflectors** (D-Star / DMR Gateway) via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
+**ProxDMR** is a client-server DMR transceiver that connects your web browser or Android smartphone directly to amateur radio networks — **BrandMeister, TGIF, FreeDMR, DMR+ / IPSC2, and XLX Reflectors (D-Star / DMR)** — via the HomeBrew/MMDVM protocol without requiring a physical digital radio, MMDVM modem, or hardware USB vocoder.
 
-Demo server: https://proxdmr.duckdns.org
+**Live Demo:** [https://proxdmr.duckdns.org](https://proxdmr.duckdns.org)
+
+[Features](#key-features) • [Prerequisites](#prerequisites) • [Installation](#installation) • [Configuration](#first-launch--network-configuration) • [Android App](#android-application) • [Operations & Backup](#operations-updates--backup)
 
 <p align="center">
   <a href="docs/images/01.jpg" target="_blank">
@@ -19,316 +21,148 @@ Demo server: https://proxdmr.duckdns.org
   </a>
 </p>
 
-### Features:
-* **Multi-Network DMR Support** — Connect to **BrandMeister**, **TGIF**, **FreeDMR**, **DMR+ / IPSC2**, and **XLX Reflectors** (D-Star / DMR Gateway). Run multiple independent virtual hotspots across different networks simultaneously on one screen.
-* **No physical radio, MMDVM modem, or hardware USB vocoder (DVStick) is required to operate on DMR** — Voice encoding and decoding are performed entirely on the server via a software AMBE+2 vocoder.
-* **Access via any modern web browser** (PC, laptop, tablet) or through a dedicated Android application (APK).
-* **Multi-Hotspot Architecture** — Run multiple independent virtual hotspots simultaneously on one screen, listening to different timeslots (TS1 and TS2) and talkgroups.
-* **Ultra-low latency audio** — Voice streams are transmitted to the client in compressed form (Opus, WebRTC, WebSocket) with low latency of just tens of milliseconds.
-* **A single server database** for users, access permissions, and QSO audio recordings.
-* **Network PTT transmission using Push-to-Talk** (PTT button on the screen or Space key on PC).
-* **Support for two timeslots (TS1 and TS2)**, dynamic and static talkgroups.
-* **Automatic transmission time limit** (Time-Out Timer).
-* **Server Probe & Multi-Network Benchmark** — Live server latency probing, jitter/ping benchmarking, and automated recommendations for the fastest connection.
-* **Contacts & Address Book** — Manage talkgroups, private call contacts, and XLX reflector modules with network-specific bindings.
-* **BrandMeister & TGIF API integration** — Manage talkgroup subscriptions directly from the interface (connect, disconnect, drop active/hung calls).
-* **Real-time network diagnostics** — Live monitoring of connection status and ping to the master server with an interactive latency chart.
-* **Microphone Automatic Gain Control (AGC)**.
-* **Built-in RadioID callsign database** with automatic local synchronization (312,000+ radio amateurs).
-* **Audio recording player** with instant search and filtering by callsign, date, and group.
-* **Speech recognition** and live transcription of conversations into text.
-* **Translation and voice readout** of transcribed dialogues into multiple languages.
+## Key Features
 
----
+* **100% Software Vocoder** — Server-side software AMBE+2 encoding and decoding; no physical transceiver, MMDVM hotspot, or DVStick hardware required.
+* **Multi-Hotspot & Multi-Network** — Run multiple independent virtual hotspots simultaneously on one screen across BrandMeister, TGIF, FreeDMR, DMR+ / IPSC2, and XLX Reflectors with full TS1/TS2 and static/dynamic talkgroup support.
+* **Ultra-Low Latency Web & Android Clients** — Stream compressed voice (Opus / WebRTC / WebSocket) with tens-of-milliseconds latency in any modern browser or via the dedicated Android app (featuring background audio and screen/hardware PTT).
+* **Live Speech-to-Text, Translation & TTS** — Real-time QSO transcription with multi-language translation and on-demand neural TTS voice readout (Silero / Piper).
+* **Direct BrandMeister & TGIF API Control** — Subscribe, unlink, and drop active or hung talkgroups directly from the UI.
+* **Server Probe & Live Diagnostics** — Benchmark master servers for ping/jitter to auto-select the fastest node, with real-time latency charts.
+* **QSO Audio Archive & RadioID Sync** — Automatic synchronization with the RadioID database (312,000+ callsigns) and built-in `.wav` call recorder with instant search by callsign, date, or talkgroup.
+* **Multi-User & Guest Demo Mode** — Centralized SQLite database for user accounts, permissions, per-network address books, and read-only guest demo access (`DEMO_MODE=true`).
+* **Watchdog, Telegram Alerts & 1-Click Updates** — Independent `watchdog` service monitoring container health, memory usage, and host resources with instant Telegram notifications, plus built-in 1-click system updates from the web UI.
+* **Audio Processing & Safety** — Built-in microphone Automatic Gain Control (AGC) and configurable transmission Time-Out Timer (TOT).
 
-## Table of Contents
+## Prerequisites
 
-1. [Package Contents](#1-package-contents)
-2. [Prerequisites](#2-prerequisites)
-3. [Installation — Choose Your Method](#3-installation--choose-your-method)
-   * [A. Linux / Raspberry Pi (Terminal)](#a-linux--raspberry-pi-terminal)
-   * [B. Windows (Docker Desktop)](#b-windows-docker-desktop)
-   * [C. Synology NAS — via GUI (Container Manager)](#c-synology-nas--via-gui-container-manager)
-   * [D. Synology NAS — via SSH](#d-synology-nas--via-ssh)
-   * [E. Manual Start via Docker Compose (Any OS)](#e-manual-start-via-docker-compose-any-os)
-   * [F. Run via Pre-Built Docker Image](#f-run-via-pre-built-docker-image)
-4. [First Launch and Sign In](#4-first-launch-and-sign-in)
-5. [DMR Hotspot & Multi-Network Configuration](#5-dmr-hotspot--multi-network-configuration)
-6. [Piper Speech Synthesis (TTS) Voices](#6-piper-speech-synthesis-tts-voices)
-7. [Android Application](#7-android-application)
-8. [Data Persistence & Storage](#8-data-persistence--storage)
-9. [Upgrading to a New Version](#9-upgrading-to-a-new-version)
-10. [Backup & Restore](#10-backup--restore)
-11. [Security Recommendations](#11-security-recommendations)
-12. [Useful Commands](#12-useful-commands)
-
----
-
-## 1. Package Contents
-
-Two release archives are provided with **identical contents**:
-
-| Archive | Intended For |
-|---|---|
-| `ProxDMR-Release.tar.gz` | Linux, Raspberry Pi, Synology NAS |
-| `ProxDMR-Release.zip` | Windows (Docker Desktop) |
-
----
-
-## 2. Prerequisites
-
-* **Docker** 20.10+ and **Docker Compose v2** (built into Docker Desktop and Synology Container Manager).
-* **Architecture:** x86_64 or ARM64 (Raspberry Pi 4/5, modern ARM Synology NAS). The AMBE+2 vocoder compiles directly inside the container for your hardware.
-* **Internet Connection** during initial launch: downloads the base Python image, packages, RadioID database, and required Piper voices.
-* **Available Ports** on your host:
+* **Docker 20.10+** and **Docker Compose v2** on **x86_64** or **ARM64** (Linux, Windows Docker Desktop, Raspberry Pi 4/5, Synology NAS).
+* **Amateur Radio Credentials:** Licensed Callsign, DMR ID (registered at [radioid.net](https://www.radioid.net)), and Hotspot Security Passwords for your networks.
+* **Open Host Ports:**
 
 | Port | Protocol | Purpose |
-|---|---|---|
-| `8266` | TCP | Web interface and Android app (HTTPS/WSS) |
-| `62031` | UDP | HomeBrew protocol exchange with master server (BM, TGIF, FreeDMR, DMR+, XLX) |
+| :--- | :--- | :--- |
+| `8266` | TCP | Web UI and Android client (HTTPS / WSS) |
+| `62031` | UDP | HomeBrew protocol communication with DMR master servers |
 
-* **Amateur Radio Credentials**: Callsign, DMR ID (registered via radioid.net), and Hotspot Security Passwords / keys for your preferred networks (BrandMeister, TGIF, FreeDMR, DMR+, XLX).
+## Installation
 
----
+Choose **Option A** (interactive setup script), **Option B** (pre-built Docker image / Synology GUI), or **Option C** (manual Docker Compose build).
 
-## 3. Installation — Choose Your Method
+### Option A: Interactive Setup Script (Linux, Raspberry Pi, Windows, NAS SSH)
 
-During interactive setup, you will be prompted for:
+Download the latest release archive (`ProxDMR-Release.tar.gz` or `ProxDMR-Release.zip`) from [GitHub Releases](https://github.com/owlze/proxdmr/releases) or clone the repository directly. The setup script verifies Docker, prompts for your IP/port, initial admin credentials, and registration policy, generates `.env`, and launches the containers.
 
-| Prompt | What to Enter |
-|---|---|
-| Host IP or domain for SSL | Local IP of your server (auto-detected default provided) |
-| Web interface port | `8266` (Press Enter) |
-| Admin username | `admin` or your callsign |
-| Admin password | **Enter your secure password** |
-
-> ⚠️ **Admin Password:** Configured upon first startup. Once logged in, you can change your password at any time directly in the web UI under **Settings → My Account → Security & Password**. Changing `ADMIN_PASSWORD` in `.env` later will not affect existing users in the database.
-
-### A. Linux / Raspberry Pi (Terminal)
-
+**Linux / Raspberry Pi / Synology SSH:**
 ```bash
-tar -xzf ProxDMR-Release.tar.gz
-cd ProxDMR
-chmod +x setup.sh
-./setup.sh
+git clone https://github.com/owlze/proxdmr.git
+cd proxdmr
+chmod +x setup.sh && ./setup.sh
+```
+*(Need Docker on Debian/Ubuntu/Raspberry Pi OS? Run `curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER`, then re-login).*
+
+**Windows (Docker Desktop):**
+1. Ensure [Docker Desktop](https://www.docker.com/products/docker-desktop/) is running.
+2. Extract `ProxDMR-Release.zip` to `C:\ProxDMR` and double-click **`setup.bat`** (or in PowerShell: `cd C:\ProxDMR` followed by `powershell -ExecutionPolicy Bypass -File .\setup.ps1`).
+3. If Windows Defender Firewall prompts for `com.docker.backend`, allow access on **Private networks**.
+
+> **Note on Admin Password:** `ADMIN_PASSWORD` is applied only during initial database creation. Afterward, change passwords in the web UI under **Settings → My Account → Security & Password**.
+
+### Option B: Pre-Built Image & Synology Container Manager (No Build Required)
+
+Use the official multi-arch image (`ghcr.io/owlze/proxdmr:latest`) via `docker-compose.yml` or Synology GUI (**Container Manager → Project → Create → Create docker-compose.yml**):
+
+```yaml
+services:
+  proxdmr:
+    image: ghcr.io/owlze/proxdmr:latest
+    container_name: proxdmr
+    restart: unless-stopped
+    ports:
+      - "8266:8266"
+      - "62031:62031/udp"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    environment:
+      - HOST_IP=192.168.1.50          # Replace with your server's LAN IP or domain
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=YourSecurePassword
 ```
 
-The script verifies Docker, generates `.env`, asks the prompts above, builds, and launches the container. Upon completion, it outputs your login URL.
-
-If Docker is not yet installed (Debian/Ubuntu/Raspberry Pi OS):
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # then log out and back in
-```
-
-### B. Windows (Docker Desktop)
-
-1. Install **Docker Desktop** (<https://www.docker.com/products/docker-desktop/>) and start it. Ensure Docker is running in the system tray.
-2. Extract `ProxDMR-Release.zip` (for example to `C:\ProxDMR`).
-3. Open the `ProxDMR` folder and double-click **`setup.bat`**.  
-   Alternatively, in PowerShell:
-   ```powershell
-   cd C:\ProxDMR\ProxDMR
-   powershell -ExecutionPolicy Bypass -File .\setup.ps1
-   ```
-4. Follow the setup prompts and wait for the launch confirmation.
-
-*If Windows Defender Firewall prompts for Docker/`com.docker.backend`, allow access on **Private networks** so other local devices can connect.*
-
-### C. Synology NAS — via GUI (Container Manager)
-
-No SSH or archive downloading required. Use the official pre-built image directly in Container Manager:
-
-1. In **File Station**, create a project folder (e.g. `docker/proxdmr`).
-2. Open **Container Manager → Project → Create**.
-   * **Project Name**: `proxdmr`
-   * **Path**: select `docker/proxdmr`
-   * **Source**: select **Create docker-compose.yml**
-3. Paste the following configuration directly into the editor:
-   ```yaml
-   version: '3.8'
-
-   services:
-     proxdmr:
-       image: ghcr.io/owlze/proxdmr:latest
-       container_name: proxdmr
-       restart: unless-stopped
-       ports:
-         - "8266:8266"
-         - "62031:62031/udp"
-       volumes:
-         - ./config:/app/config
-         - ./data:/app/data
-       environment:
-         - HOST_IP=192.168.1.50       # Your Synology local IP
-         - ADMIN_USER=admin
-         - ADMIN_PASSWORD=YourSecurePassword
-   ```
-4. Click **Next** → uncheck "Web portal" → **Done**.  
-   Container Manager will pull the pre-built image from GitHub Container Registry and start ProxDMR in seconds.
-5. If DSM Firewall is enabled (*Control Panel → Security → Firewall*), ensure incoming `8266/TCP` and `62031/UDP` are allowed.
-
-### D. Synology NAS — via SSH
-
-Connect to your NAS via SSH and clone directly from GitHub:
-
-```bash
-git clone https://github.com/owlze/proxdmr.git /volume1/docker/proxdmr
-cd /volume1/docker/proxdmr
-chmod +x setup.sh
-./setup.sh
-```
-
-### E. Manual Start via Docker Compose (Any OS)
-
-```bash
-cp .env.example .env        # Windows: copy .env.example .env
-```
-
-Edit `.env` to set `HOST_IP` (your server IP or domain), `ADMIN_USER`, and `ADMIN_PASSWORD`. Then:
-
-```bash
-docker compose up -d --build
-```
-
-### F. Run via Pre-Built Docker Image
-
-If you prefer not to build locally:
-
+Or launch directly with `docker run`:
 ```bash
 docker run -d \
   --name proxdmr \
   --restart unless-stopped \
   -p 8266:8266 \
   -p 62031:62031/udp \
-  -v proxdmr_config:/app/config \
-  -v proxdmr_data:/app/data \
+  -v ./config:/app/config \
+  -v ./data:/app/data \
   -e HOST_IP=192.168.1.50 \
   -e ADMIN_USER=admin \
   -e ADMIN_PASSWORD=YourSecurePassword \
   ghcr.io/owlze/proxdmr:latest
 ```
 
----
-
-## 4. First Launch and Sign In
-
-1. Allow 1–2 minutes after initial start: the container generates TLS certificates, session signing keys, initializes user database schemas, and downloads the RadioID database.  
-   Monitor logs with: `docker compose logs -f` (exit with `Ctrl+C`).
-2. Open your web browser:
-   ```text
-   https://<SERVER_IP>:8266
-   ```
-3. **Browser Certificate Warning:** The service generates a local self-signed TLS certificate required by browsers for Web Audio and microphone access. Click *Advanced → Proceed to site*.
-4. Sign in with the credentials specified during setup.
-
----
-
-## 5. DMR Hotspot & Multi-Network Configuration
-
-In the web interface, open hotspot settings and configure your virtual hotspots for any supported network:
-
-| Network | Supported Features & Connection Type |
-|---|---|
-| **BrandMeister** | Full HomeBrew protocol with API v2 support, dynamic/static TG management, master server latency probe |
-| **TGIF Network** | HomeBrew protocol with TGIF API integration, dynamic PTT TG routing (4000 disconnect), server probe |
-| **FreeDMR** | HomeBrew protocol with RPTO options support (`TS1=...;TS2=...;DIAL=...`), server probe |
-| **DMR+ / IPSC2** | HomeBrew protocol with reflector linking (`StartRef=...`), server probe |
-| **XLX Reflectors** | Multiprotocol reflector gateway (D-Star / DMR), module selection (A–Z) on TS2 |
-
-Basic hotspot fields:
-| Field | Description |
-|---|---|
-| **Network Type** | Select BrandMeister, TGIF, FreeDMR, DMR+, or XLX |
-| **Callsign** | Your licensed amateur radio callsign |
-| **DMR ID** | Your DMR ID (registered via radioid.net) |
-| **Hotspot Password** | *Hotspot Security Password* for the selected network |
-| **Master Host & Port** | Closest master server (use the built-in **Server Probe** to benchmark and pick the fastest server) |
-
-Click **Save** — the gateway will connect to the selected network. Multiple virtual hotspots across different networks can run simultaneously.
-
----
-
-## 6. Piper Speech Synthesis (TTS) Voices
-
-Voice models are downloaded on demand:
-
-* Open speech synthesis (TTS) settings and choose a voice model — it downloads automatically in the background.
-* Downloaded models are cached in `config/piper_voices/` and persist across container restarts and updates.
-
----
-
-## 7. Android Application
-
-The mobile app provides a native Android client with low-latency PTT and background audio service.
-
-1. **Download APK** from your server:
-   ```text
-   https://<SERVER_IP>:8266/download/apk
-   ```
-   *(or use `src/static/ProxDMR.apk` from the release archive).*
-2. Allow installation from unknown sources on your Android device and install the package.
-3. On first run, enter:
-   * **Server IP or domain**;
-   * **Port** (default `8266`);
-   * Tailscale VPN auto-connect preference (if accessing remotely).
-4. Enter your login credentials. The application persists session tokens for seamless reconnects.
-
----
-
-## 8. Data Persistence & Storage
-
-All user configurations and persistent records reside **outside the container**, preserving data across updates:
-
-| Path | Contents |
-|---|---|
-| `.env` | Environment configuration (host IP, ports, admin credentials) |
-| `config/proxdmr.db` | SQLite database (users, settings, call logs) |
-| `config/jwt_secret.key` | JWT session encryption key |
-| `config/cert.pem`, `config/key.pem` | TLS certificates |
-| `config/recordings/` | Audio recordings (`.wav`) |
-| `config/piper_voices/` | Cached Piper TTS voice models |
-| `data/` | RadioID database and TalkGroup cache |
-
----
-
-## 9. Upgrading to a New Version
-
-1. Stop the service and create a backup (see Section 10):
-   ```bash
-   docker compose down
-   ```
-2. Extract the new archive over your installation directory. Existing `.env`, `config/`, and `data/` directories will remain untouched.
-3. Rebuild and launch:
-   ```bash
-   docker compose up -d --build
-   ```
-4. Database migrations apply automatically upon startup.
-5. Update the Android app via `/download/apk` if a new APK version is available.
-
----
-
-## 10. Backup & Restore
-
-To back up, stop the service and copy **`config/`**, **`data/`**, and **`.env`**.  
-To restore, copy these items back into the project root and run `docker compose up -d`.
-
----
-
-## 11. Security Recommendations
-
-* Prefer accessing your server remotely through a **VPN (Tailscale / WireGuard)** rather than opening public WAN ports.
-* Always use a strong, unique password for your administrator account.
-* Never share `.env` or `config/` files, as they contain passwords and session keys.
-
----
-
-## 12. Useful Commands
+### Option C: Manual Build via Docker Compose
 
 ```bash
-docker compose logs -f              # Follow logs in real time
-docker compose ps                   # View container status
-docker compose restart              # Restart service
-docker compose down                 # Stop service
-docker compose up -d --build        # Rebuild and start in background
+cp .env.example .env   # Edit .env to configure HOST_IP, ADMIN_USER, ADMIN_PASSWORD, DEMO_MODE, etc.
+docker compose up -d --build
+```
+
+## First Launch & Network Configuration
+
+1. **Wait 1–2 minutes** on first start while the container generates TLS certificates, initializes the database, and downloads the RadioID directory (check progress with `docker compose logs -f`).
+2. Open **`https://<SERVER_IP>:8266`** in your browser.
+3. Accept the self-signed TLS certificate warning (*Advanced → Proceed*) — HTTPS is required by browsers for Web Audio and microphone access.
+4. Sign in and open **Hotspot Settings** to add one or more virtual hotspots:
+
+| Network | Supported Features & Protocol Options |
+| :--- | :--- |
+| **BrandMeister** | HomeBrew protocol + API v2 integration, static/dynamic TG management, server latency probe |
+| **TGIF Network** | HomeBrew protocol + TGIF API integration, dynamic PTT TG routing (`4000` disconnect), server probe |
+| **FreeDMR** | HomeBrew protocol with RPTO options (`TS1=...;TS2=...;DIAL=...`), server probe |
+| **DMR+ / IPSC2** | HomeBrew protocol with reflector linking (`StartRef=...`), server probe |
+| **XLX Reflectors** | Multiprotocol reflector gateway (D-Star / DMR), module selection (`A–Z`) on TS2 |
+
+## Android Application
+
+1. Download the native APK directly from your running server at **`https://<SERVER_IP>:8266/download/apk`** (or from `src/static/ProxDMR.apk`).
+2. Install the APK (allow installation from unknown sources if prompted).
+3. Enter your **Server IP/domain**, **Port** (`8266`), optional **Tailscale VPN** auto-connect preference, and login credentials.
+
+## Operations, Updates & Backup
+
+### Persistent Data Layout
+All user state is stored on the host outside the container and survives upgrades:
+
+| Host Path | Contents |
+| :--- | :--- |
+| `.env` | Environment variables (host IP, ports, initial admin credentials, demo mode settings) |
+| `config/proxdmr.db` | SQLite database (users, hotspot configs, contacts, call logs) |
+| `config/cert.pem`, `config/key.pem`, `config/jwt_secret.key` | TLS certificates and JWT session signing key |
+| `config/recordings/` | Recorded QSO audio files (`.wav`) |
+| `config/piper_voices/` | On-demand cached Piper TTS voice models |
+| `config/backups/` | Automatic source code backups created before in-app updates |
+| `data/` | Synchronized RadioID database, TalkGroup cache, and watchdog/alert settings |
+
+### Upgrading
+* **1-Click Web UI Update:** Open **Settings → System Update** in the web interface to check for new GitHub releases, automatically back up current code to `config/backups/`, apply the update, and restart the container.
+* **Via Pre-Built Image:** Run `docker compose pull && docker compose up -d`.
+* **Via Local Build / Git:** Pull or extract the new files over your project directory (`config/`, `data/`, and `.env` remain untouched) and run `docker compose up -d --build`. Database migrations apply automatically on startup.
+* **Android App:** Download the updated APK from `https://<SERVER_IP>:8266/download/apk` after upgrading the server.
+
+### Backup, Restore & Useful Commands
+* **Backup:** Stop the service (`docker compose down`) and copy `config/`, `data/`, and `.env`.
+* **Restore:** Copy `config/`, `data/`, and `.env` into the project root and run `docker compose up -d`.
+* **Security Best Practices:** Use strong admin passwords, never share `.env` or `config/`, and prefer VPN access (Tailscale / WireGuard) over exposing ports to the public internet.
+
+```bash
+docker compose logs -f          # Follow live container logs
+docker compose ps               # Check container status (proxdmr & proxdmr-watchdog)
+docker compose restart          # Restart services
+docker compose down             # Stop services
+docker compose up -d --build    # Rebuild and start in background
 ```
