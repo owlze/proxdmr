@@ -1296,6 +1296,94 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
   }
   window.__proxdmr.updateHotspotVuMeter = updateHotspotVuMeter;
 
+  function drawVuTrack(canvas, ctx, activeCount, peakIndex, isOverload, isTs2, isLight, N) {
+    if (!canvas || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const targetW = Math.round(rect.width * dpr);
+    const targetH = Math.round(rect.height * dpr);
+
+    if (targetW <= 0 || targetH <= 0) return;
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+
+    const segW = 7;
+    const gapW = 2;
+    const totalSegs = N || Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
+    const totalMeterW = totalSegs * segW + (totalSegs - 1) * gapW;
+    const startX = Math.floor((targetW - totalMeterW) / 2);
+    const segH = targetH;
+
+    ctx.clearRect(0, 0, targetW, targetH);
+
+    // Color definitions
+    const unlitColor = isLight ? "#cbd5e1" : "#1c2534";
+    const litColor = isTs2 
+      ? (isLight ? "#ea580c" : "#f98700") 
+      : (isLight ? "#0284c7" : "#00dbf7");
+    const peakNormalColor = isLight ? "#0f172a" : "#ffffff";
+    const peakOverloadColor = isLight ? "#dc2626" : "#ff3860";
+
+    for (let i = 0; i < totalSegs; i++) {
+      const x = startX + i * (segW + gapW);
+      const isLit = i < activeCount;
+      const isPeak = (i === peakIndex);
+
+      let color = unlitColor;
+      if (isPeak) {
+        color = isOverload ? peakOverloadColor : peakNormalColor;
+      } else if (isLit) {
+        color = litColor;
+      }
+
+      ctx.fillStyle = color;
+      ctx.fillRect(x, 0, segW, segH);
+    }
+  }
+
+  function refreshAllVuCanvases() {
+    const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
+    const dpr = window.devicePixelRatio || 1;
+    const segW = 7;
+    const gapW = 2;
+    const allCards = document.querySelectorAll(".radio-container");
+    allCards.forEach(card => {
+      const hid = card.dataset.hotspotId || "default";
+      for (const slot of [1, 2]) {
+        const canvas = card.querySelector(slot === 1 ? ".clock-vu-canvas.track-ts1" : ".clock-vu-canvas.track-ts2");
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          const targetW = Math.round(canvas.clientWidth * dpr);
+          const N = Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
+          const st = getVuState(hid, slot);
+          const activeCount = Math.min(N, Math.max(0, Math.round((st.current / 100.0) * N)));
+          const peakIndex = st.peak > 1.0 ? Math.min(N - 1, Math.max(0, Math.floor((st.peak / 100.0) * N))) : -1;
+          const isOverload = st.peak >= 85;
+          drawVuTrack(canvas, ctx, activeCount, peakIndex, isOverload, slot === 2, isLight, N);
+          if (card._vuEls && card._vuEls[slot]) {
+            card._vuEls[slot].lastActiveCount = activeCount;
+            card._vuEls[slot].lastPeakIndex = peakIndex;
+            card._vuEls[slot].lastOverload = isOverload;
+            card._vuEls[slot].lastLight = isLight;
+            card._vuEls[slot].lastW = canvas.clientWidth;
+            card._vuEls[slot].lastN = N;
+          }
+        }
+      }
+    });
+  }
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("resize", refreshAllVuCanvases, { passive: true });
+    try {
+      const themeObs = new MutationObserver(() => refreshAllVuCanvases());
+      themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    } catch (_) {}
+  }
+
   function vuMeterTick(now) {
     const dt = Math.min(0.1, (now - lastVuTickTime) / 1000.0);
     lastVuTickTime = now;
@@ -1342,18 +1430,11 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           st.peak = Math.max(st.current, st.peak - (VU_PEAK_DECAY_RATE * dt));
           if (st.peak < 1.0) st.peak = 0;
         }
-
         if (!card._vuEls) card._vuEls = {};
-        if (!card._vuEls[slot]) {
-          let peakEl = card.querySelector(slot === 1 ? ".vu-peak-ts1" : ".vu-peak-ts2");
-          if (!peakEl) {
-            const vuBar = card.querySelector(slot === 1 ? ".clock-vu-track.track-ts1, .vfo-ts1-row .vfo-vu-bar" : ".clock-vu-track.track-ts2, .vfo-ts2-row .vfo-vu-bar");
-            if (vuBar) {
-              peakEl = document.createElement("div");
-              peakEl.className = `clock-vu-peak ${slot === 1 ? "vu-peak-ts1" : "vu-peak-ts2"}`;
-              vuBar.appendChild(peakEl);
-            }
-          }
+        let vuData = card._vuEls[slot];
+        if (!vuData || !vuData.canvas || !vuData.canvas.isConnected) {
+          const canvas = card.querySelector(slot === 1 ? ".clock-vu-canvas.track-ts1" : ".clock-vu-canvas.track-ts2");
+          const ctx = canvas ? canvas.getContext("2d") : null;
           let vertPeakEl = card.querySelector(slot === 1 ? ".vu-peak-vert-ts1" : ".vu-peak-vert-ts2");
           if (!vertPeakEl) {
             const vertVuBar = card.querySelector(slot === 1 ? ".vfo-ts1-row .vfo-vu-vert-bar" : ".vfo-ts2-row .vfo-vu-vert-bar");
@@ -1363,34 +1444,55 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
               vertVuBar.appendChild(vertPeakEl);
             }
           }
-          card._vuEls[slot] = {
-            fillEl: card.querySelector(slot === 1 ? ".vu-fill-ts1" : ".vu-fill-ts2"),
+          vuData = card._vuEls[slot] = {
+            canvas,
+            ctx,
             vertFillEl: card.querySelector(slot === 1 ? ".vu-fill-vert-ts1" : ".vu-fill-vert-ts2"),
-            peakEl,
-            vertPeakEl
+            vertPeakEl,
+            lastActiveCount: -1,
+            lastPeakIndex: -2,
+            lastOverload: false,
+            lastLight: null,
+            lastW: 0,
+            lastN: 0
           };
-        }
-
-        const { fillEl, vertFillEl, peakEl, vertPeakEl } = card._vuEls[slot];
-
-        if (fillEl) {
-          fillEl.style.width = `${st.current.toFixed(1)}%`;
-        }
-        if (peakEl) {
-          if (st.peak > 1.0) {
-            peakEl.style.left = `${Math.min(100, Math.max(0, st.peak)).toFixed(1)}%`;
-            peakEl.style.opacity = "1";
-            if (st.peak >= 85) {
-              peakEl.classList.add("vu-peak-overload");
-            } else {
-              peakEl.classList.remove("vu-peak-overload");
-            }
-          } else {
-            peakEl.style.opacity = "0";
-            peakEl.classList.remove("vu-peak-overload");
+          if (canvas && ctx) {
+            const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
+            const dpr = window.devicePixelRatio || 1;
+            const targetW = Math.round(canvas.clientWidth * dpr);
+            const N = Math.max(1, Math.floor((targetW + 2) / 9));
+            drawVuTrack(canvas, ctx, 0, -1, false, slot === 2, isLight, N);
           }
         }
 
+        const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
+
+        if (vuData.canvas && vuData.ctx) {
+          const dpr = window.devicePixelRatio || 1;
+          const curW = vuData.canvas.clientWidth;
+          const targetW = Math.round(curW * dpr);
+          const N = Math.max(1, Math.floor((targetW + 2) / 9));
+          const activeCount = Math.min(N, Math.max(0, Math.round((st.current / 100.0) * N)));
+          const peakIndex = st.peak > 1.0 ? Math.min(N - 1, Math.max(0, Math.floor((st.peak / 100.0) * N))) : -1;
+          const isOverload = st.peak >= 85;
+
+          if (vuData.lastActiveCount !== activeCount ||
+              vuData.lastPeakIndex !== peakIndex ||
+              vuData.lastOverload !== isOverload ||
+              vuData.lastLight !== isLight ||
+              vuData.lastW !== curW ||
+              vuData.lastN !== N) {
+            vuData.lastActiveCount = activeCount;
+            vuData.lastPeakIndex = peakIndex;
+            vuData.lastOverload = isOverload;
+            vuData.lastLight = isLight;
+            vuData.lastW = curW;
+            vuData.lastN = N;
+            drawVuTrack(vuData.canvas, vuData.ctx, activeCount, peakIndex, isOverload, slot === 2, isLight, N);
+          }
+        }
+
+        const { vertFillEl, vertPeakEl } = vuData;
         if (vertFillEl) {
           vertFillEl.style.height = `${st.current.toFixed(1)}%`;
         }
@@ -1538,6 +1640,8 @@ export function initAudioDsp() {
 }
 
 export {
+  drawVuTrack,
+  refreshAllVuCanvases,
   setupAudioRxModal,
   setupAudioTxModal,
   applyTxDspSettings,
@@ -1567,6 +1671,8 @@ if (typeof window !== "undefined") {
   window.updateHotspotVuMeter = updateHotspotVuMeter;
   window.updateRxVuMeter = updateRxVuMeter;
   window.vuMeterTick = vuMeterTick;
+  window.drawVuTrack = drawVuTrack;
+  window.refreshAllVuCanvases = refreshAllVuCanvases;
   window.startVuMeter = startVuMeter;
   window.stopVuMeter = stopVuMeter;
   window.resetTxDsp = resetTxDsp;

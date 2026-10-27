@@ -2256,8 +2256,6 @@
   "ts.on_start_hint": "Démarrer automatiquement le service Tailscale VPN au démarrage pour l'accès à distance.",
   "ts_mode.auto_title": "Mode : Auto — sélection automatique selon le premier signal reçu (délai de maintien 2s). Cliquer pour changer de mode",
   "ts_mode.auto_toast": "🔊 Mode Auto : sélection automatique d'intervalle (délai 2s)",
-  "ts_mode.doubl_title": "Mode : Doubl — lecture simultanée des deux intervalles (contrôle Mute manuel). Cliquer pour changer de mode",
-  "ts_mode.doubl_toast": "🔊 Mode Doubl : son simultané des deux intervalles",
   "ts_mode.solo_title": "Mode : Solo — un seul intervalle de temps est audible à la fois (TS1 et TS2 s'excluent mutuellement). Cliquer pour changer de mode",
   "ts_mode.solo_toast": "🔊 Mode Solo : un seul intervalle actif",
   "ts_mode.xlx_locked_title": "Mode: Solo (verrouillé pour le réseau XLX, seul TS2 disponible)",

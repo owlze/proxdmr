@@ -1665,7 +1665,7 @@ select option:focus {
   opacity: 1;
 }
 
-/* Header Dual VU Meter between LOC & UTC clocks */
+/* Header Dual VU Meter between LOC & UTC clocks (Canvas Pixel-Perfect) */
 .screen-clock-vu {
   display: flex;
   flex-direction: column;
@@ -1677,96 +1677,17 @@ select option:focus {
   user-select: none;
 }
 
-.clock-vu-track {
-  position: relative;
+.clock-vu-canvas {
+  display: block;
   width: 100%;
   height: 7px;
   min-height: 7px;
   max-height: 7px;
-  background-color: #1c2534;
+  background: transparent !important;
   border: none !important;
-  border-radius: 0px;
-  overflow: hidden;
   box-sizing: border-box;
   box-shadow: none !important;
   outline: none !important;
-  -webkit-mask-image: repeating-linear-gradient(to right, #000 0px, #000 5px, transparent 5px, transparent 7px);
-  mask-image: repeating-linear-gradient(to right, #000 0px, #000 5px, transparent 5px, transparent 7px);
-}
-
-.clock-vu-track::after {
-  display: none !important;
-}
-
-.clock-vu-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 0%;
-  height: 100%;
-  transition: width 0.04s linear;
-  z-index: 1;
-}
-
-.clock-vu-fill.vu-fill-ts1 {
-  background-color: #00dbf7;
-  box-shadow: none;
-}
-
-.clock-vu-fill.vu-fill-ts2 {
-  background-color: #f98700;
-  box-shadow: none;
-}
-
-.clock-vu-peak {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  margin-left: -1px;
-  background-color: #ffffff;
-  box-shadow: 0 0 3px #ffffff;
-  z-index: 4;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.clock-vu-peak.vu-peak-overload {
-  background-color: #ff3860;
-  box-shadow: 0 0 4px #ff3860;
-}
-
-/* Light mode for header clock VU meter */
-[data-theme="light"] .clock-vu-track {
-  background-color: #cbd5e1 !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-[data-theme="light"] .clock-vu-track::after {
-  display: none !important;
-}
-
-[data-theme="light"] .clock-vu-fill.vu-fill-ts1 {
-  background-color: #0284c7;
-  box-shadow: none;
-}
-
-[data-theme="light"] .clock-vu-fill.vu-fill-ts2 {
-  background-color: #ea580c;
-  box-shadow: none;
-}
-
-[data-theme="light"] .clock-vu-peak {
-  background-color: #0f172a;
-  box-shadow: 0 0 2px rgba(15, 23, 42, 0.6);
-}
-
-[data-theme="light"] .clock-vu-peak.vu-peak-overload {
-  background-color: #dc2626;
-  box-shadow: 0 0 4px rgba(220, 38, 38, 0.85);
 }
 
 
@@ -2064,22 +1985,13 @@ select option:focus {
   box-shadow: 0 1px 4px rgba(56, 189, 248, 0.4);
 }
 
-/* Doubl: Inverted for dark theme (Yellow solid fill, dark text) */
-.ts-audio-mode-badge.ts-mode-doubl {
+/* Auto: Inverted for dark theme (Yellow solid fill, dark text - former Doubl color) */
+.ts-audio-mode-badge.ts-mode-auto {
   background: #ffe154;
   color: #0d1117;
   border-color: #ffe154;
   font-weight: 800;
   box-shadow: 0 1px 4px rgba(255, 225, 84, 0.4);
-}
-
-/* Auto: Inverted for dark theme (Green solid fill, dark text) */
-.ts-audio-mode-badge.ts-mode-auto {
-  background: #2ecc71;
-  color: #0d1117;
-  border-color: #2ecc71;
-  font-weight: 800;
-  box-shadow: 0 1px 4px rgba(46, 204, 113, 0.4);
 }
 
 .status-badge-item.ts-audio-mode-btn:hover .ts-audio-mode-badge {
@@ -20286,20 +20198,12 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   box-shadow: 0 0 5px rgba(56, 189, 248, 0.25) !important;
   font-weight: 700 !important;
 }
-[data-theme="light"] .ts-audio-mode-badge.ts-mode-doubl,
-.theme-light .ts-audio-mode-badge.ts-mode-doubl {
+[data-theme="light"] .ts-audio-mode-badge.ts-mode-auto,
+.theme-light .ts-audio-mode-badge.ts-mode-auto {
   background: rgba(168, 85, 247, 0.12) !important;
   color: #9333ea !important;
   border-color: rgba(168, 85, 247, 0.5) !important;
   box-shadow: 0 0 5px rgba(168, 85, 247, 0.25) !important;
-  font-weight: 700 !important;
-}
-[data-theme="light"] .ts-audio-mode-badge.ts-mode-auto,
-.theme-light .ts-audio-mode-badge.ts-mode-auto {
-  background: rgba(46, 204, 113, 0.12) !important;
-  color: #16a34a !important;
-  border-color: rgba(46, 204, 113, 0.5) !important;
-  box-shadow: 0 0 5px rgba(46, 204, 113, 0.25) !important;
   font-weight: 700 !important;
 }
 

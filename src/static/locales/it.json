@@ -2256,8 +2256,6 @@
   "ts.on_start_hint": "Avvia automaticamente il servizio VPN Tailscale all'avvio per l'accesso remoto.",
   "ts_mode.auto_title": "Modalità: Auto — selezione automatica dello slot in base al primo segnale ricevuto (ritardo di 2s). Clic per cambiare modalità",
   "ts_mode.auto_toast": "🔊 Modalità Auto: selezione automatica dello slot (ritardo 2s)",
-  "ts_mode.doubl_title": "Modalità: Doubl — riproduzione simultanea di entrambi gli slot (controllo manuale Mute). Clic per cambiare modalità",
-  "ts_mode.doubl_toast": "🔊 Modalità Doubl: audio simultaneo di entrambi gli slot",
   "ts_mode.solo_title": "Modalità: Solo — si ascolta solo uno slot alla volta (TS1 e TS2 si escludono a vicenda). Clic per cambiare modalità",
   "ts_mode.solo_toast": "🔊 Modalità Solo: un solo slot attivo",
   "ts_mode.xlx_locked_title": "Modalità: Solo (bloccata per la rete XLX, disponibile solo TS2)",

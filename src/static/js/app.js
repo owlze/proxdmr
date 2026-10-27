@@ -27,7 +27,7 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.385';
+} from './modules/dmr/transcriber.js?v=2.9.387';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
 import { initAndroidBridge } from './modules/core/android.js';
@@ -83,7 +83,7 @@ import {
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
 import {
   initAudioRouting
-} from './modules/audio/routing.js?v=2.9.367';
+} from './modules/audio/routing.js?v=2.9.387';
 import {
   initAudioDsp
 } from './modules/audio/dsp.js?v=2.9.367';
@@ -189,7 +189,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.367';
+} from './modules/audio/volume-mute.js?v=2.9.387';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -216,7 +216,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.378';
+} from './modules/network/ws.js?v=2.9.387';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application

@@ -23,6 +23,9 @@ from tts_normalizer import (
     clean_display_text,
     normalize_for_russian_tts,
     filter_hesitation_fillers,
+    strip_json_artifacts,
+    NOISE_PLACEHOLDER,
+    is_noise_placeholder,
 )
 
 logger = logging.getLogger("proxdmr.transcriber")
@@ -797,7 +800,10 @@ def prepare_text_for_tts(text: str, target_lang: str = "ru", callsign: str = "")
     4. Phoneticizes radio jargon (Q-codes, CQ, Roger) according to target language pronunciation.
     5. Cleans up extra whitespace and punctuation.
     """
-    if not text:
+    if not text or is_noise_placeholder(text):
+        return ""
+    text = strip_json_artifacts(text)
+    if not text or is_noise_placeholder(text):
         return ""
     # Strip callsigns and their tags (e.g. "<call>KD9CRD</call>", explicit callsign, or CALLSIGN_REGEX)
     clean = strip_callsigns_for_tts(text, callsign=callsign)
@@ -923,6 +929,13 @@ def clean_transcription_text(text: str) -> str:
     """
     if not text:
         return ""
+    if is_noise_placeholder(text):
+        return NOISE_PLACEHOLDER
+    text = strip_json_artifacts(text)
+    if not text:
+        return ""
+    if is_noise_placeholder(text):
+        return NOISE_PLACEHOLDER
 
     # 1. Clean <call> tag contents ending with phonetic word (e.g. <call>KD9CHARLIE</call> -> <call>KD9C</call>)
     def fix_call_tag(m):
@@ -1492,12 +1505,40 @@ class GeminiTranscriberService:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
+                    # Strip markdown code blocks if model wrapped JSON in ```json ... ```
+                    raw_json = content
+                    if "```" in raw_json:
+                        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_json)
+                        if m:
+                            raw_json = m.group(1).strip()
+
+                    parsed = None
                     try:
-                        parsed = json.loads(content)
-                        translated = (parsed.get("text") or content).strip()
+                        parsed = json.loads(raw_json)
                     except Exception:
-                        translated = content
-                    return translated, None
+                        pass
+
+                    if isinstance(parsed, dict):
+                        if "error" in parsed:
+                            err_text = str(parsed.get("error", "")).strip()
+                            logger.warning(f"[TRANSCRIBER] Groq translate model refusal: {err_text}")
+                            return None, f"Groq Model Refusal: {err_text}"
+
+                        tr_candidate = parsed.get("text") or parsed.get("translation") or parsed.get("translated_text")
+                        if isinstance(tr_candidate, str) and tr_candidate.strip():
+                            return tr_candidate.strip(), None
+
+                        logger.warning(f"[TRANSCRIBER] Groq translate JSON missing 'text' key: {raw_json}")
+                        return None, "Groq translation missing text field"
+
+                    if raw_json.startswith("{") or "error" in raw_json.lower() or "incomplete" in raw_json.lower():
+                        return None, f"Groq invalid translation output: {raw_json}"
+
+                    if raw_json:
+                        return raw_json, None
+
+                    return None, "Groq returned empty translation" 
             except urllib.error.HTTPError as e:
                 err_msg = f"Groq Translate HTTP {e.code}"
                 try:
@@ -1595,6 +1636,11 @@ class GeminiTranscriberService:
             f"  2) Standard international radio Q-codes (QTH, QSO, QSL, 73, CQ, Roger) and RST reports (59, 599, 58, 59+20, etc.).\n"
             f"- Signal reports (59, 599, etc.) MUST ALWAYS be preserved as digits, NEVER translated or spelled out in words (do NOT write 'пятьдесят девять' or 'fifty-nine')!\n"
             f"- ALL OTHER TEXT MUST BE 100% IN {target_lang_en.upper()}.\n\n"
+            f"RADIO FRAGMENTS HANDLING:\n"
+            f"- Radio transmissions are frequently short, noisy, or broken fragments (e.g. callsigns, partial phrases, single words).\n"
+            f"- NEVER refuse to translate, NEVER ask for more context, NEVER output conversational apologies or explanations.\n"
+            f"- NEVER output an 'error' object or refusal message.\n"
+            f"- Always translate whatever recognizable words exist, keep callsigns in <call>...</call>, and strictly return valid JSON with the 'text' key: {{\"text\": \"...\"}}.\n\n"
             f"- Response MUST strictly be in valid JSON format:\n"
             f'{{"text": "fully translated text in {target_lang_en} with callsigns in <call>...</call>"}}'
         )
@@ -2201,9 +2247,14 @@ class GeminiTranscriberService:
                     logger.warning(f"[TRANSCRIBER] TS{slot} Groq ASR error: {error_text}")
                     await self._notify_error(hid, slot, error_text)
                     return
-                original_text = clean_transcription_text(res.get("text", "").strip())
+                raw_asr = res.get("text", "").strip()
+                original_text = clean_transcription_text(raw_asr)
                 if not original_text:
-                    return
+                    if raw_asr:
+                        original_text = NOISE_PLACEHOLDER
+                        translation_failed = True
+                    else:
+                        return
                 sl_info = self._source_lang_info()
                 if sl_info:
                     detected_lang = sl_info[2]
@@ -2553,6 +2604,9 @@ class GeminiTranscriberService:
                     except Exception:
                         pass
 
+            if translation_failed:
+                translated_text = NOISE_PLACEHOLDER
+
             final_text = original_text if is_direct else translated_text
             if not is_direct:
                 final_text = filter_hesitation_fillers(final_text)
@@ -2586,6 +2640,10 @@ class GeminiTranscriberService:
                 })
 
             # --- STAGE 3: SPEECH SYNTHESIS (TTS) ---
+            if translation_failed or is_noise_placeholder(display_text):
+                logger.info(f"[TRANSCRIBER] TS{slot} Skipping TTS synthesis for noise/error placeholder.")
+                return
+
             if callsign_tts_task is not None:
                 try:
                     await callsign_tts_task

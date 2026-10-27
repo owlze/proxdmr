@@ -2256,8 +2256,6 @@
   "ts.on_start_hint": "Tailscale VPN-Dienst beim Start automatisch für den Fernzugriff starten.",
   "ts_mode.auto_title": "Modus: Auto — automatische Zeitschlitz-Auswahl nach erstem Signal (2s Haltezeit). Klicken zum Umschalten",
   "ts_mode.auto_toast": "🔊 Auto-Modus: automatische Zeitschlitz-Auswahl (2s Verzögerung)",
-  "ts_mode.doubl_title": "Modus: Doubl — gleichzeitiges Audio beider Zeitschlitze (manuelle Mute-Steuerung). Klicken zum Umschalten",
-  "ts_mode.doubl_toast": "🔊 Doubl-Modus: gleichzeitiges Audio beider Zeitschlitze",
   "ts_mode.solo_title": "Modus: Solo — nur ein Zeitschlitz ist aktiv (TS1 und TS2 schließen sich gegenseitig aus). Klicken zum Umschalten",
   "ts_mode.solo_toast": "🔊 Solo-Modus: ein aktiver Zeitschlitz",
   "ts_mode.xlx_locked_title": "Modus: Solo (für XLX-Netzwerk fixiert, nur TS2 verfügbar)",

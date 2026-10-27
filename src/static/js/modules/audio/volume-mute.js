@@ -111,12 +111,7 @@ export function setSimultaneousSlotsEnabled(enabled, syncServer = true) {
   const boolVal = Boolean(enabled);
   localStorage.setItem("proxdmr_simultaneous_slots", boolVal ? "true" : "false");
   if (typeof window !== "undefined" && typeof window.setHotspotTsAudioMode === "function") {
-    const curMode = (typeof window.getHotspotTsAudioMode === "function") ? window.getHotspotTsAudioMode("default") : null;
-    if (boolVal && curMode === "auto") {
-      // Preserve "auto" mode! Both slots are active, but with dynamic handover.
-    } else {
-      window.setHotspotTsAudioMode("default", boolVal ? "doubl" : "solo");
-    }
+    window.setHotspotTsAudioMode("default", boolVal ? "auto" : "solo");
   }
   if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
     window.scheduleSyncClientSettings();

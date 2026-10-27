@@ -1103,7 +1103,8 @@ function syncTtsSoloMode() {
           localStorage.removeItem("proxdmr_pre_tts_ts_mode_" + h);
         }
       } catch (_) {}
-      if (prevMode && ["solo", "doubl", "auto"].includes(prevMode) && typeof setHotspotTsAudioMode === "function") {
+      if (prevMode === "doubl") prevMode = "auto";
+      if (prevMode && ["solo", "auto"].includes(prevMode) && typeof setHotspotTsAudioMode === "function") {
         setHotspotTsAudioMode(h, prevMode);
       }
     }

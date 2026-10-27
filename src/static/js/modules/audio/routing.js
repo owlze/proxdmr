@@ -230,14 +230,22 @@ export function getHotspotTsAudioMode(hid) {
   if (isXlxHotspot(cid)) {
     return "solo";
   }
-  const v = localStorage.getItem(`proxdmr_ts_mode_${cid}`);
-  if (v && ["solo", "doubl", "auto"].includes(v)) return v;
+  let v = localStorage.getItem(`proxdmr_ts_mode_${cid}`);
+  if (v === "doubl") {
+    v = "auto";
+    try { localStorage.setItem(`proxdmr_ts_mode_${cid}`, "auto"); } catch (_) {}
+  }
+  if (v && ["solo", "auto"].includes(v)) return v;
 
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
   const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
   if (isPrimary) {
-    const vDef = localStorage.getItem("proxdmr_ts_mode_default");
-    if (vDef && ["solo", "doubl", "auto"].includes(vDef)) return vDef;
+    let vDef = localStorage.getItem("proxdmr_ts_mode_default");
+    if (vDef === "doubl") {
+      vDef = "auto";
+      try { localStorage.setItem("proxdmr_ts_mode_default", "auto"); } catch (_) {}
+    }
+    if (vDef && ["solo", "auto"].includes(vDef)) return vDef;
   }
   return "solo";
 }
@@ -249,7 +257,7 @@ export function setHotspotTsAudioMode(hid, mode) {
     updateHotspotTsAudioModeUI(cid);
     return;
   }
-  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "solo";
+  const safeMode = (mode === "auto") ? "auto" : "solo";
   localStorage.setItem(`proxdmr_ts_mode_${cid}`, safeMode);
 
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
@@ -261,9 +269,6 @@ export function setHotspotTsAudioMode(hid, mode) {
 
   if (safeMode === "solo") {
     enforceSoloTsMute(cid);
-  } else if (safeMode === "doubl") {
-    setHotspotMute(cid, 1, false);
-    setHotspotMute(cid, 2, false);
   } else if (safeMode === "auto") {
     resetAutoSlotState(cid);
   }
@@ -281,9 +286,7 @@ export function cycleHotspotTsAudioMode(hid) {
     return;
   }
   const cur = getHotspotTsAudioMode(cid);
-  const order = ["solo", "doubl", "auto"];
-  const nextIdx = (order.indexOf(cur) + 1) % order.length;
-  const nextMode = order[nextIdx];
+  const nextMode = (cur === "solo") ? "auto" : "solo";
   setHotspotTsAudioMode(cid, nextMode);
 
   _triggerHaptic(35);
@@ -291,7 +294,7 @@ export function cycleHotspotTsAudioMode(hid) {
   let toastKey = `ts_mode.${nextMode}_toast`;
   let fallbackToast = nextMode === "solo"
     ? "🔊 Режим Solo: активен один таймслот"
-    : (nextMode === "doubl" ? "🔊 Режим Doubl: одновременный звук обоих таймслотов" : "🔊 Режим Auto: автоматический выбор таймслота (задержка 2 сек)");
+    : "🔊 Режим Auto: автоматический выбор таймслота (задержка 2 сек)";
   const msg = _getTranslation(toastKey, {}, fallbackToast);
   showToast(msg, 1600);
 }
@@ -397,9 +400,6 @@ export function toggleHotspotMute(hid, slot) {
         _resetAutoSlotAudio(cid);
       }, 3000);
     }
-  } else {
-    // Doubl mode: independent mute control
-    setHotspotMute(cid, s, newMute);
   }
 }
 
@@ -586,7 +586,7 @@ export function renderTsAudioModeBtnContent(btn, mode, isXlx = false) {
   const isLockedXlx = Boolean(isXlx) || (card && ((card.dataset.networkType || "").toLowerCase() === "xlx" || card.classList.contains("card-net-xlx")));
 
   if (isLockedXlx) {
-    badge.classList.remove("ts-mode-doubl", "ts-mode-auto");
+    badge.classList.remove("ts-mode-auto");
     badge.classList.add("ts-mode-solo");
     badge.textContent = "TS1/2 Solo";
     const titleKey = "ts_mode.xlx_locked_title";
@@ -602,19 +602,15 @@ export function renderTsAudioModeBtnContent(btn, mode, isXlx = false) {
   btn.classList.remove("ts-mode-locked");
   btn.style.cursor = "";
 
-  const safeMode = ["solo", "doubl", "auto"].includes(mode) ? mode : "solo";
-  badge.classList.remove("ts-mode-solo", "ts-mode-doubl", "ts-mode-auto");
+  const safeMode = (mode === "auto") ? "auto" : "solo";
+  badge.classList.remove("ts-mode-solo", "ts-mode-auto");
   badge.classList.add(`ts-mode-${safeMode}`);
 
-  let label = "TS1/2 Doubl";
-  let titleKey = "ts_mode.doubl_title";
-  let fallbackTitle = "Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима";
+  let label = "TS1/2 Solo";
+  let titleKey = "ts_mode.solo_title";
+  let fallbackTitle = "Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима";
 
-  if (safeMode === "solo") {
-    label = "TS1/2 Solo";
-    titleKey = "ts_mode.solo_title";
-    fallbackTitle = "Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима";
-  } else if (safeMode === "auto") {
+  if (safeMode === "auto") {
     label = "TS1/2 Auto";
     titleKey = "ts_mode.auto_title";
     fallbackTitle = "Режим: Auto — автоматический выбор активного таймслота по первому появившемуся сигналу (задержка 2 сек). Клик для смены режима";

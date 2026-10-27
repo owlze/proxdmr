@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.386">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.388">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -588,14 +588,8 @@
             <div class="screen-clock-bar" title="Время станции (LOC = Местное, UTC = По Гринвичу)" data-i18n-title="clocks.title">
               <div class="screen-clock-item screen-clock-loc" title="Местное время (LOC)" data-i18n-title="clocks.loc_title"><span class="clock-label">LOC:</span> <span id="locTimeDisplay" class="clock-val loc-time-display">--:--</span></div>
               <div class="screen-clock-vu" title="Индикаторы уровня TS1 / TS2" data-i18n-title="clocks.vu_title">
-                <div class="clock-vu-track track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title">
-                  <div id="vuFill_default_ts1" class="clock-vu-fill vu-fill-ts1"></div>
-                  <div id="vuPeak_default_ts1" class="clock-vu-peak vu-peak-ts1"></div>
-                </div>
-                <div class="clock-vu-track track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title">
-                  <div id="vuFill_default_ts2" class="clock-vu-fill vu-fill-ts2"></div>
-                  <div id="vuPeak_default_ts2" class="clock-vu-peak vu-peak-ts2"></div>
-                </div>
+                <canvas class="clock-vu-canvas track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title"></canvas>
+                <canvas class="clock-vu-canvas track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title"></canvas>
               </div>
               <div class="screen-clock-item screen-clock-utc" title="Время по Гринвичу (UTC)" data-i18n-title="clocks.utc_title"><span class="clock-label">UTC:</span> <span id="utcTimeDisplay" class="clock-val utc-time-display">--:--</span></div>
             </div>
@@ -739,9 +733,9 @@
                     </div>
                   </div>
 
-                  <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) -->
+                  <!-- Right side: TS Audio Mode (Solo/Auto) -->
                   <div class="status-toggles-group">
-                    <div id="tsAudioModeToggleBtn" class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
+                    <div id="tsAudioModeToggleBtn" class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима" data-i18n-title="ts_mode.solo_title">
                       <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-solo">TS1/2 Solo</span>
                     </div>
                   </div>
@@ -1295,14 +1289,8 @@
           <div class="screen-clock-bar" title="Время станции (LOC = Местное, UTC = По Гринвичу)" data-i18n-title="clocks.title">
             <div class="screen-clock-item screen-clock-loc" title="Местное время (LOC)" data-i18n-title="clocks.loc_title"><span class="clock-label">LOC:</span> <span class="clock-val loc-time-display">--:--</span></div>
             <div class="screen-clock-vu" title="Индикаторы уровня TS1 / TS2" data-i18n-title="clocks.vu_title">
-              <div class="clock-vu-track track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title">
-                <div class="clock-vu-fill vu-fill-ts1"></div>
-                <div class="clock-vu-peak vu-peak-ts1"></div>
-              </div>
-              <div class="clock-vu-track track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title">
-                <div class="clock-vu-fill vu-fill-ts2"></div>
-                <div class="clock-vu-peak vu-peak-ts2"></div>
-              </div>
+              <canvas class="clock-vu-canvas track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title"></canvas>
+              <canvas class="clock-vu-canvas track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title"></canvas>
             </div>
             <div class="screen-clock-item screen-clock-utc" title="Время по Гринвичу (UTC)" data-i18n-title="clocks.utc_title"><span class="clock-label">UTC:</span> <span class="clock-val utc-time-display">--:--</span></div>
           </div>
@@ -1441,9 +1429,9 @@
                   </div>
                 </div>
 
-                <!-- Right side: TS Audio Mode (Solo/Doubl/Auto) -->
+                <!-- Right side: TS Audio Mode (Solo/Auto) -->
                 <div class="status-toggles-group">
-                  <div class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Doubl — одновременное воспроизведение обоих таймслотов (ручное управление Mute). Клик для смены режима" data-i18n-title="ts_mode.doubl_title">
+                  <div class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима" data-i18n-title="ts_mode.solo_title">
                     <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-solo">TS1/2 Solo</span>
                   </div>
                 </div>
@@ -5550,7 +5538,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.386"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.388"></script>
 </body>
 </html>
 

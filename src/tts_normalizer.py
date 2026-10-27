@@ -268,7 +268,65 @@ def _is_callsign_token(token: str, callsign: str = "") -> bool:
     return False
 
 
+
+NOISE_PLACEHOLDER = "[ ~ ~ ~ ~ ~ ]"
+
+
+def is_noise_placeholder(text: str) -> bool:
+    if not text:
+        return False
+    t = text.strip()
+    if t == NOISE_PLACEHOLDER:
+        return True
+    return bool(re.match(r"^\[?\s*~[\s~]*~?\s*\]?$", t))
+
+
+def strip_json_artifacts(text: str) -> str:
+    """
+    Removes raw JSON artifacts (e.g. {"error": "..."} or {"text": "..."})
+    accidentally emitted by LLMs into transcription or TTS text.
+    """
+    if not text:
+        return ""
+
+    original = text.strip()
+
+    # Unwrap markdown fences if any
+    if "```" in original:
+        original = re.sub(r'```(?:json)?\s*\{[\s\S]*?(?:error|message|detail)[\s\S]*?\}\s*```', '', original, flags=re.IGNORECASE).strip()
+        m = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", original)
+        if m:
+            original = m.group(1).strip()
+
+    if not original or "{" not in original:
+        return original
+
+    # 1. Whole string is a JSON object
+    if original.startswith("{") and original.endswith("}"):
+        try:
+            import json
+            data = json.loads(original)
+            if isinstance(data, dict):
+                if "error" in data or "message" in data:
+                    return ""
+                if "text" in data and isinstance(data["text"], str):
+                    return data["text"].strip()
+                if "translation" in data and isinstance(data["translation"], str):
+                    return data["translation"].strip()
+        except Exception:
+            pass
+
+    # 2. Embedded or appended JSON error object: {"error": "..."}
+    cleaned = re.sub(r'\{\s*"(?:error|message|detail)"\s*:[^}]*\}', "", original, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r'\{\s*"(?:error|message|detail)"\s*:.*', "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+
+    cleaned = re.sub(r'```(?:json)?\s*```', '', cleaned).strip()
+
+    return cleaned.strip()
+
+
 def clean_display_text(text: str, callsign: str = "") -> str:
+
     """
     Cleans caption display text for on-screen VFO card and CallLog:
     - Removes spelled-out phonetic callsign words (e.g. 'Девять-Генри-Один...', '9 Отель 1, GY')
@@ -279,6 +337,14 @@ def clean_display_text(text: str, callsign: str = "") -> str:
     """
     if not text or not text.strip():
         return ""
+
+    if is_noise_placeholder(text):
+        return NOISE_PLACEHOLDER
+    text = strip_json_artifacts(text)
+    if not text or not text.strip():
+        return ""
+    if is_noise_placeholder(text):
+        return NOISE_PLACEHOLDER
 
     original = text.strip()
 
@@ -391,6 +457,8 @@ def filter_hesitation_fillers(text: str) -> str:
     """
     if not text:
         return ""
+    if is_noise_placeholder(text):
+        return NOISE_PLACEHOLDER
 
     # Matches standalone 'э', 'э-э', 'э-э-э' with any combination of upper/lowercase,
     # hyphens, en-dashes, em-dashes, and '+' or acute stress marks.

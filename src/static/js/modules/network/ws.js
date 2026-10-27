@@ -461,7 +461,7 @@ export function connectWebSocket(force = false) {
           window.handleAutoSlotActivity(cid, slot, true);
         }
 
-        const mode = typeof getHotspotTsAudioMode === "function" ? getHotspotTsAudioMode(cid) : "doubl";
+        const mode = typeof getHotspotTsAudioMode === "function" ? getHotspotTsAudioMode(cid) : "solo";
         const isSlotMutedInStorage = (mode !== "auto") ? getHotspotMute(cid, slot) : false;
         const isSlotMutedInAudio = window.audioPlayer && audioPlayer.isSlotMuted && audioPlayer.isSlotMuted(cid, slot);
         if (isSlotMutedInStorage || isSlotMutedInAudio || isHotspotAudioMuted(cid) || isGlobalAudioMuted() || isPttAudioMuted()) {
@@ -1148,8 +1148,14 @@ export function handleServerMessage(msg) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_simultaneous_slots`, msg.app_settings.simultaneous_slots ? "true" : "false");
           localStorage.setItem("proxdmr_simultaneous_slots", msg.app_settings.simultaneous_slots ? "true" : "false");
           const curMode = (typeof window.getHotspotTsAudioMode === "function") ? window.getHotspotTsAudioMode("default") : null;
-          if (!(msg.app_settings.simultaneous_slots && curMode === "auto")) {
-            setSimultaneousSlotsEnabled(msg.app_settings.simultaneous_slots, false);
+          if (msg.app_settings.simultaneous_slots) {
+            if (curMode !== "auto") {
+              setSimultaneousSlotsEnabled(true, false);
+            }
+          } else {
+            if (curMode !== "solo") {
+              setSimultaneousSlotsEnabled(false, false);
+            }
           }
         }
         if (msg.app_settings.check_mic_on_tx !== undefined) {
