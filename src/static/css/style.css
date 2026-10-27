@@ -679,6 +679,34 @@ body.is-apk-mode #groupVolumeDownPtt {
   transform: scale(1.03);
   filter: drop-shadow(0 0 10px rgba(255, 87, 34, 0.45));
 }
+.brand-logo-hint {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: rgba(13, 17, 23, 0.96);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.65);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.75), 0 0 12px rgba(251, 191, 36, 0.25);
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s ease;
+}
+
+.brand-logo-wrap:hover .brand-logo-hint,
+.brand-logo-wrap:focus-visible .brand-logo-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 
 .brand-text {
   display: inline-flex;
@@ -1774,6 +1802,7 @@ select option:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 5px;
   font-size: 0.75rem;
   color: var(--text-muted);
   font-family: monospace;
@@ -1788,22 +1817,52 @@ select option:focus {
   overflow: hidden !important;
 }
 
+.screen-top-bar .mode-badge,
+.screen-top-bar .vfo-swl-badge,
+.screen-top-bar .dmr-id-display,
+.screen-top-bar .rtt-display {
+  flex-shrink: 0;
+}
+
+.screen-top-bar .callsign-display {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .rtt-display {
+  font-weight: bold;
   font-size: 0.68rem;
-  color: var(--text-muted);
   font-family: monospace;
-  opacity: 0.95;
-  font-weight: 600;
-  transition: color 0.2s ease;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 0px;
+  background: #21262d;
+  color: #8b949e;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
+
 .rtt-display.e2e-good {
-  color: #10b981 !important;
+  background: #0a5f2e !important;
+  color: #ffffff !important;
 }
+
 .rtt-display.e2e-warn {
-  color: #fbbf24 !important;
+  background: #b45309 !important;
+  color: #ffffff !important;
 }
+
 .rtt-display.e2e-bad {
-  color: #ef4444 !important;
+  background: #991b1b !important;
+  color: #ffffff !important;
 }
 
 .mode-badge {
@@ -3459,11 +3518,30 @@ select option:focus {
   z-index: 9999;
   backdrop-filter: blur(12px);
 }
-body.auth-locked > *:not(.auth-modal):not(.app-dialog-modal):not(#appDialogModal):not(.toast-container):not(#toastContainer) {
+
+/* Auth Shield: Hide empty dummy UI before auth status is determined */
+html.auth-pending body > *:not(.auth-modal):not(.onboarding-modal):not(#onboardingModal):not(.app-dialog-modal):not(#appDialogModal):not(.toast-container):not(#toastContainer) {
+  visibility: hidden !important;
+}
+html:not(.auth-pending) body > * {
+  transition: opacity .15s ease;
+}
+
+/* Initial auth lock (before first login): keep dummy UI hidden behind auth modal */
+html.initial-auth body.auth-locked > *:not(.auth-modal):not(.onboarding-modal):not(#onboardingModal):not(.app-dialog-modal):not(#appDialogModal):not(.toast-container):not(#toastContainer) {
+  visibility: hidden !important;
+  pointer-events: none;
+  user-select: none;
+  filter: none !important;
+}
+
+/* Runtime auth lock (user logged out during active session): keep existing blur */
+html:not(.initial-auth) body.auth-locked > *:not(.auth-modal):not(.onboarding-modal):not(#onboardingModal):not(.app-dialog-modal):not(#appDialogModal):not(.toast-container):not(#toastContainer) {
   pointer-events: none;
   filter: blur(3px);
   user-select: none;
 }
+
 body.auth-locked .app-dialog-modal,
 body.auth-locked #appDialogModal,
 body.auth-locked .toast-container,
@@ -12879,6 +12957,75 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   background: #58a6ff;
 }
 
+/* Free & Open Source Software Banner */
+.about-freesoft-banner {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.14) 0%, rgba(0, 229, 255, 0.12) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.55);
+  border-radius: 0px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 0 14px rgba(16, 185, 129, 0.12);
+}
+
+.about-freesoft-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.about-freesoft-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: #ecfdf5;
+}
+
+.about-freesoft-pill {
+  background: #10b981;
+  color: #06281e;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 2px 7px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.about-freesoft-sub {
+  font-size: 0.78rem;
+  color: #a7f3d0;
+  opacity: 0.92;
+}
+
+.about-github-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid rgba(0, 229, 255, 0.5);
+  color: #58a6ff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 11px;
+  text-decoration: none;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+}
+
+.about-github-btn:hover {
+  background: rgba(0, 229, 255, 0.16);
+  border-color: #00e5ff;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);
+}
+
 /* Author Profile Card */
 .about-author-card {
   background: linear-gradient(135deg, rgba(22, 27, 34, 0.95) 0%, rgba(30, 36, 46, 0.95) 100%);
@@ -14679,9 +14826,17 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     font-size: 0.80rem !important;
   }
 
-  .dmr-id-display,
-  .rtt-display {
+  .dmr-id-display {
     font-size: 0.62rem !important;
+    flex-shrink: 0 !important;
+  }
+
+  .rtt-display {
+    font-size: 0.58rem !important;
+    height: 16px !important;
+    line-height: 16px !important;
+    padding: 0 4px !important;
+    flex-shrink: 0 !important;
   }
 
   /* ==========================================================
@@ -19122,17 +19277,21 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   text-shadow: none !important;
 }
 [data-theme="light"] .rtt-display {
-  color: #64748b !important;
+  background: #e2e8f0 !important;
+  color: #475569 !important;
   text-shadow: none !important;
 }
 [data-theme="light"] .rtt-display.e2e-good {
-  color: #059669 !important;
+  background: #0a5f2e !important;
+  color: #ffffff !important;
 }
 [data-theme="light"] .rtt-display.e2e-warn {
-  color: #d97706 !important;
+  background: #b45309 !important;
+  color: #ffffff !important;
 }
 [data-theme="light"] .rtt-display.e2e-bad {
-  color: #dc2626 !important;
+  background: #991b1b !important;
+  color: #ffffff !important;
 }
 [data-theme="light"] .mode-standby {
   background: #f1f5f9 !important;
@@ -19485,56 +19644,79 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 
 /* AI Speech Transcriber in Light Mode */
-[data-theme="light"] .vfo-caption-box {
-  background: rgba(0, 0, 0, 0.05) !important;
-  border: 1px solid rgba(0, 0, 0, 0.12) !important;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+[data-theme="light"] .vfo-caption-box,
+[data-theme="light"] .radio-container.transcribe-ts1-only .vfo-ts1-row .vfo-caption-box,
+[data-theme="light"] .radio-container.transcribe-ts2-only .vfo-ts2-row .vfo-caption-box,
+[data-theme="light"] .radio-container.transcribe-both .vfo-ts1-row .vfo-caption-box,
+[data-theme="light"] .radio-container.transcribe-both .vfo-ts2-row .vfo-caption-box {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border: 1.5px solid rgba(2, 132, 199, 0.45) !important;
+  box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.06) !important;
   color: #0f172a !important;
   font-weight: 600 !important;
-  scrollbar-color: rgba(2, 132, 199, 0.35) transparent;
+  scrollbar-color: rgba(2, 132, 199, 0.35) transparent !important;
 }
-[data-theme="light"] .vfo-caption-stream {
+
+[data-theme="light"] .radio-container.transcribe-ts2-only .vfo-ts2-row .vfo-caption-box,
+[data-theme="light"] .radio-container.transcribe-both .vfo-ts2-row .vfo-caption-box {
+  border-color: rgba(217, 119, 6, 0.5) !important;
+}
+
+[data-theme="light"] .vfo-caption-stream,
+[data-theme="light"] .vfo-caption-text,
+[data-theme="light"] .vfo-caption-entry {
   color: #0f172a !important;
   font-weight: 600 !important;
-  scrollbar-color: rgba(2, 132, 199, 0.35) transparent;
+  scrollbar-color: rgba(2, 132, 199, 0.35) transparent !important;
 }
 
 [data-theme="light"] .vfo-caption-stream::-webkit-scrollbar-thumb,
 [data-theme="light"] .vfo-caption-box::-webkit-scrollbar-thumb {
-  background: rgba(2, 132, 199, 0.3);
+  background: rgba(2, 132, 199, 0.35) !important;
 }
 
 [data-theme="light"] .vfo-caption-stream::-webkit-scrollbar-thumb:hover,
 [data-theme="light"] .vfo-caption-box::-webkit-scrollbar-thumb:hover {
-  background: rgba(2, 132, 199, 0.6);
+  background: rgba(2, 132, 199, 0.65) !important;
 }
 
 [data-theme="light"] .vfo-caption-box.is-holding {
-  box-shadow: inset 0 0 0 1.5px #0284c7, 0 0 10px rgba(2, 132, 199, 0.4) !important;
-  border-color: rgba(2, 132, 199, 0.7) !important;
+  box-shadow: inset 0 0 0 1.5px #0284c7, 0 0 10px rgba(2, 132, 199, 0.35) !important;
+  border-color: rgba(2, 132, 199, 0.75) !important;
 }
 
 [data-theme="light"] .caption-font-ctrl {
-  background: rgba(241, 245, 249, 0.85) !important;
-  border-color: rgba(0, 0, 0, 0.15) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(15, 23, 42, 0.18) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+}
+[data-theme="light"] .caption-font-ctrl:hover,
+[data-theme="light"] .caption-font-ctrl:focus-within,
+[data-theme="light"] .caption-font-ctrl:active,
+[data-theme="light"] .caption-font-ctrl.is-active {
+  background: #ffffff !important;
+  border-color: rgba(2, 132, 199, 0.6) !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15) !important;
 }
 [data-theme="light"] .caption-font-ctrl button {
-  color: #334155 !important;
+  color: #1e293b !important;
 }
 [data-theme="light"] .caption-font-ctrl button:hover {
   color: #0284c7 !important;
-  background: rgba(2, 132, 199, 0.15) !important;
+  background: rgba(2, 132, 199, 0.12) !important;
 }
 [data-theme="light"] .caption-font-ctrl .caption-font-val {
-  color: #475569 !important;
+  color: #334155 !important;
 }
 [data-theme="light"] .caption-font-ctrl .caption-font-val:hover {
   color: #0284c7 !important;
 }
 
-[data-theme="light"] .vfo-caption-stream:empty::before {
+[data-theme="light"] .vfo-caption-stream:empty::before,
+[data-theme="light"] .radio-container.transcribe-ts1-only .vfo-ts1-row .vfo-caption-stream:empty::before,
+[data-theme="light"] .radio-container.transcribe-ts2-only .vfo-ts2-row .vfo-caption-stream:empty::before {
   color: #64748b !important;
-  opacity: 0.7 !important;
+  opacity: 0.75 !important;
 }
 
 [data-theme="light"] .vfo-call-tag {
@@ -19544,8 +19726,8 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 
 [data-theme="light"] .vfo-caption-badge {
-  background: rgba(2, 132, 199, 0.1) !important;
-  border-color: rgba(2, 132, 199, 0.28) !important;
+  background: rgba(2, 132, 199, 0.14) !important;
+  border-color: rgba(2, 132, 199, 0.38) !important;
 }
 
 [data-theme="light"] .vfo-caption-badge .flag-badge {
@@ -19554,7 +19736,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 }
 
 [data-theme="light"] .vfo-caption-callsign {
-  color: #0284c7 !important;
+  color: #0369a1 !important;
 }
 
 [data-theme="light"] .vfo-lang-badge {

@@ -76,6 +76,7 @@ class AppSettings(BaseModel):
     transcriber_model: str = "gemini-3.5-flash"
     translation_engine: str = "groq"
     transcriber_target_lang: str = "ru"
+    transcriber_source_lang: str = "auto"
     groq_api_key: str = ""
     groq_api_keys: List[str] = Field(default_factory=list)
     deepgram_api_key: str = ""

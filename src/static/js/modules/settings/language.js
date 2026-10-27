@@ -93,6 +93,9 @@ export function initLanguageManager() {
       if (typeof window.renderTtsModelOptions === "function") {
         window.renderTtsModelOptions();
       }
+      if (typeof window.renderSourceLangSelect === "function") {
+        window.renderSourceLangSelect();
+      }
       if (typeof window.renderTargetLangSelect === "function") {
         window.renderTargetLangSelect();
       }

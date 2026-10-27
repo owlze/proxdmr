@@ -1239,9 +1239,11 @@ export function renderRadiosGrid() {
           const logoWrap = document.createElement("div");
           logoWrap.className = "brand-logo-wrap";
           logoWrap.tabIndex = 0;
+          const hintText = (window.t && window.t("about.logo_hint")) || "Длинный тап — вызов About";
           logoWrap.innerHTML = `
             <img src="/static/img/Logo_light.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
             <img src="/static/img/Logo_dark.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-light">
+            <span class="brand-logo-hint" data-i18n="about.logo_hint">${hintText}</span>
           `;
           brandTitle.insertBefore(logoWrap, brandTitle.firstChild);
         }

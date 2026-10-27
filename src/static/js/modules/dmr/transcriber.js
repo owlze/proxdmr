@@ -617,6 +617,58 @@ function get3LetterLangCode(code) {
 window.get3LetterLangCode = get3LetterLangCode;
 window.LANG_3LETTER_MAP = LANG_3LETTER_MAP;
 
+function renderSourceLangSelect(selectEl) {
+  const el = selectEl || document.getElementById("optTranscriberSourceLang");
+  if (!el) return;
+  const curVal = el.value || (window.transcriberSettings && window.transcriberSettings.source_lang) || "auto";
+  const curLang = (window.I18N && window.I18N.currentLanguage) || "ru";
+  let langDisplay = null;
+  try {
+    langDisplay = new Intl.DisplayNames([curLang], { type: 'language' });
+  } catch (_) {}
+
+  el.innerHTML = "";
+  const autoOpt = document.createElement("option");
+  autoOpt.value = "auto";
+  autoOpt.textContent = "AUTO mode";
+  if (curVal === "auto") {
+    autoOpt.selected = true;
+  }
+  el.appendChild(autoOpt);
+
+  SUPPORTED_TARGET_LANGUAGES.forEach(l => {
+    if (l.code === "none") return;
+    const opt = document.createElement("option");
+    opt.value = l.code;
+    let localizedName = "";
+    if (langDisplay) {
+      try {
+        const trans = langDisplay.of(l.code);
+        if (trans) {
+          localizedName = trans.charAt(0).toUpperCase() + trans.slice(1);
+        }
+      } catch (_) {}
+    }
+    if (localizedName && localizedName.toLowerCase() !== l.native.toLowerCase()) {
+      opt.textContent = `${l.flag} ${l.native} (${localizedName})`;
+    } else {
+      opt.textContent = `${l.flag} ${l.native}`;
+    }
+    if (l.code === curVal) {
+      opt.selected = true;
+    }
+    el.appendChild(opt);
+  });
+  if (curVal && curVal !== "auto" && curVal !== "none" && !Array.from(el.options).some(o => o.value === curVal)) {
+    const opt = document.createElement("option");
+    opt.value = curVal;
+    opt.textContent = curVal.toUpperCase();
+    opt.selected = true;
+    el.appendChild(opt);
+  }
+}
+window.renderSourceLangSelect = renderSourceLangSelect;
+
 function renderTargetLangSelect(selectEl) {
   const el = selectEl || document.getElementById("optTranscriberTargetLang");
   if (!el) return;
@@ -4405,7 +4457,27 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   });
   updatePopTransEngineUI(curTransEngine);
 
-  // 5. Target Language select
+  // 5. Source Language select
+  let curSourceLang = (s.source_lang) ? s.source_lang : null;
+  if (!curSourceLang) {
+    const optSl = document.getElementById("optTranscriberSourceLang");
+    curSourceLang = (optSl && optSl.value) ? optSl.value : "auto";
+  }
+
+  const rowSourceLang = document.createElement("div");
+  rowSourceLang.className = "tts-quick-row";
+  rowSourceLang.id = "popTxtRowSourceLang";
+  rowSourceLang.innerHTML = `
+    <label class="tts-quick-label" for="popTxtSourceLang">${window.t ? window.t("transcriber.source_lang", {}, "🌐 Язык, с которого перевод / Source language:") : "🌐 Язык, с которого перевод / Source language:"}</label>
+    <select class="tts-quick-select" id="popTxtSourceLang"></select>
+  `;
+  const selSourceLang = rowSourceLang.querySelector("#popTxtSourceLang");
+  renderSourceLangSelect(selSourceLang);
+  if (curSourceLang) {
+    selSourceLang.value = curSourceLang;
+  }
+
+  // 6. Target Language select
   const rowTargetLang = document.createElement("div");
   rowTargetLang.className = "tts-quick-row";
   rowTargetLang.id = "popTxtRowTargetLang";
@@ -4434,6 +4506,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   body.appendChild(rowModel);
   body.appendChild(rowNoTrans);
   body.appendChild(rowTransEngine);
+  body.appendChild(rowSourceLang);
   body.appendChild(rowTargetLang);
 
   // Footer
@@ -4482,6 +4555,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
       const newTransEng = selTransEngine ? selTransEngine.value : curTransEngine;
       const newModel = selModel ? selModel.value : curModel;
       const newNoTrans = cbNoTranslate ? cbNoTranslate.checked : false;
+      const newSourceLang = selSourceLang ? selSourceLang.value : (curSourceLang || "auto");
       const newTargetLang = newNoTrans ? "none" : (selTargetLang ? selTargetLang.value : "ru");
 
       try {
@@ -4493,6 +4567,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
         transcriber_engine: newRecEng,
         translation_engine: newTransEng,
         model: newModel,
+        source_lang: newSourceLang,
         target_lang: newTargetLang,
         api_key: getCachedTranscriberKey("gemini"),
         groq_api_key: getCachedTranscriberKey("groq"),
@@ -4542,6 +4617,9 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
             optNoTrans.checked = newNoTrans;
             updateNoTranslateUI(newNoTrans);
           }
+
+          const optSl = document.getElementById("optTranscriberSourceLang");
+          if (optSl) optSl.value = newSourceLang;
 
           const optTl = document.getElementById("optTranscriberTargetLang");
           if (optTl && !newNoTrans) {
@@ -6800,8 +6878,10 @@ function initTranscriberSettings() {
   }
 
   // Dynamic localized rendering for models and target languages
+  const optSourceLang = document.getElementById("optTranscriberSourceLang");
   renderTranscriberModelOptions(optModel);
   renderTtsModelOptions(optTtsModel);
+  renderSourceLangSelect(optSourceLang);
   renderTargetLangSelect(optTargetLang);
 
   // Restore selected value from LS if present
@@ -7027,6 +7107,13 @@ function initTranscriberSettings() {
 
         const isNoTranslate = (data.settings.target_lang === "none");
         if (optNoTranslate) optNoTranslate.checked = isNoTranslate;
+        if (optSourceLang) {
+          if (data.settings.source_lang) {
+            optSourceLang.value = data.settings.source_lang;
+          } else if (!optSourceLang.value) {
+            optSourceLang.value = "auto";
+          }
+        }
         if (optTargetLang) {
           if (!isNoTranslate && data.settings.target_lang) {
             optTargetLang.value = data.settings.target_lang;
@@ -7177,6 +7264,7 @@ function initTranscriberSettings() {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const isNoTrans = optNoTranslate ? optNoTranslate.checked : false;
+      const sourceLangVal = optSourceLang && optSourceLang.value ? optSourceLang.value : "auto";
       const targetLangVal = isNoTrans ? "none" : (optTargetLang && optTargetLang.value ? optTargetLang.value : "ru");
 
       const chosenTtsEng = optTtsEngine ? optTtsEngine.value : "gemini";
@@ -7213,6 +7301,7 @@ function initTranscriberSettings() {
         model: optModel ? optModel.value : "gemini-3.5-flash",
         transcriber_engine: recEng,
         translation_engine: transEng,
+        source_lang: sourceLangVal,
         target_lang: targetLangVal,
         tts_engine: optTtsEngine ? optTtsEngine.value : "gemini",
         tts_model: optTtsModel ? optTtsModel.value : "gemini-3.1-flash-tts-preview",
@@ -7336,6 +7425,7 @@ export {
   SILERO_SUPPORTED_LANGUAGES,
   isStageLocalEngine,
   SUPPORTED_TARGET_LANGUAGES,
+  renderSourceLangSelect,
   renderTargetLangSelect,
   renderTranscriberModelOptions,
   renderTtsModelOptions,
@@ -7405,6 +7495,7 @@ if (typeof window !== "undefined") {
   window.SILERO_SUPPORTED_LANGUAGES = SILERO_SUPPORTED_LANGUAGES;
   window.isStageLocalEngine = isStageLocalEngine;
   window.SUPPORTED_TARGET_LANGUAGES = SUPPORTED_TARGET_LANGUAGES;
+  window.renderSourceLangSelect = renderSourceLangSelect;
   window.renderTargetLangSelect = renderTargetLangSelect;
   window.renderTranscriberModelOptions = renderTranscriberModelOptions;
   window.renderTtsModelOptions = renderTtsModelOptions;
@@ -7446,6 +7537,7 @@ if (typeof window !== "undefined") {
   window.__proxdmr.populateVoiceSelect = populateVoiceSelect;
   window.__proxdmr.checkAndPromptPiperModel = checkAndPromptPiperModel;
   window.__proxdmr.checkAndPromptSileroModel = checkAndPromptSileroModel;
+  window.__proxdmr.renderSourceLangSelect = renderSourceLangSelect;
   window.__proxdmr.renderTargetLangSelect = renderTargetLangSelect;
   window.__proxdmr.renderTranscriberModelOptions = renderTranscriberModelOptions;
   window.__proxdmr.renderTtsModelOptions = renderTtsModelOptions;

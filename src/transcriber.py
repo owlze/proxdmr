@@ -92,7 +92,43 @@ LANG_NAMES_EN: Dict[str, str] = {
     "da": "Danish",
     "he": "Hebrew",
     "ar": "Arabic",
+    "be": "Belarusian",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "hr": "Croatian",
+    "sr": "Serbian",
+    "lv": "Latvian",
+    "lt": "Lithuanian",
+    "et": "Estonian",
+    "hi": "Hindi",
+    "fa": "Persian",
+    "th": "Thai",
+    "vi": "Vietnamese",
+    "id": "Indonesian",
+    "ms": "Malay",
+    "ca": "Catalan",
+    "eu": "Basque",
+    "gl": "Galician",
+    "kk": "Kazakh",
+    "ka": "Georgian",
+    "hy": "Armenian",
+    "az": "Azerbaijani",
     "none": "original language"
+}
+
+LANG_3LETTER_MAP: Dict[str, str] = {
+    "ru": "RUS", "en": "ENG", "uk": "UKR", "de": "DEU",
+    "fr": "FRA", "es": "ESP", "it": "ITA", "pl": "POL",
+    "pt": "POR", "nl": "NLD", "tr": "TUR", "ja": "JPN",
+    "zh": "CHN", "ko": "KOR", "cs": "CZE", "ro": "RON",
+    "bg": "BUL", "el": "GRE", "hu": "HUN", "sv": "SWE",
+    "no": "NOR", "fi": "FIN", "da": "DAN", "he": "HEB",
+    "ar": "ARA", "be": "BEL", "ca": "CAT", "eu": "EUS",
+    "gl": "GLG", "kk": "KAZ", "ka": "KAT", "hy": "HYE",
+    "az": "AZE", "hi": "HIN", "th": "THA", "vi": "VIE",
+    "id": "IND", "ms": "MSA", "hr": "HRV", "sr": "SRP",
+    "sk": "SLK", "sl": "SLV", "lt": "LIT", "lv": "LAV",
+    "et": "EST", "fa": "FAS"
 }
 
 DEFAULT_MODELS_DATA: List[Dict[str, Any]] = [
@@ -1075,6 +1111,7 @@ class GeminiTranscriberService:
         self._groq_key_index: int = 0
         self.groq_use_first_key_only: bool = False
         self.deepgram_api_key: str = ""
+        self.source_lang: str = "auto"
         self.target_lang: str = "ru"
 
         # TTS configuration
@@ -1107,6 +1144,7 @@ class GeminiTranscriberService:
         api_key: str,
         model: str,
         target_lang: str,
+        source_lang: str = "auto",
         api_keys: Optional[List[str]] = None,
         tts_enabled: bool = False,
         tts_engine: str = "gemini",
@@ -1154,6 +1192,7 @@ class GeminiTranscriberService:
         if any(dep in m.lower() for dep in ["gemini-2.5-", "gemini-2.0-", "gemini-1.5-"]):
             m = "gemini-3.1-flash-lite"
         self.model = m
+        self.source_lang = (source_lang or "auto").strip().lower()
         self.target_lang = target_lang.strip() if target_lang and target_lang.strip() else "ru"
         self.tts_enabled = bool(tts_enabled)
         self.tts_engine = (tts_engine or "gemini").lower().strip()
@@ -1345,6 +1384,10 @@ class GeminiTranscriberService:
         body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3\r\n".encode("utf-8"))
         body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\nverbose_json\r\n".encode("utf-8"))
         body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"temperature\"\r\n\r\n0.0\r\n".encode("utf-8"))
+        sl_info = self._source_lang_info()
+        if sl_info:
+            _, iso_2, _ = sl_info
+            body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{iso_2}\r\n".encode("utf-8"))
         body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n".encode("utf-8"))
         body.extend(wav_bytes)
         body.extend(b"\r\n")
@@ -1364,8 +1407,12 @@ class GeminiTranscriberService:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 text = (data.get("text") or "").strip()
-                raw_l = (data.get("language") or "ru").strip().lower()
-                lang = LANG_NAME_TO_CODE.get(raw_l, raw_l[:2])
+                if sl_info:
+                    _, iso_2, _ = sl_info
+                    lang = iso_2
+                else:
+                    raw_l = (data.get("language") or "ru").strip().lower()
+                    lang = LANG_NAME_TO_CODE.get(raw_l, raw_l[:2])
                 return {"text": text, "lang": lang}, None
         except urllib.error.HTTPError as e:
             err_msg = f"Groq HTTP {e.code}"
@@ -1488,10 +1535,21 @@ class GeminiTranscriberService:
             self._request_timestamps.append(now)
             return True
 
-    def _build_stage1_asr_instruction(self) -> str:
+    def _source_lang_info(self) -> Optional[Tuple[str, str, str]]:
+        sl = getattr(self, "source_lang", "auto") or "auto"
+        sl = sl.strip().lower()
+        if sl == "auto":
+            return None
+        iso_2 = sl[:2]
+        name_en = LANG_NAMES_EN.get(iso_2, sl.capitalize())
+        iso_3 = LANG_3LETTER_MAP.get(iso_2, iso_2.upper())
+        return (name_en, iso_2, iso_3)
+
+    def _build_stage1_asr_instruction(self, source_lang_name: Optional[str] = None) -> str:
+        lang_directive = f"IN {source_lang_name.upper()}" if source_lang_name else "IN THE ORIGINAL LANGUAGE SPOKEN"
         return (
             "You are a professional, highly disciplined speech-to-text transcriber specializing in amateur radio communications (DMR / Ham Radio).\n"
-            "Your task is to listen to the amateur radio operator's voice transmission and return an accurate, verbatim transcription IN THE ORIGINAL LANGUAGE SPOKEN without translation.\n\n"
+            f"Your task is to listen to the amateur radio operator's voice transmission and return an accurate, verbatim transcription {lang_directive} without translation.\n\n"
             "VOICE CHARACTERISTICS DETECTION:\n"
             "- Determine the speaker's biological voice gender: 'male' or 'female'. If uncertain, use 'male'.\n"
             "- Determine the speaker's vocal pitch/timbre: 'low', 'medium', or 'high'. If uncertain, use 'medium'.\n\n"
@@ -2146,8 +2204,12 @@ class GeminiTranscriberService:
                 original_text = clean_transcription_text(res.get("text", "").strip())
                 if not original_text:
                     return
-                lang_code = (res.get("lang", "ru") or "ru").upper().strip()
-                detected_lang = lang_code[:3] if len(lang_code) > 3 else lang_code
+                sl_info = self._source_lang_info()
+                if sl_info:
+                    detected_lang = sl_info[2]
+                else:
+                    lang_code = (res.get("lang", "ru") or "ru").upper().strip()
+                    detected_lang = LANG_3LETTER_MAP.get(lang_code.lower(), lang_code[:3] if len(lang_code) > 3 else lang_code)
                 detected_gender = "male"
                 detected_pitch = "medium"
 
@@ -2188,12 +2250,23 @@ class GeminiTranscriberService:
                 b64_audio = base64.b64encode(wav_bytes).decode("ascii")
 
                 # --- STAGE 1: SPEECH RECOGNITION (ASR in original language) ---
-                stage1_instruction = self._build_stage1_asr_instruction()
-                user_prompt_stage1 = (
-                    "Transcribe this amateur radio audio recording verbatim in its original spoken language. "
-                    "Detect spoken language, speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. "
-                    "Output strictly valid JSON: {\"lang\": \"...\", \"gender\": \"...\", \"pitch\": \"...\", \"text\": \"...\"}."
-                )
+                sl_info = self._source_lang_info()
+                if sl_info:
+                    name_en, iso_2, iso_3 = sl_info
+                    stage1_instruction = self._build_stage1_asr_instruction(source_lang_name=name_en)
+                    user_prompt_stage1 = (
+                        f'The speech in this recording is spoken in {name_en} (ISO {iso_2}). Transcribe it in {name_en}; do not auto-detect the language. Set "lang" to "{iso_3}". '
+                        'Transcribe this amateur radio audio recording verbatim in its original spoken language. '
+                        'Detect speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. '
+                        f'Output strictly valid JSON: {{"lang": "{iso_3}", "gender": "...", "pitch": "...", "text": "..."}}.'
+                    )
+                else:
+                    stage1_instruction = self._build_stage1_asr_instruction()
+                    user_prompt_stage1 = (
+                        "Transcribe this amateur radio audio recording verbatim in its original spoken language. "
+                        "Detect spoken language, speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. "
+                        "Output strictly valid JSON: {\"lang\": \"...\", \"gender\": \"...\", \"pitch\": \"...\", \"text\": \"...\"}."
+                    )
 
                 payload_stage1 = {
                     "contents": [
@@ -2259,9 +2332,12 @@ class GeminiTranscriberService:
                     if not parsed or not parsed.get("text"):
                         return
 
-                    detected_lang = parsed.get("lang", "---").upper().strip()
-                    if len(detected_lang) > 3:
-                        detected_lang = detected_lang[:3]
+                    if sl_info:
+                        detected_lang = sl_info[2]
+                    else:
+                        detected_lang = parsed.get("lang", "---").upper().strip()
+                        if len(detected_lang) > 3:
+                            detected_lang = detected_lang[:3]
                     detected_gender = parsed.get("gender", "male").lower().strip()
                     detected_pitch = parsed.get("pitch", "medium").lower().strip()
                     original_text = parsed.get("text", "").strip()
@@ -2348,6 +2424,8 @@ class GeminiTranscriberService:
             is_same_lang = False
             d_lower = detected_lang.lower()
             if target_lang_code in (d_lower, d_lower[:2]):
+                is_same_lang = True
+            elif LANG_3LETTER_MAP.get(target_lang_code, "").lower() == d_lower:
                 is_same_lang = True
             elif target_lang_code == "ru" and d_lower in ("rus", "ru"):
                 is_same_lang = True
@@ -2832,12 +2910,23 @@ class GeminiTranscriberService:
             return None, None, "Не указан API ключ Gemini"
 
         b64_audio = base64.b64encode(wav_bytes).decode("ascii")
-        stage1_instruction = self._build_stage1_asr_instruction()
-        user_prompt_stage1 = (
-            "Transcribe this amateur radio audio recording verbatim in its original spoken language. "
-            "Detect spoken language, speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. "
-            "Output strictly valid JSON: {\"lang\": \"...\", \"gender\": \"...\", \"pitch\": \"...\", \"text\": \"...\"}."
-        )
+        sl_info = self._source_lang_info()
+        if sl_info:
+            name_en, iso_2, iso_3 = sl_info
+            stage1_instruction = self._build_stage1_asr_instruction(source_lang_name=name_en)
+            user_prompt_stage1 = (
+                f'The speech in this recording is spoken in {name_en} (ISO {iso_2}). Transcribe it in {name_en}; do not auto-detect the language. Set "lang" to "{iso_3}". '
+                'Transcribe this amateur radio audio recording verbatim in its original spoken language. '
+                'Detect speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. '
+                f'Output strictly valid JSON: {{"lang": "{iso_3}", "gender": "...", "pitch": "...", "text": "..."}}.'
+            )
+        else:
+            stage1_instruction = self._build_stage1_asr_instruction()
+            user_prompt_stage1 = (
+                "Transcribe this amateur radio audio recording verbatim in its original spoken language. "
+                "Detect spoken language, speaker voice gender (male/female), and pitch (low/medium/high). Do not translate. Assemble callsigns into <call>...</call>. "
+                "Output strictly valid JSON: {\"lang\": \"...\", \"gender\": \"...\", \"pitch\": \"...\", \"text\": \"...\"}."
+            )
 
         payload_stage1 = {
             "contents": [
@@ -2887,9 +2976,12 @@ class GeminiTranscriberService:
             if not parsed or not parsed.get("text"):
                 return None, None, "Не удалось распознать речь"
 
-            detected_lang = parsed.get("lang", "---").upper().strip()
-            if len(detected_lang) > 3:
-                detected_lang = detected_lang[:3]
+            if sl_info:
+                detected_lang = sl_info[2]
+            else:
+                detected_lang = parsed.get("lang", "---").upper().strip()
+                if len(detected_lang) > 3:
+                    detected_lang = detected_lang[:3]
             original_text = clean_transcription_text(parsed.get("text", "").strip())
             if not original_text:
                 return None, detected_lang, "Речь не обнаружена"
@@ -2900,6 +2992,8 @@ class GeminiTranscriberService:
             is_same_lang = False
             d_lower = detected_lang.lower()
             if target_lang_code in (d_lower, d_lower[:2]):
+                is_same_lang = True
+            elif LANG_3LETTER_MAP.get(target_lang_code, "").lower() == d_lower:
                 is_same_lang = True
             elif target_lang_code == "ru" and d_lower in ("rus", "ru"):
                 is_same_lang = True

@@ -11,11 +11,11 @@ import re
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.58"
-APP_VERSION_DATE = "26.10.2026"
+APP_VERSION = "1.59"
+APP_VERSION_DATE = "27.10.2026"
 
-APK_VERSION = "1.31"
-APK_VERSION_DATE = "25.10.2026"
+APK_VERSION = "1.32"
+APK_VERSION_DATE = "27.10.2026"
 
 
 def detect_apk_version(apk_path: Path | str | None = None) -> str:

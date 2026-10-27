@@ -26,6 +26,7 @@
   window.ProxDMRAuth = {
     init: initAuth,
     checkAuth: checkAuth,
+    releaseAuthShield: releaseAuthShield,
     isAuthenticated: () => isAuthenticated,
     getUser: () => currentUser,
     logout: doLogout,
@@ -325,6 +326,7 @@
         'optLanguage',
         'languageSelect',
         'themeSelect',
+        'optTranscriberSourceLang',
         'optTranscriberTargetLang',
         'optTranscriberNoTranslate',
         'optTtsEngine',
@@ -831,6 +833,19 @@
     }
   }
 
+  function releaseAuthShield() {
+    if (window._authPendingTimer) {
+      clearTimeout(window._authPendingTimer);
+      window._authPendingTimer = null;
+    }
+    document.documentElement.classList.remove('auth-pending');
+    if (window.AndroidBridge && typeof window.AndroidBridge.notifyAppReady === 'function') {
+      try {
+        window.AndroidBridge.notifyAppReady();
+      } catch (_) {}
+    }
+  }
+
   function showModal(show) {
     if (show) {
       startDemoStatusPolling();
@@ -848,6 +863,8 @@
       if (authModal) authModal.classList.remove('active');
       showOnboarding(false);
       document.body.classList.remove('auth-locked');
+      document.documentElement.classList.remove('initial-auth');
+      releaseAuthShield();
     }
   }
 
@@ -907,6 +924,8 @@
         showModal(false);
         if (logoutBtn) logoutBtn.style.display = '';
         updateAccountUI();
+        document.documentElement.classList.remove('initial-auth');
+        releaseAuthShield();
         return true;
       }
     } catch (e) { /* ignore */ }
@@ -916,6 +935,7 @@
     showModal(true);
     if (logoutBtn) logoutBtn.style.display = 'none';
     updateAccountUI();
+    releaseAuthShield();
     return false;
   }
 

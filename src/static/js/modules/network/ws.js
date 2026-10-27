@@ -2087,6 +2087,13 @@ export function handleServerMessage(msg) {
           if (qSkipShort) qSkipShort.checked = Boolean(msg.tts_skip_short_callsign);
         }
       }
+      if (msg.source_lang !== undefined) {
+        if (window.transcriberSettings) window.transcriberSettings.source_lang = msg.source_lang;
+        const optSrcLang = document.getElementById("optTranscriberSourceLang");
+        if (optSrcLang) optSrcLang.value = msg.source_lang;
+        const popSrcLang = document.getElementById("popTxtSourceLang");
+        if (popSrcLang) popSrcLang.value = msg.source_lang;
+      }
       const optNoTrans = document.getElementById("optTranscriberNoTranslate");
       const optTgtLang = document.getElementById("optTranscriberTargetLang");
       const grpTgtLang = document.getElementById("groupTranscriberTargetLang");

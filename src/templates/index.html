@@ -2,6 +2,15 @@
 <html lang="ru">
 <head>
   <script>
+    document.documentElement.classList.add('auth-pending', 'initial-auth');
+    window._authPendingTimer = setTimeout(function() {
+      if (document.documentElement.classList.contains('auth-pending')) {
+        document.documentElement.classList.remove('auth-pending');
+        if (window.ProxDMRAuth && typeof window.ProxDMRAuth.showModal === 'function') {
+          window.ProxDMRAuth.showModal(true);
+        }
+      }
+    }, 4000);
     window.onerror = function(msg, url, line, col, error) {
       if (typeof msg === 'string' && msg.includes('ResizeObserver')) return true;
       alert('Error: ' + msg + '\nLine: ' + line);
@@ -30,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.378">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.386">
   <script>
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
@@ -473,6 +482,7 @@
               <div class="brand-logo-wrap" tabindex="0">
                 <img src="/static/img/Logo_light.png?v=2.9.367" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
                 <img src="/static/img/Logo_dark.png?v=2.9.367" alt="ProxDMR" class="brand-logo-img brand-logo-light">
+                <span class="brand-logo-hint" data-i18n="about.logo_hint">Длинный тап — вызов About</span>
               </div>
               <span class="brand-version hotspot-name-badge">Main 📻</span>
               <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
@@ -2917,7 +2927,18 @@
                 </label>
               </div>
 
-              <!-- Item 7: Target Language Selection -->
+              <!-- Item 7: Source Language Selection -->
+              <div class="form-group" id="groupTranscriberSourceLang" style="margin-bottom: 5px; transition: opacity 0.2s ease;">
+                <label for="optTranscriberSourceLang" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;" data-i18n="transcriber.source_lang">
+                  🌐 Язык, с которого перевод / Source language:
+                </label>
+                <select id="optTranscriberSourceLang" class="form-input" style="cursor: pointer; width: 100%;"></select>
+                <small class="form-hint" style="margin-top: 4px; display: block;" data-i18n="transcriber.source_lang_hint">
+                  AUTO — язык речи определяется автоматически. Явный выбор повышает точность на коротких фразах.
+                </small>
+              </div>
+
+              <!-- Item 8: Target Language Selection -->
               <div class="form-group" id="groupTranscriberTargetLang" style="margin-bottom: 5px; transition: opacity 0.2s ease;">
                 <label for="optTranscriberTargetLang" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;" data-i18n="transcriber.target_lang">
                   🌐 Целевой язык перевода / Target Language:
@@ -4614,6 +4635,23 @@
       </div>
 
       <div class="about-modal-body">
+        <!-- Free & Open Source Software Banner -->
+        <div class="about-freesoft-banner">
+          <div class="about-freesoft-info">
+            <div class="about-freesoft-title">
+              <span class="about-freesoft-pill">FREE SOFT</span>
+              <span data-i18n="about.freesoft_heading">Free &amp; Open Source Software</span>
+            </div>
+            <div class="about-freesoft-sub" data-i18n="about.freesoft_sub">Свободное ПО с открытым исходным кодом для радиолюбителей</div>
+          </div>
+          <a href="https://github.com/owlze/proxdmr" target="_blank" rel="noopener noreferrer" class="about-github-btn" title="https://github.com/owlze/proxdmr">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+            <span>github.com/owlze/proxdmr ↗</span>
+          </a>
+        </div>
+
         <!-- Author Profile Card -->
         <div class="about-author-card">
           <div class="about-avatar-wrap">
@@ -5248,10 +5286,10 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.381"></script>
+  <script src="/static/js/i18n.js?v=2.9.382"></script>
   <script src="/static/js/audio-player.js?v=2.9.367"></script>
   <script src="/static/js/dialog.js?v=2.9.375"></script>
-  <script src="/static/js/auth.js?v=2.9.381"></script>
+  <script src="/static/js/auth.js?v=2.9.386"></script>
   <style>
     /* Demo Mode Styles */
     .auth-demo-box {
@@ -5437,7 +5475,7 @@
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   </style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.381"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.386"></script>
 </body>
 </html>
 

@@ -27,6 +27,9 @@
   "about.desc_webaudio": "Pipeline audio DSP a bassa latenza nel browser: AGC, equalizzatore a 3 bande, filtro di presenza e routing stereo TS1/TS2.",
   "about.desc_websockets": "Toolkit ASGI open-source e driver WebSocket per lo streaming audio PCM bidirezionale e la telemetria in tempo reale.",
   "about.email_copied": "e-mail copiata negli appunti",
+  "about.freesoft_heading": "Free & Open Source Software",
+  "about.freesoft_sub": "Software libero e open-source per radioamatori",
+  "about.logo_hint": "Pressione prolungata — apri About",
   "about.sec": "s",
   "about.title": "Info stazione",
   "about.ver_title": "Versione ProxDMR",
@@ -2393,5 +2396,7 @@
   "xlx_help_step3": "<b>Moduli A–Z (TG 4001–4026):</b> modulo <b>A = TG 4001</b>, <b>B = TG 4002</b>, ..., <b>Z = TG 4026</b>. Disconnessione — <b>TG 4000</b>.",
   "xlx_help_step4": "<b>Chiamate vocali (TG 9):</b> dopo il collegamento, tutto il traffico vocale avviene nel gruppo <b>TG 9</b> su TS2.",
   "xlx_help_title": "Come funziona il collegamento al riflettore XLX:",
-  "xlx_help_toggle": "❓ Guida XLX"
+  "xlx_help_toggle": "❓ Guida XLX",
+  "transcriber.source_lang": "🌐 Lingua di origine:",
+  "transcriber.source_lang_hint": "AUTO — la lingua parlata viene rilevata automaticamente. La selezione esplicita migliora la precisione sulle frasi brevi."
 }

@@ -27,6 +27,9 @@
   "about.desc_webaudio": "Browser low-latency DSP audio pipeline: AGC, 3-band parametric EQ, presence filter, and TS1/TS2 stereo routing.",
   "about.desc_websockets": "Open-source ASGI toolkit and WebSocket driver for real-time bidirectional PCM audio streaming and telemetry.",
   "about.email_copied": "e-mail copied to clipboard",
+  "about.freesoft_heading": "Free & Open Source Software",
+  "about.freesoft_sub": "Free and open-source software for amateur radio operators",
+  "about.logo_hint": "Long press — open About",
   "about.sec": "s",
   "about.title": "About Station",
   "about.ver_title": "ProxDMR Version",
@@ -2393,5 +2396,7 @@
   "xlx_help_step3": "<b>Modules A–Z (TG 4001–4026):</b> module <b>A = TG 4001</b>, <b>B = TG 4002</b>, ..., <b>Z = TG 4026</b>. Disconnect — <b>TG 4000</b>.",
   "xlx_help_step4": "<b>Voice QSOs (TG 9):</b> after linking, all reflector QSOs occur on group <b>TG 9</b> on TS2.",
   "xlx_help_title": "How XLX Reflector linking works:",
-  "xlx_help_toggle": "❓ XLX Guide"
+  "xlx_help_toggle": "❓ XLX Guide",
+  "transcriber.source_lang": "🌐 Source Language:",
+  "transcriber.source_lang_hint": "AUTO — spoken language is auto-detected. Explicit selection improves accuracy on short phrases."
 }

@@ -27,6 +27,9 @@
   "about.desc_webaudio": "Niedriglatente DSP-Audio-Pipeline im Browser: AGC, 3-Band-EQ, Präsenzfilter und TS1/TS2-Stereorouting.",
   "about.desc_websockets": "Open-Source-ASGI-Toolkit und WebSocket-Treiber für bidirektionales Echtzeit-PCM-Audiostreaming und Telemetrie.",
   "about.email_copied": "E-Mail in Zwischenablage kopiert",
+  "about.freesoft_heading": "Free & Open Source Software",
+  "about.freesoft_sub": "Freie und quelloffene Software für Funkamateure",
+  "about.logo_hint": "Langes Tippen — About öffnen",
   "about.sec": "s",
   "about.title": "Über die Station",
   "about.ver_title": "ProxDMR-Version",
@@ -2393,5 +2396,7 @@
   "xlx_help_step3": "<b>Module A–Z (TG 4001–4026):</b> Modul <b>A = TG 4001</b>, <b>B = TG 4002</b>, ..., <b>Z = TG 4026</b>. Trennen — <b>TG 4000</b>.",
   "xlx_help_step4": "<b>Sprach-QSOs (TG 9):</b> Nach Verknüpfung laufen alle Reflektor-Gespräche über die Gruppe <b>TG 9</b> auf TS2.",
   "xlx_help_title": "Funktionsweise des XLX-Reflektors:",
-  "xlx_help_toggle": "❓ XLX Anleitung"
+  "xlx_help_toggle": "❓ XLX Anleitung",
+  "transcriber.source_lang": "🌐 Quellsprache:",
+  "transcriber.source_lang_hint": "AUTO — gesprochene Sprache wird automatisch erkannt. Eine explizite Auswahl erhöht die Genauigkeit bei kurzen Sätzen."
 }

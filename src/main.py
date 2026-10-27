@@ -315,6 +315,7 @@ transcriber_service.configure(
     api_key=getattr(app_settings, "transcriber_api_key", ""),
     model=getattr(app_settings, "transcriber_model", "gemini-3.1-flash-lite"),
     target_lang=getattr(app_settings, "transcriber_target_lang", "ru"),
+    source_lang=getattr(app_settings, "transcriber_source_lang", "auto"),
     api_keys=getattr(app_settings, "transcriber_api_keys", []),
     tts_enabled=getattr(app_settings, "tts_enabled", False),
     tts_engine=getattr(app_settings, "tts_engine", "gemini"),
@@ -519,6 +520,7 @@ async def _revert_demo_runtime_state():
                     "enabled": getattr(s_admin, "transcriber_enabled", False),
                     "model": getattr(s_admin, "transcriber_model", "gemini-3.5-flash"),
                     "target_lang": getattr(transcriber_service, "target_lang", "ru"),
+                    "source_lang": getattr(transcriber_service, "source_lang", "auto"),
                     "has_key": bool(s_admin.transcriber_api_key or getattr(s_admin, "transcriber_api_keys", [])),
                     "tts_enabled": getattr(transcriber_service, "tts_enabled", False),
                     "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
@@ -669,6 +671,7 @@ def _configure_transcriber_from_settings(user_app_settings: AppSettings):
         api_key=getattr(user_app_settings, "transcriber_api_key", ""),
         model=getattr(user_app_settings, "transcriber_model", "gemini-3.1-flash-lite"),
         target_lang=getattr(user_app_settings, "transcriber_target_lang", "ru"),
+        source_lang=getattr(user_app_settings, "transcriber_source_lang", "auto"),
         api_keys=getattr(user_app_settings, "transcriber_api_keys", []),
         tts_enabled=getattr(user_app_settings, "tts_enabled", False),
         tts_engine=getattr(user_app_settings, "tts_engine", "piper"),
@@ -2457,6 +2460,7 @@ class TranscriberSettingsUpdate(BaseModel):
     transcriber_engine: Optional[str] = None
     model: Optional[str] = None
     translation_engine: Optional[str] = None
+    source_lang: Optional[str] = None
     target_lang: Optional[str] = None
     groq_api_key: Optional[str] = None
     groq_api_keys: Optional[List[str]] = None
@@ -2519,6 +2523,7 @@ async def get_transcriber_settings(request: Request):
             "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
             "translation_engine": getattr(s, "translation_engine", "groq"),
             "target_lang": getattr(live_ts, "target_lang", None) or getattr(s, "transcriber_target_lang", "ru"),
+            "source_lang": getattr(live_ts, "source_lang", None) or getattr(s, "transcriber_source_lang", "auto"),
             "groq_api_key": ("••••••••••••" if (is_demo and getattr(s, "groq_api_key", "")) else getattr(s, "groq_api_key", "")),
             "groq_api_keys": (["••••••••••••"] if (is_demo and getattr(s, "groq_api_keys", [])) else (getattr(s, "groq_api_keys", []) or [])),
             "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
@@ -2546,6 +2551,9 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
     s = await ensure_active_user(uid, login)
     is_demo = bool(user and user.get("is_demo"))
     if is_demo:
+        if update.source_lang is not None:
+            clean_sl = update.source_lang.strip().lower()
+            transcriber_service.source_lang = clean_sl if clean_sl else "auto"
         if update.target_lang is not None:
             transcriber_service.target_lang = update.target_lang
         if update.tts_enabled is not None:
@@ -2599,6 +2607,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "enabled": getattr(s, "transcriber_enabled", False),
             "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
             "target_lang": getattr(transcriber_service, "target_lang", "ru"),
+            "source_lang": getattr(transcriber_service, "source_lang", "auto"),
             "has_key": bool(s.transcriber_api_key or getattr(s, "transcriber_api_keys", [])),
             "tts_enabled": getattr(transcriber_service, "tts_enabled", False),
             "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
@@ -2627,6 +2636,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
                 "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
                 "translation_engine": getattr(s, "translation_engine", "groq"),
                 "target_lang": getattr(transcriber_service, "target_lang", "ru"),
+                "source_lang": getattr(transcriber_service, "source_lang", "auto"),
                 "groq_api_key": ("••••••••••••" if getattr(s, "groq_api_key", "") else ""),
                 "groq_api_keys": (["••••••••••••"] if getattr(s, "groq_api_keys", []) else []),
                 "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
@@ -2691,6 +2701,12 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             target_model = "gemini-3.5-flash"
         if target_model != s.transcriber_model:
             s.transcriber_model = target_model
+            changed = True
+    if update.source_lang is not None:
+        clean_sl = update.source_lang.strip().lower()
+        valid_sl = clean_sl if clean_sl else "auto"
+        if valid_sl != getattr(s, "transcriber_source_lang", "auto"):
+            s.transcriber_source_lang = valid_sl
             changed = True
     if update.target_lang is not None and update.target_lang != s.transcriber_target_lang:
         s.transcriber_target_lang = update.target_lang
@@ -2771,6 +2787,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "enabled": s.transcriber_enabled,
             "model": s.transcriber_model,
             "target_lang": s.transcriber_target_lang,
+            "source_lang": getattr(s, "transcriber_source_lang", "auto"),
             "has_key": bool(s.transcriber_api_key or getattr(s, "transcriber_api_keys", [])),
             "tts_enabled": getattr(s, "tts_enabled", False),
             "tts_engine": getattr(s, "tts_engine", "gemini"),
@@ -2799,6 +2816,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "model": s.transcriber_model,
             "translation_engine": getattr(s, "translation_engine", "gemini"),
             "target_lang": s.transcriber_target_lang,
+            "source_lang": getattr(s, "transcriber_source_lang", "auto"),
             "groq_api_key": getattr(s, "groq_api_key", ""),
             "groq_api_keys": getattr(s, "groq_api_keys", []) or [],
             "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),

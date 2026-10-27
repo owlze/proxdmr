@@ -27,6 +27,9 @@
   "about.desc_webaudio": "Низколатентный DSP-аудиотракт в браузере: АРУ (AGC), 3-полосный эквалайзер, фильтр присутствия и стереопанорама TS1/TS2.",
   "about.desc_websockets": "Открытый ASGI-тулкит и драйвер WebSocket для двунаправленного потокового обмена PCM-аудио и телеметрией в реальном времени.",
   "about.email_copied": "e-mail скопирован в буфер",
+  "about.freesoft_heading": "Free & Open Source Software",
+  "about.freesoft_sub": "Свободное ПО с открытым исходным кодом для радиолюбителей",
+  "about.logo_hint": "Длинный тап — вызов About",
   "about.sec": "с",
   "about.title": "ProxDMR",
   "about.ver_title": "Версия ProxDMR",
@@ -2393,5 +2396,7 @@
   "xlx_help_step3": "<b>Модули A–Z (TG 4001–4026):</b> модуль <b>A = TG 4001</b>, <b>B = TG 4002</b>, ..., <b>Z = TG 4026</b>. Отключение от модуля — <b>TG 4000</b>.",
   "xlx_help_step4": "<b>Голосовой вызов (TG 9):</b> после привязки к модулю весь голосовой обмен в рефлекторе идёт в группе <b>TG 9</b> на TS2.",
   "xlx_help_title": "Как работает связь с рефлектором XLX:",
-  "xlx_help_toggle": "❓ Инструкция XLX"
+  "xlx_help_toggle": "❓ Инструкция XLX",
+  "transcriber.source_lang": "🌐 Язык, с которого перевод / Source language:",
+  "transcriber.source_lang_hint": "AUTO — язык речи определяется автоматически. Явный выбор повышает точность на коротких фразах."
 }
