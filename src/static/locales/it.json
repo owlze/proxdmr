@@ -2398,5 +2398,8 @@
   "xlx_help_title": "Come funziona il collegamento al riflettore XLX:",
   "xlx_help_toggle": "❓ Guida XLX",
   "transcriber.source_lang": "🌐 Lingua di origine:",
-  "transcriber.source_lang_hint": "AUTO — la lingua parlata viene rilevata automaticamente. La selezione esplicita migliora la precisione sulle frasi brevi."
+  "transcriber.source_lang_hint": "AUTO — la lingua parlata viene rilevata automaticamente. La selezione esplicita migliora la precisione sulle frasi brevi.",
+  "ai_guide.btn_full": "🤖 Scarica Guida per IA (.txt)",
+  "ai_guide.btn_short": "🤖 Guida IA (.txt)",
+  "ai_guide.title": "Scarica questo file e invialo a ChatGPT / Gemini / Claude: l'IA ti guiderà passo dopo passo nell'installazione"
 }

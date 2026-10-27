@@ -2398,5 +2398,8 @@
   "xlx_help_title": "Funktionsweise des XLX-Reflektors:",
   "xlx_help_toggle": "❓ XLX Anleitung",
   "transcriber.source_lang": "🌐 Quellsprache:",
-  "transcriber.source_lang_hint": "AUTO — gesprochene Sprache wird automatisch erkannt. Eine explizite Auswahl erhöht die Genauigkeit bei kurzen Sätzen."
+  "transcriber.source_lang_hint": "AUTO — gesprochene Sprache wird automatisch erkannt. Eine explizite Auswahl erhöht die Genauigkeit bei kurzen Sätzen.",
+  "ai_guide.btn_full": "🤖 KI-Setup-Leitfaden (.txt) herunterladen",
+  "ai_guide.btn_short": "🤖 KI-Leitfaden (.txt)",
+  "ai_guide.title": "Laden Sie diese Datei herunter und senden Sie sie an ChatGPT / Gemini / Claude – KI führt Sie Schritt für Schritt durch die Installation"
 }

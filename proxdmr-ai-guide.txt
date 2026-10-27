@@ -1,0 +1,189 @@
+=== INSTRUCTIONS FOR THE AI ASSISTANT (LLM) ===
+The user has uploaded this file because they want help understanding, installing, or configuring ProxDMR (https://github.com/owlze/proxdmr).
+The user may be a beginner in Docker, Linux, networking, or amateur radio.
+Your role:
+1. Respond in the SAME LANGUAGE the user writes to you (e.g., Russian or English).
+2. First, explain in 2-3 simple sentences what ProxDMR is: a client-server DMR transceiver that turns a web browser or Android phone into a full-featured digital radio. It connects directly to BrandMeister, TGIF, FreeDMR, DMR+, and XLX Reflectors via the HomeBrew/MMDVM protocol without requiring a physical radio, hardware hotspot, or DVStick vocoder.
+3. Ask the user ONLY ONE question to start:
+   "Where would you like to install ProxDMR? (1) Windows PC, (2) Linux / Raspberry Pi, (3) Synology NAS, or (4) rented VPS server?"
+4. Guide the user strictly ONE STEP AT A TIME based on their answer. Do not dump all installation methods at once. Wait for their confirmation before giving the next step.
+5. Proactively help them troubleshoot any errors, firewall prompts, self-signed HTTPS warnings, or BrandMeister Hotspot Security passwords using the troubleshooting section below.
+===============================================
+
+PROXDMR TECHNICAL REFERENCE & INSTALLATION GUIDE
+
+1. SYSTEM REQUIREMENTS & PREREQUISITES
+- Operating Systems: Windows 10/11 (with Docker Desktop), Linux (Debian, Ubuntu, Arch, etc.), Raspberry Pi OS (Pi 4 or Pi 5 recommended, ARM64), Synology DSM 7+ (Container Manager), or any Linux VPS.
+- Software: Docker 20.10+ and Docker Compose v2.
+- Hardware: Minimum 1 GB RAM, 2 GB disk space. The AMBE+2 vocoder compiles or runs directly in Docker.
+- Required Host Ports:
+  * Port 8266 TCP — Web UI and Android client connection (HTTPS / WSS).
+  * Port 62031 UDP — HomeBrew protocol exchange with DMR master servers.
+- Amateur Radio Credentials:
+  * Licensed Amateur Radio Callsign (e.g. N0CALL, UB3AAA, DL1ABC).
+  * DMR ID (7 digits, obtained for free from https://www.radioid.net).
+  * Hotspot Security Password for your chosen network (configured in BrandMeister SelfCare or TGIF profile).
+
+--------------------------------------------------
+
+2. INSTALLATION METHODS
+
+METHOD 1: INTERACTIVE SETUP SCRIPT (EASIEST)
+
+A. Linux / Raspberry Pi / Synology SSH / VPS:
+1. Open a terminal and clone the repository or download the release archive:
+   git clone https://github.com/owlze/proxdmr.git
+   cd proxdmr
+2. Run the automated installer:
+   chmod +x setup.sh && ./setup.sh
+3. The script verifies Docker, auto-detects your IP, prompts for:
+   - Host IP or domain name for SSL certificate (press Enter for auto-detected)
+   - Port (press Enter for default 8266)
+   - Admin username (e.g. admin or your callsign)
+   - Admin password (set a secure password)
+   - Disable open registration? (recommended: Y)
+4. The installer automatically creates .env, builds, and starts the container.
+5. If Docker is not yet installed on Debian/Ubuntu/Raspberry Pi OS, run:
+   curl -fsSL https://get.docker.com | sh
+   sudo usermod -aG docker $USER
+   (then log out and log back in before running ./setup.sh)
+
+B. Windows 10/11 (Docker Desktop):
+1. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it.
+2. Download ProxDMR-Release.zip from https://github.com/owlze/proxdmr/releases
+3. Extract the ZIP archive into C:\ProxDMR
+4. Open C:\ProxDMR and double-click setup.bat (or run PowerShell as Administrator: cd C:\ProxDMR ; powershell -ExecutionPolicy Bypass -File .\setup.ps1).
+5. Follow the interactive prompts in the terminal window.
+6. When Windows Defender Firewall asks about "com.docker.backend", select Private networks and click Allow.
+
+METHOD 2: PRE-BUILT DOCKER IMAGE (NO COMPILATION)
+
+A. Using docker-compose.yml:
+Create a folder (e.g. proxdmr) and save this docker-compose.yml:
+
+services:
+  proxdmr:
+    image: ghcr.io/owlze/proxdmr:latest
+    container_name: proxdmr
+    restart: unless-stopped
+    ports:
+      - "8266:8266"
+      - "62031:62031/udp"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    environment:
+      - HOST_IP=192.168.1.50   # Replace with your server IP or domain
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=YourSecurePassword
+      - ALLOW_REGISTRATION=false
+
+Then launch with:
+docker compose up -d
+
+B. Synology NAS (GUI - Container Manager):
+1. Open File Station and create a folder: docker/proxdmr
+2. Open Container Manager -> Project -> Create.
+3. Project Name: proxdmr. Path: docker/proxdmr. Source: Create docker-compose.yml.
+4. Paste the docker-compose.yml YAML block from above.
+5. Change HOST_IP to your Synology local IP (e.g. 192.168.1.50) and set ADMIN_PASSWORD.
+6. Finish wizard. Container Manager will download the image from ghcr.io and start.
+
+C. Using a single "docker run" command:
+docker run -d \
+  --name proxdmr \
+  --restart unless-stopped \
+  -p 8266:8266 \
+  -p 62031:62031/udp \
+  -v ./config:/app/config \
+  -v ./data:/app/data \
+  -e HOST_IP=192.168.1.50 \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASSWORD=YourSecurePassword \
+  ghcr.io/owlze/proxdmr:latest
+
+METHOD 3: MANUAL BUILD FROM SOURCE VIA DOCKER COMPOSE
+1. git clone https://github.com/owlze/proxdmr.git
+2. cd proxdmr
+3. cp .env.example .env
+4. Edit .env (set HOST_IP, ADMIN_USER, ADMIN_PASSWORD)
+5. docker compose up -d --build
+
+--------------------------------------------------
+
+3. FIRST LAUNCH & CONFIGURATION
+1. Wait 1-2 minutes for first boot. The container generates TLS certificates, initializes SQLite database schemas, and downloads the RadioID directory.
+2. Open your web browser and go to:
+   https://<SERVER_IP>:8266
+3. Certificate Warning: Accept the self-signed TLS certificate ("Advanced -> Proceed to site"). HTTPS is mandatory for Web Audio and microphone access.
+4. Sign in using the admin credentials you set in step 1.
+5. Add a virtual hotspot in Hotspot Settings:
+   - Select Network: BrandMeister, TGIF, FreeDMR, DMR+ / IPSC2, or XLX Reflector.
+   - Enter your Callsign and 7-digit DMR ID.
+   - Enter your Hotspot Security Password (see troubleshooting below).
+   - Select Master Server (use built-in Server Probe to test ping and find the fastest node).
+   - Click Save. The gateway connects within 2-3 seconds.
+
+--------------------------------------------------
+
+4. ANDROID APPLICATION
+1. Download the native Android client APK directly from your server at:
+   https://<SERVER_IP>:8266/download/apk
+   (or from the GitHub Releases page).
+2. Install the APK on your phone (allow "Install unknown apps" if prompted).
+3. Open the app, enter your server address, port 8266, and credentials.
+4. The Android app supports background audio reception, hardware PTT buttons, and Bluetooth PTT headsets.
+
+--------------------------------------------------
+
+5. TROUBLESHOOTING & BEGINNER FAQ FOR THE AI ASSISTANT
+
+PROBLEM A: "Authentication Failed / RPTK Rejected / Connection rejected by BrandMeister or TGIF"
+EXPLANATION:
+Amateur radio digital networks require a separate "Hotspot Security Password", NOT the password used to log in to the network's website.
+HOW TO FIX:
+1. For BrandMeister:
+   - Go to https://brandmeister.network and log in.
+   - Click on "SelfCare" (top right user menu).
+   - Find "Hotspot Security" section.
+   - Enter a dedicated password and click Save.
+   - In ProxDMR Hotspot Settings, enter this exact Hotspot Security password.
+2. For TGIF:
+   - Log in to https://tgif.network
+   - Go to User Profile -> Hotspot Security Key.
+   - Copy that key into the Hotspot Password field in ProxDMR.
+
+PROBLEM B: "Your connection is not private / NET::ERR_CERT_AUTHORITY_INVALID in Chrome/Firefox"
+EXPLANATION:
+Modern browsers strictly prohibit microphone access and Web Audio over unencrypted HTTP (except on localhost). ProxDMR automatically generates an internal self-signed TLS/HTTPS certificate for your LAN IP or domain.
+HOW TO FIX:
+This is normal and safe for private home servers:
+- In Google Chrome / Edge: Click "Advanced" -> "Proceed to <ip> (unsafe)".
+- In Firefox: Click "Advanced" -> "Accept the Risk and Continue".
+- In Safari: Click "Show Details" -> "visit this website".
+
+PROBLEM C: "How to connect from my smartphone when away from home (on 4G/5G) without opening router ports?"
+EXPLANATION:
+Many home ISPs use Carrier-Grade NAT (CGNAT) or dynamic private IPs ("gray IP"), making direct port forwarding difficult or insecure.
+HOW TO FIX:
+Use Tailscale (free mesh VPN):
+1. Create a free account at https://tailscale.com
+2. Install Tailscale on the machine hosting ProxDMR (or as a Docker sidecar).
+3. Install Tailscale app on your Android phone and log in.
+4. In the ProxDMR Android app, enter the Tailscale 100.x.y.z IP of your server.
+5. Everything works seamlessly worldwide through an encrypted private tunnel without opening any router ports!
+
+PROBLEM D: "Docker Desktop on Windows fails to start or gives WSL2 error"
+HOW TO FIX:
+1. Make sure Virtualization (VT-x / AMD-V) is enabled in your computer's BIOS/UEFI.
+2. Run PowerShell as Administrator and run:
+   wsl --update
+   wsl --set-default-version 2
+3. Restart your computer and start Docker Desktop again.
+4. In Windows Defender Firewall, ensure com.docker.backend is allowed for Private networks.
+
+PROBLEM E: "Can I just listen to radio traffic without having an amateur radio license or DMR ID?"
+HOW TO FIX:
+Yes! You can test ProxDMR right now on the official live demo server:
+https://proxdmr.duckdns.org
+Click "Demo Login" to enter guest mode. You can listen in real-time to active talkgroups (Worldwide, USA, Europe, regional groups), watch live AI transcription and translation, and test the interface with zero setup.

@@ -437,6 +437,10 @@
   <div id="demoHeaderBadge" data-i18n-title="demo.badge_title" class="demo-header-badge" style="display: none;" title="Ознакомительный демо-режим">
     <span class="demo-header-dot" aria-hidden="true"></span>
     <span id="demoHeaderTime" class="demo-header-time">Demo: 10.00</span>
+    <a href="/download/ai-guide" download="proxdmr-ai-guide.txt" class="demo-header-ai-btn" title="Скачайте этот файл и отправьте его в ChatGPT / Gemini / Claude — ИИ поможет вам установить такой же сервер ProxDMR самостоятельно" data-i18n-title="ai_guide.title">
+      <span class="ai-guide-text-full" data-i18n="ai_guide.btn_full">🤖 Скачать .txt для ИИ (Помощь с установкой)</span>
+      <span class="ai-guide-text-short" data-i18n="ai_guide.btn_short">🤖 ИИ-Гид (.txt)</span>
+    </a>
     <button type="button" id="demoHeaderLogoutBtn" class="demo-header-logout" title="Выйти из демо" data-i18n-title="demo.exit">🚪</button>
   </div>
 
@@ -486,6 +490,10 @@
               </div>
               <span class="brand-version hotspot-name-badge">Main 📻</span>
               <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
+              <a href="/download/ai-guide" download="proxdmr-ai-guide.txt" id="headerAiGuideBadge" class="header-ai-guide-badge" title="Скачайте этот файл и отправьте его в ChatGPT / Gemini / Claude — ИИ поможет вам установить такой же сервер ProxDMR самостоятельно" data-i18n-title="ai_guide.title">
+                <span class="ai-guide-text-full" data-i18n="ai_guide.btn_full">🤖 Скачать .txt для ИИ (Помощь с установкой)</span>
+                <span class="ai-guide-text-short" data-i18n="ai_guide.btn_short">🤖 ИИ-Гид (.txt)</span>
+              </a>
             </div>
 
             <!-- Day / Night Theme Switcher (Click/tap to toggle) -->
@@ -5473,7 +5481,78 @@
     }
     .admin-act-btn{background:none;border:none;cursor:pointer;font-size:1em;padding:2px 4px;border-radius: 0px;opacity:0.8;transition:opacity 0.15s;}
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
-  </style>
+  
+    /* AI Setup Guide Badge & Button */
+    .header-ai-guide-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(211, 47, 47, 0.15);
+      border: 1px solid #d32f2f;
+      color: #ff5252;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-left: 8px;
+      box-shadow: 0 0 8px rgba(211, 47, 47, 0.2);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    .header-ai-guide-badge:hover {
+      background: rgba(211, 47, 47, 0.35);
+      color: #ffffff;
+      border-color: #ff5252;
+      box-shadow: 0 0 12px rgba(255, 82, 82, 0.45);
+      text-decoration: none;
+      transform: translateY(-1px);
+    }
+    .demo-header-ai-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(211, 47, 47, 0.25);
+      border: 1px solid #d32f2f;
+      color: #ffffff;
+      padding: 2px 8px;
+      border-radius: 2px;
+      font-size: 0.73rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      margin: 0 6px;
+      transition: all 0.2s ease;
+    }
+    .demo-header-ai-btn:hover {
+      background: #d32f2f;
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(211, 47, 47, 0.6);
+      text-decoration: none;
+    }
+    @media (max-width: 768px) {
+      .header-ai-guide-badge .ai-guide-text-full,
+      .demo-header-ai-btn .ai-guide-text-full {
+        display: none !important;
+      }
+      .header-ai-guide-badge .ai-guide-text-short,
+      .demo-header-ai-btn .ai-guide-text-short {
+        display: inline !important;
+      }
+    }
+    @media (min-width: 769px) {
+      .header-ai-guide-badge .ai-guide-text-full,
+      .demo-header-ai-btn .ai-guide-text-full {
+        display: inline !important;
+      }
+      .header-ai-guide-badge .ai-guide-text-short,
+      .demo-header-ai-btn .ai-guide-text-short {
+        display: none !important;
+      }
+    }
+</style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
   <script type="module" src="/static/js/app.js?v=2.9.386"></script>
 </body>

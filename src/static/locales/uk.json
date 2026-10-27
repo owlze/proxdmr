@@ -2398,5 +2398,8 @@
   "xlx_help_title": "Як працює зв'язок з рефлектором XLX:",
   "xlx_help_toggle": "❓ Інструкція XLX",
   "transcriber.source_lang": "🌐 Мова, з якої переклад / Source language:",
-  "transcriber.source_lang_hint": "AUTO — мова мовлення визначається автоматично. Явний вибір підвищує точність на коротких фразах."
+  "transcriber.source_lang_hint": "AUTO — мова мовлення визначається автоматично. Явний вибір підвищує точність на коротких фразах.",
+  "ai_guide.btn_full": "🤖 Завантажити .txt для ШІ (Допомога зі встановленням)",
+  "ai_guide.btn_short": "🤖 ШІ-Гід (.txt)",
+  "ai_guide.title": "Завантажте цей файл та надішліть його до ChatGPT / Gemini / Claude — ШІ допоможе вам встановити власний сервер ProxDMR"
 }

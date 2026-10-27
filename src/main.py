@@ -478,7 +478,7 @@ def _record_attempt(ip: str):
 # --- JWT Auth Middleware ---
 
 _AUTH_SKIP_PREFIXES = ("/static/", "/api/auth/", "/ws/")
-_AUTH_SKIP_EXACT = ("/", "/favicon.ico", "/apk", "/download/apk", "/api/apk/info", "/api/apk/version", "/api/health")
+_AUTH_SKIP_EXACT = ("/", "/favicon.ico", "/apk", "/download/apk", "/download/ai-guide", "/ai-guide", "/api/apk/info", "/api/apk/version", "/api/health")
 
 # Короткий TTL-кэш (blocked, role) на user_id: избавляет от 2 запросов к БД на каждый HTTP-запрос.
 _USER_STATE_TTL = 3.0
@@ -1757,8 +1757,26 @@ async def download_apk():
         )
     raise HTTPException(status_code=404, detail="APK not found")
 
+
+@app.get("/download/ai-guide", include_in_schema=False)
+@app.get("/ai-guide", include_in_schema=False)
+async def download_ai_guide():
+    guide_path = STATIC_DIR / "proxdmr-ai-guide.txt"
+    if not guide_path.exists():
+        guide_path = STATIC_DIR.parent.parent / "proxdmr-ai-guide.txt"
+    if guide_path.exists():
+        return FileResponse(
+            path=str(guide_path),
+            filename="proxdmr-ai-guide.txt",
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="proxdmr-ai-guide.txt"'}
+        )
+    raise HTTPException(status_code=404, detail="AI Guide file not found")
+
 @app.get("/download/{filename:path}", include_in_schema=False)
 async def download_named_file(filename: str):
+    if filename in ("proxdmr-ai-guide.txt", "ai-guide.txt"):
+        return await download_ai_guide()
     if filename.endswith(".apk"):
         try:
             static_root = STATIC_DIR.resolve()

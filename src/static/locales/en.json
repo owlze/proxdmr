@@ -2398,5 +2398,8 @@
   "xlx_help_title": "How XLX Reflector linking works:",
   "xlx_help_toggle": "❓ XLX Guide",
   "transcriber.source_lang": "🌐 Source Language:",
-  "transcriber.source_lang_hint": "AUTO — spoken language is auto-detected. Explicit selection improves accuracy on short phrases."
+  "transcriber.source_lang_hint": "AUTO — spoken language is auto-detected. Explicit selection improves accuracy on short phrases.",
+  "ai_guide.btn_full": "🤖 Download AI Setup Guide (.txt)",
+  "ai_guide.btn_short": "🤖 AI Guide (.txt)",
+  "ai_guide.title": "Download this file and drop it into ChatGPT / Gemini / Claude — AI will walk you through setting up your own ProxDMR server"
 }

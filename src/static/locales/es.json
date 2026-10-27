@@ -2398,5 +2398,8 @@
   "xlx_help_title": "Cómo funciona el enlace con reflectores XLX:",
   "xlx_help_toggle": "❓ Guía XLX",
   "transcriber.source_lang": "🌐 Idioma de origen:",
-  "transcriber.source_lang_hint": "AUTO — el idioma hablado se detecta automáticamente. La selección explícita mejora la precisión en frases cortas."
+  "transcriber.source_lang_hint": "AUTO — el idioma hablado se detecta automáticamente. La selección explícita mejora la precisión en frases cortas.",
+  "ai_guide.btn_full": "🤖 Descargar Guía para IA (.txt)",
+  "ai_guide.btn_short": "🤖 Guía IA (.txt)",
+  "ai_guide.title": "Descarga este archivo y envíalo a ChatGPT / Gemini / Claude: la IA te guiará paso a paso en la instalación"
 }
