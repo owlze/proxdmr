@@ -2,7 +2,7 @@
 
 ProxDMR is a client-server application that turns an ordinary web browser or smartphone into a full-featured DMR transceiver. The program connects directly to amateur radio networks — **BrandMeister**, **TGIF**, **FreeDMR**, **DMR+ / IPSC2**, and **XLX Reflectors** (D-Star / DMR Gateway) via the Homebrew/MMDVM protocol, eliminating the need for a physical digital radio or hardware hotspot.
 
-I've set up a demo server: https://proxdmr.duckdns.org
+Demo server: https://proxdmr.duckdns.org
 
 <p align="center">
   <a href="docs/images/01.jpg" target="_blank">
