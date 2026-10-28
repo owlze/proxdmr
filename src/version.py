@@ -1,4 +1,4 @@
-﻿"""
+"""
 ProxDMR Version Management
 
 Правила версионирования:

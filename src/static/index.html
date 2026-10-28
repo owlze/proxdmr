@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <script>
@@ -142,8 +142,11 @@
       }
       function updateVuMeterGrid() {
         var dpr = window.devicePixelRatio || 1;
-        var cssGap = 7 / dpr;
-        var cssPeriod = 9 / dpr;
+        var isSmartphone = window.innerWidth <= 768 || (window.matchMedia && window.matchMedia('(pointer: coarse) and (max-width: 960px), (pointer: coarse) and (max-height: 540px)').matches) || Boolean(window.AndroidBridge);
+        var seg = isSmartphone ? 14 : 7;
+        var gap = isSmartphone ? 3 : 2;
+        var cssGap = seg / dpr;
+        var cssPeriod = (seg + gap) / dpr;
         document.documentElement.style.setProperty('--vu-gap', cssGap.toFixed(6) + 'px');
         document.documentElement.style.setProperty('--vu-period', cssPeriod.toFixed(6) + 'px');
       }

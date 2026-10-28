@@ -1296,6 +1296,15 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
   }
   window.__proxdmr.updateHotspotVuMeter = updateHotspotVuMeter;
 
+  function _getVuSegDims() {
+    const isSmartphone = (typeof window !== "undefined") && (
+      window.innerWidth <= 768 ||
+      (window.matchMedia && window.matchMedia("(pointer: coarse) and (max-width: 960px), (pointer: coarse) and (max-height: 540px)").matches) ||
+      Boolean(window.AndroidBridge)
+    );
+    return isSmartphone ? { segW: 14, gapW: 3 } : { segW: 7, gapW: 2 };
+  }
+
   function drawVuTrack(canvas, ctx, activeCount, peakIndex, isOverload, isTs2, isLight, N) {
     if (!canvas || !ctx) return;
     const dpr = window.devicePixelRatio || 1;
@@ -1310,8 +1319,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       canvas.height = targetH;
     }
 
-    const segW = 7;
-    const gapW = 2;
+    const { segW, gapW } = _getVuSegDims();
     const totalSegs = N || Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
     const totalMeterW = totalSegs * segW + (totalSegs - 1) * gapW;
     const startX = Math.floor((targetW - totalMeterW) / 2);
@@ -1347,8 +1355,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
   function refreshAllVuCanvases() {
     const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
     const dpr = window.devicePixelRatio || 1;
-    const segW = 7;
-    const gapW = 2;
+    const { segW, gapW } = _getVuSegDims();
     const allCards = document.querySelectorAll(".radio-container");
     allCards.forEach(card => {
       const hid = card.dataset.hotspotId || "default";
@@ -1459,8 +1466,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           if (canvas && ctx) {
             const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
             const dpr = window.devicePixelRatio || 1;
+            const { segW, gapW } = _getVuSegDims();
             const targetW = Math.round(canvas.clientWidth * dpr);
-            const N = Math.max(1, Math.floor((targetW + 2) / 9));
+            const N = Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
             drawVuTrack(canvas, ctx, 0, -1, false, slot === 2, isLight, N);
           }
         }
@@ -1469,9 +1477,10 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
         if (vuData.canvas && vuData.ctx) {
           const dpr = window.devicePixelRatio || 1;
+          const { segW, gapW } = _getVuSegDims();
           const curW = vuData.canvas.clientWidth;
           const targetW = Math.round(curW * dpr);
-          const N = Math.max(1, Math.floor((targetW + 2) / 9));
+          const N = Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
           const activeCount = Math.min(N, Math.max(0, Math.round((st.current / 100.0) * N)));
           const peakIndex = st.peak > 1.0 ? Math.min(N - 1, Math.max(0, Math.floor((st.peak / 100.0) * N))) : -1;
           const isOverload = st.peak >= 85;
