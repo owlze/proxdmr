@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
   <script>
@@ -1751,6 +1751,17 @@
             <div id="superadminDeleteDisabledHint" style="display: none; margin-top: 8px; padding: 6px 10px; background: rgba(255, 204, 0, 0.08); border: 1px solid rgba(255, 204, 0, 0.25); border-radius: 0px; font-size: 0.8rem; color: #ffcc00; text-align: center; font-weight: 600;" data-i18n="account.superadmin_delete_disabled">
               🛡️ Аккаунт суперадминистратора защищен от удаления
             </div>
+          </div>
+
+          <!-- Stats Sharing Block (superadmin only) -->
+          <div id="adminShareStatsBlock" class="settings-action-block" style="display:none; padding-top:14px; margin-top:14px; border-top:1px solid rgba(88,166,255,0.2);">
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+              <input type="checkbox" id="adminShareStatsCheckbox" style="width:15px;height:15px;margin-top:3px;accent-color:#58a6ff;cursor:pointer;">
+              <div>
+                <span style="font-size:0.87rem;font-weight:600;color:var(--text-primary);" data-i18n="account.share_stats_label">Отсылать данные о статистике в сервер мониторинга автора проекта</span>
+                <div style="font-size:0.75rem;opacity:0.7;margin-top:3px;line-height:1.4;" data-i18n="account.share_stats_hint">Отсылка количественной статистики на сервер автора проекта, никакие личные данные и идентификаторы не отсылаются</div>
+              </div>
+            </label>
           </div>
         </div>
 

@@ -41,6 +41,20 @@
       if (tabBtnAlerts) tabBtnAlerts.style.display = '';
       if (subtabsNav) subtabsNav.style.display = 'flex';
       if (serverRestartBlock) serverRestartBlock.style.display = isDemo ? 'none' : 'block';
+      // Stats sharing checkbox (superadmin only)
+      const shareStatsBlock = document.getElementById('adminShareStatsBlock');
+      const shareStatsChk = document.getElementById('adminShareStatsCheckbox');
+      if (shareStatsBlock && currentUserRole === 'superadmin' && !isDemo) {
+        shareStatsBlock.style.display = 'block';
+        fetch('/api/admin/visitor-stats').then(r => r.json()).then(d => {
+          if (shareStatsChk) shareStatsChk.checked = Boolean(d.enabled);
+        }).catch(() => {});
+        if (shareStatsChk) {
+          shareStatsChk.addEventListener('change', () => {
+            fetch('/api/admin/visitor-stats', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ enabled: shareStatsChk.checked }) }).catch(() => {});
+          });
+        }
+      }
       const demoSettingsBlock = document.getElementById('adminDemoSettingsBlock');
       if (demoSettingsBlock && isDemo) {
         demoSettingsBlock.style.display = 'none';

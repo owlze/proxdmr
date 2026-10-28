@@ -1,4 +1,4 @@
-"""
+﻿"""
 ProxDMR Version Management
 
 Правила версионирования:
@@ -11,8 +11,8 @@ import re
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.59"
-APP_VERSION_DATE = "27.10.2026"
+APP_VERSION = "1.60"
+APP_VERSION_DATE = "28.10.2026"
 
 APK_VERSION = "1.32"
 APK_VERSION_DATE = "27.10.2026"

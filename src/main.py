@@ -37,6 +37,7 @@ try:
     from dmr.hamqth import hamqth_service
     from ping import BMPingService, ClientPingService
     import memguard
+    import visitor_stats
     import alerts_config
     from ssl_helper import ensure_ssl_certificates
     from transcriber import GeminiTranscriberService, get_tts_test_phrase
@@ -64,6 +65,7 @@ except ImportError:
     from src.dmr.hamqth import hamqth_service
     from src.ping import BMPingService, ClientPingService
     from src import memguard
+    from src import visitor_stats
     from src import alerts_config
     from src.ssl_helper import ensure_ssl_certificates
     from src.transcriber import GeminiTranscriberService
@@ -415,6 +417,8 @@ async def lifespan(app: FastAPI):
     await hotspot_manager.start()
     bm_ping_service.start()
     memguard.start(BASE_DIR / "data")
+    await visitor_stats.init()
+    stats_task = asyncio.create_task(visitor_stats.reporter_loop())
 
     # Предзагрузка голоса Piper при старте (когда loop уже активен)
     if transcriber_service and getattr(transcriber_service, "tts_voice", None):
@@ -441,6 +445,7 @@ async def lifespan(app: FastAPI):
     bm_ping_service.stop()
     memguard.stop()
     sync_task.cancel()
+    stats_task.cancel()
     logger.info("[MAIN] Shutting down ProxDMR Gateway...")
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
         transcriber_service.disable_all_slots()
@@ -1292,6 +1297,34 @@ def _require_admin(request: Request) -> dict:
     return user
 
 
+def _require_superadmin(request: Request) -> dict:
+    """Require superadmin role. Returns user dict or raises 401/403."""
+    user = _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if user.get("role") != "superadmin":
+        raise HTTPException(status_code=403, detail="Доступ запрещён. Требуются права суперадминистратора.")
+    return user
+
+
+class VisitorStatsShareUpdate(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/admin/visitor-stats")
+async def get_visitor_stats_sharing(request: Request):
+    _require_superadmin(request)
+    return {"status": "ok", "enabled": visitor_stats.is_enabled()}
+
+
+@app.post("/api/admin/visitor-stats")
+async def set_visitor_stats_sharing(body: VisitorStatsShareUpdate, request: Request):
+    _require_superadmin(request)
+    enabled = await visitor_stats.set_enabled(body.enabled)
+    logger.info(f"[STATS] Sending anonymous statistics to the author's server: {'enabled' if enabled else 'disabled'}")
+    return {"status": "ok", "enabled": enabled}
+
+
 @app.get("/api/admin/diag")
 async def admin_diag(request: Request):
     _require_admin(request)
@@ -1970,7 +2003,7 @@ async def get_index(request: Request):
     is_first_run = (uc == 0)
     is_swl = await is_user_swl(uid) if uid else False
 
-    return templates.TemplateResponse(
+    index_response = templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
@@ -2023,6 +2056,8 @@ async def get_index(request: Request):
             "allow_registration": False,
         }
     )
+    visitor_stats.ensure_cid_cookie(request, index_response)
+    return index_response
 
 # --- Hotspot Management API ---
 
@@ -6928,6 +6963,11 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     if ws_is_demo:
         demo_ws_clients[websocket] = ws_demo_sid
     logger.info(f"[WS] Client connected: {client_id} (user={ws_login}, demo={ws_is_demo}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
+    asyncio.create_task(visitor_stats.record_visit(
+        visitor_stats.client_ip(websocket),
+        websocket.headers.get("user-agent", ""),
+        websocket.cookies.get(visitor_stats.CID_COOKIE),
+    ))
 
     user_settings = await ensure_active_user(ws_user_id, ws_login)
     ws_active_hotspots[websocket] = {

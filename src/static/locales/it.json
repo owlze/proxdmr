@@ -2399,5 +2399,7 @@
   "transcriber.source_lang_hint": "AUTO — la lingua parlata viene rilevata automaticamente. La selezione esplicita migliora la precisione sulle frasi brevi.",
   "ai_guide.btn_full": "🤖 Scarica Guida per IA (.txt)",
   "ai_guide.btn_short": "🤖 Guida IA (.txt)",
-  "ai_guide.title": "Scarica questo file e invialo a ChatGPT / Gemini / Claude: l'IA ti guiderà passo dopo passo nell'installazione"
+  "ai_guide.title": "Scarica questo file e invialo a ChatGPT / Gemini / Claude: l'IA ti guiderà passo dopo passo nell'installazione",
+  "account.share_stats_label": "Invia statistiche di utilizzo al server di monitoraggio dell’autore del progetto",
+  "account.share_stats_hint": "Invia statistiche aggregate al server dell’autore del progetto. Nessun dato personale o identificatore viene trasmesso."
 }

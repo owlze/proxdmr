@@ -2399,5 +2399,7 @@
   "transcriber.source_lang_hint": "AUTO — spoken language is auto-detected. Explicit selection improves accuracy on short phrases.",
   "ai_guide.btn_full": "🤖 Download AI Setup Guide (.txt)",
   "ai_guide.btn_short": "🤖 AI Guide (.txt)",
-  "ai_guide.title": "Download this file and drop it into ChatGPT / Gemini / Claude — AI will walk you through setting up your own ProxDMR server"
+  "ai_guide.title": "Download this file and drop it into ChatGPT / Gemini / Claude — AI will walk you through setting up your own ProxDMR server",
+  "account.share_stats_label": "Send usage statistics to the project author's monitoring server",
+  "account.share_stats_hint": "Sends aggregated statistics to the project author's server. No personal data or identifiers are transmitted."
 }
