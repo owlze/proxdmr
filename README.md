@@ -5,8 +5,7 @@
 **Live Demo:** [https://proxdmr.duckdns.org](https://proxdmr.duckdns.org)
 
 > [!CAUTION]
-> ### 🤖 Сложно разобраться с Docker, Linux или настройкой сервера? / Need help installing?
-> **$\color{#ff4d4d}{\textsf{Скачайте этот текстовый файл и отправьте его вашему ИИ (ChatGPT, Gemini, Claude, DeepSeek) — он проведёт вас за руку по шагам!}}$**  
+> ### 🤖 Finding it difficult to get to grips with Docker, Linux or server configuration? / Need help installing?
 > **$\color{#ff4d4d}{\textsf{Download this AI-ready guide (.txt) and drop it into any AI chat — your AI will walk you through the setup step-by-step!}}$**
 >
 > [![Download AI Setup Guide](https://img.shields.io/badge/%F0%9F%93%A5_DOWNLOAD_AI_SETUP_GUIDE_(proxdmr--ai--guide.txt)-D32F2F?style=for-the-badge)](https://raw.githubusercontent.com/owlze/proxdmr/main/proxdmr-ai-guide.txt)
