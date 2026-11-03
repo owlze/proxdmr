@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js?v=2.9.367';
+import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js?v=2.9.547';
 import { showToast } from '../core/toast.js';
 import { logSelection } from './log-selection.js';
 
@@ -917,7 +917,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
     let html = toRender.map(c => {
       const isTx = Boolean(c.is_tx);
-      const country = getCountryInfo(c.src_id, c.src_callsign);
+      const country = getCallCountryInfo(c);
       const flagHtml = isTx 
         ? `<span class="tx-mic-icon" title="${window.t ? window.t("live.tx_tooltip", {}, "Моя передача (TX)") : "Моя передача (TX)"}">\u{1F399}\u{FE0F}</span>` 
         : getFlagBadgeHtml(country, false, country.flag);

@@ -2996,7 +2996,7 @@ class GeminiTranscriberService:
                                 should_start = True
                                 if dl_st.get("status") == "error":
                                     last_err_time = dl_st.get("timestamp", 0)
-                                    import time
+
                                     if time.time() - last_err_time < 60:
                                         should_start = False
                                 if should_start:

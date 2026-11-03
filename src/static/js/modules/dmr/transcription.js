@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, getHistoryTimeMode } from '../core/formatters.js?v=2.9.367';
+import { getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, getHistoryTimeMode } from '../core/formatters.js?v=2.9.547';
 import { showToast } from '../core/toast.js';
 
 /**
@@ -1157,7 +1157,7 @@ export function renderTranscriptionSummary() {
     const tgInfo = isPrivateCall ? `ID ${c.dst_id}` : `TG ${c.dst_id}`;
     const slotInfo = `TS${c.slot}`;
 
-    const country = getCountryInfo(c.src_id, c.src_callsign);
+    const country = getCallCountryInfo(c);
     const flagHtml = isTx ? "🎙️ " : (country && country.flag ? `${country.flag} ` : "");
 
     const hsObj = currentHotspots.find(h => h.id === (c.hotspot_id || "default"));

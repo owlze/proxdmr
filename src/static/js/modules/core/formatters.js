@@ -142,7 +142,8 @@
     { prefix: /^E7/i, name: "Босния и Герцеговина", name_en: "Bosnia & Herzegovina", flag: "🇧🇦" },
     { prefix: /^TF/i, name: "Исландия", name_en: "Iceland", flag: "🇮🇸" },
     { prefix: /^LX/i, name: "Люксембург", name_en: "Luxembourg", flag: "🇱🇺" },
-    { prefix: /^XE/i, name: "Мексика", name_en: "Mexico", flag: "🇲🇽" }
+    { prefix: /^XE/i, name: "Мексика", name_en: "Mexico", flag: "🇲🇽" },
+    { prefix: /^7Z|^8Z|^HZ/i, name: "Саудовская Аравия", name_en: "Saudi Arabia", flag: "🇸🇦" }
   ];
 
   export function getCountryInfo(dmrId, callsign = "", countryName = "") {
@@ -188,6 +189,55 @@
       }
     }
     return { name: "Global", name_en: "", flag: "🌐" };
+  }
+
+  const GLOBAL_COUNTRY_INFO = { name: "Global", name_en: "", flag: "🌐" };
+  // Радиолюбительский позывной ОБЯЗАТЕЛЬНО содержит цифру района (EA1AMF, WB8FWB, 7Z1AJ).
+  // Имена хабов/узлов вроде EASTC цифры не содержат и НЕ должны давать флаг страны по префиксу.
+  const HAM_CALLSIGN_SHAPE = /^[A-Z0-9]{1,3}\d[A-Z0-9]{0,4}[A-Z]$/;
+
+  function lookupCountryByHamCallsign(rawCallsign) {
+    let cs = String(rawCallsign || "").trim().toUpperCase();
+    if (!cs) return null;
+    if (cs.includes("/")) {
+      const parts = cs.split("/").filter(Boolean);
+      parts.sort((a, b) => b.length - a.length);
+      cs = parts[0] || "";
+    }
+    if (!HAM_CALLSIGN_SHAPE.test(cs)) return null;
+    for (const item of CALLSIGN_PREFIX_MAP) {
+      if (item.prefix.test(cs)) return item;
+    }
+    return null;
+  }
+
+  function getAslIsoCountryInfo(rawIso) {
+    const iso = String(rawIso || "").trim().toLowerCase();
+    if (!/^[a-z]{2}$/.test(iso) || iso === "gl" || iso === "xx") return null;
+    const upper = iso.toUpperCase();
+    return {
+      iso,
+      name: getLocalizedCountryName(upper, upper),
+      name_en: getLocalizedCountryName(upper, upper, "en"),
+      flag: isoToEmoji(upper)
+    };
+  }
+
+  export function getCallCountryInfo(call, legacyCountryHint = "") {
+    if (!call) return GLOBAL_COUNTRY_INFO;
+    const callIdStr = String(call.id || call.call_id || "");
+    const isAslCall = call.network_type === "allstar" || callIdStr.startsWith("asl_");
+    if (!isAslCall) {
+      return getCountryInfo(call.src_id, call.src_callsign, legacyCountryHint);
+    }
+    // 1) Оператор назвал позывной в эфире: talker_alias = "🎙️ WB8FWB · EASTC"
+    const alias = String(call.talker_alias || "");
+    const spoken = alias.match(/^\s*\u{1F399}\uFE0F?\s*([A-Za-z0-9\/]{3,12})/u);
+    if (spoken) {
+      return lookupCountryByHamCallsign(spoken[1]) || GLOBAL_COUNTRY_INFO;
+    }
+    // 2) Реальная страна узла/хаба из справочника AllStarLink (поле country: "US", "RU"; "INT" = неизвестно)
+    return getAslIsoCountryInfo(call.country) || GLOBAL_COUNTRY_INFO;
   }
 
   export function emojiToIso(flagEmoji) {

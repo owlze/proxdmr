@@ -4,7 +4,7 @@ import {
   formatCaptionHtml,
   renderTranscriptionSummary,
   updateLogTranscriptionPopoverIfActive
-} from './transcription.js?v=2.9.367';
+} from './transcription.js?v=2.9.547';
 import {
   getHotspotMute,
   getPersistentHotspotMute,

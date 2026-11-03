@@ -4,7 +4,7 @@
  * and dispatching 46+ server messages (audio, transcription, status, recordings, etc.).
  */
 
-import { getCountryInfo, renderTgTextHtml, updateFlagElement, formatCallerLocation } from '../core/formatters.js?v=2.9.367';
+import { getCountryInfo, getCallCountryInfo, renderTgTextHtml, updateFlagElement, formatCallerLocation } from '../core/formatters.js?v=2.9.547';
 import { showToast } from '../core/toast.js';
 import {
   updateGwStatus,
@@ -28,8 +28,8 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.545';
-import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.367';
+} from '../dmr/transcriber.js?v=2.9.547';
+import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.547';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.367';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js';
@@ -2004,7 +2004,7 @@ export function handleServerMessage(msg) {
             const tgFlagEl = vfoRow.querySelector(".ts-tg-flag");
             const tgTextEl = vfoRow.querySelector(".ts-tg-text");
 
-            const callerCountry = getCountryInfo(msg.src_id, msg.src_callsign, msg.country);
+            const callerCountry = getCallCountryInfo(msg, msg.country);
             const userCached = (typeof window !== "undefined" && window.USER_CALLSIGNS && window.USER_CALLSIGNS[msg.src_id]) || {};
             const callerCity = msg.city || userCached.city || "";
             const tgCountry = getCountryInfo(msg.dst_id);
@@ -2221,7 +2221,8 @@ export function handleServerMessage(msg) {
           const callerCallEl = vfoRow.querySelector(".ts-caller-call");
           const callerIdEl = vfoRow.querySelector(".ts-caller-id");
           const callerCountryEl = vfoRow.querySelector(".ts-caller-country");
-          const country = getCountryInfo(msg.src_id, msg.src_callsign);
+          const knownCall = (window.heardCalls || []).find(c => String(c.id) === String(msg.call_id));
+          const country = getCallCountryInfo({ ...(knownCall || {}), ...msg });
           const cCall = msg.src_callsign || (msg.src_id ? `ID: ${msg.src_id}` : "Unknown");
           const cName = msg.src_name || "";
           const displayName = `${cCall} ${cName}`.trim();

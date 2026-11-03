@@ -1,10 +1,10 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay } from '../core/formatters.js?v=2.9.367';
+import { formatCallerDisplay } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
 import {
   formatCaptionHtml,
   renderTranscriptionSummary,
   updateLogTranscriptionPopoverIfActive
-} from './transcription.js?v=2.9.367';
+} from './transcription.js?v=2.9.547';
 import {
   getHotspotMute,
   getPersistentHotspotMute,
@@ -3779,8 +3779,8 @@ function formatCaptionEntryHtml(entry) {
   const cs = (entry.callsign || "DMR").trim();
   const rawText = (entry.text || "").trim();
   const textHtml = formatCaptionHtml(rawText);
-  const country = getCountryInfo(entry.srcId, cs);
-  const flagHtml = getFlagBadgeHtml(country, false, (country && country.flag) ? country.flag : "🌐");
+
+
 
   // Spoken callsign extraction e.g. <call>K7ABC</call> or turn badge
   let spokenBadge = "";
@@ -3796,7 +3796,7 @@ function formatCaptionEntryHtml(entry) {
 
   const turnClass = entry.speakerTurn ? ` speaker-turn-${entry.speakerTurn}` : "";
 
-  return `<div class="vfo-caption-entry${turnClass}"><span class="vfo-caption-badge"><span class="vfo-caption-flag">${flagHtml}</span> <strong class="vfo-caption-callsign">${safeEscapeHtml(cs)}</strong>${spokenBadge}</span>: <span class="vfo-caption-text">${textHtml}</span></div>`;
+  return `<div class="vfo-caption-entry${turnClass}"><span class="vfo-caption-badge"><strong class="vfo-caption-callsign">${safeEscapeHtml(cs)}</strong>${spokenBadge}</span>: <span class="vfo-caption-text">${textHtml}</span></div>`;
 }
 
 function updateCallLogTranscription(msg) {

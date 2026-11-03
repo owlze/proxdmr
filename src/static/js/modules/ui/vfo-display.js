@@ -6,6 +6,7 @@
 
 import {
   getCountryInfo,
+  getCallCountryInfo,
   updateFlagElement,
   getCleanTgDesc,
   getHotspotNetworkType,
@@ -13,7 +14,7 @@ import {
   adjustPttDescFontSize,
   renderTgTextHtml,
   formatCallerLocation
-} from "../core/formatters.js?v=2.9.367";
+} from "../core/formatters.js?v=2.9.547";
 
 function getActiveHotspotId() {
   return (typeof window !== "undefined" && window.activeHotspotId) || "default";
@@ -563,7 +564,7 @@ export function updateCardTgDisplay(card) {
       // Top row: caller info - ALWAYS CLEAN & NEVER GREY DURING RECENT/ACTIVE RX
       const cCall = rxData.src_callsign || (rxData.src_id ? `ID: ${rxData.src_id}` : "———");
       const cName = rxData.src_name || "";
-      const callerCountry = getCountryInfo(rxData.src_id, rxData.src_callsign);
+      const callerCountry = getCallCountryInfo(rxData);
 
       if (callerCallEl) {
         if (!rxData.src_callsign && rxData.src_id) {

@@ -1,7 +1,7 @@
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.380';
 import { RecordingsManager } from './modules/audio/player.js?v=2.9.542';
 import './modules/ui/theme.js?v=2.9.541';
-import './modules/dmr/bm-monitor.js?v=2.9.528';
+import './modules/dmr/bm-monitor.js?v=2.9.547';
 import './modules/dmr/log-selection.js';
 import {
   handleCallTranscription,
@@ -27,10 +27,10 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.545';
+} from './modules/dmr/transcriber.js?v=2.9.547';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
-import { initAndroidBridge } from './modules/core/android.js?v=2.9.545';
+import { initAndroidBridge } from './modules/core/android.js?v=2.9.547';
 import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.367';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
 import { initLanguageManager } from './modules/settings/language.js?v=2.9.367';
@@ -46,7 +46,7 @@ import {
 import { initStationClocks, updateClocks } from './modules/ui/clocks.js';
 import {
   renderTranscriptionSummary
-} from './modules/dmr/transcription.js?v=2.9.367';
+} from './modules/dmr/transcription.js?v=2.9.547';
 import {
   initSearchManager,
   loadCallDbStats,
@@ -77,7 +77,7 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.545';
+} from './modules/dmr/hotspots.js?v=2.9.547';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
@@ -126,7 +126,7 @@ import {
   selectHotspotTargetId,
   getStoredLastRx,
   saveStoredLastRx
-} from './modules/ui/vfo-display.js?v=2.9.510';
+} from './modules/ui/vfo-display.js?v=2.9.547';
 import {
   loadCardPingHistory,
   saveCardPingHistory,
@@ -150,7 +150,7 @@ import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js?v=2.9.545';
+} from './modules/settings/sync.js?v=2.9.547';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -216,7 +216,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.545';
+} from './modules/network/ws.js?v=2.9.547';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application

@@ -34,7 +34,7 @@ import {
   disableHotspotTranscribe,
   ensureCaptionFontControls,
   setupCaptionBoxPinchZoom
-} from './transcriber.js?v=2.9.545';
+} from './transcriber.js?v=2.9.547';
 import {
   startTransmission,
   stopTransmission,
