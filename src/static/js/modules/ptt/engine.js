@@ -7,7 +7,7 @@ import { getCountryInfo, updateFlagElement } from '../core/formatters.js?v=2.9.3
 import { updateAllHotspotRecUI } from '../audio/routing.js';
 import { initAudio, applyTxDspSettings, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js?v=2.9.525';
 import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js';
-import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, getRogerBeepDurationMs, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js';
+import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, getRogerBeepDurationMs, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js?v=2.9.542';
 import { triggerHaptic } from '../core/haptic.js';
 
 let txStartTime = 0;
@@ -296,6 +296,10 @@ function _isVolumeDownPttEnabled() {
   let cancelTransmissionStart = false;
 
   async function startTransmission(targetHotspotId = null, targetSlotParam = null) {
+    if (window.isSessionPausedByAnotherDevice) {
+      clearTxIndicationUI(targetHotspotId || window.activeHotspotId);
+      return;
+    }
     if (isPttReleasing) {
       finalizeTransmissionRelease(targetHotspotId || window.activeTxHotspotId || window.activeHotspotId);
     }
@@ -878,6 +882,7 @@ window.triggerAslTxReadyHaptic = function(hotspotId) {
   window.startTransmission = startTransmission;
   window.stopTransmission = stopTransmission;
   window.triggerHardwarePtt = function(isDown) {
+    if (window.isSessionPausedByAnotherDevice) return;
     const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
     const mode = getHotspotPttMode(hid);
     if (mode === "toggle") {
@@ -932,6 +937,7 @@ window.triggerAslTxReadyHaptic = function(hotspotId) {
 export function initPttEngine() {
   // Keyboard Spacebar & Hardware/Headset Volume Up PTT (acts on active hotspot)
   window.addEventListener("keydown", (e) => {
+    if (window.isSessionPausedByAnotherDevice) return;
     if (e.code === "Space" && !e.repeat && e.target.tagName !== "INPUT" && !document.querySelector(".modal.active")) {
       e.preventDefault();
       const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";

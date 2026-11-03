@@ -7103,6 +7103,195 @@ textarea::placeholder {
     border-color: #0284c7;
   }
 
+  /* ── AI API Keys Manager Popover & Paid/Primary Key #1 Highlight ── */
+  .apikeys-popover-editor {
+    white-space: pre;
+    overflow-x: auto;
+    overflow-y: auto;
+    word-break: normal;
+    overflow-wrap: normal;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    min-height: 124px;
+    max-height: 210px;
+    padding: 6px 8px;
+    border-radius: var(--app-border-radius, 0px);
+    border: 1px solid var(--border-color, #30363d);
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--text-primary, #e6edf3);
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .apikeys-popover-editor:focus {
+    border-color: var(--accent-color, #00b0ff);
+  }
+
+  .apikeys-popover-editor:empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-muted, #6e7681);
+    pointer-events: none;
+    white-space: pre-wrap;
+  }
+
+  .apikeys-popover-editor > div {
+    padding: 2px 8px;
+    margin: 1px 0;
+    border-radius: 4px;
+    border-left: 3px solid transparent;
+    transition: background-color 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+  }
+
+  /* Выделение первого в списке (условно платного) ключа — ТЁМНАЯ ТЕМА */
+  .apikeys-popover-editor > div.apikeys-line-first,
+  .apikeys-popover-editor > div:first-child {
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.22) 0%, rgba(245, 158, 11, 0.09) 100%);
+    border-left-color: #f59e0b;
+    color: #fef3c7;
+    font-weight: 600;
+  }
+
+  /* Визуальная индикация неактивных ключей по чекбоксам */
+  .apikeys-popover-editor.apikeys-skip-first > div.apikeys-line-first,
+  .apikeys-popover-editor.apikeys-skip-first > div:first-child {
+    opacity: 0.45;
+    border-left-style: dashed;
+  }
+
+  .apikeys-popover-editor.apikeys-skip-others > div.apikeys-line-other {
+    opacity: 0.42;
+  }
+
+  /* Цвета статуса проверки ключей (Тёмная тема) */
+  .apikeys-popover-editor > div.key-valid {
+    color: #4ade80 !important;
+  }
+  .apikeys-popover-editor > div.key-invalid {
+    color: #f87171 !important;
+    background: rgba(239, 68, 68, 0.12);
+  }
+  .apikeys-popover-editor > div.key-ratelimit {
+    color: #fbbf24 !important;
+  }
+
+  /* Чекбоксы режимов использования ключей */
+  .apikeys-mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: var(--app-border-radius, 0px);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .apikeys-mode-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.81rem;
+    font-weight: 600;
+    color: var(--text-primary, #e6edf3);
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.3;
+  }
+
+  .apikeys-mode-row input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: #00b0ff;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .apikeys-first-badge {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: rgba(245, 158, 11, 0.45);
+    border: 1px solid #f59e0b;
+    flex-shrink: 0;
+  }
+
+  .apikeys-console-link {
+    font-size: 0.76rem;
+    color: #38bdf8;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .apikeys-console-link:hover {
+    text-decoration: underline;
+  }
+
+  .apikeys-popover-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.22);
+    border-top: 1px solid var(--border-color, #30363d);
+  }
+
+  /* ── СВЕТЛАЯ ТЕМА ([data-theme="light"]) ── */
+  [data-theme="light"] .apikeys-popover-editor {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+  }
+
+  [data-theme="light"] .apikeys-popover-editor:empty::before {
+    color: #94a3b8;
+  }
+
+  [data-theme="light"] .apikeys-popover-editor > div.apikeys-line-first,
+  [data-theme="light"] .apikeys-popover-editor > div:first-child {
+    background: linear-gradient(90deg, #fef3c7 0%, #fffbeb 100%);
+    border-left-color: #d97706;
+    color: #78350f;
+  }
+
+  [data-theme="light"] .apikeys-popover-editor > div.key-valid {
+    color: #15803d !important;
+  }
+
+  [data-theme="light"] .apikeys-popover-editor > div.key-invalid {
+    color: #dc2626 !important;
+    background: rgba(220, 38, 38, 0.09);
+  }
+
+  [data-theme="light"] .apikeys-popover-editor > div.key-ratelimit {
+    color: #b45309 !important;
+  }
+
+  [data-theme="light"] .apikeys-mode-options {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+  }
+
+  [data-theme="light"] .apikeys-mode-row {
+    color: #1e293b;
+  }
+
+  [data-theme="light"] .apikeys-first-badge {
+    background: #fde68a;
+    border-color: #d97706;
+  }
+
+  [data-theme="light"] .apikeys-console-link {
+    color: #0284c7;
+  }
+
+  [data-theme="light"] .apikeys-popover-footer {
+    background: #f6f8fa;
+    border-top-color: #d0d7de;
+  }
+
 
   /* Vertical VU Meter (under PTT dot on the right) */
   .vfo-vu-vert-bar {
@@ -34660,4 +34849,140 @@ body.is-hotspot-dragging .radio-header {
   background: #f0f9ff !important;
   border: 1px solid #0284c7 !important;
   color: #0284c7 !important;
+}
+
+/* --- Roger Beep & Seam Beep Test Button --- */
+.tone-test-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 10px;
+  min-height: 30px;
+  border-radius: var(--app-border-radius, 0px);
+  border: 1px solid rgba(56, 139, 253, 0.45);
+  background: rgba(56, 139, 253, 0.14);
+  color: #79c0ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.tone-test-btn:hover {
+  background: rgba(56, 139, 253, 0.26);
+  border-color: rgba(88, 166, 255, 0.75);
+  color: #ffffff;
+}
+.tone-test-btn:active,
+.tone-test-btn.is-playing {
+  background: rgba(46, 160, 67, 0.28);
+  border-color: #3fb950;
+  color: #aff5b4;
+}
+[data-theme="light"] .tone-test-btn {
+  background: rgba(9, 105, 218, 0.1);
+  border-color: rgba(9, 105, 218, 0.4);
+  color: #0969da;
+}
+[data-theme="light"] .tone-test-btn:hover {
+  background: rgba(9, 105, 218, 0.18);
+  border-color: #0969da;
+  color: #0550ae;
+}
+[data-theme="light"] .tone-test-btn.is-playing {
+  background: rgba(26, 127, 55, 0.16);
+  border-color: #1a7f37;
+  color: #116329;
+}
+
+/* --- Session Paused By Another Device Overlay --- */
+.session-paused-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10050 !important;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(8, 11, 16, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.session-paused-modal.active {
+  display: flex !important;
+}
+.session-paused-card {
+  width: 100%;
+  max-width: 430px !important;
+  padding: 26px 24px 22px 24px !important;
+  text-align: center;
+  border-radius: var(--app-border-radius, 0px);
+  background: var(--bg-card, #161b22);
+  border: 1px solid rgba(234, 179, 8, 0.45);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65), 0 0 24px rgba(234, 179, 8, 0.12);
+}
+.session-paused-icon-wrap {
+  font-size: 2.3rem;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+.session-paused-title {
+  margin: 0 0 10px 0;
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: var(--text-primary, #f0f6fc);
+}
+.session-paused-desc {
+  margin: 0 0 20px 0;
+  font-size: 0.93rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #c9d1d9);
+}
+.session-paused-actions {
+  display: flex;
+  justify-content: center;
+}
+.session-paused-restore-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 22px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  border-radius: var(--app-border-radius, 0px);
+  border: 1px solid #2ea043;
+  background: linear-gradient(180deg, #2ea043 0%, #238636 100%);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(46, 160, 67, 0.32);
+  transition: filter 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+}
+.session-paused-restore-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.session-paused-restore-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.session-paused-restore-btn:disabled {
+  opacity: 0.68;
+  cursor: wait;
+}
+[data-theme="light"] .session-paused-modal {
+  background: rgba(15, 23, 42, 0.58);
+}
+[data-theme="light"] .session-paused-card {
+  background: #ffffff;
+  border-color: rgba(217, 119, 6, 0.55);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.22);
+}
+[data-theme="light"] .session-paused-title {
+  color: #0f172a;
+}
+[data-theme="light"] .session-paused-desc {
+  color: #334155;
 }

@@ -2569,5 +2569,22 @@
   "contacts.asl_traffic_high": "High",
   "contacts.asl_traffic_live": "ON AIR 🔥",
   "contacts.asl_db_updated_toast": "✅ AllStarLink database updated: {count} nodes",
-  "contacts.asl_db_error_toast": "⚠️ Error updating AllStarLink database"
+  "contacts.asl_db_error_toast": "⚠️ Error updating AllStarLink database",
+  "ptt.roger_beep_test_btn": "Test",
+  "ptt.roger_beep_test_title": "Preview Roger Beep tone",
+  "recordings.seam_beep_test_btn": "Test",
+  "recordings.seam_beep_test_title": "Preview session separator tone",
+  "gw.session_paused_title": "Session Paused",
+  "gw.session_paused_msg": "You signed in on another device, so this client is paused. To activate priority on this device again, click \"Restore\".",
+  "gw.session_paused_restore_btn": "Restore",
+  "gw.session_paused_restoring_btn": "Restoring...",
+  "gw.session_paused_status": "Paused (active on another device)",
+  "transcriber.apikeys_use_first": "Use the first key in the list (paid)",
+  "transcriber.apikeys_use_others": "Use all other keys (rotation)",
+  "transcriber.apikeys_status_first_only": "Keys found: {count} • Active: #1 only",
+  "transcriber.apikeys_status_others_only": "Keys found: {count} • Active: #2–{count} ({active} in rotation)",
+  "transcriber.apikeys_status_all": "Keys found: {count} • Active: all {count}",
+  "transcriber.apikeys_warn_no_other_keys": "⚠️ Only 1 key in list — add keys from line 2 or enable the 1st key",
+  "transcriber.tts_key_gemini_lbl": "🔑 Gemini API Keys (for TTS):",
+  "transcriber.tts_key_groq_lbl": "⚡ Groq Cloud API Keys (for TTS):"
 }

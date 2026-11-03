@@ -34,7 +34,7 @@ import {
   disableHotspotTranscribe,
   ensureCaptionFontControls,
   setupCaptionBoxPinchZoom
-} from './transcriber.js?v=2.9.464';
+} from './transcriber.js?v=2.9.545';
 import {
   startTransmission,
   stopTransmission,
@@ -1675,6 +1675,7 @@ export async function probeAslMatrixNodes(card, targetHs, force = false) {
 
 if (typeof window !== "undefined" && !window._aslMatrixProbeInterval) {
   window._aslMatrixProbeInterval = setInterval(() => {
+    if (window.isSessionPausedByAnotherDevice) return;
     try {
       const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
       const aslHs = hsList.find(h => ((h && h.network_type) || "").toLowerCase() === "allstar");
@@ -9104,6 +9105,7 @@ export function appendAllStarTelemetryLog(cid, rtt, jitter) {
 
 if (typeof window !== "undefined" && !window._aslOnlinePollInterval) {
   window._aslOnlinePollInterval = setInterval(() => {
+    if (window.isSessionPausedByAnotherDevice) return;
     try {
       const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
       const aslHs = hsList.find(h => ((h && h.network_type) || "").toLowerCase() === "allstar");

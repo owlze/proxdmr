@@ -1,5 +1,5 @@
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.380';
-import { RecordingsManager } from './modules/audio/player.js?v=2.9.527';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.542';
 import './modules/ui/theme.js?v=2.9.541';
 import './modules/dmr/bm-monitor.js?v=2.9.528';
 import './modules/dmr/log-selection.js';
@@ -27,17 +27,17 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.528';
+} from './modules/dmr/transcriber.js?v=2.9.545';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
-import { initAndroidBridge } from './modules/core/android.js?v=2.9.541';
+import { initAndroidBridge } from './modules/core/android.js?v=2.9.545';
 import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.367';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
 import { initLanguageManager } from './modules/settings/language.js?v=2.9.367';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
 import { initGeneralSettings } from './modules/settings/general.js?v=2.9.509';
 import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.509';
-import { initSystemUpdater } from './modules/settings/system-updater.js';
+import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.543';
 import { initOrientationLock } from './modules/ui/orientation.js';
 import {
   initQuickAssign,
@@ -66,7 +66,7 @@ import {
   startSystemLinkWatchdog,
   checkBmApiStatus,
   updateGwStatus
-} from './modules/network/watchdog.js?v=2.9.527';
+} from './modules/network/watchdog.js?v=2.9.542';
 import {
   initHotspotsManager,
   loadHotspots,
@@ -77,7 +77,7 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.541';
+} from './modules/dmr/hotspots.js?v=2.9.545';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
@@ -92,9 +92,9 @@ import {
   updatePttLockUI,
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
-} from './modules/ptt/engine.js?v=2.9.522';
+} from './modules/ptt/engine.js?v=2.9.542';
 import { initAboutModal } from './modules/ui/about.js';
-import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.367';
+import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.542';
 import {
   initFullscreen,
   toggleFullscreen,
@@ -150,7 +150,7 @@ import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js?v=2.9.506';
+} from './modules/settings/sync.js?v=2.9.545';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -216,12 +216,50 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.525';
+} from './modules/network/ws.js?v=2.9.545';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application
  * Modular Application Orchestrator & Bootstrapper
  */
+
+function _generateClientInstanceId() {
+  try {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    const arr = new Uint8Array(16);
+    window.crypto.getRandomValues(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+  } catch (_) {
+    return "cid_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 11);
+  }
+}
+
+if (typeof window !== "undefined") {
+  if (!window.PROXDMR_CLIENT_ID) {
+    window.PROXDMR_CLIENT_ID = _generateClientInstanceId();
+  }
+  if (!window._proxdmrCidFetchPatched && typeof window.fetch === "function") {
+    window._proxdmrCidFetchPatched = true;
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+      try {
+        const urlStr = typeof input === "string" ? input : (input && input.url ? input.url : "");
+        const isLocalApi = urlStr.startsWith("/api/") || urlStr.includes(window.location.origin + "/api/");
+        if (isLocalApi && window.PROXDMR_CLIENT_ID) {
+          init = init ? Object.assign({}, init) : {};
+          const hdrs = new Headers(init.headers || (typeof input !== "string" && input && input.headers ? input.headers : undefined));
+          if (!hdrs.has("X-ProxDMR-Client-Id")) {
+            hdrs.set("X-ProxDMR-Client-Id", window.PROXDMR_CLIENT_ID);
+          }
+          init.headers = hdrs;
+        }
+      } catch (_) {}
+      return _origFetch(input, init);
+    };
+  }
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   window.safeEscapeHtml = safeEscapeHtml;

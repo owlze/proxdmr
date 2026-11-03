@@ -2569,5 +2569,22 @@
   "contacts.asl_traffic_high": "Hoog",
   "contacts.asl_traffic_live": "IN DE LUCHT 🔥",
   "contacts.asl_db_updated_toast": "✅ AllStarLink-database bijgewerkt: {count} knooppunten",
-  "contacts.asl_db_error_toast": "⚠️ Fout bij het bijwerken van de AllStarLink-database"
+  "contacts.asl_db_error_toast": "⚠️ Fout bij het bijwerken van de AllStarLink-database",
+  "ptt.roger_beep_test_btn": "Test",
+  "ptt.roger_beep_test_title": "Roger Beep-toon beluisteren",
+  "recordings.seam_beep_test_btn": "Test",
+  "recordings.seam_beep_test_title": "Sessiescheidingstoon beluisteren",
+  "gw.session_paused_title": "Sessie gepauzeerd",
+  "gw.session_paused_msg": "U bent ingelogd op een ander apparaat, waardoor deze client is gepauzeerd. Klik op 'Herstellen' om de prioriteit op dit apparaat weer te activeren.",
+  "gw.session_paused_restore_btn": "Herstellen",
+  "gw.session_paused_restoring_btn": "Herstellen...",
+  "gw.session_paused_status": "Gepauzeerd (ander apparaat actief)",
+  "transcriber.apikeys_use_first": "Eerste sleutel in de lijst gebruiken (betaald)",
+  "transcriber.apikeys_use_others": "Alle overige sleutels gebruiken (roulatie)",
+  "transcriber.apikeys_status_first_only": "Sleutels gevonden: {count} • Actief: alleen nr. 1",
+  "transcriber.apikeys_status_others_only": "Sleutels gevonden: {count} • Actief: nr. 2–{count} ({active} in roulatie)",
+  "transcriber.apikeys_status_all": "Sleutels gevonden: {count} • Actief: alle {count}",
+  "transcriber.apikeys_warn_no_other_keys": "⚠️ Slechts 1 sleutel in lijst — voeg sleutels toe vanaf regel 2 of schakel 1e sleutel in",
+  "transcriber.tts_key_gemini_lbl": "🔑 Gemini API-sleutels (voor spraaksynthese):",
+  "transcriber.tts_key_groq_lbl": "⚡ Groq Cloud API-sleutels (voor spraaksynthese):"
 }

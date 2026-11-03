@@ -106,11 +106,49 @@ def parse_multilingual_notes(raw_body: str) -> Dict[str, str]:
     return notes
 
 
+def get_current_app_metadata() -> Tuple[str, str]:
+    """Dynamically reloads version.py to ensure the live on-disk version is immediately recognized."""
+    cur_ver = APP_VERSION
+    cur_date = APP_VERSION_DATE
+    try:
+        import importlib
+        mod = None
+        try:
+            import version
+            importlib.reload(version)
+            mod = version
+        except Exception:
+            pass
+        if mod is None:
+            try:
+                from src import version as src_version
+                importlib.reload(src_version)
+                mod = src_version
+            except Exception:
+                pass
+        if mod is not None:
+            cur_ver = getattr(mod, "APP_VERSION", cur_ver)
+            cur_date = getattr(mod, "APP_VERSION_DATE", cur_date)
+    except Exception as e:
+        logger.warning(f"[UPDATER] Error reloading version module: {e}")
+    return cur_ver, cur_date
+
+
 def check_for_updates(force: bool = False) -> Dict[str, Any]:
     global _update_cache
     now = time.time()
-    if not force and _update_cache["data"] and (now - _update_cache["checked_at"] < _update_cache["ttl_sec"]):
-        return _update_cache["data"]
+    current_ver, current_date = get_current_app_metadata()
+    current_tuple = parse_version_tuple(current_ver)
+
+    # Invalidate cache if force=True, or TTL expired, or disk version changed since cache creation
+    cached_data = _update_cache.get("data")
+    if (
+        not force
+        and cached_data
+        and (now - _update_cache["checked_at"] < _update_cache["ttl_sec"])
+        and (cached_data.get("current_version") == current_ver)
+    ):
+        return cached_data
 
     url = f"{GITHUB_API_BASE}/releases?per_page=5"
     req = urllib.request.Request(
@@ -154,9 +192,6 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
         except Exception as te:
             logger.warning(f"[UPDATER] Tags check failed: {te}")
 
-    current_ver = APP_VERSION
-    current_tuple = parse_version_tuple(current_ver)
-
     if not release_data:
         fallback_notes = {l: "" for l in SUPPORTED_LANGUAGES}
         local_notes_file = Path(__file__).resolve().parent / "data" / "latest_release_notes.md"
@@ -170,10 +205,10 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
             "status": "ok",
             "has_update": False,
             "current_version": current_ver,
-            "current_date": APP_VERSION_DATE,
+            "current_date": current_date,
             "latest_version": current_ver,
             "release_name": f"v{current_ver}",
-            "release_date": APP_VERSION_DATE,
+            "release_date": current_date,
             "release_url": f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases",
             "notes_by_lang": fallback_notes,
             "raw_notes": "",
@@ -218,7 +253,7 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
         "status": "ok",
         "has_update": has_update,
         "current_version": current_ver,
-        "current_date": APP_VERSION_DATE,
+        "current_date": current_date,
         "latest_version": latest_tag,
         "release_name": release_data.get("name") or f"v{latest_tag}",
         "release_date": (release_data.get("published_at") or "")[:10],

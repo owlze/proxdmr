@@ -158,7 +158,10 @@ export function updateHotspotGwStatus(hid, isOnline, detail = "") {
 
   let badgeClass = "status-offline bm-offline";
   let badgeText = "GW:OFFLINE";
-  if (effectiveOnline) {
+  if (window.isSessionPausedByAnotherDevice) {
+    badgeClass = "status-connecting bm-connecting";
+    badgeText = "GW:PAUSED";
+  } else if (effectiveOnline) {
     badgeClass = "status-online bm-online";
     badgeText = "GW:ONLINE";
   } else if (isConnecting) {
@@ -211,6 +214,12 @@ export function updateGwStatus(isOnline, detail = "") {
 }
 
 export const triggerHotspotGwAction = async (hid) => {
+  if (window.isSessionPausedByAnotherDevice) {
+    if (typeof window.restorePausedSession === "function") {
+      window.restorePausedSession();
+    }
+    return;
+  }
   if (isGwToggling) return;
   isGwToggling = true;
   setTimeout(() => { isGwToggling = false; }, 350);
@@ -302,6 +311,7 @@ let lastGwWatchdogAttemptTime = 0;
 let isSystemLinkChecking = false;
 
 export async function runSystemLinkCheck() {
+  if (window.isSessionPausedByAnotherDevice) return;
   if (isSystemLinkChecking) return;
   isSystemLinkChecking = true;
 
@@ -610,6 +620,7 @@ export function renderHotspotAuxStatusBadge(card, hs) {
 let isCheckingApi = false;
 
 export async function checkBmApiStatus(arg1 = false, arg2 = null) {
+  if (window.isSessionPausedByAnotherDevice) return;
   let force = false;
   let hotspotId = null;
   if (typeof arg1 === "string") {

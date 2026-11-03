@@ -2569,5 +2569,22 @@
   "contacts.asl_traffic_high": "Hoch",
   "contacts.asl_traffic_live": "ON AIR 🔥",
   "contacts.asl_db_updated_toast": "✅ AllStarLink-Datenbank aktualisiert: {count} Nodes",
-  "contacts.asl_db_error_toast": "⚠️ Fehler beim Aktualisieren der AllStarLink-Datenbank"
+  "contacts.asl_db_error_toast": "⚠️ Fehler beim Aktualisieren der AllStarLink-Datenbank",
+  "ptt.roger_beep_test_btn": "Test",
+  "ptt.roger_beep_test_title": "Roger-Beep-Ton testen",
+  "recordings.seam_beep_test_btn": "Test",
+  "recordings.seam_beep_test_title": "Trennton testen",
+  "gw.session_paused_title": "Sitzung pausiert",
+  "gw.session_paused_msg": "Sie haben sich auf einem anderen Gerät angemeldet, daher ist dieser Client pausiert. Klicken Sie auf „Wiederherstellen“, um die Priorität auf diesem Gerät wieder zu aktivieren.",
+  "gw.session_paused_restore_btn": "Wiederherstellen",
+  "gw.session_paused_restoring_btn": "Wird wiederhergestellt...",
+  "gw.session_paused_status": "Pausiert (anderes Gerät aktiv)",
+  "transcriber.apikeys_use_first": "Ersten Schlüssel in der Liste verwenden (kostenpflichtig)",
+  "transcriber.apikeys_use_others": "Alle übrigen Schlüssel verwenden (Rotation)",
+  "transcriber.apikeys_status_first_only": "Schlüssel: {count} • Aktiv: nur Nr. 1",
+  "transcriber.apikeys_status_others_only": "Schlüssel: {count} • Aktiv: Nr. 2–{count} ({active} in Rotation)",
+  "transcriber.apikeys_status_all": "Schlüssel: {count} • Aktiv: alle {count}",
+  "transcriber.apikeys_warn_no_other_keys": "⚠️ Nur 1 Schlüssel vorhanden — weitere ab Zeile 2 hinzufügen oder 1. Schlüssel aktivieren",
+  "transcriber.tts_key_gemini_lbl": "🔑 Gemini API-Schlüssel (für Sprachsynthese):",
+  "transcriber.tts_key_groq_lbl": "⚡ Groq Cloud API-Schlüssel (für Sprachsynthese):"
 }

@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import struct
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -1176,6 +1177,8 @@ class GeminiTranscriberService:
         self.api_keys: List[str] = []
         self._key_index: int = 0
         self.gemini_use_first_key_only: bool = False
+        self.gemini_use_first_key: bool = True
+        self.gemini_use_other_keys: bool = True
         self.transcriber_engine: str = "gemini"
         self.model: str = "gemini-3.1-flash-lite"
         self.translation_engine: str = "gemini"
@@ -1183,6 +1186,10 @@ class GeminiTranscriberService:
         self.groq_api_keys: List[str] = []
         self._groq_key_index: int = 0
         self.groq_use_first_key_only: bool = False
+        self.groq_use_first_key: bool = True
+        self.groq_use_other_keys: bool = True
+        self._key_lock = threading.Lock()
+        self._key_cooldowns: Dict[str, float] = {}
         self.deepgram_api_key: str = ""
         self.source_lang: str = "auto"
         self.target_lang: str = "ru"
@@ -1237,30 +1244,53 @@ class GeminiTranscriberService:
         groq_api_keys: Optional[List[str]] = None,
         deepgram_api_key: str = "",
         gemini_use_first_key_only: bool = False,
-        groq_use_first_key_only: bool = False
+        groq_use_first_key_only: bool = False,
+        gemini_use_first_key: Optional[bool] = None,
+        gemini_use_other_keys: Optional[bool] = None,
+        groq_use_first_key: Optional[bool] = None,
+        groq_use_other_keys: Optional[bool] = None
     ):
         self.api_keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
         if not self.api_keys and api_key and api_key.strip():
             self.api_keys = [api_key.strip()]
         self.api_key = self.api_keys[0] if self.api_keys else (api_key or "").strip()
-        self.gemini_use_first_key_only = bool(gemini_use_first_key_only)
+        if gemini_use_first_key is None and gemini_use_other_keys is None:
+            self.gemini_use_first_key = True
+            self.gemini_use_other_keys = not bool(gemini_use_first_key_only)
+        else:
+            self.gemini_use_first_key = True if gemini_use_first_key is None else bool(gemini_use_first_key)
+            self.gemini_use_other_keys = True if gemini_use_other_keys is None else bool(gemini_use_other_keys)
+            if not self.gemini_use_first_key and not self.gemini_use_other_keys:
+                self.gemini_use_first_key = True
+        self.gemini_use_first_key_only = bool(self.gemini_use_first_key and not self.gemini_use_other_keys)
 
         self.groq_api_keys = [k.strip() for k in (groq_api_keys or []) if k and k.strip()]
         if not self.groq_api_keys and groq_api_key and groq_api_key.strip():
             self.groq_api_keys = [groq_api_key.strip()]
         self.groq_api_key = self.groq_api_keys[0] if self.groq_api_keys else (groq_api_key or "").strip()
-        self.groq_use_first_key_only = bool(groq_use_first_key_only)
+        if groq_use_first_key is None and groq_use_other_keys is None:
+            self.groq_use_first_key = True
+            self.groq_use_other_keys = not bool(groq_use_first_key_only)
+        else:
+            self.groq_use_first_key = True if groq_use_first_key is None else bool(groq_use_first_key)
+            self.groq_use_other_keys = True if groq_use_other_keys is None else bool(groq_use_other_keys)
+            if not self.groq_use_first_key and not self.groq_use_other_keys:
+                self.groq_use_first_key = True
+        self.groq_use_first_key_only = bool(self.groq_use_first_key and not self.groq_use_other_keys)
+
+        with self._key_lock:
+            self._key_cooldowns.clear()
 
         self.transcriber_engine = (transcriber_engine or "gemini").lower().strip()
         self.translation_engine = (translation_engine or "gemini").lower().strip()
         self.deepgram_api_key = (deepgram_api_key or "").strip()
 
         if self.transcriber_engine == "groq":
-            self.enabled = bool(enabled and (self.groq_api_keys or self.groq_api_key))
+            self.enabled = bool(enabled and len(self.get_all_groq_keys()) > 0)
         elif self.transcriber_engine == "deepgram":
             self.enabled = bool(enabled and self.deepgram_api_key)
         else:
-            self.enabled = bool(enabled and (self.api_keys or self.api_key))
+            self.enabled = bool(enabled and len(self.get_all_keys()) > 0)
 
         m = model.strip() if model and model.strip() else "gemini-3.1-flash-lite"
         if any(dep in m.lower() for dep in ["gemini-2.5-", "gemini-2.0-", "gemini-1.5-"]):
@@ -1316,48 +1346,118 @@ class GeminiTranscriberService:
         if not self.enabled:
             return False
         if self.transcriber_engine == "groq":
-            return bool(self.groq_api_keys or self.groq_api_key)
+            return bool(self.get_all_groq_keys())
         elif self.transcriber_engine == "deepgram":
             return bool(self.deepgram_api_key)
-        return bool(self.api_keys or self.api_key)
+        return bool(self.get_all_keys())
+
+    def _select_pool_by_flags(self, raw_list: List[str], single_fallback: str, use_first: bool, use_other: bool) -> List[str]:
+        full = list(raw_list) if raw_list else ([single_fallback] if single_fallback else [])
+        if not full:
+            return []
+        if use_first and use_other:
+            return full
+        if use_first and not use_other:
+            return [full[0]]
+        if not use_first and use_other:
+            # ВАЖНО: Ключ №1 (платный) строго исключён! Если ключей меньше 2 — пул пуст (НЕ трогать full[0]!).
+            return full[1:] if len(full) > 1 else []
+        return [full[0]]
 
     def get_all_keys(self) -> List[str]:
-        if self.gemini_use_first_key_only:
-            if self.api_keys:
-                return [self.api_keys[0]]
-            return [self.api_key] if self.api_key else []
-        if self.api_keys:
-            return list(self.api_keys)
-        return [self.api_key] if self.api_key else []
-
-    def _get_next_key(self) -> str:
-        keys = self.get_all_keys()
-        if not keys:
-            return ""
-        if self.gemini_use_first_key_only:
-            return keys[0]
-        key = keys[self._key_index % len(keys)]
-        self._key_index = (self._key_index + 1) % len(keys)
-        return key
+        return self._select_pool_by_flags(
+            self.api_keys, self.api_key, self.gemini_use_first_key, self.gemini_use_other_keys
+        )
 
     def get_all_groq_keys(self) -> List[str]:
-        if self.groq_use_first_key_only:
-            if self.groq_api_keys:
-                return [self.groq_api_keys[0]]
-            return [self.groq_api_key] if self.groq_api_key else []
-        if self.groq_api_keys:
-            return list(self.groq_api_keys)
-        return [self.groq_api_key] if self.groq_api_key else []
+        return self._select_pool_by_flags(
+            self.groq_api_keys, self.groq_api_key, self.groq_use_first_key, self.groq_use_other_keys
+        )
 
-    def _get_next_groq_key(self) -> str:
-        keys = self.get_all_groq_keys()
+    def _mark_key_cooldown(self, key: str, seconds: float, reason: str = ""):
+        if not key or seconds <= 0:
+            return
+        until = time.monotonic() + seconds
+        with self._key_lock:
+            prev = self._key_cooldowns.get(key, 0.0)
+            if until > prev:
+                self._key_cooldowns[key] = until
+        masked = f"...{key[-6:]}" if len(key) > 6 else "***"
+        logger.warning(f"[TRANSCRIBER] Key {masked} placed on cooldown for {int(seconds)}s ({reason})")
+
+    def _clear_key_cooldown(self, key: str):
+        if not key:
+            return
+        with self._key_lock:
+            self._key_cooldowns.pop(key, None)
+
+    def _pick_next_from_pool(self, keys: List[str], is_groq: bool, exclude: Optional[set] = None) -> str:
         if not keys:
             return ""
-        if self.groq_use_first_key_only:
+        if len(keys) == 1:
             return keys[0]
-        key = keys[self._groq_key_index % len(keys)]
-        self._groq_key_index = (self._groq_key_index + 1) % len(keys)
-        return key
+        now_m = time.monotonic()
+        excl = exclude or set()
+        with self._key_lock:
+            # Очистка истёкших карантинов
+            expired = [k for k, ts in self._key_cooldowns.items() if ts <= now_m]
+            for k in expired:
+                self._key_cooldowns.pop(k, None)
+
+            n = len(keys)
+            start_idx = (self._groq_key_index if is_groq else self._key_index) % n
+
+            # 1-й проход: ищем здоровый ключ не в карантине и не в exclude текущего запроса
+            for offset in range(n):
+                idx = (start_idx + offset) % n
+                cand = keys[idx]
+                if cand in excl:
+                    continue
+                if cand not in self._key_cooldowns:
+                    next_idx = (idx + 1) % n
+                    if is_groq:
+                        self._groq_key_index = next_idx
+                    else:
+                        self._key_index = next_idx
+                    return cand
+
+            # 2-й проход (все неисключённые ключи на карантине): берём неисключённый с минимальным остатком карантина
+            non_excluded = [k for k in keys if k not in excl]
+            pool_for_fallback = non_excluded if non_excluded else keys
+            best_key = min(pool_for_fallback, key=lambda k: self._key_cooldowns.get(k, 0.0))
+            best_pos = keys.index(best_key)
+            if is_groq:
+                self._groq_key_index = (best_pos + 1) % n
+            else:
+                self._key_index = (best_pos + 1) % n
+            return best_key
+
+    def _get_next_key(self, exclude: Optional[set] = None) -> str:
+        return self._pick_next_from_pool(self.get_all_keys(), is_groq=False, exclude=exclude)
+
+    def _get_next_groq_key(self, exclude: Optional[set] = None) -> str:
+        return self._pick_next_from_pool(self.get_all_groq_keys(), is_groq=True, exclude=exclude)
+
+    def _classify_key_error(self, err: Optional[str]) -> Tuple[bool, float]:
+        if not err:
+            return False, 0.0
+        low = str(err).lower()
+        # 1) Невалидный / заблокированный / отозванный ключ -> долгий карантин 30 мин + переключить ключ
+        if any(t in low for t in (
+            "http 401", "http 403", "api_key_invalid", "api key not valid",
+            "invalid_api_key", "invalid api key", "permission_denied", "permission denied",
+            "key expired", "suspended"
+        )):
+            return True, 1800.0
+        # 2) Суточный лимит (RPD / Per Day Quota) -> карантин 10 мин + переключить ключ
+        if any(t in low for t in ("429", "quota", "resource_exhausted", "rate_limit", "rate limit", "too many requests")):
+            if any(d in low for d in ("perday", "per_day", "per day", "daily", "rpd", "requests per day", "tokens per day")):
+                return True, 600.0
+            return True, 60.0
+        # 3) Временный сбой шлюза/сервера/сети -> короткий карантин 10с + попробовать следующий ключ
+        if any(t in low for t in ("http 500", "http 502", "http 503", "http 504", "unavailable", "overloaded", "таймаут", "timeout")):
+            return True, 10.0
+        return False, 0.0
 
     def set_slot_enabled(self, hid: str, slot: int, enabled: bool):
         key = f"{hid}_{slot}"
@@ -1516,9 +1616,10 @@ class GeminiTranscriberService:
         except urllib.error.HTTPError as e:
             err_msg = f"Groq HTTP {e.code}"
             try:
-                err_data = json.loads(e.read().decode("utf-8"))
+                err_data = json.loads(e.read().decode("utf-8", errors="replace"))
                 if "error" in err_data and "message" in err_data["error"]:
-                    err_msg = f"Groq: {err_data['error']['message']}"
+                    err_code = err_data["error"].get("code") or ""
+                    err_msg = f"Groq HTTP {e.code} ({err_code}): {err_data['error']['message']}"
             except Exception:
                 pass
             return None, err_msg
@@ -1628,13 +1729,15 @@ class GeminiTranscriberService:
             except urllib.error.HTTPError as e:
                 err_msg = f"Groq Translate HTTP {e.code}"
                 try:
-                    err_data = json.loads(e.read().decode("utf-8"))
+                    err_data = json.loads(e.read().decode("utf-8", errors="replace"))
                     if "error" in err_data and "message" in err_data["error"]:
-                        err_msg = f"Groq: {err_data['error']['message']}"
+                        err_code = err_data["error"].get("code") or ""
+                        err_msg = f"Groq Translate HTTP {e.code} ({err_code}): {err_data['error']['message']}"
                 except Exception:
                     pass
                 last_err = err_msg
-                if e.code in (400, 404):
+                # Продолжать перебор модели ТОЛЬКО если сама модель не найдена/устарела (не когда битый ключ 401/403!)
+                if e.code in (400, 404) and any(t in err_msg.lower() for t in ("model", "decommissioned", "not_found", "not exist", "does not exist")):
                     continue
                 return None, err_msg
             except Exception as e:
@@ -1651,12 +1754,17 @@ class GeminiTranscriberService:
         return bio.getvalue()
 
     async def _check_rate_limit(self) -> bool:
+        active_keys = self.get_all_keys()
+        if self.gemini_use_first_key and not self.gemini_use_other_keys:
+            max_rpm = 120  # Платный / выделенный ключ №1 — не душим 15 RPM лимитом бесплатного тира
+        else:
+            max_rpm = max(15, len(active_keys) * 15)
         async with self._rate_limit_lock:
             now = time.time()
             self._request_timestamps = [t for t in self._request_timestamps if now - t < 60.0]
-            if len(self._request_timestamps) >= 15:
+            if len(self._request_timestamps) >= max_rpm:
                 logger.warning(
-                    f"[TRANSCRIBER] Rate limit reached: {len(self._request_timestamps)} reqs in last 60s. Skipping."
+                    f"[TRANSCRIBER] Rate limit reached: {len(self._request_timestamps)}/{max_rpm} reqs in last 60s. Skipping."
                 )
                 return False
             self._request_timestamps.append(now)
@@ -1734,17 +1842,27 @@ class GeminiTranscriberService:
     def _post_multipart_groq_asr_with_retry(self, wav_bytes: bytes) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         keys = self.get_all_groq_keys()
         if not keys:
+            if self.groq_api_keys and not self.groq_use_first_key and self.groq_use_other_keys and len(self.groq_api_keys) < 2:
+                return None, "Нет дополнительных ключей Groq (№2+) в списке: добавьте бесплатные ключи или включите 1-й ключ"
             return None, "Не указан API ключ Groq"
-        attempts = 1 if self.groq_use_first_key_only else min(len(keys), 5)
+        attempts = 1 if len(keys) == 1 else min(len(keys), 12)
         last_err = None
+        tried_keys: set = set()
         for _ in range(attempts):
-            key = self._get_next_groq_key()
+            key = self._get_next_groq_key(exclude=tried_keys)
+            if not key:
+                break
+            tried_keys.add(key)
             res, err = self._post_multipart_groq_asr(wav_bytes, key)
             if not err and res:
+                self._clear_key_cooldown(key)
                 return res, None
             last_err = err
-            if not self.groq_use_first_key_only and err and any(term in str(err).lower() for term in ["429", "quota", "rate_limit", "too many requests"]):
-                logger.warning(f"[TRANSCRIBER] Groq ASR key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
+            should_switch, cd_sec = self._classify_key_error(err)
+            if cd_sec > 0 and len(keys) > 1:
+                self._mark_key_cooldown(key, cd_sec, str(err)[:80])
+            if should_switch and len(keys) > 1:
+                logger.warning(f"[TRANSCRIBER] Groq ASR key ...{key[-6:] if len(key)>6 else key} error ({err}). Switching key...")
                 continue
             else:
                 break
@@ -1753,17 +1871,27 @@ class GeminiTranscriberService:
     def _post_groq_translate_with_retry(self, text: str, source_lang: str, target_lang: str) -> Tuple[Optional[str], Optional[str]]:
         keys = self.get_all_groq_keys()
         if not keys:
+            if self.groq_api_keys and not self.groq_use_first_key and self.groq_use_other_keys and len(self.groq_api_keys) < 2:
+                return None, "Нет дополнительных ключей Groq (№2+) в списке: добавьте бесплатные ключи или включите 1-й ключ"
             return None, "Не указан API ключ Groq"
-        attempts = 1 if self.groq_use_first_key_only else min(len(keys), 5)
+        attempts = 1 if len(keys) == 1 else min(len(keys), 12)
         last_err = None
+        tried_keys: set = set()
         for _ in range(attempts):
-            key = self._get_next_groq_key()
+            key = self._get_next_groq_key(exclude=tried_keys)
+            if not key:
+                break
+            tried_keys.add(key)
             res, err = self._post_groq_translate(text, source_lang, target_lang, key)
             if not err and res:
+                self._clear_key_cooldown(key)
                 return res, None
             last_err = err
-            if not self.groq_use_first_key_only and err and any(term in str(err).lower() for term in ["429", "quota", "rate_limit", "too many requests"]):
-                logger.warning(f"[TRANSCRIBER] Groq Translate key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
+            should_switch, cd_sec = self._classify_key_error(err)
+            if cd_sec > 0 and len(keys) > 1:
+                self._mark_key_cooldown(key, cd_sec, str(err)[:80])
+            if should_switch and len(keys) > 1:
+                logger.warning(f"[TRANSCRIBER] Groq Translate key ...{key[-6:] if len(key)>6 else key} error ({err}). Switching key...")
                 continue
             else:
                 break
@@ -1774,18 +1902,28 @@ class GeminiTranscriberService:
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         keys = self.get_all_keys()
         if not keys:
+            if self.api_keys and not self.gemini_use_first_key and self.gemini_use_other_keys and len(self.api_keys) < 2:
+                return None, "Нет дополнительных ключей Gemini (№2+) в списке: добавьте бесплатные ключи или включите 1-й ключ"
             return None, "Не указан API ключ Gemini"
-        attempts = 1 if self.gemini_use_first_key_only else min(len(keys), 5)
+        attempts = 1 if len(keys) == 1 else min(len(keys), 12)
         last_err = None
+        tried_keys: set = set()
         for _ in range(attempts):
-            key = self._get_next_key()
+            key = self._get_next_key(exclude=tried_keys)
+            if not key:
+                break
+            tried_keys.add(key)
             url = f"https://generativelanguage.googleapis.com/v1beta/{endpoint}?key={key}"
             result_json, err = self._http_post_json(url, payload)
             if not err and result_json:
+                self._clear_key_cooldown(key)
                 return result_json, None
             last_err = err
-            if not self.gemini_use_first_key_only and err and any(term in str(err).lower() for term in ["429", "quota", "resource_exhausted", "limit"]):
-                logger.warning(f"[TRANSCRIBER] Gemini key ...{key[-6:] if len(key)>6 else key} rate limit ({err}). Switching key...")
+            should_switch, cd_sec = self._classify_key_error(err)
+            if cd_sec > 0 and len(keys) > 1:
+                self._mark_key_cooldown(key, cd_sec, str(err)[:80])
+            if should_switch and len(keys) > 1:
+                logger.warning(f"[TRANSCRIBER] Gemini key ...{key[-6:] if len(key)>6 else key} error ({err}). Switching key...")
                 continue
             else:
                 break
@@ -1971,10 +2109,14 @@ class GeminiTranscriberService:
                 body["speed"] = max(0.5, min(2.0, float(speed)))
 
             data_bytes = json.dumps(body).encode("utf-8")
-            attempts = 1 if (api_key or self.groq_use_first_key_only) else min(len(groq_keys), 5)
+            attempts = 1 if (api_key or len(groq_keys) <= 1) else min(len(groq_keys), 12)
             last_err = None
+            tried_groq_keys: set = set()
             for _ in range(attempts):
-                groq_key = groq_keys[0] if (api_key or self.groq_use_first_key_only) else self._get_next_groq_key()
+                groq_key = groq_keys[0] if api_key else self._get_next_groq_key(exclude=tried_groq_keys)
+                if not groq_key:
+                    break
+                tried_groq_keys.add(groq_key)
                 headers = {
                     "Authorization": f"Bearer {groq_key}",
                     "Content-Type": "application/json",
@@ -1985,13 +2127,18 @@ class GeminiTranscriberService:
                     with urllib.request.urlopen(req, timeout=12) as resp:
                         wav_data = resp.read()
                         if wav_data and len(wav_data) > 44:
+                            if not api_key:
+                                self._clear_key_cooldown(groq_key)
                             return wav_data, None
                         return None, "Groq TTS вернул пустые аудиоданные"
                 except urllib.error.HTTPError as e:
                     err_body = e.read().decode("utf-8", errors="replace")
                     last_err = f"Ошибка Groq TTS {e.code}: {err_body[:200]}"
-                    if not api_key and not self.groq_use_first_key_only and e.code == 429:
-                        logger.warning(f"[TRANSCRIBER] Groq TTS key ...{groq_key[-6:] if len(groq_key)>6 else groq_key} rate limited (429). Switching key...")
+                    should_switch, cd_sec = self._classify_key_error(last_err)
+                    if not api_key and cd_sec > 0 and len(groq_keys) > 1:
+                        self._mark_key_cooldown(groq_key, cd_sec, last_err[:80])
+                    if not api_key and should_switch and len(groq_keys) > 1:
+                        logger.warning(f"[TRANSCRIBER] Groq TTS key ...{groq_key[-6:] if len(groq_key)>6 else groq_key} rate limited ({e.code}). Switching key...")
                         continue
                     return None, last_err
                 except Exception as e:
@@ -2322,8 +2469,8 @@ class GeminiTranscriberService:
             wav_bytes = self._pcm_to_wav(pcm_bytes)
 
             if self.transcriber_engine == "groq":
-                if not self.groq_api_key:
-                    err = "Не указан API ключ Groq"
+                if not self.get_all_groq_keys():
+                    err = "Нет доступных ключей Groq (проверьте настройки ключей)" if self.groq_api_keys else "Не указан API ключ Groq"
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
@@ -2371,14 +2518,14 @@ class GeminiTranscriberService:
                 detected_pitch = "medium"
 
             else:
-                if not self.api_key and not self.api_keys:
-                    err = "Не указан API ключ Gemini"
+                if not self.get_all_keys():
+                    err = "Нет доступных ключей Gemini (проверьте настройки ключей)" if self.api_keys else "Не указан API ключ Gemini"
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
 
                 if not await self._check_rate_limit():
-                    err = "Превышен лимит запросов (Rate Limit: 15 req/min)"
+                    err = "Превышен минутный лимит запросов к Gemini API"
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
@@ -2656,7 +2803,7 @@ class GeminiTranscriberService:
                             translated_text = original_text
                             translation_failed = True
                 elif self.translation_engine == "gemini":
-                    if not self.api_key and not self.api_keys:
+                    if not self.get_all_keys():
                         logger.warning(f"[TRANSCRIBER] TS{slot}: Gemini API key missing for translation. Keeping original.")
                         translated_text = original_text
                         translation_failed = True
@@ -2849,6 +2996,7 @@ class GeminiTranscriberService:
                                 should_start = True
                                 if dl_st.get("status") == "error":
                                     last_err_time = dl_st.get("timestamp", 0)
+                                    import time
                                     if time.time() - last_err_time < 60:
                                         should_start = False
                                 if should_start:
@@ -3096,7 +3244,7 @@ class GeminiTranscriberService:
         Transcribes a complete WAV file session for offline/batch transcription (2-stage).
         Returns (transcribed_text, detected_lang, error_str).
         """
-        if not self.api_key and not self.api_keys:
+        if not self.get_all_keys():
             return None, None, "Не указан API ключ Gemini"
 
         b64_audio = base64.b64encode(wav_bytes).decode("ascii")
@@ -3348,10 +3496,10 @@ class GeminiTranscriberService:
                     m = err_data["error"].get("message", "")
                     s = err_data["error"].get("status", "")
                     if m:
-                        clean_msg = f"{s}: {m}" if s else m
+                        clean_msg = f"HTTP {e.code} ({s}): {m}" if s else f"HTTP {e.code}: {m}"
             except Exception:
                 if err_body:
-                    clean_msg = f"HTTP {e.code}: {err_body[:80]}"
+                    clean_msg = f"HTTP {e.code}: {err_body[:120]}"
             return None, clean_msg
         except urllib.error.URLError as e:
             logger.error(f"[TRANSCRIBER] Gemini network error: {e.reason}")
@@ -3407,6 +3555,24 @@ class GeminiTranscriberService:
         except Exception as e:
             logger.debug(f"[TRANSCRIBER] Failed to parse model candidate: {e}")
             return None
+
+    def fetch_available_models_with_pool(self, explicit_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Queries Gemini API models.list using active key pool or explicit key, with fallback."""
+        if explicit_key and explicit_key.strip() and not explicit_key.startswith("•"):
+            return self.fetch_available_models(explicit_key.strip())
+        active_keys = self.get_all_keys()
+        if not active_keys:
+            return list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)
+        tried = set()
+        for _ in range(min(len(active_keys), 3)):
+            cand = self._get_next_key(exclude=tried)
+            if not cand:
+                break
+            tried.add(cand)
+            res = self.fetch_available_models(cand)
+            if res and res != (list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)):
+                return res
+        return list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)
 
     @staticmethod
     def fetch_available_models(api_key: str) -> List[Dict[str, Any]]:

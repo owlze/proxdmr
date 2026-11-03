@@ -224,11 +224,11 @@ export function parseTonePattern(patternStr) {
         const freq = parseFloat(parts[0]);
         const dur = parts.length > 1 ? parseInt(parts[1], 10) : 80;
         const volPct = parts.length > 2 ? parseFloat(parts[2]) : 30.0;
-        if (!isNaN(freq) && freq > 0) {
+        if (!isNaN(freq) && freq >= 0) {
           tones.push({
             freq,
             durationMs: Math.max(5, Math.min(2000, isNaN(dur) ? 80 : dur)),
-            volPct: Math.max(1, Math.min(100, isNaN(volPct) ? 30 : volPct))
+            volPct: freq === 0 ? 0 : Math.max(1, Math.min(100, isNaN(volPct) ? 30 : volPct))
           });
         }
       } catch (e) {}
@@ -238,11 +238,11 @@ export function parseTonePattern(patternStr) {
       try {
         const freq = parseFloat(tokens[i]);
         const dur = parseInt(tokens[i + 1], 10);
-        if (!isNaN(freq) && freq > 0) {
+        if (!isNaN(freq) && freq >= 0) {
           tones.push({
             freq,
             durationMs: Math.max(5, Math.min(2000, isNaN(dur) ? 80 : dur)),
-            volPct: 30.0
+            volPct: freq === 0 ? 0 : 30.0
           });
           i += 2;
           continue;
@@ -260,10 +260,6 @@ export function parseTonePattern(patternStr) {
 }
 
 /**
- * Play Roger Beep locally using Web Audio API
- * @param {string} patternStr
- */
-/**
  * Calculate total Roger Beep duration in milliseconds
  * @param {string} patternStr
  * @returns {number} duration in ms
@@ -277,50 +273,121 @@ export function getRogerBeepDurationMs(patternStr) {
   return totalMs;
 }
 
-export function playLocalRogerBeep(patternStr) {
+let _activeBeepNodes = [];
+let _activeBeepTimer = null;
+let _activeBeepResolve = null;
+
+/**
+ * Stop any currently playing local Roger / Seam test beep immediately
+ */
+export function stopLocalRogerBeep() {
+  if (_activeBeepTimer) {
+    clearTimeout(_activeBeepTimer);
+    _activeBeepTimer = null;
+  }
+  if (_activeBeepNodes.length > 0) {
+    for (const item of _activeBeepNodes) {
+      try { item.osc.onended = null; } catch (_) {}
+      try { item.osc.stop(); } catch (_) {}
+      try { item.osc.disconnect(); } catch (_) {}
+      try { item.gain.disconnect(); } catch (_) {}
+    }
+    _activeBeepNodes = [];
+  }
+  if (typeof _activeBeepResolve === "function") {
+    const r = _activeBeepResolve;
+    _activeBeepResolve = null;
+    r(0);
+  }
+}
+
+/**
+ * Play Roger Beep / Seam Beep locally using Web Audio API
+ * Respects DMRAudioPlayer AudioContext (and output sinkId) if available.
+ * @param {string} patternStr
+ * @returns {Promise<number>} resolves with total duration (ms) when playback finishes
+ */
+export async function playLocalRogerBeep(patternStr) {
   try {
+    stopLocalRogerBeep();
     const tones = parseTonePattern(patternStr);
-    if (!tones || tones.length === 0) return;
+    if (!tones || tones.length === 0) return 0;
 
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass && !window.audioCtx) return;
-
-    let ctx = window.audioCtx;
-    if (!ctx || ctx.state === "closed") {
+    let ctx = null;
+    if (window.audioPlayer) {
+      try {
+        if (typeof window.audioPlayer.ensureInitialized === "function") {
+          window.audioPlayer.ensureInitialized();
+        }
+        if (window.audioPlayer.audioCtx && window.audioPlayer.audioCtx.state !== "closed") {
+          ctx = window.audioPlayer.audioCtx;
+        }
+      } catch (_) {}
+    }
+    if (!ctx && window.audioCtx && window.audioCtx.state !== "closed") {
+      ctx = window.audioCtx;
+    }
+    if (!ctx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return 0;
       ctx = new AudioContextClass();
+      window.audioCtx = ctx;
     }
     if (ctx.state === "suspended") {
-      ctx.resume().catch(() => {});
+      try { await ctx.resume(); } catch (_) {}
     }
 
     let startTime = ctx.currentTime + 0.01;
+    const createdNodes = [];
+
     tones.forEach((tone) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const durSec = (tone.durationMs || 80) / 1000.0;
+      if (tone.freq > 0 && tone.volPct > 0) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(tone.freq, startTime);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(tone.freq, startTime);
 
-      const durSec = tone.durationMs / 1000.0;
-      const targetVol = Math.max(0.01, Math.min(1.0, tone.volPct / 100.0)) * 0.4;
-      const attackSec = Math.min(0.005, durSec * 0.1);
-      const releaseSec = Math.min(0.005, durSec * 0.1);
+        const targetVol = Math.max(0.01, Math.min(1.0, tone.volPct / 100.0)) * 0.4;
+        const attackSec = Math.min(0.005, durSec * 0.15);
+        const releaseSec = Math.min(0.005, durSec * 0.15);
 
-      gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.linearRampToValueAtTime(targetVol, startTime + attackSec);
-      gain.gain.setValueAtTime(targetVol, startTime + durSec - releaseSec);
-      gain.gain.linearRampToValueAtTime(0.0001, startTime + durSec);
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.linearRampToValueAtTime(targetVol, startTime + attackSec);
+        gain.gain.setValueAtTime(targetVol, Math.max(startTime + attackSec, startTime + durSec - releaseSec));
+        gain.gain.linearRampToValueAtTime(0.0001, startTime + durSec);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
 
-      osc.start(startTime);
-      osc.stop(startTime + durSec);
+        const nodePair = { osc, gain };
+        createdNodes.push(nodePair);
+        osc.onended = () => {
+          try { osc.disconnect(); } catch (_) {}
+          try { gain.disconnect(); } catch (_) {}
+        };
 
+        osc.start(startTime);
+        osc.stop(startTime + durSec);
+      }
       startTime += durSec;
+    });
+
+    _activeBeepNodes = createdNodes;
+    const totalMs = Math.max(0, Math.round((startTime - ctx.currentTime) * 1000));
+    return await new Promise((resolve) => {
+      _activeBeepResolve = resolve;
+      _activeBeepTimer = setTimeout(() => {
+        _activeBeepTimer = null;
+        _activeBeepNodes = [];
+        _activeBeepResolve = null;
+        resolve(totalMs);
+      }, totalMs + 25);
     });
   } catch (err) {
     console.warn("[PTT] Failed to play local roger beep:", err);
+    return 0;
   }
 }
 
@@ -459,6 +526,9 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
 
   const rogerContainer = document.createElement("div");
   rogerContainer.className = "ptt-roger-container";
+  const testBtnLabel = window.t ? window.t("ptt.roger_beep_test_btn", {}, "Тест") : "Тест";
+  const testBtnTitle = window.t ? window.t("ptt.roger_beep_test_title", {}, "Прослушать сигнал Роджер-бипа") : "Прослушать сигнал Роджер-бипа";
+
   rogerContainer.innerHTML = `
     <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
       <label class="ptt-mode-opt" style="font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; margin: 0;">
@@ -466,11 +536,15 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
         <span>${window.t ? window.t("ptt.roger_beep", {}, "Роджер-бип (сигнал окончания передачи)") : "Роджер-бип (сигнал окончания передачи)"}</span>
       </label>
     </div>
-    <div style="margin-top: 8px;">
-      <input type="text" id="txtRogerBeepPattern" class="rec-text-input" value="${currentRogerPattern}" placeholder="600-110-33, 840-50-15" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 0px; font-family: monospace; font-size: 0.85rem; transition: opacity 0.15s ease; ${currentRogerBeep ? '' : 'opacity: 0.55;'}">
-      <div class="tot-config-desc" style="margin-top: 5px; font-size: 0.72rem; color: var(--text-muted, #8b949e); line-height: 1.3;">
-        ${window.t ? window.t("ptt.roger_beep_hint", {}, "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)") : "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)"}
-      </div>
+    <div class="tone-pattern-input-row" style="margin-top: 8px; display: flex; align-items: stretch; gap: 6px;">
+      <input type="text" id="txtRogerBeepPattern" class="rec-text-input" value="${currentRogerPattern}" placeholder="600-110-33, 840-50-15" style="flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 6px 10px; border-radius: var(--app-border-radius, 0px); font-family: monospace; font-size: 0.85rem; transition: opacity 0.15s ease; ${currentRogerBeep ? '' : 'opacity: 0.55;'}">
+      <button type="button" id="btnTestRogerBeep" class="tone-test-btn local-demo-allowed" title="${testBtnTitle}" aria-label="${testBtnTitle}">
+        <span class="tone-test-icon">🔊</span>
+        <span class="tone-test-label">${testBtnLabel}</span>
+      </button>
+    </div>
+    <div class="tot-config-desc" style="margin-top: 5px; font-size: 0.72rem; color: var(--text-muted, #8b949e); line-height: 1.3;">
+      ${window.t ? window.t("ptt.roger_beep_hint", {}, "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)") : "Формат тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)"}
     </div>
   `;
 
@@ -549,6 +623,20 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
   const chkToggle = popup.querySelector("#chkPttToggle");
   const chkRoger = popup.querySelector("#chkRogerBeep");
   const txtRogerPattern = popup.querySelector("#txtRogerBeepPattern");
+  const btnTestRoger = popup.querySelector("#btnTestRogerBeep");
+  if (btnTestRoger) {
+    btnTestRoger.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pat = (txtRogerPattern && txtRogerPattern.value.trim()) ? txtRogerPattern.value.trim() : DEFAULT_ROGER_BEEP_PATTERN;
+      btnTestRoger.classList.add("is-playing");
+      try {
+        await playLocalRogerBeep(pat);
+      } finally {
+        btnTestRoger.classList.remove("is-playing");
+      }
+    });
+  }
   const saveBtn = popup.querySelector(".btn-tot-save");
   const cancelBtn = popup.querySelector(".btn-tot-cancel");
   const closeBtn = popup.querySelector(".tot-config-close");
@@ -641,7 +729,12 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
     if (e.key === "Escape") {
       e.preventDefault();
       closeTotConfigModal();
-    } else if (e.key === "Enter" && (e.target === rangeInput || e.target === popup || e.target.closest(".tot-config-popup"))) {
+    } else if (
+      e.key === "Enter" &&
+      e.target !== btnTestRoger &&
+      !(e.target && e.target.closest && e.target.closest("#btnTestRogerBeep")) &&
+      (e.target === rangeInput || e.target === popup || e.target.closest(".tot-config-popup"))
+    ) {
       e.preventDefault();
       doSave();
     }
@@ -661,6 +754,7 @@ export function openTotConfigModal(hid = null, anchorEl = null) {
  * Close PTT parameters / TOT modal if currently open
  */
 export function closeTotConfigModal() {
+  stopLocalRogerBeep();
   if (activeTotModalOverlay) {
     if (activeTotModalOverlay._keydownHandler) {
       window.removeEventListener("keydown", activeTotModalOverlay._keydownHandler);
@@ -691,6 +785,7 @@ if (typeof window !== "undefined") {
   window.setHotspotRogerBeepPattern = setHotspotRogerBeepPattern;
   window.parseTonePattern = parseTonePattern;
   window.playLocalRogerBeep = playLocalRogerBeep;
+  window.stopLocalRogerBeep = stopLocalRogerBeep;
   window.getRogerBeepDurationMs = getRogerBeepDurationMs;
   window.formatTotDuration = formatTotDuration;
   window.openTotConfigModal = openTotConfigModal;

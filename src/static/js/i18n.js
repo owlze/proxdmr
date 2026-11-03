@@ -22,7 +22,7 @@
   ];
 
   // Cache-busting version — bump when locales JSON changes
-  const LOCALES_VER = "2.9.528";
+  const LOCALES_VER = "2.9.544";
   const LOCALES_BASE = "/static/locales/";
   const FALLBACK_LANG = "en";
 

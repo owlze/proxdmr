@@ -273,8 +273,10 @@ export async function checkUpdates(manual = false) {
   }
 
   try {
-    const url = `/api/system/check-update${manual ? "?force=true" : ""}`;
-    const resp = await fetch(url);
+    const antiCache = `_t=${Date.now()}`;
+    const query = manual ? `?${antiCache}&force=true` : `?${antiCache}`;
+    const url = `/api/system/check-update${query}`;
+    const resp = await fetch(url, { cache: "no-store" });
     const data = await resp.json();
 
     if (data && data.status === "ok") {

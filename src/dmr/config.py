@@ -3,7 +3,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
@@ -94,6 +94,10 @@ class AppSettings(BaseModel):
     deepgram_api_key: str = ""
     gemini_use_first_key_only: bool = False
     groq_use_first_key_only: bool = False
+    gemini_use_first_key: Optional[bool] = None
+    gemini_use_other_keys: Optional[bool] = None
+    groq_use_first_key: Optional[bool] = None
+    groq_use_other_keys: Optional[bool] = None
     tts_enabled: bool = False
     tts_engine: str = "piper"
     tts_model: str = "gemini-3.1-flash-tts-preview"
@@ -115,6 +119,37 @@ class AppSettings(BaseModel):
     contacts: List[Dict[str, Any]] = Field(default_factory=list)
     contacts_gateway: Dict[str, Any] = Field(default_factory=lambda: {"hotspot_id": "default", "slot": 2})
     model_config = {"extra": "allow"}
+
+    @model_validator(mode="after")
+    def _normalize_api_key_mode_flags(self) -> "AppSettings":
+        if self.gemini_use_first_key is None and self.gemini_use_other_keys is None:
+            if self.gemini_use_first_key_only:
+                self.gemini_use_first_key = True
+                self.gemini_use_other_keys = False
+            else:
+                self.gemini_use_first_key = True
+                self.gemini_use_other_keys = True
+        else:
+            self.gemini_use_first_key = True if self.gemini_use_first_key is None else bool(self.gemini_use_first_key)
+            self.gemini_use_other_keys = True if self.gemini_use_other_keys is None else bool(self.gemini_use_other_keys)
+            if not self.gemini_use_first_key and not self.gemini_use_other_keys:
+                self.gemini_use_first_key = True
+        self.gemini_use_first_key_only = bool(self.gemini_use_first_key and not self.gemini_use_other_keys)
+
+        if self.groq_use_first_key is None and self.groq_use_other_keys is None:
+            if self.groq_use_first_key_only:
+                self.groq_use_first_key = True
+                self.groq_use_other_keys = False
+            else:
+                self.groq_use_first_key = True
+                self.groq_use_other_keys = True
+        else:
+            self.groq_use_first_key = True if self.groq_use_first_key is None else bool(self.groq_use_first_key)
+            self.groq_use_other_keys = True if self.groq_use_other_keys is None else bool(self.groq_use_other_keys)
+            if not self.groq_use_first_key and not self.groq_use_other_keys:
+                self.groq_use_first_key = True
+        self.groq_use_first_key_only = bool(self.groq_use_first_key and not self.groq_use_other_keys)
+        return self
 
     def get_active_hotspot(self) -> Optional[HotspotConfig]:
         for hs in self.hotspots:

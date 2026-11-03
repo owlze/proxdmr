@@ -15,7 +15,7 @@ import {
   setGwConnectAttempt,
   setWsReconnectTimer,
   clearWsReconnectTimer
-} from './watchdog.js';
+} from './watchdog.js?v=2.9.542';
 import { getVuState, ensureVuMeterLoop, updateHotspotVuMeter } from '../audio/dsp.js?v=2.9.525';
 import { getHotspotMute, getHotspotTsAudioMode, syncAllSlotMutesToServer, updateCardRecUI, updateAllHotspotRecUI } from '../audio/routing.js';
 import {
@@ -28,7 +28,7 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.367';
+} from '../dmr/transcriber.js?v=2.9.545';
 import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.367';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.367';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
@@ -215,6 +215,10 @@ let wsConnectTimeoutTimer = null;
 const lastRxBurstMap = new Map();
 
 export function connectWebSocket(force = false) {
+    if (window.isSessionPausedByAnotherDevice && !force) {
+      console.log("[WS] connectWebSocket ignored: session is paused by another device.");
+      return;
+    }
     if (force) {
       setIsManualGwDisconnect(false);
       clearWsReconnectTimer();
@@ -278,8 +282,11 @@ export function connectWebSocket(force = false) {
     if (!token) {
       try { token = localStorage.getItem("proxdmr_auth_token") || ""; } catch (e) {}
     }
-    const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
-    const wsUrl = `${protocol}//${window.location.host}/ws/radio${tokenQuery}`;
+    const qp = new URLSearchParams();
+    if (token) qp.set("token", token);
+    if (window.PROXDMR_CLIENT_ID) qp.set("cid", window.PROXDMR_CLIENT_ID);
+    const qs = qp.toString();
+    const wsUrl = `${protocol}//${window.location.host}/ws/radio${qs ? "?" + qs : ""}`;
 
     const attemptText = window.gwIsFastReconnecting
       ? `Быстрое переподключение к шлюзу (${window.gwConnectAttempt} из 5)...`
@@ -599,6 +606,27 @@ export function resetTranscribeAndTtsOnDisconnect() {
 }
 
 export function handleGwDisconnectFailure(eventOrReason) {
+    if (
+      (eventOrReason && eventOrReason.code === 4010) ||
+      window.isSessionPausedByAnotherDevice
+    ) {
+      enterSessionPausedState();
+      return;
+    }
+    if (eventOrReason && eventOrReason.code === 4000) {
+      // Stale socket silently replaced by same client instance
+      return;
+    }
+    if (window._isRestoringPausedSession) {
+      const btn = document.getElementById("btnRestorePausedSession");
+      const btnLbl = document.getElementById("btnRestorePausedSessionLabel");
+      if (btn) btn.disabled = false;
+      if (btnLbl) {
+        btnLbl.textContent = window.t
+          ? window.t("gw.session_paused_restore_btn", {}, "Восстановить")
+          : "Восстановить";
+      }
+    }
     resetTranscribeAndTtsOnDisconnect();
     if (wsConnectTimeoutTimer) {
       clearTimeout(wsConnectTimeoutTimer);
@@ -742,6 +770,10 @@ export function handleGwDisconnectFailure(eventOrReason) {
     }
   }
 export function handleServerMessage(msg) {
+    if (msg.type === "session_paused") {
+      enterSessionPausedState();
+      return;
+    }
     if (msg.type === "session_limit_exceeded") {
       window._isSessionLimitExceeded = true;
       handleGwDisconnectFailure({ code: 4008 });
@@ -880,6 +912,15 @@ export function handleServerMessage(msg) {
     }
 
     if (msg.type === "init") {
+      if (window._isRestoringPausedSession || document.getElementById("sessionPausedModal")?.classList.contains("active")) {
+        window._isRestoringPausedSession = false;
+        window.isSessionPausedByAnotherDevice = false;
+        const pm = document.getElementById("sessionPausedModal");
+        if (pm) {
+          pm.classList.remove("active");
+          pm.style.display = "none";
+        }
+      }
       if (msg.is_demo) {
         window.isDemoMode = true;
         document.body.classList.add("is-demo-mode");
@@ -2553,9 +2594,170 @@ export function handleServerMessage(msg) {
     }
   }
   window.__proxdmr.handleServerMessage = handleServerMessage;
+export function stopPing() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
+  pendingPings.clear();
+}
+
+export function enterSessionPausedState() {
+  if (window.isDemoMode) return; // На режим ДЕМО система паузы одного подключения НЕ распространяется
+
+  console.warn("[WS] Entering session PAUSED state (account opened on another device)");
+  window.isSessionPausedByAnotherDevice = true;
+  window._isRestoringPausedSession = false;
+
+  // 1. Останавливаем авто-реконнекты и пинг (без разлогина — токены НЕ трогаем!)
+  clearWsReconnectTimer();
+  if (wsConnectTimeoutTimer) {
+    clearTimeout(wsConnectTimeoutTimer);
+    wsConnectTimeoutTimer = null;
+  }
+  isWsConnecting = false;
+  setWasGwConnected(false);
+  setGwIsFastReconnecting(false);
+  setIsManualGwDisconnect(true);
+  stopPing();
+
+  // 2. Закрываем текущий сокет локально, если он ещё открыт
+  if (ws) {
+    try {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, "Session paused locally");
+      }
+    } catch (_) {}
+    ws = null;
+    window.ws = null;
+  }
+
+  // 3. Немедленно гасим передачу PTT и освобождаем микрофон
+  try {
+    if (typeof window.stopTransmission === "function") {
+      window.stopTransmission({ silentCancel: true });
+    }
+  } catch (_) {}
+  try {
+    if (typeof window.stopAndReleaseMic === "function") {
+      window.stopAndReleaseMic();
+    } else if (window.micStream) {
+      window.micStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+      window.micStream = null;
+    }
+  } catch (_) {}
+
+  // 4. Полностью останавливаем весь вывод звука (RX WebAudio, плеер Истории, TTS, тоны)
+  try {
+    if (typeof window.stopLocalRogerBeep === "function") {
+      window.stopLocalRogerBeep();
+    }
+  } catch (_) {}
+  try {
+    if (window.audioPlayer) {
+      if (typeof window.audioPlayer.reset === "function") {
+        window.audioPlayer.reset();
+      }
+      if (window.audioPlayer.audioCtx && window.audioPlayer.audioCtx.state === "running") {
+        window.audioPlayer.audioCtx.suspend().catch(() => {});
+      }
+    }
+  } catch (_) {}
+  try {
+    if (window.recordingsManager && window.recordingsManager.audio && !window.recordingsManager.audio.paused) {
+      window.recordingsManager.audio.pause();
+    }
+  } catch (_) {}
+  try {
+    if (window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.stopAll === "function") {
+      window.ttsAudioQueueManager.stopAll();
+    }
+  } catch (_) {}
+  resetTranscribeAndTtsOnDisconnect();
+
+  // Сбрасываем визуальную индикацию активного RX на всех карточках
+  document.querySelectorAll(".vfo-rx-active").forEach(el => el.classList.remove("vfo-rx-active"));
+  document.querySelectorAll(".allstar-rx-active").forEach(el => el.classList.remove("allstar-rx-active"));
+  document.querySelectorAll(".vfo-ts1-rx.active, .vfo-ts2-rx.active").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".radio-container").forEach(card => updateCardModeBadge(card));
+
+  // 5. Обновляем статус GW на карточках и в шторке Android APK
+  const pausedStatusTxt = window.t
+    ? window.t("gw.session_paused_status", {}, "На паузе (активно другое устройство)")
+    : "На паузе (активно другое устройство)";
+  updateGwStatus(false, pausedStatusTxt);
+  if (window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function") {
+    try { window.AndroidBridge.updateRadioStatus(pausedStatusTxt); } catch (_) {}
+  }
+
+  // 6. Показываем модальное окно с кнопкой [Восстановить]
+  const modal = document.getElementById("sessionPausedModal");
+  const btn = document.getElementById("btnRestorePausedSession");
+  const btnLbl = document.getElementById("btnRestorePausedSessionLabel");
+  if (btn) {
+    btn.disabled = false;
+    if (btnLbl) {
+      btnLbl.textContent = window.t
+        ? window.t("gw.session_paused_restore_btn", {}, "Восстановить")
+        : "Восстановить";
+    }
+    if (!btn._restoreWired) {
+      btn._restoreWired = true;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        restorePausedSession();
+      });
+    }
+  }
+  if (modal) {
+    modal.style.display = "flex";
+    modal.classList.add("active");
+  }
+}
+
+export function restorePausedSession() {
+  const btn = document.getElementById("btnRestorePausedSession");
+  const btnLbl = document.getElementById("btnRestorePausedSessionLabel");
+  if (btn) btn.disabled = true;
+  if (btnLbl) {
+    btnLbl.textContent = window.t
+      ? window.t("gw.session_paused_restoring_btn", {}, "Восстановление...")
+      : "Восстановление...";
+  }
+
+  window._isRestoringPausedSession = true;
+  window.isSessionPausedByAnotherDevice = false;
+  setIsManualGwDisconnect(false);
+  setGwConnectAttempt(1);
+  setGwIsFastReconnecting(false);
+
+  // Возобновляем AudioContext прямо внутри пользовательского клика по [Восстановить]
+  try {
+    if (window.audioPlayer) {
+      if (typeof window.audioPlayer.ensureInitialized === "function") {
+        window.audioPlayer.ensureInitialized();
+      }
+      if (window.audioPlayer.audioCtx && window.audioPlayer.audioCtx.state === "suspended") {
+        window.audioPlayer.audioCtx.resume().catch(() => {});
+      }
+    }
+    if (window.audioCtx && window.audioCtx.state === "suspended") {
+      window.audioCtx.resume().catch(() => {});
+    }
+  } catch (_) {}
+
+  connectWebSocket(true);
+}
+
 export function startPing() {
     if (pingTimer) clearInterval(pingTimer);
     pingTimer = setInterval(() => {
+    if (window.isSessionPausedByAnotherDevice) return;
       const now = Date.now();
       const nowSec = now / 1000;
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2631,7 +2833,7 @@ if (typeof window !== "undefined") {
 
   window.addEventListener("online", () => {
     console.log("[NET] Browser online event detected. Forcing immediate WebSocket reconnection...");
-    if (typeof window.connectWebSocket === "function" && !window.isManualGwDisconnect) {
+    if (typeof window.connectWebSocket === "function" && !window.isManualGwDisconnect && !window.isSessionPausedByAnotherDevice) {
       window.connectWebSocket(true);
     }
   });
@@ -2642,6 +2844,9 @@ window.connectWebSocket = connectWebSocket;
 window.handleGwDisconnectFailure = handleGwDisconnectFailure;
 window.handleServerMessage = handleServerMessage;
 window.startPing = startPing;
+window.stopPing = stopPing;
+window.enterSessionPausedState = enterSessionPausedState;
+window.restorePausedSession = restorePausedSession;
 window.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;
 
 window.__proxdmr = window.__proxdmr || {};
@@ -2649,4 +2854,7 @@ window.__proxdmr.connectWebSocket = connectWebSocket;
 window.__proxdmr.handleGwDisconnectFailure = handleGwDisconnectFailure;
 window.__proxdmr.handleServerMessage = handleServerMessage;
 window.__proxdmr.startPing = startPing;
+window.__proxdmr.stopPing = stopPing;
+window.__proxdmr.enterSessionPausedState = enterSessionPausedState;
+window.__proxdmr.restorePausedSession = restorePausedSession;
 window.__proxdmr.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;

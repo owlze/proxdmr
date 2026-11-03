@@ -74,6 +74,48 @@ export function getEngineKeys(engine) {
   return single ? [single] : [];
 }
 
+export function getEngineKeyModeFlags(engine) {
+  const isGroq = (engine || "").toLowerCase().trim() === "groq";
+  const s = window.transcriberSettings || {};
+  const rawFirst = isGroq ? s.groq_use_first_key : s.gemini_use_first_key;
+  const rawOther = isGroq ? s.groq_use_other_keys : s.gemini_use_other_keys;
+  const legacyFirstOnly = isGroq ? Boolean(s.groq_use_first_key_only) : Boolean(s.gemini_use_first_key_only);
+
+  let useFirst = true;
+  let useOther = true;
+  if (rawFirst === undefined && rawOther === undefined) {
+    useFirst = true;
+    useOther = !legacyFirstOnly;
+  } else {
+    useFirst = (rawFirst === undefined) ? true : Boolean(rawFirst);
+    useOther = (rawOther === undefined) ? true : Boolean(rawOther);
+    if (!useFirst && !useOther) useFirst = true;
+  }
+  return { useFirst, useOther };
+}
+
+export function getActiveEngineKeys(engine) {
+  const all = getEngineKeys(engine);
+  if (!all.length) return [];
+  const { useFirst, useOther } = getEngineKeyModeFlags(engine);
+  if (useFirst && useOther) return all;
+  if (useFirst && !useOther) return [all[0]];
+  if (!useFirst && useOther) return all.length > 1 ? all.slice(1) : [];
+  return [all[0]];
+}
+
+export function formatKeyButtonBadge(engine, providerLabel) {
+  const all = getEngineKeys(engine);
+  if (all.length === 0) return `${providerLabel} (0)`;
+  const { useFirst, useOther } = getEngineKeyModeFlags(engine);
+  if (useFirst && !useOther) return `${providerLabel} (1/${all.length} • #1)`;
+  if (!useFirst && useOther) {
+    const rem = Math.max(0, all.length - 1);
+    return `${providerLabel} (${rem}/${all.length} • #2+)`;
+  }
+  return `${providerLabel} (${all.length})`;
+}
+
 export function getCachedTranscriberKey(engine) {
   if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
   let k = window.transcriberKeysCache[engine];
@@ -135,6 +177,10 @@ window.setTranscriberKey = setTranscriberKey;
 
 window.transcriberSettings = {
   enabled: true,
+  gemini_use_first_key: true,
+  gemini_use_other_keys: true,
+  groq_use_first_key: true,
+  groq_use_other_keys: true,
   transcriber_engine: "groq",
   translation_engine: "groq",
   api_key: "",
@@ -187,6 +233,10 @@ window.onTranscriberSettingsUpdate = function(settings) {
   }
   if (typeof refreshAllSlotTtsBadges === "function") {
     refreshAllSlotTtsBadges();
+  }
+  const optTtsEng = document.getElementById("optTtsEngine");
+  if (typeof updateTtsApiKeyUI === "function") {
+    updateTtsApiKeyUI(optTtsEng ? optTtsEng.value : (settings.tts_engine || "piper"));
   }
 };
 
@@ -1674,6 +1724,7 @@ export function initPiperDownloadWatcher() {
   let isWatching = false;
 
   setInterval(async () => {
+    if (window.isSessionPausedByAnotherDevice) return;
     try {
       const resp = await fetch("/api/transcriber/piper/download/status");
       const data = await resp.json();
@@ -2444,9 +2495,13 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           }
         } else if (eng === "groq") {
           const testVoice = (voi === "auto" || !voi) ? "troy" : voi;
-          const groqKey = getCachedTranscriberKey("groq");
-          if (!groqKey) {
-            showToast("⚠️ Укажите API-ключ Groq для проверки звука", 3500);
+          const activeKeys = getActiveEngineKeys("groq");
+          if (!activeKeys.length) {
+            const all = getEngineKeys("groq");
+            const warn = all.length > 0
+              ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ") : "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ")
+              : "⚠️ Укажите API-ключ Groq для проверки звука";
+            showToast(warn, 3500);
             btnTest.disabled = false;
             btnTest.textContent = oldTxt;
             return;
@@ -2459,7 +2514,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
               text: testText,
               voice: testVoice,
               model: mod || "canopylabs/orpheus-v1-english",
-              api_key: groqKey,
+              api_key: null,
               target_lang: testLang,
               engine: "groq",
               speed: spd,
@@ -2491,8 +2546,19 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           }
         } else {
           const testVoice = (eng === "gemini" && voi === "auto") ? "Puck" : voi;
-          const keyInp = document.querySelector('#geminiApiKeysBody .apikey-cb:checked + .apikey-name + .apikey-input-wrap .apikey-input, #geminiApiKeysBody .apikey-cb:checked ~ .apikey-input-wrap .apikey-input');
-          const key = (keyInp && keyInp.value.trim()) ? keyInp.value.trim() : (window.transcriberSettings ? window.transcriberSettings.api_key : "");
+          if (eng === "gemini") {
+            const activeKeys = getActiveEngineKeys("gemini");
+            if (!activeKeys.length) {
+              const all = getEngineKeys("gemini");
+              const warn = all.length > 0
+                ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ") : "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ")
+                : (window.t ? window.t("transcriber.toast_need_key", {}, "⚠️ Укажите API-ключ Gemini для проверки звука") : "⚠️ Укажите API-ключ Gemini для проверки звука");
+              showToast(warn, 3500);
+              btnTest.disabled = false;
+              btnTest.textContent = oldTxt;
+              return;
+            }
+          }
 
           const resp = await fetch("/api/transcriber/tts-test", {
             method: "POST",
@@ -2501,7 +2567,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
               text: testText,
               voice: testVoice,
               model: mod,
-              api_key: key,
+              api_key: null,
               target_lang: testLang,
               engine: eng,
               speed: spd,
@@ -4681,10 +4747,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
         translation_engine: newTransEng,
         model: newModel,
         source_lang: newSourceLang,
-        target_lang: newTargetLang,
-        api_key: getCachedTranscriberKey("gemini"),
-        groq_api_key: getCachedTranscriberKey("groq"),
-        deepgram_api_key: getCachedTranscriberKey("deepgram")
+        target_lang: newTargetLang
       };
 
       try {
@@ -5997,7 +6060,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
 
   const popup = document.createElement("div");
   popup.className = "tts-quick-settings-popup apikeys-popover-popup";
-  popup.style.width = "420px";
+  popup.style.width = "460px";
   popup.style.maxWidth = "calc(100vw - 20px)";
   popup.style.position = "fixed";
   popup.style.top = "50%";
@@ -6021,7 +6084,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
       <span>${titleText.replace(/^[⚡🔑]\s*/, "")}</span>
     </div>
     <div style="display: flex; align-items: center; gap: 10px;">
-      <a href="${consoleUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.76rem; color: #38bdf8; text-decoration: none;">${consoleName}</a>
+      <a href="${consoleUrl}" target="_blank" rel="noopener noreferrer" class="apikeys-console-link">${consoleName}</a>
       <button type="button" class="tts-quick-close" aria-label="${t("buttons.close", {}, "Закрыть")}">&times;</button>
     </div>
   `;
@@ -6036,60 +6099,90 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   hintText.style.color = "var(--text-muted, #8b949e)";
   hintText.style.marginBottom = "8px";
   hintText.style.lineHeight = "1.4";
-  hintText.textContent = t("transcriber.apikeys_hint", {}, "Введите по одному ключу на строку. Если ключей несколько, система распределяет нагрузку (Round-Robin) и автоматически перебирает следующий при лимитах (429 / Quota):");
+  hintText.textContent = t("transcriber.apikeys_hint", {}, "Введите по одному ключу на строку. Первая строка — слот платного/основного ключа. Все последующие строки — бесплатный пул.");
   body.appendChild(hintText);
 
   // Editor container
   const editor = document.createElement("div");
   editor.id = "popApiKeysEditor";
+  editor.className = "apikeys-popover-editor";
   editor.contentEditable = "true";
   editor.spellcheck = false;
-  editor.style.whiteSpace = "pre";
-  editor.style.overflowX = "auto";
-  editor.style.overflowY = "auto";
-  editor.style.wordBreak = "normal";
-  editor.style.overflowWrap = "normal";
-  editor.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-  editor.style.fontSize = "0.82rem";
-  editor.style.lineHeight = "1.6";
-  editor.style.minHeight = "120px";
-  editor.style.maxHeight = "200px";
-  editor.style.padding = "8px 10px";
-  editor.style.borderRadius = "6px";
-  editor.style.border = "1px solid var(--border-color, #30363d)";
-  editor.style.background = "rgba(0, 0, 0, 0.25)";
-  editor.style.color = "var(--text-primary, #ffffff)";
-  editor.style.outline = "none";
-  editor.style.boxSizing = "border-box";
-  editor.dataset.placeholder = isGroq ? "gsk_...\ngsk_..." : "AIzaSy...\nAIzaSy...";
+  editor.dataset.placeholder = isGroq
+    ? ["gsk_... (основной/платный ключ)", "gsk_... (бесплатный пул)", "gsk_..."].join("\n")
+    : ["AIzaSy... (основной/платный ключ)", "AIzaSy... (бесплатный пул)", "AIzaSy..."].join("\n");
 
-  // Load existing keys
-  const existingKeys = getEngineKeys(eng);
-  if (existingKeys.length > 0) {
-    existingKeys.forEach(k => {
-      const lineDiv = document.createElement("div");
-      lineDiv.style.whiteSpace = "pre";
-      lineDiv.textContent = k;
-      editor.appendChild(lineDiv);
-    });
-  }
+  // Mode checkboxes container
+  const modeContainer = document.createElement("div");
+  modeContainer.className = "apikeys-mode-options";
 
-  // Prevent rich HTML paste
-  editor.addEventListener("paste", (e) => {
-    e.preventDefault();
-    const text = (e.clipboardData || window.clipboardData).getData("text/plain");
-    if (document.queryCommandSupported && document.queryCommandSupported("insertText")) {
-      document.execCommand("insertText", false, text);
-    } else {
-      const selection = window.getSelection();
-      if (!selection.rangeCount) return;
-      selection.deleteFromDocument();
-      selection.getRangeAt(0).insertNode(document.createTextNode(text));
+  // Checkbox 1: Use first key (paid)
+  const rowFirst = document.createElement("label");
+  rowFirst.className = "apikeys-mode-row";
+  const chkUseFirst = document.createElement("input");
+  chkUseFirst.type = "checkbox";
+  chkUseFirst.id = "popChkUseFirstKey";
+  const badgeFirst = document.createElement("span");
+  badgeFirst.className = "apikeys-first-badge";
+  const txtFirst = document.createElement("span");
+  txtFirst.textContent = t("transcriber.apikeys_use_first", {}, "Использовать первый в списке ключ (платный)");
+  rowFirst.appendChild(chkUseFirst);
+  rowFirst.appendChild(badgeFirst);
+  rowFirst.appendChild(txtFirst);
+
+  // Checkbox 2: Use other keys (rotation)
+  const rowOthers = document.createElement("label");
+  rowOthers.className = "apikeys-mode-row";
+  const chkUseOthers = document.createElement("input");
+  chkUseOthers.type = "checkbox";
+  chkUseOthers.id = "popChkUseOtherKeys";
+  const txtOthers = document.createElement("span");
+  txtOthers.textContent = t("transcriber.apikeys_use_others", {}, "Использовать все остальные ключи (перебор при лимитах)");
+  rowOthers.appendChild(chkUseOthers);
+  rowOthers.appendChild(txtOthers);
+
+  modeContainer.appendChild(rowFirst);
+  modeContainer.appendChild(rowOthers);
+
+  // Initialize checkbox values from current settings
+  const curFlags = getEngineKeyModeFlags(eng);
+  chkUseFirst.checked = curFlags.useFirst;
+  chkUseOthers.checked = curFlags.useOther;
+
+  // Enforce mutex: cannot both be unchecked
+  chkUseFirst.addEventListener("change", () => {
+    if (!chkUseFirst.checked && !chkUseOthers.checked) {
+      chkUseOthers.checked = true;
     }
+    applyLineClasses();
     updateEditorState();
   });
 
-  body.appendChild(editor);
+  chkUseOthers.addEventListener("change", () => {
+    if (!chkUseOthers.checked && !chkUseFirst.checked) {
+      chkUseFirst.checked = true;
+    }
+    applyLineClasses();
+    updateEditorState();
+  });
+
+  function applyLineClasses() {
+    let firstKeyMarked = false;
+    const children = Array.from(editor.children);
+    children.forEach((child) => {
+      if (child.tagName !== "DIV") return;
+      child.classList.remove("apikeys-line-first", "apikeys-line-other");
+      const txt = (child.textContent || "").trim();
+      if (txt && !txt.startsWith("#") && !firstKeyMarked) {
+        child.classList.add("apikeys-line-first");
+        firstKeyMarked = true;
+      } else {
+        child.classList.add("apikeys-line-other");
+      }
+    });
+    editor.classList.toggle("apikeys-skip-first", !chkUseFirst.checked);
+    editor.classList.toggle("apikeys-skip-others", !chkUseOthers.checked);
+  }
 
   function getKeysFromEditor() {
     if (editor.children && editor.children.length > 0) {
@@ -6109,67 +6202,109 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
       .filter(k => k.length > 0 && !k.startsWith("#"));
   }
 
-  // Row for single key checkbox ("Использовать только первый")
-  const rowUseFirst = document.createElement("div");
-  rowUseFirst.id = "popRowUseFirstOnly";
-  rowUseFirst.style.display = existingKeys.length > 1 ? "flex" : "none";
-  rowUseFirst.style.alignItems = "center";
-  rowUseFirst.style.gap = "8px";
-  rowUseFirst.style.marginTop = "8px";
-  rowUseFirst.style.fontSize = "0.82rem";
-  rowUseFirst.style.fontWeight = "600";
-  rowUseFirst.style.color = "var(--text-primary, #e6edf3)";
-  rowUseFirst.style.cursor = "pointer";
-  rowUseFirst.style.userSelect = "none";
+  function renderKeys(keysList) {
+    editor.innerHTML = "";
+    keysList.forEach(k => {
+      const d = document.createElement("div");
+      d.textContent = k;
+      editor.appendChild(d);
+    });
+    applyLineClasses();
+  }
 
-  const chkUseFirst = document.createElement("input");
-  chkUseFirst.type = "checkbox";
-  chkUseFirst.id = "popChkUseFirstOnly";
-  chkUseFirst.style.cursor = "pointer";
-  const curUseFirst = isGroq ? Boolean(s.groq_use_first_key_only) : Boolean(s.gemini_use_first_key_only);
-  chkUseFirst.checked = curUseFirst;
+  // Load existing keys
+  const existingKeys = getEngineKeys(eng);
+  renderKeys(existingKeys);
 
-  const lblUseFirst = document.createElement("label");
-  lblUseFirst.htmlFor = "popChkUseFirstOnly";
-  lblUseFirst.style.cursor = "pointer";
-  lblUseFirst.textContent = t("transcriber.apikeys_use_first_only", {}, "Использовать только первый (платный ключ, без перебора)");
+  // Intercept paste for strict line-by-line div structure
+  editor.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const clipText = (e.clipboardData || window.clipboardData).getData("text/plain") || "";
+    const lines = clipText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith("#"));
+    if (lines.length > 1 || editor.children.length === 0) {
+      const current = getKeysFromEditor();
+      const combined = current.concat(lines);
+      renderKeys(combined);
+    } else {
+      document.execCommand("insertText", false, clipText);
+      applyLineClasses();
+    }
+    updateEditorState();
+  });
 
-  rowUseFirst.appendChild(chkUseFirst);
-  rowUseFirst.appendChild(lblUseFirst);
-  body.appendChild(rowUseFirst);
+  body.appendChild(editor);
+  body.appendChild(modeContainer);
 
   // Status text line
   const statusEl = document.createElement("div");
   statusEl.id = "popApiKeysStatus";
   statusEl.style.fontSize = "0.76rem";
-  statusEl.style.minHeight = "18px";
-  statusEl.style.marginTop = "6px";
+  statusEl.style.minHeight = "20px";
+  statusEl.style.marginTop = "8px";
+  statusEl.style.lineHeight = "1.35";
   statusEl.style.color = "var(--text-muted, #8b949e)";
   body.appendChild(statusEl);
 
+  let btnSave = null;
+
   function updateEditorState() {
     const currentKeys = getKeysFromEditor();
-    rowUseFirst.style.display = currentKeys.length > 1 ? "flex" : "none";
-    statusEl.textContent = currentKeys.length > 0 
-      ? t("transcriber.apikeys_found_count", { count: currentKeys.length }, `Найдено ключей: ${currentKeys.length}`)
-      : t("transcriber.apikeys_empty_hint", {}, "Список пуст. Вставьте хотя бы один ключ.");
+    const total = currentKeys.length;
+    applyLineClasses();
+
+    if (total === 0) {
+      if (btnSave) btnSave.disabled = false;
+      statusEl.style.color = "var(--text-muted, #8b949e)";
+      statusEl.textContent = t("transcriber.apikeys_empty_hint", {}, "Список пуст. Вставьте хотя бы один ключ.");
+      return;
+    }
+
+    const useFirst = chkUseFirst.checked;
+    const useOther = chkUseOthers.checked;
+
+    if (!useFirst && useOther && total === 1) {
+      if (btnSave) btnSave.disabled = true;
+      statusEl.style.color = "#f59e0b";
+      statusEl.textContent = t(
+        "transcriber.apikeys_warn_no_other_keys",
+        {},
+        "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ"
+      );
+      return;
+    }
+
+    if (btnSave) btnSave.disabled = false;
+    statusEl.style.color = "var(--text-muted, #8b949e)";
+    if (useFirst && !useOther) {
+      statusEl.textContent = t(
+        "transcriber.apikeys_status_first_only",
+        { count: total },
+        `Найдено ключей: ${total} • Активен: только №1 (платный, без перебора)`
+      );
+    } else if (!useFirst && useOther) {
+      const activeCount = Math.max(0, total - 1);
+      statusEl.textContent = t(
+        "transcriber.apikeys_status_others_only",
+        { count: total, active: activeCount },
+        `Найдено ключей: ${total} • Активны: №2–${total} (${activeCount} в переборе, №1 в резерве)`
+      );
+    } else {
+      statusEl.textContent = t(
+        "transcriber.apikeys_status_all",
+        { count: total },
+        `Найдено ключей: ${total} • Активны: все ${total} (в переборе)`
+      );
+    }
   }
 
   editor.addEventListener("input", () => {
+    applyLineClasses();
     updateEditorState();
   });
 
-  updateEditorState();
-
   // Footer action buttons
   const footer = document.createElement("div");
-  footer.style.display = "flex";
-  footer.style.justifyContent = "space-between";
-  footer.style.alignItems = "center";
-  footer.style.marginTop = "8px";
-  footer.style.padding = "8px 12px";
-  footer.style.background = "rgba(0, 0, 0, 0.22)";
-  footer.style.borderTop = "1px solid var(--border-color, #30363d)";
+  footer.className = "apikeys-popover-footer";
 
   const btnTestText = t("transcriber.apikeys_btn_test", {}, "Проверить");
   const btnTest = document.createElement("button");
@@ -6195,7 +6330,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   btnCancel.style.cursor = "pointer";
   btnCancel.textContent = t("buttons.cancel", {}, "Отмена");
 
-  const btnSave = document.createElement("button");
+  btnSave = document.createElement("button");
   btnSave.type = "button";
   btnSave.className = "btn-primary btn-tts-quick-save";
   btnSave.style.fontSize = "0.8rem";
@@ -6203,9 +6338,10 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   btnSave.style.cursor = "pointer";
   btnSave.textContent = t("buttons.save", {}, "Сохранить");
 
+  updateEditorState();
+
   rightBtns.appendChild(btnCancel);
   rightBtns.appendChild(btnSave);
-
   footer.appendChild(btnTest);
   footer.appendChild(rightBtns);
 
@@ -6215,7 +6351,6 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   overlay.appendChild(popup);
   document.body.appendChild(overlay);
   activeApiKeysPopoverOverlay = overlay;
-  updateEditorState();
 
   // Close handlers
   const closeBtn = header.querySelector(".tts-quick-close");
@@ -6254,30 +6389,39 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
         editor.innerHTML = "";
         let validCount = 0;
         let invalidCount = 0;
+        let rateLimitCount = 0;
+
         data.results.forEach(item => {
           const lineDiv = document.createElement("div");
-          lineDiv.style.whiteSpace = "pre";
           lineDiv.textContent = item.key;
+          const code = item.http_code;
           if (item.valid) {
             validCount++;
-            lineDiv.style.color = "#22c55e"; // Green
-            lineDiv.title = t("transcriber.apikeys_key_valid", {}, "OK: Ключ действителен");
+            lineDiv.className = "key-valid";
+            lineDiv.title = t("transcriber.apikeys_key_valid", {}, "OK: Ключ действителен (200)");
+          } else if (code === 429) {
+            rateLimitCount++;
+            lineDiv.className = "key-ratelimit";
+            lineDiv.title = item.error ? `429 Rate Limit: ${item.error}` : "429: Лимит запросов исчерпан";
           } else {
             invalidCount++;
-            lineDiv.style.color = "#ef4444"; // Red
-            lineDiv.title = item.error
-              ? `${t("common.error", {}, "Ошибка")}: ${item.error}`
-              : t("transcriber.apikeys_key_invalid", {}, "Недействителен");
+            lineDiv.className = "key-invalid";
+            lineDiv.title = item.error ? `${t("common.error", {}, "Ошибка")}: ${item.error}` : t("transcriber.apikeys_key_invalid", {}, "Недействителен");
           }
           editor.appendChild(lineDiv);
         });
 
-        if (invalidCount === 0) {
+        applyLineClasses();
+
+        if (invalidCount === 0 && rateLimitCount === 0) {
           statusEl.style.color = "#22c55e";
           statusEl.textContent = t("transcriber.apikeys_all_valid", { count: validCount }, `✅ Все ключи (${validCount}) проверены и работают!`);
+        } else if (rateLimitCount > 0 && invalidCount === 0) {
+          statusEl.style.color = "#fbbf24";
+          statusEl.textContent = `⚠️ Доступно: ${validCount}, временно исчерпан лимит (429): ${rateLimitCount} (будет использован автоперебор).`;
         } else {
           statusEl.style.color = "#ef4444";
-          statusEl.textContent = t("transcriber.apikeys_partial_valid", { valid: validCount, invalid: invalidCount }, `⚠️ ${validCount} активных, ${invalidCount} с ошибками (выделены красным).`);
+          statusEl.textContent = t("transcriber.apikeys_partial_valid", { valid: validCount, invalid: invalidCount + rateLimitCount }, `⚠️ ${validCount} активных, ${invalidCount + rateLimitCount} с ошибками или лимитом.`);
         }
       } else {
         statusEl.style.color = "#ef4444";
@@ -6296,49 +6440,85 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   btnSave.addEventListener("click", async () => {
     const finalKeys = getKeysFromEditor();
     const useFirst = Boolean(chkUseFirst.checked);
+    const useOther = Boolean(chkUseOthers.checked);
 
     btnSave.disabled = true;
     btnSave.textContent = t("transcriber.apikeys_saving", {}, "Сохранение...");
 
     if (!window.transcriberSettings) window.transcriberSettings = {};
+    if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+
     if (isGroq) {
       window.transcriberSettings.groq_api_keys = finalKeys;
       window.transcriberSettings.groq_api_key = finalKeys[0] || "";
-      window.transcriberSettings.groq_use_first_key_only = useFirst;
-      if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+      window.transcriberSettings.groq_use_first_key = useFirst;
+      window.transcriberSettings.groq_use_other_keys = useOther;
+      window.transcriberSettings.groq_use_first_key_only = Boolean(useFirst && !useOther);
       window.transcriberKeysCache.groq = finalKeys[0] || "";
-      try { localStorage.setItem("proxdmr_key_groq", finalKeys[0] || ""); } catch (_) {}
+      try {
+        if (finalKeys[0]) localStorage.setItem("proxdmr_key_groq", finalKeys[0]);
+        else localStorage.removeItem("proxdmr_key_groq");
+      } catch (_) {}
     } else {
       window.transcriberSettings.api_keys = finalKeys;
       window.transcriberSettings.api_key = finalKeys[0] || "";
-      window.transcriberSettings.gemini_use_first_key_only = useFirst;
-      if (!window.transcriberKeysCache) window.transcriberKeysCache = {};
+      window.transcriberSettings.gemini_use_first_key = useFirst;
+      window.transcriberSettings.gemini_use_other_keys = useOther;
+      window.transcriberSettings.gemini_use_first_key_only = Boolean(useFirst && !useOther);
       window.transcriberKeysCache.gemini = finalKeys[0] || "";
-      try { localStorage.setItem("proxdmr_key_gemini", finalKeys[0] || ""); } catch (_) {}
+      try {
+        if (finalKeys[0]) localStorage.setItem("proxdmr_key_gemini", finalKeys[0]);
+        else localStorage.removeItem("proxdmr_key_gemini");
+      } catch (_) {}
     }
+
+    const gemFlagsNow = getEngineKeyModeFlags("gemini");
+    const groqFlagsNow = getEngineKeyModeFlags("groq");
+    let savedOk = false;
 
     try {
       const payload = {
         api_key: window.transcriberSettings.api_key || "",
         api_keys: window.transcriberSettings.api_keys || [],
-        gemini_use_first_key_only: Boolean(window.transcriberSettings.gemini_use_first_key_only),
+        gemini_use_first_key: isGroq ? gemFlagsNow.useFirst : useFirst,
+        gemini_use_other_keys: isGroq ? gemFlagsNow.useOther : useOther,
+        gemini_use_first_key_only: Boolean(isGroq ? (gemFlagsNow.useFirst && !gemFlagsNow.useOther) : (useFirst && !useOther)),
         groq_api_key: window.transcriberSettings.groq_api_key || "",
         groq_api_keys: window.transcriberSettings.groq_api_keys || [],
-        groq_use_first_key_only: Boolean(window.transcriberSettings.groq_use_first_key_only)
+        groq_use_first_key: isGroq ? useFirst : groqFlagsNow.useFirst,
+        groq_use_other_keys: isGroq ? useOther : groqFlagsNow.useOther,
+        groq_use_first_key_only: Boolean(isGroq ? (useFirst && !useOther) : (groqFlagsNow.useFirst && !groqFlagsNow.useOther))
       };
-      await fetch("/api/transcriber/settings", {
+      const resp = await fetch("/api/transcriber/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+      const resJson = await resp.json().catch(() => null);
+      if (resp.ok && resJson && resJson.status === "ok") {
+        savedOk = true;
+        if (resJson.settings) {
+          window.transcriberSettings = Object.assign({}, window.transcriberSettings, resJson.settings);
+        }
+      }
     } catch (err) {
       console.warn("[TRANSCRIBER] Failed to save keys to server:", err);
     }
 
+    if (!savedOk) {
+      btnSave.disabled = false;
+      btnSave.textContent = t("buttons.save", {}, "Сохранить");
+      statusEl.style.color = "#ef4444";
+      statusEl.textContent = t("transcriber.settings_save_err", {}, "⚠️ Ошибка сохранения настроек на сервере");
+      return;
+    }
+
     const optRecEng = document.getElementById("optTranscriberEngine");
     const optTransEng = document.getElementById("optTranslationEngine");
+    const optTtsEng = document.getElementById("optTtsEngine");
     if (typeof updateRecApiKeyUI === "function") updateRecApiKeyUI(optRecEng ? optRecEng.value : "gemini");
     if (typeof updateTransApiKeyUI === "function") updateTransApiKeyUI(optTransEng ? optTransEng.value : "gemini");
+    if (typeof updateTtsApiKeyUI === "function") updateTtsApiKeyUI(optTtsEng ? optTtsEng.value : "gemini");
 
     if (typeof showToast === "function") {
       const engLabel = isGroq ? "Groq" : "Gemini";
@@ -6366,10 +6546,11 @@ function updateRecApiKeyUI(engine) {
   const t = window.t || ((k, _, def) => def);
   const keys = getEngineKeys(eng);
 
+  const badge = formatKeyButtonBadge(eng, eng === "groq" ? "Groq API" : "Gemini API");
   if (eng === "gemini") {
     if (lbl) lbl.textContent = t("transcriber.rec_key_gemini_lbl", {}, "🔑 Ключ Gemini API:");
     if (btnIcon) btnIcon.textContent = "🔑";
-    if (btnText) btnText.textContent = `Gemini API (${keys.length})`;
+    if (btnText) btnText.textContent = badge;
     if (link) {
       link.href = "https://aistudio.google.com/app/apikey";
       link.textContent = "Google AI Studio ↗";
@@ -6378,7 +6559,7 @@ function updateRecApiKeyUI(engine) {
   } else if (eng === "groq") {
     if (lbl) lbl.textContent = t("transcriber.rec_key_groq_lbl", {}, "⚡ Ключи Groq Cloud API (для Whisper):");
     if (btnIcon) btnIcon.textContent = "⚡";
-    if (btnText) btnText.textContent = `Groq API (${keys.length})`;
+    if (btnText) btnText.textContent = badge;
     if (link) {
       link.href = "https://console.groq.com/keys";
       link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
@@ -6409,10 +6590,11 @@ function updateTransApiKeyUI(engine) {
   const t = window.t || ((k, _, def) => def);
   const keys = getEngineKeys(eng);
 
+  const badge = formatKeyButtonBadge(eng, eng === "groq" ? "Groq API" : "Gemini API");
   if (eng === "gemini") {
     if (lbl) lbl.textContent = t("transcriber.trans_key_gemini_lbl", {}, "🔑 Ключи Gemini API (для перевода):");
     if (btnIcon) btnIcon.textContent = "🔑";
-    if (btnText) btnText.textContent = `Gemini API (${keys.length})`;
+    if (btnText) btnText.textContent = badge;
     if (link) {
       link.href = "https://aistudio.google.com/app/apikey";
       link.textContent = "Google AI Studio ↗";
@@ -6421,12 +6603,53 @@ function updateTransApiKeyUI(engine) {
   } else if (eng === "groq") {
     if (lbl) lbl.textContent = t("transcriber.trans_key_groq_lbl", {}, "⚡ Ключи Groq Cloud API (для перевода Llama 3.3):");
     if (btnIcon) btnIcon.textContent = "⚡";
-    if (btnText) btnText.textContent = `Groq API (${keys.length})`;
+    if (btnText) btnText.textContent = badge;
     if (link) {
       link.href = "https://console.groq.com/keys";
       link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
     }
     if (hint) hint.textContent = t("transcriber.trans_key_groq_hint", {}, "Используется для сверхбыстрого перевода через модель Llama 3.3 70B. Нажмите для добавления и проверки.");
+  }
+}
+
+export function updateTtsApiKeyUI(engine) {
+  const lbl = document.getElementById("lblTranscriberTtsApiKey");
+  const btn = document.getElementById("btnManageTtsApiKeys");
+  const btnText = document.getElementById("btnManageTtsApiKeysText");
+  const btnIcon = document.getElementById("btnManageTtsApiKeysIcon");
+  const link = document.getElementById("linkTranscriberTtsApiKey");
+  const hint = document.getElementById("hintTranscriberTtsApiKey");
+  const gKey = document.getElementById("groupTtsApiKey");
+  if (!btn || !gKey) return;
+
+  const eng = (engine || "gemini").toLowerCase().trim();
+  if (eng !== "gemini" && eng !== "groq") {
+    gKey.style.display = "none";
+    return;
+  }
+  gKey.style.display = "block";
+
+  const t = window.t || ((k, _, def) => def);
+  const badge = formatKeyButtonBadge(eng, eng === "groq" ? "Groq API" : "Gemini API");
+
+  if (eng === "gemini") {
+    if (lbl) lbl.textContent = t("transcriber.tts_key_gemini_lbl", {}, "🔑 Ключи Gemini API (для синтеза речи):");
+    if (btnIcon) btnIcon.textContent = "🔑";
+    if (btnText) btnText.textContent = badge;
+    if (link) {
+      link.href = "https://aistudio.google.com/app/apikey";
+      link.textContent = "Google AI Studio ↗";
+    }
+    if (hint) hint.textContent = t("transcriber.tts_key_gemini_hint", {}, "Единый список ключей Gemini API. Нажмите для настройки режима (платный / бесплатный пул) и проверки.");
+  } else if (eng === "groq") {
+    if (lbl) lbl.textContent = t("transcriber.tts_key_groq_lbl", {}, "⚡ Ключи Groq Cloud API (для синтеза речи):");
+    if (btnIcon) btnIcon.textContent = "⚡";
+    if (btnText) btnText.textContent = badge;
+    if (link) {
+      link.href = "https://console.groq.com/keys";
+      link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
+    }
+    if (hint) hint.textContent = t("transcriber.tts_key_groq_hint", {}, "Единый список ключей Groq Cloud API. Нажмите для настройки режима (платный / бесплатный пул) и проверки.");
   }
 }
 
@@ -6528,6 +6751,7 @@ function initGeminiTtsFrame() {
 
     if (groupModel) groupModel.style.display = (isGemini || isGroq) ? 'block' : 'none';
     if (groupStyle) groupStyle.style.display = isGemini ? 'block' : 'none';
+    updateTtsApiKeyUI(curEng);
 
     if (optTtsModel) {
       if (isGemini) {
@@ -6558,6 +6782,15 @@ function initGeminiTtsFrame() {
       }
     }
   };
+  const btnTtsKeys = document.getElementById('btnManageTtsApiKeys');
+  if (btnTtsKeys && !btnTtsKeys._wired) {
+    btnTtsKeys._wired = true;
+    btnTtsKeys.addEventListener('click', () => {
+      const curEng = (optEngine && optEngine.value) || 'gemini';
+      openApiKeysManagerPopover(curEng, btnTtsKeys);
+    });
+  }
+
   if (optEngine && !optEngine._wired) {
     optEngine._wired = true;
     optEngine.addEventListener('change', async () => {
@@ -6723,15 +6956,23 @@ function initGeminiTtsFrame() {
 
     let key = "";
     if (engine === 'groq') {
-      key = getCachedTranscriberKey('groq');
-      if (!key) {
-        showToast("⚠️ Укажите API-ключ Groq для проверки звука", 3500);
+      const activeKeys = getActiveEngineKeys('groq');
+      if (!activeKeys.length) {
+        const all = getEngineKeys('groq');
+        const warn = all.length > 0
+          ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ") : "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ")
+          : "⚠️ Укажите API-ключ Groq для проверки звука";
+        showToast(warn, 3500);
         return;
       }
     } else if (engine === 'gemini') {
-      key = getCachedTranscriberKey('gemini');
-      if (!key) {
-        showToast(window.t ? window.t("transcriber.toast_need_key", {}, "⚠️ Укажите API-ключ Gemini для проверки звука") : "⚠️ Укажите API-ключ Gemini для проверки звука", 3500);
+      const activeKeys = getActiveEngineKeys('gemini');
+      if (!activeKeys.length) {
+        const all = getEngineKeys('gemini');
+        const warn = all.length > 0
+          ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ") : "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ")
+          : (window.t ? window.t("transcriber.toast_need_key", {}, "⚠️ Укажите API-ключ Gemini для проверки звука") : "⚠️ Укажите API-ключ Gemini для проверки звука");
+        showToast(warn, 3500);
         return;
       }
     }
@@ -6842,7 +7083,7 @@ function initGeminiTtsFrame() {
           text: testText,
           model: model,
           voice: voice,
-          api_key: key,
+          api_key: (engine === 'gemini' || engine === 'groq') ? null : key,
           target_lang: testLang,
           engine: engine,
           speed: speed,
@@ -6885,11 +7126,15 @@ function initGeminiTtsFrame() {
 window.addEventListener("languageChanged", () => {
   const optRecEng = document.getElementById("optTranscriberEngine");
   const optTransEng = document.getElementById("optTranslationEngine");
+  const optTtsEng = document.getElementById("optTtsEngine");
   if (typeof updateRecApiKeyUI === "function") {
     updateRecApiKeyUI(optRecEng ? optRecEng.value : "groq");
   }
   if (typeof updateTransApiKeyUI === "function") {
     updateTransApiKeyUI(optTransEng ? optTransEng.value : "groq");
+  }
+  if (typeof updateTtsApiKeyUI === "function") {
+    updateTtsApiKeyUI(optTtsEng ? optTtsEng.value : "gemini");
   }
 });
 
@@ -7303,7 +7548,7 @@ function initTranscriberSettings() {
       btnFetchModels.textContent = window.t ? window.t("transcriber.models_fetching", {}, "⏳ Загрузка...") : "⏳ Загрузка...";
 
       try {
-        const url = key ? `/api/transcriber/models?api_key=${encodeURIComponent(key)}` : "/api/transcriber/models";
+        const url = "/api/transcriber/models";
         const resp = await fetch(url);
         const resJson = await resp.json();
         if (resJson && ((resJson.models && resJson.models.length > 0) || (resJson.transcribe_models && resJson.transcribe_models.length > 0))) {
@@ -7425,14 +7670,20 @@ function initTranscriberSettings() {
       } catch (_) {}
 
       const sKeys = window.transcriberSettings || {};
+      const gemFlags = getEngineKeyModeFlags("gemini");
+      const groqFlags = getEngineKeyModeFlags("groq");
       const payload = {
         enabled: true,
         api_key: getCachedTranscriberKey("gemini"),
         api_keys: getEngineKeys("gemini"),
-        gemini_use_first_key_only: Boolean(sKeys.gemini_use_first_key_only),
+        gemini_use_first_key: gemFlags.useFirst,
+        gemini_use_other_keys: gemFlags.useOther,
+        gemini_use_first_key_only: Boolean(gemFlags.useFirst && !gemFlags.useOther),
         groq_api_key: getCachedTranscriberKey("groq"),
         groq_api_keys: getEngineKeys("groq"),
-        groq_use_first_key_only: Boolean(sKeys.groq_use_first_key_only),
+        groq_use_first_key: groqFlags.useFirst,
+        groq_use_other_keys: groqFlags.useOther,
+        groq_use_first_key_only: Boolean(groqFlags.useFirst && !groqFlags.useOther),
         deepgram_api_key: getCachedTranscriberKey("deepgram"),
         model: optModel ? optModel.value : "gemini-3.5-flash",
         transcriber_engine: recEng,

@@ -107,6 +107,8 @@ ws_active_hotspots: Dict[WebSocket, Set[str]] = {}
 demo_ws_clients: Dict[WebSocket, str] = {}  # ws -> demo_sid
 ws_audio_queues: Dict[WebSocket, asyncio.Queue] = {}
 ws_audio_tasks: Dict[WebSocket, asyncio.Task] = {}
+ws_client_instance_map: Dict[WebSocket, str] = {}   # ws -> client_instance_id (cid)
+active_user_client_cid: Dict[int, str] = {}         # user_id -> active non-demo cid
 
 def _prune_dead_ws_clients() -> None:
     dead = {
@@ -392,6 +394,10 @@ transcriber_service.configure(
     deepgram_api_key=getattr(app_settings, "deepgram_api_key", ""),
     gemini_use_first_key_only=getattr(app_settings, "gemini_use_first_key_only", False),
     groq_use_first_key_only=getattr(app_settings, "groq_use_first_key_only", False),
+    gemini_use_first_key=getattr(app_settings, "gemini_use_first_key", True),
+    gemini_use_other_keys=getattr(app_settings, "gemini_use_other_keys", True),
+    groq_use_first_key=getattr(app_settings, "groq_use_first_key", True),
+    groq_use_other_keys=getattr(app_settings, "groq_use_other_keys", True),
 )
 
 hotspot_manager = HotspotManager(
@@ -571,6 +577,14 @@ async def _get_user_state_cached(user_id: int):
     return blocked, role
 
 
+def _is_asl_hotspot_obj(rt_or_cfg) -> bool:
+    if not rt_or_cfg:
+        return False
+    cfg = getattr(rt_or_cfg, "config", rt_or_cfg)
+    nt = getattr(cfg, "network_type", None) if not isinstance(cfg, dict) else cfg.get("network_type")
+    return str(nt or "").strip().lower() == "allstar"
+
+
 async def _prepare_demo_hotspot_ssid(uid: int, rt_check):
     """Records admin collapsed state before demo user expands/connects a hotspot."""
     if not rt_check:
@@ -691,6 +705,25 @@ async def auth_middleware(request: Request, call_next):
                     # Role is loaded from DB (cached for a few seconds) so role changes take effect quickly
                     payload["role"] = role
                     request.state.user = payload
+                    # Блокировка случайных мутирующих запросов от клиента на паузе (без разлогина!)
+                    req_cid = (request.headers.get("x-proxdmr-client-id") or "").strip()
+                    cur_active_cid = active_user_client_cid.get(uid)
+                    if (
+                        role != "demo"
+                        and req_cid
+                        and cur_active_cid
+                        and req_cid != cur_active_cid
+                        and request.method not in ("GET", "HEAD", "OPTIONS")
+                        and not path.startswith("/api/auth/")
+                    ):
+                        return JSONResponse(
+                            {
+                                "status": "error",
+                                "code": "SESSION_PAUSED",
+                                "detail": "Сессия приостановлена (активно другое устройство)"
+                            },
+                            status_code=409,
+                        )
 
     # Skip 401 check for public paths
     if path in _AUTH_SKIP_EXACT or any(path.startswith(p) for p in _AUTH_SKIP_PREFIXES):
@@ -764,6 +797,10 @@ def _configure_transcriber_from_settings(user_app_settings: AppSettings):
         deepgram_api_key=getattr(user_app_settings, "deepgram_api_key", ""),
         gemini_use_first_key_only=getattr(user_app_settings, "gemini_use_first_key_only", False),
         groq_use_first_key_only=getattr(user_app_settings, "groq_use_first_key_only", False),
+        gemini_use_first_key=getattr(user_app_settings, "gemini_use_first_key", True),
+        gemini_use_other_keys=getattr(user_app_settings, "gemini_use_other_keys", True),
+        groq_use_first_key=getattr(user_app_settings, "groq_use_first_key", True),
+        groq_use_other_keys=getattr(user_app_settings, "groq_use_other_keys", True),
     )
 
 
@@ -958,7 +995,7 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
         s_admin = hotspot_manager.user_settings.get(showcase_uid, hotspot_manager.settings)
         if len(demo_manager.get_active_sessions()) <= 1 and s_admin:
             _configure_transcriber_from_settings(s_admin)
-        admin_rts = list(hotspot_manager.get_user_runtimes(showcase_uid).values())
+        admin_rts = [rt for rt in hotspot_manager.get_user_runtimes(showcase_uid).values() if not _is_asl_hotspot_obj(rt)]
         hs_collapsed_map = {}
         for idx_rt, rt in enumerate(admin_rts):
             hid = rt.config.id
@@ -983,7 +1020,7 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
                 "bg_color_light": getattr(s_admin, "bg_color_light", "#f4f6f8") or "#f4f6f8",
                 "custom_wallpaper_dark": c_dark,
                 "custom_wallpaper_light": c_light,
-                "active_hotspot_id": getattr(s_admin, "active_hotspot_id", "default") or "default",
+                "active_hotspot_id": (admin_rts[0].config.id if admin_rts and all(rt.config.id != (getattr(s_admin, "active_hotspot_id", "default") or "default") for rt in admin_rts) else (getattr(s_admin, "active_hotspot_id", "default") or "default")),
                 "simultaneous_slots": getattr(s_admin, "simultaneous_slots", True),
             },
             "client_settings": getattr(s_admin, "client_settings", None) or getattr(hotspot_manager.settings, "client_settings", {}) or {},
@@ -2137,9 +2174,20 @@ async def list_hotspots(request: Request):
         await ensure_active_user(uid, user.get("login", ""))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     rts = hotspot_manager.get_user_runtimes(uid)
+    is_demo_req = bool(user and user.get("is_demo"))
+    rt_list = [
+        rt for rt in rts.values()
+        if not (is_demo_req and _is_asl_hotspot_obj(rt))
+    ]
+    act_hid = getattr(user_sett, "active_hotspot_id", "default")
+    if is_demo_req and rt_list and all(rt.config.id != act_hid for rt in rt_list):
+        act_hid = rt_list[0].config.id
     return {
-        "active_hotspot_id": getattr(user_sett, "active_hotspot_id", "default"),
-        "hotspots": [(mask_hotspot_dict_for_demo(rt.to_dict(), index=idx) if (user and user.get("is_demo")) else rt.to_dict()) for idx, rt in enumerate(rts.values())]
+        "active_hotspot_id": act_hid,
+        "hotspots": [
+            (mask_hotspot_dict_for_demo(rt.to_dict(), index=idx) if is_demo_req else rt.to_dict())
+            for idx, rt in enumerate(rt_list)
+        ]
     }
 
 @app.post("/api/hotspots")
@@ -2604,6 +2652,10 @@ class TranscriberSettingsUpdate(BaseModel):
     deepgram_api_key: Optional[str] = None
     gemini_use_first_key_only: Optional[bool] = None
     groq_use_first_key_only: Optional[bool] = None
+    gemini_use_first_key: Optional[bool] = None
+    gemini_use_other_keys: Optional[bool] = None
+    groq_use_first_key: Optional[bool] = None
+    groq_use_other_keys: Optional[bool] = None
     tts_enabled: Optional[bool] = None
     tts_engine: Optional[str] = None
     tts_model: Optional[str] = None
@@ -2665,6 +2717,10 @@ async def get_transcriber_settings(request: Request):
             "groq_api_keys": (["••••••••••••"] if (is_demo and getattr(s, "groq_api_keys", [])) else (getattr(s, "groq_api_keys", []) or [])),
             "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
             "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
+            "gemini_use_first_key": getattr(s, "gemini_use_first_key", True),
+            "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
+            "groq_use_first_key": getattr(s, "groq_use_first_key", True),
+            "groq_use_other_keys": getattr(s, "groq_use_other_keys", True),
             "deepgram_api_key": ("••••••••••••" if (is_demo and getattr(s, "deepgram_api_key", "")) else getattr(s, "deepgram_api_key", "")),
             "tts_enabled": getattr(live_ts, "tts_enabled", getattr(s, "tts_enabled", False)),
             "tts_engine": getattr(live_ts, "tts_engine", None) or getattr(s, "tts_engine", "piper"),
@@ -2759,8 +2815,12 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_style": getattr(transcriber_service, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
             "translation_engine": getattr(s, "translation_engine", "groq"),
-            "has_groq_key": bool(getattr(s, "groq_api_key", "")),
-            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", ""))
+            "has_groq_key": bool(getattr(s, "groq_api_key", "") or getattr(s, "groq_api_keys", [])),
+            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", "")),
+            "gemini_use_first_key": getattr(s, "gemini_use_first_key", True),
+            "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
+            "groq_use_first_key": getattr(s, "groq_use_first_key", True),
+            "groq_use_other_keys": getattr(s, "groq_use_other_keys", True),
         })
 
         return {
@@ -2802,14 +2862,31 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         changed = True
     if update.api_keys is not None:
         clean_keys = [k.strip() for k in update.api_keys if k and k.strip()]
-        if clean_keys != getattr(s, "transcriber_api_keys", []):
+        new_primary = clean_keys[0] if clean_keys else ""
+        if clean_keys != getattr(s, "transcriber_api_keys", []) or new_primary != getattr(s, "transcriber_api_key", ""):
             s.transcriber_api_keys = clean_keys
-            if clean_keys:
-                s.transcriber_api_key = clean_keys[0]
+            s.transcriber_api_key = new_primary
             changed = True
-    if update.gemini_use_first_key_only is not None and update.gemini_use_first_key_only != getattr(s, "gemini_use_first_key_only", False):
-        s.gemini_use_first_key_only = update.gemini_use_first_key_only
-        changed = True
+
+    # Gemini key usage flags
+    if update.gemini_use_first_key is not None or update.gemini_use_other_keys is not None or update.gemini_use_first_key_only is not None:
+        cur_first = getattr(s, "gemini_use_first_key", True)
+        cur_other = getattr(s, "gemini_use_other_keys", True)
+        new_first = update.gemini_use_first_key if update.gemini_use_first_key is not None else cur_first
+        new_other = update.gemini_use_other_keys if update.gemini_use_other_keys is not None else cur_other
+        if update.gemini_use_first_key_only is not None and update.gemini_use_first_key is None and update.gemini_use_other_keys is None:
+            if update.gemini_use_first_key_only:
+                new_first, new_other = True, False
+            else:
+                new_first, new_other = True, True
+        if not new_first and not new_other:
+            new_first = True
+        if new_first != cur_first or new_other != cur_other:
+            s.gemini_use_first_key = new_first
+            s.gemini_use_other_keys = new_other
+            s.gemini_use_first_key_only = bool(new_first and not new_other)
+            changed = True
+
     if update.transcriber_engine is not None and update.transcriber_engine != getattr(s, "transcriber_engine", "gemini"):
         s.transcriber_engine = update.transcriber_engine
         changed = True
@@ -2821,14 +2898,30 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         changed = True
     if update.groq_api_keys is not None:
         clean_groq = [k.strip() for k in update.groq_api_keys if k and k.strip()]
-        if clean_groq != getattr(s, "groq_api_keys", []):
+        new_groq_primary = clean_groq[0] if clean_groq else ""
+        if clean_groq != getattr(s, "groq_api_keys", []) or new_groq_primary != getattr(s, "groq_api_key", ""):
             s.groq_api_keys = clean_groq
-            if clean_groq:
-                s.groq_api_key = clean_groq[0]
+            s.groq_api_key = new_groq_primary
             changed = True
-    if update.groq_use_first_key_only is not None and update.groq_use_first_key_only != getattr(s, "groq_use_first_key_only", False):
-        s.groq_use_first_key_only = update.groq_use_first_key_only
-        changed = True
+
+    # Groq key usage flags
+    if update.groq_use_first_key is not None or update.groq_use_other_keys is not None or update.groq_use_first_key_only is not None:
+        cur_first = getattr(s, "groq_use_first_key", True)
+        cur_other = getattr(s, "groq_use_other_keys", True)
+        new_first = update.groq_use_first_key if update.groq_use_first_key is not None else cur_first
+        new_other = update.groq_use_other_keys if update.groq_use_other_keys is not None else cur_other
+        if update.groq_use_first_key_only is not None and update.groq_use_first_key is None and update.groq_use_other_keys is None:
+            if update.groq_use_first_key_only:
+                new_first, new_other = True, False
+            else:
+                new_first, new_other = True, True
+        if not new_first and not new_other:
+            new_first = True
+        if new_first != cur_first or new_other != cur_other:
+            s.groq_use_first_key = new_first
+            s.groq_use_other_keys = new_other
+            s.groq_use_first_key_only = bool(new_first and not new_other)
+            changed = True
     if update.deepgram_api_key is not None and update.deepgram_api_key.strip() != getattr(s, "deepgram_api_key", ""):
         s.deepgram_api_key = update.deepgram_api_key.strip()
         changed = True
@@ -2902,7 +2995,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         await save_user_settings(uid, s.model_dump())
         if uid == 1:
             save_app_settings(s)
-            _configure_transcriber_from_settings(s)
+        _configure_transcriber_from_settings(s)
         # Proactively ensure Piper voice is downloaded/preloaded if Piper TTS is active
         if effective_engine == "piper" and eff_l != "none":
             try:
@@ -2939,8 +3032,12 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_style": getattr(s, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
             "translation_engine": getattr(s, "translation_engine", "gemini"),
-            "has_groq_key": bool(getattr(s, "groq_api_key", "")),
-            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", ""))
+            "has_groq_key": bool(getattr(s, "groq_api_key", "") or getattr(s, "groq_api_keys", [])),
+            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", "")),
+            "gemini_use_first_key": getattr(s, "gemini_use_first_key", True),
+            "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
+            "groq_use_first_key": getattr(s, "groq_use_first_key", True),
+            "groq_use_other_keys": getattr(s, "groq_use_other_keys", True),
         })
 
     return {
@@ -2958,6 +3055,10 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "groq_api_keys": getattr(s, "groq_api_keys", []) or [],
             "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
             "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
+            "gemini_use_first_key": getattr(s, "gemini_use_first_key", True),
+            "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
+            "groq_use_first_key": getattr(s, "groq_use_first_key", True),
+            "groq_use_other_keys": getattr(s, "groq_use_other_keys", True),
             "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
             "tts_enabled": getattr(s, "tts_enabled", False),
             "tts_engine": getattr(s, "tts_engine", "gemini"),
@@ -2996,7 +3097,7 @@ async def test_transcriber_keys(req: TestKeysRequest):
                     with urllib.request.urlopen(r, timeout=6) as resp:
                         return resp.status
                 await asyncio.to_thread(_do_groq)
-                return {"key": k, "valid": True, "error": None}
+                return {"key": k, "valid": True, "error": None, "http_code": 200}
             except urllib.error.HTTPError as e:
                 err_text = f"HTTP {e.code}"
                 try:
@@ -3005,9 +3106,9 @@ async def test_transcriber_keys(req: TestKeysRequest):
                         err_text = b["error"]["message"]
                 except Exception:
                     pass
-                return {"key": k, "valid": False, "error": err_text}
+                return {"key": k, "valid": False, "error": err_text, "http_code": e.code}
             except Exception as e:
-                return {"key": k, "valid": False, "error": str(e)}
+                return {"key": k, "valid": False, "error": str(e), "http_code": None}
         else:
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={k}"
             try:
@@ -3016,7 +3117,7 @@ async def test_transcriber_keys(req: TestKeysRequest):
                     with urllib.request.urlopen(r, timeout=6) as resp:
                         return resp.status
                 await asyncio.to_thread(_do_gemini)
-                return {"key": k, "valid": True, "error": None}
+                return {"key": k, "valid": True, "error": None, "http_code": 200}
             except urllib.error.HTTPError as e:
                 err_text = f"HTTP {e.code}"
                 try:
@@ -3025,9 +3126,9 @@ async def test_transcriber_keys(req: TestKeysRequest):
                         err_text = b["error"]["message"]
                 except Exception:
                     pass
-                return {"key": k, "valid": False, "error": err_text}
+                return {"key": k, "valid": False, "error": err_text, "http_code": e.code}
             except Exception as e:
-                return {"key": k, "valid": False, "error": str(e)}
+                return {"key": k, "valid": False, "error": str(e), "http_code": None}
 
     results = await asyncio.gather(*[_test_one(k) for k in keys])
     return {"status": "ok", "results": results}
@@ -3167,8 +3268,8 @@ async def api_translation_status():
 
 @app.get("/api/transcriber/models")
 async def get_transcriber_models(api_key: Optional[str] = None):
-    key = api_key if api_key else app_settings.transcriber_api_key
-    models = await asyncio.to_thread(GeminiTranscriberService.fetch_available_models, key)
+    clean_k = api_key.strip() if (api_key and not api_key.startswith("•")) else None
+    models = await asyncio.to_thread(transcriber_service.fetch_available_models_with_pool, clean_k)
     transcribe_models = [
         m for m in models
         if m.get("category") == "transcribe"
@@ -3466,8 +3567,9 @@ async def api_get_offline_transcribe_status(hotspot_id: Optional[str] = None):
 async def api_start_offline_transcribe(request: Request):
     user = _get_user_from_request(request)
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
-    if not transcriber_service.api_key:
-        return JSONResponse({"status": "error", "message": "Не указан API ключ Gemini в настройках транскрибации"}, status_code=400)
+    if not transcriber_service.get_all_keys():
+        msg = "Нет доступных ключей Gemini (проверьте настройки ключей в менеджере)" if transcriber_service.api_keys else "Не указан API ключ Gemini в настройках транскрибации"
+        return JSONResponse({"status": "error", "message": msg}, status_code=400)
     delete_orig = False
     hid = "default"
     try:
@@ -3808,6 +3910,8 @@ async def connect_hotspot(hotspot_id: str, request: Request):
     if rt_check and getattr(rt_check.config, "hidden", False):
         return {"status": "error", "message": "Нельзя подключить скрытый хотспот. Сначала верните его в список живых"}
     if is_demo and rt_check:
+        if _is_asl_hotspot_obj(rt_check):
+            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": "ASL отключен в демо-режиме"}, status_code=403)
         await _prepare_demo_hotspot_ssid(uid, rt_check)
     success = await hotspot_manager.connect_hotspot(target_id, user_id=uid, persist=not is_demo)
     rt = hotspot_manager.get_runtime(uid, target_id)
@@ -3844,6 +3948,8 @@ async def reconnect_hotspot_api(hotspot_id: str, request: Request):
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
     rt_check = hotspot_manager.get_runtime(uid, target_id)
     if is_demo and rt_check:
+        if _is_asl_hotspot_obj(rt_check):
+            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": "ASL отключен в демо-режиме"}, status_code=403)
         await _prepare_demo_hotspot_ssid(uid, rt_check)
     success = await hotspot_manager.reconnect_hotspot(target_id, user_id=uid, persist=not is_demo)
     rt = hotspot_manager.get_runtime(uid, target_id)
@@ -3883,6 +3989,8 @@ async def expand_hotspot_api(hotspot_id: str, request: Request):
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
     rt_check = hotspot_manager.get_runtime(uid, target_id)
     if is_demo and rt_check:
+        if _is_asl_hotspot_obj(rt_check):
+            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": "ASL отключен в демо-режиме"}, status_code=403)
         await _prepare_demo_hotspot_ssid(uid, rt_check)
     success = await hotspot_manager.set_hotspot_collapsed(target_id, False, user_id=uid, persist=not is_demo)
     if success:
@@ -4494,6 +4602,8 @@ async def api_allstar_disconnect(action: AllStarNodeAction, request: Request = N
 async def api_allstar_connected(hotspot_id: str = "default", request: Request = None):
     """Returns list of remote nodes currently connected to this AllStar node with telemetry."""
     user = _get_user_from_request(request) if request else None
+    if user and user.get("is_demo"):
+        return {"status": "ok", "connected_nodes": [], "online_count": 0, "rtt": 0, "jitter": 0}
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     target_hs = (hotspot_manager.get_runtime(uid, hotspot_id) if hotspot_id else None) or hotspot_manager.get_active_runtime(uid)
     if not target_hs:
@@ -6574,15 +6684,23 @@ async def check_update_endpoint(request: Request, force: bool = False):
     user = _get_user_from_request(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    nocache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
     try:
         data = await asyncio.to_thread(check_for_updates, force=force)
         sett = hotspot_manager.user_settings.get(1) or hotspot_manager.settings
         data["disable_update_notifications"] = bool(getattr(sett, "disable_update_notifications", False))
         data["is_admin"] = user.get("role") in ("admin", "superadmin")
-        return data
+        return JSONResponse(content=data, headers=nocache_headers)
     except Exception as e:
         logger.error(f"[UPDATER] Error checking updates: {e}")
-        return {"status": "error", "message": str(e), "has_update": False}
+        return JSONResponse(
+            content={"status": "error", "message": str(e), "has_update": False},
+            headers=nocache_headers,
+        )
 
 @app.post("/api/system/apply-update")
 async def apply_update_endpoint(request: Request, payload: Optional[ApplyUpdateRequest] = None):
@@ -7425,6 +7543,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         connected_clients.difference_update(dead)
         for ws_dead in dead:
             dead_uid = ws_user_map.pop(ws_dead, None)
+            ws_client_instance_map.pop(ws_dead, None)
             q_dead = ws_audio_queues.pop(ws_dead, None)
             t_dead = ws_audio_tasks.pop(ws_dead, None)
             if q_dead:
@@ -7443,6 +7562,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             for ws_s in stale_u:
                 connected_clients.discard(ws_s)
                 ws_user_map.pop(ws_s, None)
+                ws_client_instance_map.pop(ws_s, None)
                 q_s = ws_audio_queues.pop(ws_s, None)
                 t_s = ws_audio_tasks.pop(ws_s, None)
                 if q_s:
@@ -7452,69 +7572,60 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     t_s.cancel()
 
     _prune_stale_ws()
+    ws_cid = (websocket.query_params.get("cid") or "").strip()[:64]
     ws_is_demo = bool(ws_user.get("is_demo"))
     ws_demo_sid = ws_user.get("demo_sid", "")
+    demo_cfg_now = demo_manager.get_config()
+    demo_login_name = str(demo_cfg_now.get("login", "demo") or "demo").strip().lower()
+    ws_role_pre = "demo" if ws_is_demo else await get_user_role(ws_user_id)
+    # Полное исключение для режима и аккаунта ДЕМО
+    is_exempt_multi_session = bool(
+        ws_is_demo
+        or ws_role_pre == "demo"
+        or str(ws_login).strip().lower() == demo_login_name
+    )
+
     demo_sess = None
     if ws_is_demo:
         demo_sess = demo_manager.get_session(ws_demo_sid)
-        if not demo_sess or not demo_manager.get_config().get("enabled"):
+        if not demo_sess or not demo_cfg_now.get("enabled"):
             try:
                 await websocket.send_text(json.dumps({
                     "type": "demo_expired",
-                    "cooldown_seconds": demo_manager.get_config().get("cooldown_seconds", 60),
+                    "cooldown_seconds": demo_cfg_now.get("cooldown_seconds", 60),
                 }))
                 await websocket.close(code=4009, reason="Demo session expired")
             except Exception:
                 pass
             return
 
-    MAX_CONNECTIONS_PER_USER = 3
-    non_demo_active = [s for s in user_clients.get(ws_user_id, set()) if s not in demo_ws_clients]
-    if not ws_is_demo and len(non_demo_active) >= MAX_CONNECTIONS_PER_USER:
-        # Short grace yield in case a page refresh (F5) is closing an existing tab socket right now
-        await asyncio.sleep(0.12)
-        _prune_stale_ws()
-        non_demo_active = [s for s in user_clients.get(ws_user_id, set()) if s not in demo_ws_clients]
+    # Собираем предыдущие НЕ-демо подключения этого же аккаунта ProxDMR
+    sockets_to_evict: List[WebSocket] = []
+    if not is_exempt_multi_session:
+        sockets_to_evict = [
+            s for s in list(user_clients.get(ws_user_id, set()))
+            if s is not websocket and s not in demo_ws_clients
+        ]
 
-    if not ws_is_demo and len(non_demo_active) >= MAX_CONNECTIONS_PER_USER:
-        logger.warning(
-            f"[WS] Connection rejected for {client_id} (user={ws_login}, id={ws_user_id}): "
-            f"limit {MAX_CONNECTIONS_PER_USER} reached ({len(non_demo_active)} active)"
-        )
-        try:
-            await websocket.send_text(json.dumps({
-                "type": "session_limit_exceeded",
-                "max_connections": MAX_CONNECTIONS_PER_USER,
-                "active_connections": len(non_demo_active),
-                "login": ws_login
-            }))
-        except Exception:
-            pass
-        try:
-            await websocket.close(code=4008, reason="Connection limit reached (max 3)")
-        except Exception:
-            pass
-        return
-
+    # ВАЖНО: Сначала регистрируем НОВЫЙ сокет и его открытые хотспоты,
+    # чтобы при закрытии старого сокета блок finally не свернул хотспоты пользователя!
     connected_clients.add(websocket)
     if ws_user_id not in user_clients:
         user_clients[ws_user_id] = set()
     user_clients[ws_user_id].add(websocket)
     ws_user_map[websocket] = ws_user_id
+    if ws_cid:
+        ws_client_instance_map[websocket] = ws_cid
     if ws_is_demo:
         demo_ws_clients[websocket] = ws_demo_sid
+    elif not is_exempt_multi_session and ws_cid:
+        active_user_client_cid[ws_user_id] = ws_cid
 
-    # Start dedicated audio streaming queue & worker task for this client (Stage 2)
-    audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)  # Stage 2: expanded to 100 for up to 6s buffer margin
+    # Start dedicated audio streaming queue & worker task for this client
+    audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)
     ws_audio_queues[websocket] = audio_q
     audio_task = asyncio.create_task(_ws_audio_sender_loop(websocket, audio_q))
     ws_audio_tasks[websocket] = audio_task
-    logger.info(f"[WS] Client connected: {client_id} (user={ws_login}, demo={ws_is_demo}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
-    asyncio.create_task(visitor_stats.record_visit(
-        visitor_stats.client_ip(websocket),
-        websocket.headers.get("user-agent", ""),
-        websocket.cookies.get(visitor_stats.CID_COOKIE),
-    ))
 
     user_settings = await ensure_active_user(ws_user_id, ws_login)
     ws_active_hotspots[websocket] = {
@@ -7522,6 +7633,70 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         if not getattr(rt.config, "collapsed", False)
     }
     u_radio_state = get_user_radio_state(ws_user_id)
+
+    # Теперь переводим все предыдущие подключения этого аккаунта в режим паузы (без разлогина)
+    if sockets_to_evict:
+        for old_ws in sockets_to_evict:
+            old_cid = ws_client_instance_map.pop(old_ws, "")
+            old_client_addr = f"{old_ws.client.host}:{old_ws.client.port}" if getattr(old_ws, "client", None) else "unknown"
+            same_instance_reconnect = bool(ws_cid and old_cid and ws_cid == old_cid)
+
+            # Отключаем аудио-очередь и убираем старый сокет из активной рассылки сразу
+            q_old = ws_audio_queues.pop(old_ws, None)
+            t_old = ws_audio_tasks.pop(old_ws, None)
+            if q_old:
+                try:
+                    q_old.put_nowait(None)
+                except Exception:
+                    pass
+            if t_old and not t_old.done():
+                t_old.cancel()
+
+            connected_clients.discard(old_ws)
+            if ws_user_id in user_clients:
+                user_clients[ws_user_id].discard(old_ws)
+            ws_user_map.pop(old_ws, None)
+            ws_active_hotspots.pop(old_ws, None)
+
+            # Если вытесняемое устройство держало передачу (PTT) — немедленно гасим TX
+            if u_radio_state.is_transmitting and u_radio_state.transmitting_client_id == old_client_addr:
+                try:
+                    await hotspot_manager.stop_tx(user_id=ws_user_id)
+                except Exception:
+                    pass
+                u_radio_state.is_transmitting = False
+                u_radio_state.transmitting_client_id = None
+
+            if same_instance_reconnect:
+                logger.info(f"[WS] Replaced stale socket of same client instance cid={ws_cid} (user={ws_login})")
+                try:
+                    await old_ws.close(code=4000, reason="Replaced by same client instance")
+                except Exception:
+                    pass
+            else:
+                logger.info(
+                    f"[WS] Pausing previous device {old_client_addr} (old_cid={old_cid or '-'}) "
+                    f"for user={ws_login} (id={ws_user_id}) -> priority taken by {client_id} (new_cid={ws_cid or '-'})"
+                )
+                try:
+                    await old_ws.send_text(json.dumps({
+                        "type": "session_paused",
+                        "reason": "another_device",
+                        "login": ws_login,
+                    }))
+                except Exception:
+                    pass
+                try:
+                    await old_ws.close(code=4010, reason="Paused by another device")
+                except Exception:
+                    pass
+
+    logger.info(f"[WS] Client connected: {client_id} (user={ws_login}, demo={ws_is_demo}, cid={ws_cid or '-'}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
+    asyncio.create_task(visitor_stats.record_visit(
+        visitor_stats.client_ip(websocket),
+        websocket.headers.get("user-agent", ""),
+        websocket.cookies.get(visitor_stats.CID_COOKIE),
+    ))
 
     active_hs = hotspot_manager.get_active_runtime(ws_user_id)
     default_unified_tg = getattr(active_hs.config, "default_tg", getattr(active_hs.config, "default_tg_ts2", 2501)) if active_hs else 2501
@@ -7534,7 +7709,12 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     custom_wp_dark = f"/static/img/wallpapers/bg-custom-u{ws_user_id}-dark.jpg?v={int((wp_dir / f'bg-custom-u{ws_user_id}-dark.jpg').stat().st_mtime)}" if (wp_dir / f"bg-custom-u{ws_user_id}-dark.jpg").exists() else (f"/static/img/bg-custom-dark.jpg?v={int((STATIC_DIR / 'img' / 'bg-custom-dark.jpg').stat().st_mtime)}" if ws_user_id == 1 and (STATIC_DIR / "img" / "bg-custom-dark.jpg").exists() else None)
     custom_wp_light = f"/static/img/wallpapers/bg-custom-u{ws_user_id}-light.jpg?v={int((wp_dir / f'bg-custom-u{ws_user_id}-light.jpg').stat().st_mtime)}" if (wp_dir / f"bg-custom-u{ws_user_id}-light.jpg").exists() else (f"/static/img/bg-custom-light.jpg?v={int((STATIC_DIR / 'img' / 'bg-custom-light.jpg').stat().st_mtime)}" if ws_user_id == 1 and (STATIC_DIR / "img" / "bg-custom-light.jpg").exists() else None)
 
-    ws_role = "demo" if ws_is_demo else await get_user_role(ws_user_id)
+    all_user_rts = list(hotspot_manager.get_user_runtimes(ws_user_id).values())
+    visible_rts = [rt for rt in all_user_rts if not (ws_is_demo and _is_asl_hotspot_obj(rt))]
+    if ws_is_demo and _is_asl_hotspot_obj(active_hs):
+        active_hs = visible_rts[0] if visible_rts else None
+    init_active_hid = (active_hs.config.id if active_hs else "default") if ws_is_demo else user_settings.active_hotspot_id
+    ws_role = ws_role_pre if 'ws_role_pre' in locals() else ("demo" if ws_is_demo else await get_user_role(ws_user_id))
     ws_is_swl = True if ws_is_demo else await is_user_swl(ws_user_id)
 
     demo_timer_task = None
@@ -7553,13 +7733,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             "apk_path": apk_meta["apk_path"],
             "apk_url": apk_meta["apk_url"],
             "server_time": time.time() * 1000,
-            "active_hotspot_id": user_settings.active_hotspot_id,
+            "active_hotspot_id": init_active_hid,
             "is_demo": ws_is_demo,
             "demo_expires_at": int(demo_sess.expires_at) if (ws_is_demo and demo_sess) else None,
             "demo_session_minutes": demo_manager.get_config()["session_minutes"] if ws_is_demo else None,
             "demo_cooldown_seconds": demo_manager.get_config()["cooldown_seconds"] if ws_is_demo else None,
             "active_hotspot": (mask_hotspot_dict_for_demo(active_hs.to_dict()) if (ws_is_demo and active_hs) else (active_hs.to_dict() if active_hs else None)),
-            "hotspots": [(mask_hotspot_dict_for_demo(rt.to_dict(), index=idx) if ws_is_demo else rt.to_dict()) for idx, rt in enumerate(hotspot_manager.get_user_runtimes(ws_user_id).values())],
+            "hotspots": [(mask_hotspot_dict_for_demo(rt.to_dict(), index=idx) if ws_is_demo else rt.to_dict()) for idx, rt in enumerate(visible_rts)],
             "bm_pings": bm_ping_service.cached_pings,
             "bm_host_pings": bm_ping_service.cached_host_pings,
             "bm_losses": bm_ping_service.cached_losses,
@@ -7667,6 +7847,11 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 elif m_type in ("set_transcribe_slot", "set_tts_slot"):
                     pass  # allow demo client to turn ON slot transcription and TTS speech synthesis
                 elif m_type in ("hotspot_collapse", "bm_connect", "bm_disconnect", "bm_reconnect", "set_active_hotspot"):
+                    hs_id_req = d_check.get("hotspot_id") or d_check.get("id")
+                    if hs_id_req:
+                        rt_target = hotspot_manager.get_runtime(ws_user_id, hs_id_req)
+                        if _is_asl_hotspot_obj(rt_target):
+                            continue
                     pass  # allow demo client to expand/collapse/connect hotspots in-memory
                 else:
                     if m_type == "ptt_press":
@@ -8532,6 +8717,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         if t_disc and not t_disc.done():
             t_disc.cancel()
 
+        disc_cid = ws_client_instance_map.pop(websocket, None)
         connected_clients.discard(websocket)
         if not connected_clients and transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
             transcriber_service.disable_all_slots()
@@ -8541,6 +8727,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             user_clients[disc_uid].discard(websocket)
             if not user_clients[disc_uid]:
                 user_clients.pop(disc_uid, None)
+                if disc_cid and active_user_client_cid.get(disc_uid) == disc_cid:
+                    active_user_client_cid.pop(disc_uid, None)
             elif not was_demo:
                 for r_hid in list(removed_hids):
                     if not _is_hotspot_open_on_any_client(disc_uid, r_hid):

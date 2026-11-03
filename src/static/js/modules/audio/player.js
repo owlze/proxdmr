@@ -1,5 +1,11 @@
 import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime } from '../core/formatters.js?v=2.9.367';
 import { showToast } from '../core/toast.js';
+import {
+  DEFAULT_ROGER_BEEP_PATTERN,
+  playLocalRogerBeep,
+  stopLocalRogerBeep
+} from '../ptt/tot.js?v=2.9.542';
+
 
 export   class RecordingsManager {
     constructor() {
@@ -96,6 +102,12 @@ export   class RecordingsManager {
       this.optAutoRecord = document.getElementById("recOptAutoRecord");
       this.optSeamBeep = document.getElementById("recOptSeamBeep");
       this.inputSeamBeepPattern = document.getElementById("recSeamBeepPattern");
+      this.btnTestSeamBeep = document.getElementById("btnTestSeamBeep");
+      this.optSeamBeep?.addEventListener("change", () => {
+        if (this.inputSeamBeepPattern) {
+          this.inputSeamBeepPattern.style.opacity = this.optSeamBeep.checked ? "1" : "0.55";
+        }
+      });
       this.optAutoCleanup = document.getElementById("recOptAutoCleanup");
       this.inputMinDuration = document.getElementById("recMinDurationInput");
       this.inputQuotaGb = document.getElementById("recQuotaGbInput");
@@ -622,6 +634,20 @@ export   class RecordingsManager {
       if (this.saveSettingsBtn) {
         this.saveSettingsBtn.onclick = () => this.saveSettings();
       }
+      if (this.btnTestSeamBeep) {
+        this.btnTestSeamBeep.onclick = async (e) => {
+          if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          this.btnTestSeamBeep.classList.add("is-playing");
+          try {
+            await this.playSeamBeep({ forceTest: true });
+          } finally {
+            this.btnTestSeamBeep.classList.remove("is-playing");
+          }
+        };
+      }
       if (this.settingsModal) {
         this.settingsModal.onclick = (e) => {
           if (e.target === this.settingsModal) this.closeSettingsModal();
@@ -635,6 +661,9 @@ export   class RecordingsManager {
               e.stopPropagation();
               this.closeSettingsModal();
             } else if (e.key === "Enter") {
+              if (e.target && e.target.closest && e.target.closest("#btnTestSeamBeep")) {
+                return;
+              }
               e.preventDefault();
               e.stopPropagation();
               this.saveSettings();
@@ -1698,68 +1727,13 @@ export   class RecordingsManager {
       }
     }
 
-    async playSeamBeep() {
-      if (!this.optSeamBeep || !this.optSeamBeep.checked) return;
-      
-      const patternStr = this.inputSeamBeepPattern ? this.inputSeamBeepPattern.value : "600,80";
-      const nums = (patternStr.match(/\d+/g) || []).map(Number);
-      if (nums.length < 2) return;
-      
-      const beeps = [];
-      for (let i = 0; i < nums.length - 1; i += 2) {
-        if (beeps.length >= 7) break;
-        beeps.push({ freq: nums[i], durMs: nums[i+1] });
-      }
-      if (beeps.length === 0) return;
+    async playSeamBeep(options = {}) {
+      const forceTest = Boolean(options && options.forceTest);
+      if (!forceTest && (!this.optSeamBeep || !this.optSeamBeep.checked)) return;
 
-      try {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        let ctx = null;
-        let isTemporaryCtx = false;
-        if (window.audioPlayer && window.audioPlayer.audioCtx) {
-          ctx = window.audioPlayer.audioCtx;
-        } else {
-          ctx = new AudioContextClass();
-          isTemporaryCtx = true;
-        }
-        if (ctx.state === 'suspended') {
-          await ctx.resume();
-        }
-
-        let startTime = ctx.currentTime;
-        
-        beeps.forEach(beep => {
-          const dur = beep.durMs / 1000;
-          if (beep.freq > 0) {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            
-            osc.type = "sine";
-            osc.frequency.setValueAtTime(beep.freq, startTime);
-            
-            gain.gain.setValueAtTime(0, startTime);
-            gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
-            gain.gain.setValueAtTime(0.15, startTime + dur - 0.005);
-            gain.gain.linearRampToValueAtTime(0, startTime + dur);
-            
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            
-            osc.start(startTime);
-            osc.stop(startTime + dur);
-            osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch(_) {} };
-          }
-          startTime += dur;
-        });
-        
-        const totalDurationMs = (startTime - ctx.currentTime) * 1000;
-        await new Promise(resolve => setTimeout(resolve, totalDurationMs + 20));
-        if (isTemporaryCtx) {
-          try { await ctx.close(); } catch(_) {}
-        }
-      } catch (e) {
-        console.warn("[PLAYER] Could not play seam beep", e);
-      }
+      const rawVal = this.inputSeamBeepPattern ? this.inputSeamBeepPattern.value.trim() : "";
+      const patternStr = rawVal || DEFAULT_ROGER_BEEP_PATTERN;
+      await playLocalRogerBeep(patternStr);
     }
 
     playNext() {
@@ -2241,7 +2215,12 @@ export   class RecordingsManager {
       if (!s) return;
       if (this.optAutoRecord && s.auto_record !== undefined) this.optAutoRecord.checked = Boolean(s.auto_record);
       if (this.optSeamBeep && s.seam_beep !== undefined) this.optSeamBeep.checked = Boolean(s.seam_beep);
-      if (this.inputSeamBeepPattern && s.seam_beep_pattern !== undefined) this.inputSeamBeepPattern.value = s.seam_beep_pattern || "600,80";
+      if (this.inputSeamBeepPattern && s.seam_beep_pattern !== undefined) {
+        this.inputSeamBeepPattern.value = s.seam_beep_pattern || DEFAULT_ROGER_BEEP_PATTERN;
+      }
+      if (this.inputSeamBeepPattern && this.optSeamBeep) {
+        this.inputSeamBeepPattern.style.opacity = this.optSeamBeep.checked ? "1" : "0.55";
+      }
       if (this.optAutoCleanup && s.auto_cleanup !== undefined) this.optAutoCleanup.checked = Boolean(s.auto_cleanup);
       if (this.inputMinDuration && s.min_duration_sec !== undefined) this.inputMinDuration.value = s.min_duration_sec;
       if (this.inputQuotaGb) {
@@ -2279,6 +2258,7 @@ export   class RecordingsManager {
     }
 
     closeSettingsModal() {
+      stopLocalRogerBeep();
       if (this.settingsModal) {
         this.settingsModal.style.display = "none";
         this.settingsModal.classList.remove("active");
@@ -2289,7 +2269,7 @@ export   class RecordingsManager {
       const payload = {
         auto_record: this.optAutoRecord ? this.optAutoRecord.checked : true,
         seam_beep: this.optSeamBeep ? this.optSeamBeep.checked : true,
-        seam_beep_pattern: this.inputSeamBeepPattern ? this.inputSeamBeepPattern.value.trim() : "600,80",
+        seam_beep_pattern: this.inputSeamBeepPattern ? this.inputSeamBeepPattern.value.trim() : DEFAULT_ROGER_BEEP_PATTERN,
         auto_cleanup: this.optAutoCleanup ? this.optAutoCleanup.checked : true,
         min_duration_sec: this.inputMinDuration ? (parseFloat(this.inputMinDuration.value) || 0.5) : 0.5,
         max_storage_gb: this.inputQuotaGb ? (parseFloat(this.inputQuotaGb.value) || 2.0) : 2.0,

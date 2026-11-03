@@ -2569,5 +2569,22 @@
   "contacts.asl_traffic_high": "Alto",
   "contacts.asl_traffic_live": "EN EL AIRE 🔥",
   "contacts.asl_db_updated_toast": "✅ Base de datos AllStarLink actualizada: {count} nodos",
-  "contacts.asl_db_error_toast": "⚠️ Error al actualizar la base de datos AllStarLink"
+  "contacts.asl_db_error_toast": "⚠️ Error al actualizar la base de datos AllStarLink",
+  "ptt.roger_beep_test_btn": "Probar",
+  "ptt.roger_beep_test_title": "Escuchar tono Roger Beep",
+  "recordings.seam_beep_test_btn": "Probar",
+  "recordings.seam_beep_test_title": "Escuchar marcador de separación de sesiones",
+  "gw.session_paused_title": "Sesión en pausa",
+  "gw.session_paused_msg": "Has iniciado sesión en otro dispositivo y este cliente está en pausa. Si deseas activar la prioridad de nuevo en este dispositivo, pulsa «Restaurar».",
+  "gw.session_paused_restore_btn": "Restaurar",
+  "gw.session_paused_restoring_btn": "Restaurando...",
+  "gw.session_paused_status": "En pausa (otro dispositivo activo)",
+  "transcriber.apikeys_use_first": "Usar la primera clave de la lista (de pago)",
+  "transcriber.apikeys_use_others": "Usar todas las demás claves (rotación)",
+  "transcriber.apikeys_status_first_only": "Claves: {count} • Activa: solo n.º 1",
+  "transcriber.apikeys_status_others_only": "Claves: {count} • Activas: n.º 2–{count} ({active} en rotación)",
+  "transcriber.apikeys_status_all": "Claves: {count} • Activas: todas ({count})",
+  "transcriber.apikeys_warn_no_other_keys": "⚠️ Solo hay 1 clave — añada claves desde la línea 2 o active la 1.ª clave",
+  "transcriber.tts_key_gemini_lbl": "🔑 Claves Gemini API (para síntesis de voz):",
+  "transcriber.tts_key_groq_lbl": "⚡ Claves Groq Cloud API (para síntesis de voz):"
 }

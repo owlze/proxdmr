@@ -2569,5 +2569,22 @@
   "contacts.asl_traffic_high": "Высокий",
   "contacts.asl_traffic_live": "В ЭФИРЕ 🔥",
   "contacts.asl_db_updated_toast": "✅ База AllStarLink обновлена: {count} узлов",
-  "contacts.asl_db_error_toast": "⚠️ Ошибка обновления базы AllStarLink"
+  "contacts.asl_db_error_toast": "⚠️ Ошибка обновления базы AllStarLink",
+  "ptt.roger_beep_test_btn": "Тест",
+  "ptt.roger_beep_test_title": "Прослушать сигнал Роджер-бипа",
+  "recordings.seam_beep_test_btn": "Тест",
+  "recordings.seam_beep_test_title": "Прослушать звуковой маркер разделения сессий",
+  "gw.session_paused_title": "Сессия на паузе",
+  "gw.session_paused_msg": "Вы вошли на другом устройстве, здесь вы на паузе, если хотите можно активировать приоритет работы снова на этом устройстве, нажмите «Восстановить».",
+  "gw.session_paused_restore_btn": "Восстановить",
+  "gw.session_paused_restoring_btn": "Восстановление...",
+  "gw.session_paused_status": "На паузе (активно другое устройство)",
+  "transcriber.apikeys_use_first": "Использовать первый в списке ключ (платный)",
+  "transcriber.apikeys_use_others": "Использовать все остальные ключи (перебор)",
+  "transcriber.apikeys_status_first_only": "Найдено ключей: {count} • Активен: только №1",
+  "transcriber.apikeys_status_others_only": "Найдено ключей: {count} • Активны: №2–{count} ({active} в переборе)",
+  "transcriber.apikeys_status_all": "Найдено ключей: {count} • Активны: все {count}",
+  "transcriber.apikeys_warn_no_other_keys": "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ",
+  "transcriber.tts_key_gemini_lbl": "🔑 Ключи Gemini API (для синтеза речи):",
+  "transcriber.tts_key_groq_lbl": "⚡ Ключи Groq Cloud API (для синтеза речи):"
 }

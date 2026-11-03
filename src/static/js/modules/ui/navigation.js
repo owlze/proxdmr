@@ -136,6 +136,11 @@
 
   // --- Global Unified Back Navigation Handler (Browser + Android APK + PC Escape Key) ---
   export function handleAppBack(fromPopstate = false) {
+    const pausedModalEl = document.getElementById("sessionPausedModal");
+    if (pausedModalEl && pausedModalEl.classList.contains("active")) {
+      // Модальное окно паузы НЕ должно закрываться кнопкой «Назад» или Escape без нажатия [Восстановить].
+      return false;
+    }
     // -1. Auth Modal (Mandatory Login Screen): user skipping auth immediately exits application
     const authModalEl = document.getElementById("authModal");
     if (authModalEl && authModalEl.classList.contains("active")) {

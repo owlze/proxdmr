@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.541">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.545">
   <script>
     window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
@@ -1646,9 +1646,14 @@
           <button type="button" class="tab-btn" data-tab="tab-edit-hs" data-i18n="nav.tab_params">HAM Net</button>
           <button type="button" class="tab-btn" data-tab="tab-transcriber" data-i18n="nav.tab_transcriber">Ai</button>
           <button type="button" class="tab-btn" data-tab="tab-alerts" data-i18n="nav.tab_alerts" id="tabBtnAlerts" style="display:none;">Оповещения</button>
-
         </div>
-        <button id="closeSettingsBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+        <div class="settings-header-actions">
+          <button type="button" id="btnSettingsHeaderSave" title="Сохранить настройки" data-i18n-title="buttons.save_settings">
+            <span class="save-btn-icon" aria-hidden="true">💾</span>
+            <span class="save-btn-label" data-i18n="buttons.save">Сохранить</span>
+          </button>
+          <button type="button" id="closeSettingsBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+        </div>
       </div>
 
       <div class="settings-modal-body">
@@ -3053,6 +3058,25 @@
                   <option value="gemini" data-i18n="transcriber.tts_engine_gemini">🌐 Gemini API</option>
                   <option value="groq" data-i18n="transcriber.tts_engine_groq">🌐 Groq Cloud TTS</option>
                 </select>
+              </div>
+
+              <!-- TTS API Key button (shown when Gemini API or Groq Cloud TTS is selected) -->
+              <div class="form-group" id="groupTtsApiKey" style="margin-bottom: 10px; display: none;">
+                <label id="lblTranscriberTtsApiKey" for="btnManageTtsApiKeys" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                  🔑 Ключи Gemini API (для синтеза речи):
+                </label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button type="button" id="btnManageTtsApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: var(--app-border-radius, 0px);">
+                    <span id="btnManageTtsApiKeysIcon">🔑</span>
+                    <span id="btnManageTtsApiKeysText">Gemini API (0)</span>
+                  </button>
+                  <a id="linkTranscriberTtsApiKey" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center;">
+                    Google AI Studio ↗
+                  </a>
+                </div>
+                <small id="hintTranscriberTtsApiKey" class="form-hint" style="margin-top: 4px; display: block;">
+                  Единый список ключей Gemini API. Нажмите для настройки режима (платный / бесплатный пул) и проверки.
+                </small>
               </div>
 
               <!-- Model select -->
@@ -5057,15 +5081,21 @@
 
         <!-- Seam Beep Marker -->
         <div class="rec-setting-block" style="display: flex; flex-direction: column; gap: 6px;">
-          <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
             <label for="recOptSeamBeep" style="font-size: 0.95rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px;">
               <input type="checkbox" id="recOptSeamBeep" class="rec-toggle-checkbox">
               <span data-i18n="recordings.seam_beep">Звуковой маркер склейки</span>
             </label>
-            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 175px; text-align: right; padding: 4px 8px; border-radius: var(--app-border-radius, 0px); font-family: monospace;">
+            <div class="tone-pattern-input-row" style="display: flex; align-items: stretch; gap: 6px; margin-left: auto;">
+              <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 165px; text-align: right; padding: 4px 8px; border-radius: var(--app-border-radius, 0px); font-family: monospace;">
+              <button type="button" id="btnTestSeamBeep" class="tone-test-btn local-demo-allowed" title="Прослушать звуковой маркер разделения сессий" data-i18n-title="recordings.seam_beep_test_title" aria-label="Тест">
+                <span class="tone-test-icon">🔊</span>
+                <span class="tone-test-label" data-i18n="recordings.seam_beep_test_btn">Тест</span>
+              </button>
+            </div>
           </div>
           <div style="font-size: 0.75rem; color: var(--text-muted, #8b949e); line-height: 1.3;" data-i18n="recordings.seam_beep_hint">
-            До 7 пар частота, длительность (Гц, мс) через запятую (напр. 600,80 или 1750,100, 1200,80)
+            До 7 тонов: частота-длительность-громкость через запятую (напр. 600-110-33, 840-50-15)
           </div>
         </div>
 
@@ -5135,6 +5165,23 @@
       </div>
     </div>
   </div>
+  <!-- Session Paused (Another Device Active) Modal -->
+  <div id="sessionPausedModal" class="modal session-paused-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="sessionPausedTitle">
+    <div class="modal-content session-paused-card">
+      <div class="session-paused-icon-wrap" aria-hidden="true">⏸️</div>
+      <h3 id="sessionPausedTitle" class="session-paused-title" data-i18n="gw.session_paused_title">Сессия на паузе</h3>
+      <p id="sessionPausedText" class="session-paused-desc" data-i18n="gw.session_paused_msg">
+        Вы вошли на другом устройстве, здесь вы на паузе, если хотите можно активировать приоритет работы снова на этом устройстве, нажмите «Восстановить».
+      </p>
+      <div class="session-paused-actions">
+        <button type="button" id="btnRestorePausedSession" class="btn-primary session-paused-restore-btn">
+          <span class="restore-btn-icon">▶️</span>
+          <span id="btnRestorePausedSessionLabel" data-i18n="gw.session_paused_restore_btn">Восстановить</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="orientationShield" class="orientation-shield" aria-hidden="true">
     <div class="orientation-shield-box">
       <div class="orientation-shield-icon-wrap">
@@ -5411,7 +5458,7 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.528"></script>
+  <script src="/static/js/i18n.js?v=2.9.544"></script>
   <script src="/static/js/audio-player.js?v=2.9.526"></script>
   <script src="/static/js/dialog.js?v=2.9.489"></script>
   <script src="/static/js/auth.js?v=2.9.386"></script>
@@ -5671,7 +5718,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.541"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.545"></script>
 </body>
 </html>
 
