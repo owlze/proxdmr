@@ -28,7 +28,7 @@ REPO_NAME = "proxdmr"
 GITHUB_API_BASE = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 USER_AGENT = "ProxDMR-Updater/1.0"
 
-SUPPORTED_LANGUAGES = ["ru", "en", "uk", "de", "es", "fr", "it"]
+SUPPORTED_LANGUAGES = ["ru", "en", "uk", "de", "es", "fr", "it", "nl"]
 
 _update_cache: Dict[str, Any] = {
     "checked_at": 0,
@@ -314,8 +314,19 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
             else:
                 shutil.copy2(item, target_item)
 
-        # Copy any root files if present (requirements.txt, README.md, etc.)
-        for root_item in ["requirements.txt", "README.md", "Dockerfile", "docker-compose.yml"]:
+        # Copy any root files if present (requirements.txt, README.md, Dockerfiles, scripts, etc.)
+        root_files_to_sync = [
+            "requirements.txt",
+            "README.md",
+            "Dockerfile",
+            "Dockerfile.asl3",
+            "docker-entrypoint-asl3.sh",
+            "docker-compose.yml",
+            "setup.sh",
+            "setup.ps1",
+            "setup.bat",
+        ]
+        for root_item in root_files_to_sync:
             src_f = root_extracted / root_item
             if src_f.exists():
                 try:

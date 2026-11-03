@@ -68,9 +68,9 @@ export function getPersistentHotspotMute(hid, slot) {
     if (vLeg !== null) return vLeg === "true";
   }
 
-  // If in Solo mode by default and neither slot has been explicitly set:
+  // If in Solo or Auto mode by default and neither slot has been explicitly set:
   const mode = getHotspotTsAudioMode(cid);
-  if (mode === "solo") {
+  if (mode === "solo" || mode === "auto") {
     if (isXlxHotspot(cid)) {
       return s === 1; // TS1 muted (true), TS2 unmuted (false)
     }
@@ -225,6 +225,64 @@ export function isXlxHotspot(hid, card = null) {
   return false;
 }
 
+export function isAllStarHotspot(hid, card = null) {
+  const cid = _resolveHotspotId(hid);
+  if (card) {
+    const cardNet = (card.dataset && card.dataset.networkType ? card.dataset.networkType : "").toLowerCase();
+    if (cardNet === "allstar" || card.classList.contains("card-net-allstar")) return true;
+  }
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  let hs = null;
+  if (cid === "default") {
+    hs = hsList[0] || null;
+  } else {
+    hs = hsList.find(h => String(h.id) === String(cid));
+  }
+  if (hs && ((hs.network_type || "").toLowerCase() === "allstar")) {
+    return true;
+  }
+  if (typeof document !== "undefined") {
+    const el = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || (cid === "default" ? document.getElementById("radioContainer") : null);
+    if (el) {
+      const net = (el.dataset && el.dataset.networkType ? el.dataset.networkType : "").toLowerCase();
+      if (net === "allstar" || el.classList.contains("card-net-allstar")) return true;
+    }
+  }
+  return false;
+}
+
+export function getHotspotAslMode(hid = null) {
+  const cid = _resolveHotspotId(hid);
+  try {
+    const val = localStorage.getItem(`proxdmr_asl_mode_${cid}`);
+    if (val === "*2" || val === "*3") return val;
+  } catch (e) {}
+  return "*2"; // Default is Monitor (*2)
+}
+
+export function setHotspotAslMode(hid, mode) {
+  const cid = _resolveHotspotId(hid);
+  const safeMode = (mode === "*3") ? "*3" : "*2";
+  try {
+    localStorage.setItem(`proxdmr_asl_mode_${cid}`, safeMode);
+  } catch (e) {}
+}
+
+export function isHotspotAslAddMode(hid = null) {
+  const cid = _resolveHotspotId(hid);
+  try {
+    const val = localStorage.getItem(`proxdmr_asl_add_mode_${cid}`);
+    if (val === null) return false; // Default is Single mode (Add mode OFF)
+    return val === "true";
+  } catch (e) {
+    return false;
+  }
+}
+
+export function setHotspotAslAddMode(hid, enabled) {
+  // Single-node mode enforced
+}
+
 export function getHotspotTsAudioMode(hid) {
   const cid = _resolveHotspotId(hid);
   if (isXlxHotspot(cid)) {
@@ -264,7 +322,7 @@ export function setHotspotTsAudioMode(hid, mode) {
   const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
   if (isPrimary) {
     localStorage.setItem("proxdmr_ts_mode_default", safeMode);
-    localStorage.setItem("proxdmr_simultaneous_slots", safeMode === "solo" ? "false" : "true");
+    localStorage.setItem("proxdmr_simultaneous_slots", "false");
   }
 
   if (safeMode === "solo") {
@@ -279,6 +337,55 @@ export function setHotspotTsAudioMode(hid, mode) {
 
 export function cycleHotspotTsAudioMode(hid) {
   const cid = _resolveHotspotId(hid);
+  if (isAllStarHotspot(cid)) {
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
+    const hs = hsList.find(h => String(h.id) === String(cid)) || (cid === "default" ? hsList[0] : null);
+    const targetNode = String((hs && (hs.connected_node || (Array.isArray(hs.asl_links) && hs.asl_links[0] && hs.asl_links[0].node))) || "").trim();
+
+    if (targetNode === "1999" || targetNode === "9999") {
+      setHotspotAslMode(cid, "*3");
+      updateHotspotTsAudioModeUI(cid);
+      if (typeof showToast === "function") {
+        showToast("Попугай #1999 всегда работает в режиме RX/TX (*3)", "info", 2000);
+      }
+      return;
+    }
+
+    const curAsl = getHotspotAslMode(cid);
+    const nextAsl = (curAsl === "*2") ? "*3" : "*2";
+    setHotspotAslMode(cid, nextAsl);
+    _triggerHaptic(35);
+    updateHotspotTsAudioModeUI(cid);
+
+    const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || (cid === "default" ? document.getElementById("radioContainer") : null);
+    if (card && typeof window.updateCardAllStarPanel === "function") {
+      window.updateCardAllStarPanel(card);
+    }
+    if (card && typeof window.updateCardPttHint === "function") {
+      window.updateCardPttHint(card);
+    }
+
+    if (targetNode && typeof window.aslConnectNodeProcedure === "function") {
+      window.aslConnectNodeProcedure(cid, targetNode, nextAsl, { showStatusBanner: true, showCardEffects: true });
+    } else if (targetNode) {
+      const ws = (typeof getWs === "function" ? getWs() : window.ws);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "allstar_connect_node",
+          hotspot_id: cid,
+          node: targetNode,
+          mode: nextAsl
+        }));
+      }
+    }
+
+    const label = (nextAsl === "*2") ? "Monitor (*2) — только приём" : "RX/TX (*3) — полный дуплекс";
+    if (typeof showToast === "function") {
+      showToast(`AllStarLink: ${label}`, "info", 2000);
+    }
+    return;
+  }
+
   if (isXlxHotspot(cid)) {
     _triggerHaptic(20);
     const msg = _getTranslation("ts_mode.xlx_locked_toast", {}, "В сети XLX используется только TS2 (режим Solo зафиксирован)");
@@ -363,21 +470,40 @@ export function toggleHotspotMute(hid, slot) {
     return;
   }
 
-  const cur = getHotspotMute(cid, s);
-  const newMute = !cur;
-
   if (mode === "auto") {
-    // In Auto mode: user manual override sets chosen slot unmuted and other muted
-    const otherS = (s === 1) ? 2 : 1;
-    const st = _getAutoState(cid);
-    const targetActiveSlot = newMute ? otherS : s;
-    const targetMutedSlot = newMute ? s : otherS;
+    // 1. Fully clear any temporary soloSet flags for this hotspot
+    const soloSet = getSoloMutedSet();
+    if (soloSet && soloSet.size > 0) {
+      [1, 2].forEach(sl => {
+        soloSet.delete(`${cid}_ts${sl}`);
+        soloSet.delete(`default_ts${sl}`);
+      });
+      saveSoloMutedSet(soloSet);
+    }
 
-    st.flag = targetActiveSlot;
+    const st = _getAutoState(cid);
     if (st.hangTimer) {
       clearTimeout(st.hangTimer);
       st.hangTimer = null;
     }
+
+    // Determine current active slot (1 or 2):
+    // 1) If an active slot is currently arbitrated: st.flag (1 or 2)
+    // 2) If idle (st.flag === 0): st.lastActiveSlot or persistent mute
+    const curActive = (st.flag === 1 || st.flag === 2)
+      ? st.flag
+      : ((st.lastActiveSlot === 2) ? 2 : (getPersistentHotspotMute(cid, 2) === false ? 2 : 1));
+
+    // Invert the active slot: clicking ANY speaker icon flips active slot between TS1 and TS2 (identical to Solo mode)
+    const targetActiveSlot = (curActive === 1) ? 2 : 1;
+    const targetMutedSlot = (targetActiveSlot === 1) ? 2 : 1;
+
+    st.lastActiveSlot = targetActiveSlot;
+    st.flag = targetActiveSlot;
+
+    // Persist mute state and sync with audio player & backend
+    setHotspotMute(cid, targetActiveSlot, false);
+    setHotspotMute(cid, targetMutedSlot, true);
 
     const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
     if (ap) {
@@ -392,7 +518,8 @@ export function toggleHotspotMute(hid, slot) {
     }
     _renderAutoCardMuteVisuals(cid, targetActiveSlot, targetMutedSlot);
 
-    // If the target slot is not actively receiving, auto-revert to idle (st.flag = 0) after 3s
+    // If the target slot is not actively receiving, auto-revert arbitration flag to idle (st.flag = 0) after 3s,
+    // staying parked on st.lastActiveSlot
     if (!_isSlotReceivingNow(cid, targetActiveSlot)) {
       st.hangTimer = setTimeout(() => {
         st.hangTimer = null;
@@ -400,7 +527,11 @@ export function toggleHotspotMute(hid, slot) {
         _resetAutoSlotAudio(cid);
       }, 3000);
     }
+    return;
   }
+
+  const cur = getHotspotMute(cid, s);
+  const newMute = !cur;
 }
 
 // --- Auto Mode Arbitration State Machine (Flag 0, 1, 2 with 2s hold delay) ---
@@ -408,7 +539,7 @@ const _autoArbitrationState = {}; // cid -> { flag: 0, hangTimer: null }
 
 function _getAutoState(cid) {
   if (!_autoArbitrationState[cid]) {
-    _autoArbitrationState[cid] = { flag: 0, hangTimer: null };
+    _autoArbitrationState[cid] = { flag: 0, hangTimer: null, lastActiveSlot: 1 };
   }
   return _autoArbitrationState[cid];
 }
@@ -427,22 +558,27 @@ export function resetAutoSlotState(cid) {
   }
   st.flag = 0;
 
-  // Clear stored mutes in localStorage and backend for this hotspot
-  setHotspotMute(id, 1, false);
-  setHotspotMute(id, 2, false);
+  // Strict mutual exclusion in Auto mode: exactly ONE slot unmuted, other muted
+  const activeSlot = (typeof window._getHotspotSlot === "function") ? window._getHotspotSlot(id) : 1;
+  const keepSlot = (activeSlot === 2) ? 2 : 1;
+  const muteSlot = (keepSlot === 1) ? 2 : 1;
+  st.lastActiveSlot = keepSlot;
+
+  setHotspotMute(id, keepSlot, false);
+  setHotspotMute(id, muteSlot, true);
 
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
   if (ap) {
     if (typeof ap.setSlotMute === "function") {
-      ap.setSlotMute(id, 1, false);
-      ap.setSlotMute(id, 2, false);
+      ap.setSlotMute(id, keepSlot, false);
+      ap.setSlotMute(id, muteSlot, true);
     }
     if (typeof ap.updateSlotMute === "function") {
-      ap.updateSlotMute(id, 1, false);
-      ap.updateSlotMute(id, 2, false);
+      ap.updateSlotMute(id, keepSlot, false);
+      ap.updateSlotMute(id, muteSlot, true);
     }
   }
-  _renderAutoCardMuteVisuals(id, 0, 0);
+  _renderAutoCardMuteVisuals(id, keepSlot, muteSlot);
 }
 
 export function handleAutoSlotActivity(hid, slot, active) {
@@ -524,6 +660,9 @@ function _isSlotReceivingNow(cid, slot) {
 
 function _applyAutoSlotAudio(cid, activeSlot) {
   const otherSlot = (activeSlot === 1) ? 2 : 1;
+  const st = _getAutoState(cid);
+  st.lastActiveSlot = activeSlot;
+
   const soloSet = getSoloMutedSet();
   const soloActiveMuted = Boolean(soloSet && (soloSet.has(`${cid}_ts${activeSlot}`) || (cid === "default" && soloSet.has(`default_ts${activeSlot}`))));
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
@@ -541,38 +680,39 @@ function _applyAutoSlotAudio(cid, activeSlot) {
 }
 
 function _resetAutoSlotAudio(cid) {
+  const st = _getAutoState(cid);
+  // Stay parked on last active slot (strictly 1 unmuted, 1 muted)
+  const activeSlot = (st.lastActiveSlot === 2) ? 2 : 1;
+  const otherSlot = (activeSlot === 1) ? 2 : 1;
+
   const soloSet = getSoloMutedSet();
-  const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
-  const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
+  const soloActiveMuted = Boolean(soloSet && (soloSet.has(`${cid}_ts${activeSlot}`) || (cid === "default" && soloSet.has(`default_ts${activeSlot}`))));
+
   const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
   if (ap) {
     if (typeof ap.setSlotMute === "function") {
-      ap.setSlotMute(cid, 1, solo1);
-      ap.setSlotMute(cid, 2, solo2);
+      ap.setSlotMute(cid, activeSlot, soloActiveMuted);
+      ap.setSlotMute(cid, otherSlot, true);
     }
     if (typeof ap.updateSlotMute === "function") {
-      ap.updateSlotMute(cid, 1, solo1);
-      ap.updateSlotMute(cid, 2, solo2);
+      ap.updateSlotMute(cid, activeSlot, soloActiveMuted);
+      ap.updateSlotMute(cid, otherSlot, true);
     }
   }
-  _renderAutoCardMuteVisuals(cid, 0, 0);
+  _renderAutoCardMuteVisuals(cid, activeSlot, otherSlot);
 }
 
 function _renderAutoCardMuteVisuals(cid, activeSlot, mutedSlot) {
-  const soloSet = getSoloMutedSet();
-  const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
-  const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
+  const st = _getAutoState(cid);
+  const effectiveActive = (activeSlot === 1 || activeSlot === 2)
+    ? activeSlot
+    : ((st.lastActiveSlot === 2) ? 2 : 1);
   const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
   cards.forEach(card => {
     const btn1 = card.querySelector(".btn-mute-ts1");
     const btn2 = card.querySelector(".btn-mute-ts2");
-    if (activeSlot === 0) {
-      if (btn1) renderMutePanBtnContent(btn1, solo1, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, solo2, getHotspotPan(cid, 2), 2);
-    } else {
-      if (btn1) renderMutePanBtnContent(btn1, solo1 || activeSlot !== 1, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, solo2 || activeSlot !== 2, getHotspotPan(cid, 2), 2);
-    }
+    if (btn1) renderMutePanBtnContent(btn1, effectiveActive !== 1, getHotspotPan(cid, 1), 1);
+    if (btn2) renderMutePanBtnContent(btn2, effectiveActive !== 2, getHotspotPan(cid, 2), 2);
   });
 }
 
@@ -583,6 +723,31 @@ export function renderTsAudioModeBtnContent(btn, mode, isXlx = false) {
   if (!badge) return;
 
   const card = btn.closest(".radio-container");
+  const cid = _resolveHotspotId(card ? card.dataset.hotspotId : null);
+  const isAsl = isAllStarHotspot(cid, card);
+
+  if (isAsl) {
+    const aslMode = getHotspotAslMode(cid);
+    badge.classList.remove("ts-mode-auto", "ts-mode-solo", "ts-mode-locked");
+    badge.classList.toggle("asl-mode-monitor", aslMode === "*2");
+    badge.classList.toggle("asl-mode-tx", aslMode !== "*2");
+    btn.classList.remove("ts-mode-locked");
+    btn.style.cursor = "pointer";
+
+    if (aslMode === "*2") {
+      badge.textContent = "*2 Monitor";
+      const title = window.t ? window.t("routing.asl_mode_2_title", {}, "AllStarLink: Режим *2 Monitor (Только приём, PTT заблокирован). Нажмите для переключения в *3 RX/TX") : "AllStarLink: Режим *2 Monitor (Только приём, PTT заблокирован). Нажмите для переключения в *3 RX/TX";
+      btn.title = title;
+      btn.setAttribute("title", title);
+    } else {
+      badge.textContent = "*3 RX/TX";
+      const title = window.t ? window.t("routing.asl_mode_3_title", {}, "AllStarLink: Режим *3 RX/TX (Полный дуплекс: приём + передача). Нажмите для переключения в *2 Monitor") : "AllStarLink: Режим *3 RX/TX (Полный дуплекс: приём + передача). Нажмите для переключения в *2 Monitor";
+      btn.title = title;
+      btn.setAttribute("title", title);
+    }
+    return;
+  }
+
   const isLockedXlx = Boolean(isXlx) || (card && ((card.dataset.networkType || "").toLowerCase() === "xlx" || card.classList.contains("card-net-xlx")));
 
   if (isLockedXlx) {
@@ -912,14 +1077,11 @@ export function updateCardMuteUI(card, hid) {
     const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
     const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
     const st = _getAutoState(cid);
-    const activeSlot = st.flag || 0;
-    if (activeSlot === 0) {
-      if (btn1) renderMutePanBtnContent(btn1, solo1, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, solo2, getHotspotPan(cid, 2), 2);
-    } else {
-      if (btn1) renderMutePanBtnContent(btn1, solo1 || activeSlot !== 1, getHotspotPan(cid, 1), 1);
-      if (btn2) renderMutePanBtnContent(btn2, solo2 || activeSlot !== 2, getHotspotPan(cid, 2), 2);
-    }
+    const activeSlot = (st.flag === 1 || st.flag === 2)
+      ? st.flag
+      : ((st.lastActiveSlot === 2) ? 2 : 1);
+    if (btn1) renderMutePanBtnContent(btn1, solo1 || activeSlot !== 1, getHotspotPan(cid, 1), 1);
+    if (btn2) renderMutePanBtnContent(btn2, solo2 || activeSlot !== 2, getHotspotPan(cid, 2), 2);
     return;
   }
 
@@ -1317,6 +1479,11 @@ if (typeof window !== "undefined") {
   window.enforceSingleTsMute = enforceSingleTsMute;
   window.enforceSoloTsMute = enforceSoloTsMute;
   window.isXlxHotspot = isXlxHotspot;
+  window.isAllStarHotspot = isAllStarHotspot;
+  window.getHotspotAslMode = getHotspotAslMode;
+  window.setHotspotAslMode = setHotspotAslMode;
+  window.isHotspotAslAddMode = isHotspotAslAddMode;
+  window.setHotspotAslAddMode = setHotspotAslAddMode;
   window.getHotspotTsAudioMode = getHotspotTsAudioMode;
   window.setHotspotTsAudioMode = setHotspotTsAudioMode;
   window.cycleHotspotTsAudioMode = cycleHotspotTsAudioMode;
@@ -1358,6 +1525,11 @@ if (typeof window !== "undefined") {
     toggleHotspotMute,
     enforceSingleTsMute,
     enforceSoloTsMute,
+    isAllStarHotspot,
+    getHotspotAslMode,
+    setHotspotAslMode,
+    isHotspotAslAddMode,
+    setHotspotAslAddMode,
     getHotspotTsAudioMode,
     setHotspotTsAudioMode,
     cycleHotspotTsAudioMode,

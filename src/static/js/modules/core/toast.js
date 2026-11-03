@@ -1,8 +1,8 @@
 // Toast and HUD Notifications
 
 // Short toasts: hold on screen for 1.6s, then smooth fade-out for 0.8s
-const TOAST_HOLD_MS = 1600;
-const TOAST_FADE_MS = 800;
+const TOAST_HOLD_MS = 1300;
+const TOAST_FADE_MS = 350;
 
 export function showCenterHudToast(text, duration = TOAST_HOLD_MS) {
   const old = document.getElementById("proxdmrCenterHudToast");
@@ -158,17 +158,17 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
     document.body.appendChild(container);
   }
 
-  // 3. Position update: centered in targetCard, or centered in viewport
+  // 3. Position update: top 1/5 (~20%) of targetCard, or 20% of viewport
   const updateContainerPosition = () => {
     if (targetCard && targetCard.isConnected) {
       const rect = targetCard.getBoundingClientRect();
       const centerX = Math.round(rect.left + rect.width / 2);
-      const centerY = Math.round(rect.top + rect.height / 2);
+      const topY = Math.round(rect.top + rect.height * 0.20);
       const maxW = Math.max(220, Math.round(rect.width - 24));
 
       container.style.cssText = [
         "position: fixed;",
-        `top: ${centerY}px;`,
+        `top: ${topY}px;`,
         `left: ${centerX}px;`,
         "transform: translate(-50%, -50%);",
         "z-index: 99999;",
@@ -184,7 +184,7 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
     } else {
       container.style.cssText = [
         "position: fixed;",
-        "top: 50%;",
+        "top: 20%;",
         "left: 50%;",
         "transform: translate(-50%, -50%);",
         "z-index: 99999;",
@@ -227,14 +227,26 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
     }
   }
 
-  // 4. Create toast item
+  // 4. Create toast item with theme-aware styling
+  const isLight = (typeof document !== "undefined") && (
+    document.documentElement.getAttribute("data-theme") === "light" ||
+    document.body.classList.contains("theme-light") ||
+    document.body.getAttribute("data-theme") === "light"
+  );
+  const bgCol = isLight ? "#000000" : "#ffffff";
+  const textCol = isLight ? "#ffffff" : "#000000";
+  const borderCol = isLight ? "#16a34a" : "#22c55e";
+  const shadowCol = isLight
+    ? "0 10px 28px rgba(0, 0, 0, 0.45), 0 2px 12px rgba(22, 163, 74, 0.35)"
+    : "0 10px 28px rgba(0, 0, 0, 0.25), 0 2px 12px rgba(34, 197, 94, 0.3)";
+
   const toast = document.createElement("div");
   toast.className = "proxdmr-toast-item";
   toast.style.cssText = [
-    "background: #0a5f2e;",
-    "border: 1px solid rgba(255, 255, 255, 0.22);",
-    "box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 255, 102, 0.25);",
-    "color: #ffffff;",
+    `background: ${bgCol};`,
+    `border: 2px solid ${borderCol};`,
+    `box-shadow: ${shadowCol};`,
+    `color: ${textCol};`,
     "text-shadow: none;",
     "padding: 7px 16px;",
     "border-radius: 0px;",
@@ -261,6 +273,7 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
     toast.style.transform = "scale(1)";
   });
 
+  // Smooth fade-out disappearance (350ms)
   setTimeout(() => {
     toast.style.transition = `opacity ${TOAST_FADE_MS}ms ease-out, transform ${TOAST_FADE_MS}ms ease-out`;
     toast.style.opacity = "0";
@@ -274,7 +287,7 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
         }
         container.remove();
       }
-    }, TOAST_FADE_MS + 40);
+    }, TOAST_FADE_MS + 20);
   }, dur);
 }
 

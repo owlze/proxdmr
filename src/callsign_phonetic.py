@@ -388,6 +388,19 @@ DIGITS_EL: Dict[str, str] = {
     "9": "εννέα",
 }
 
+DIGITS_NL: Dict[str, str] = {
+    "0": "Nul",
+    "1": "Een",
+    "2": "Twee",
+    "3": "Drie",
+    "4": "Vier",
+    "5": "Vijf",
+    "6": "Zes",
+    "7": "Zeven",
+    "8": "Acht",
+    "9": "Negen",
+}
+
 # Slash '/' pronunciation by language in radio communications
 SLASH_BY_LANG: Dict[str, str] = {
     "ru": "Дробь",
@@ -398,6 +411,7 @@ SLASH_BY_LANG: Dict[str, str] = {
     "fr": "Barre",
     "it": "Barra",
     "pt": "Barra",
+    "nl": "Schuine streep",
     "ja": "スラッシュ",
     "zh": "斜杠",
     "el": "κάθετος",
@@ -413,6 +427,7 @@ INTRO_PHRASE_BY_LANG: Dict[str, str] = {
     "fr": "Ici parle",
     "it": "Qui parla",
     "pt": "Aqui fala",
+    "nl": "Hier spreekt",
     "ja": "こちらは",
     "zh": "这里是",
     "el": "Εδώ μιλάει",
@@ -490,6 +505,10 @@ def format_callsign_phonetic(
         letters_map = PHONETIC_LETTERS_ITU
         digits_map = DIGITS_PT
         slash_word = SLASH_BY_LANG["pt"]
+    elif code in ("nl", "nld", "dut"):
+        letters_map = PHONETIC_LETTERS_ITU
+        digits_map = DIGITS_NL
+        slash_word = SLASH_BY_LANG["nl"]
     else:
         letters_map = PHONETIC_LETTERS_ITU
         digits_map = DIGITS_EN

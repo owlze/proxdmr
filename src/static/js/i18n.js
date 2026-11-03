@@ -17,11 +17,12 @@
     { code: "es", name: "Español",    flag: "🇪🇸", flagSvg: "/static/flags/es.svg" },
     { code: "fr", name: "Français",   flag: "🇫🇷", flagSvg: "/static/flags/fr.svg" },
     { code: "it", name: "Italiano",   flag: "🇮🇹", flagSvg: "/static/flags/it.svg" },
+    { code: "nl", name: "Nederlands", flag: "🇳🇱", flagSvg: "/static/flags/nl.svg" },
     { code: "ru", name: "Русский",    flag: "🇷🇺", flagSvg: "/static/flags/ru.svg" }
   ];
 
   // Cache-busting version — bump when locales JSON changes
-  const LOCALES_VER = "2.9.383";
+  const LOCALES_VER = "2.9.528";
   const LOCALES_BASE = "/static/locales/";
   const FALLBACK_LANG = "en";
 

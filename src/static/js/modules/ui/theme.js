@@ -584,14 +584,44 @@ import { showToast } from '../core/toast.js';
     syncUIForEditingTheme(currentTheme);
   }
 
+
+  function initBorderRadiusSettings() {
+    const slider = document.getElementById("sliderBorderRadius");
+    const label = document.getElementById("borderRadiusValueLabel");
+
+    function applyRadius(val, save = true) {
+      const num = Math.max(0, Math.min(20, parseInt(val, 10) || 0));
+      document.documentElement.style.setProperty("--app-border-radius", num + "px");
+      if (slider) slider.value = num;
+      if (label) label.textContent = num + " px";
+      if (save) {
+        setLocalUserItem("border_radius", num);
+        if (window.scheduleSyncClientSettings) window.scheduleSyncClientSettings();
+      }
+    }
+
+    const saved = parseInt(getLocalUserItem("border_radius", "5"), 10);
+    applyRadius(isNaN(saved) ? 5 : saved, false);
+
+    if (slider) {
+      slider.addEventListener("input", (e) => {
+        applyRadius(e.target.value, true);
+      });
+    }
+
+    window.applyAppBorderRadius = applyRadius;
+  }
+
   initTheme();
   initBackgroundSettings();
+  initBorderRadiusSettings();
   window.getTheme = getTheme;
   window.setTheme = setTheme;
   window.toggleTheme = toggleTheme;
   window.initTheme = initTheme;
   window.applyBackground = applyBackground;
   window.initBackgroundSettings = initBackgroundSettings;
+  window.initBorderRadiusSettings = initBorderRadiusSettings;
   window.syncThemeBgTabs = syncThemeBgTabs;
 
 Object.defineProperty(window, 'currentTheme', { get: () => currentTheme, set: (v) => currentTheme = v, configurable: true });

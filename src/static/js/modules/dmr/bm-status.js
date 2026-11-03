@@ -5,8 +5,8 @@
  */
 
 import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js";
-import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.378";
-import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.367";
+import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.496";
+import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.534";
 
 export let currentBmStatus = "OFFLINE";
 export let isTogglingConnection = false;
@@ -131,6 +131,21 @@ export function updateBmStatus(status, detail = "", hotspotId = null) {
     }
     // Ensure banner ping and sparkline are refreshed on status change
     updateCardBmBanner(card, hs);
+
+    // Sync AllStar status badge if present
+    const aslBadge = card.querySelector(`#allstarStatusBadge_${targetHid}`) || card.querySelector(".allstar-status-badge");
+    if (aslBadge && !aslBadge.classList.contains("status-rx") && !aslBadge.classList.contains("status-tx")) {
+      if (isOnline) {
+        aslBadge.className = "allstar-status-badge status-online";
+        aslBadge.textContent = "CONNECTED";
+      } else if (status === "CONNECTING" || status === "AUTHENTICATING" || status === "CONFIGURING") {
+        aslBadge.className = "allstar-status-badge status-connecting";
+        aslBadge.textContent = "CONNECTING...";
+      } else {
+        aslBadge.className = "allstar-status-badge status-idle";
+        aslBadge.textContent = "IDLE";
+      }
+    }
   }
 
   // Also keep edit tab toolbar connect/online button in sync if open

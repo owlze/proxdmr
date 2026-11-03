@@ -3153,9 +3153,11 @@ export function renderHamQthCards(container, d, targetId) {
   const web = d.web ? safeEscapeHtml(d.web) : '';
   const lookups = d.lookups || '—';
 
-  // Badges (License year, IOTA, birth year)
+  // Badges (License year, IOTA, birth year, Operator class, Expiration)
   const metaBadges = [];
+  if (d.oper_class) metaBadges.push(`🎖️ ${window.t ? window.t("hamqth.badge_class", { val: d.oper_class }, `Класс: ${safeEscapeHtml(d.oper_class)}`) : `Класс: ${safeEscapeHtml(d.oper_class)}`}`);
   if (d.lic_year) metaBadges.push(window.t ? window.t("hamqth.badge_on_air", { year: d.lic_year }, `📻 В эфире с ${safeEscapeHtml(d.lic_year)} г.`) : `📻 В эфире с ${safeEscapeHtml(d.lic_year)} г.`);
+  if (d.lic_expires) metaBadges.push(`📅 ${window.t ? window.t("hamqth.badge_expires", { val: d.lic_expires }, `Лицензия до: ${safeEscapeHtml(d.lic_expires)}`) : `Лицензия до: ${safeEscapeHtml(d.lic_expires)}`}`);
   if (d.birth_year) metaBadges.push(window.t ? window.t("hamqth.badge_birth", { year: d.birth_year }, `🎂 Год рожд.: ${safeEscapeHtml(d.birth_year)}`) : `🎂 Год рожд.: ${safeEscapeHtml(d.birth_year)}`);
   if (d.iota) metaBadges.push(`🏝️ IOTA: ${safeEscapeHtml(d.iota)}`);
 

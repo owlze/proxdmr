@@ -59,6 +59,8 @@ export function getClientSettingsSnapshot() {
     eq_high: parseFloat(localStorage.getItem("proxdmr_eq_high") || "0") || 0,
     deemphasis: localStorage.getItem("proxdmr_deemphasis") === "true",
     active_preset: localStorage.getItem("proxdmr_audio_rx_active_preset") || "1",
+    jitter_buffer_ms: Math.max(40, Math.min(2000, parseInt(localStorage.getItem("proxdmr_jitter_buffer_ms") || "180", 10) || 180)),
+    backend_buffer_ms: Math.max(0, Math.min(2000, parseInt(localStorage.getItem("proxdmr_backend_buffer_ms") || "0", 10) || 0)),
     presets: rxPresets
   };
 
@@ -257,6 +259,19 @@ export function applyServerClientSettings(cs) {
     }
     if (audioPlayer && audioPlayer.setDeemphasis) {
       audioPlayer.setDeemphasis(deemph);
+    }
+
+    if (arx.jitter_buffer_ms !== undefined) {
+      localStorage.setItem("proxdmr_jitter_buffer_ms", arx.jitter_buffer_ms.toString());
+      if (typeof window !== "undefined" && typeof window.updateJitterUI === "function") {
+        window.updateJitterUI(arx.jitter_buffer_ms);
+      }
+    }
+    if (arx.backend_buffer_ms !== undefined) {
+      localStorage.setItem("proxdmr_backend_buffer_ms", arx.backend_buffer_ms.toString());
+      if (typeof window !== "undefined" && typeof window.updateBackendBufferUI === "function") {
+        window.updateBackendBufferUI(arx.backend_buffer_ms, false);
+      }
     }
 
     if (typeof window !== "undefined" && typeof window.updateAudioRxPresetUI === "function") {

@@ -883,13 +883,13 @@ TTS_STYLE_CONFIG: Dict[str, Dict[str, Any]] = {
     },
 }
 
-def resolve_tts_voice(requested_voice: str, gender: str = "male", pitch: str = "medium") -> str:
+def resolve_tts_voice(requested_voice: str, gender: str = "male", pitch: str = "medium", last_voice: str = "", turn: int = 1) -> str:
     """
     Selects prebuilt Gemini TTS voice:
     - If requested_voice is specified and not 'auto', returns it.
-    - If 'auto', resolves based on detected operator gender and pitch:
-      * female: high -> Aoede, low -> Despina, otherwise -> Kore
-      * male/other: low -> Charon, high -> Fenrir, otherwise -> Puck
+    - If 'auto', resolves based on detected operator gender and pitch with contrastive dialogue voice alternation:
+      * female: high -> Aoede/Zephyr, low -> Despina/Kore, otherwise -> Kore/Aoede/Leda
+      * male/other: low -> Charon/Orus, high -> Fenrir/Puck, otherwise -> Charon/Puck/Iapetus
     """
     if requested_voice and requested_voice.lower() != "auto":
         return requested_voice
@@ -899,16 +899,23 @@ def resolve_tts_voice(requested_voice: str, gender: str = "male", pitch: str = "
 
     if g == "female":
         if p == "high":
-            return "Aoede"
+            pool = ["Aoede", "Zephyr", "Kore"]
         elif p == "low":
-            return "Despina"
-        return "Kore"
+            pool = ["Despina", "Kore", "Leda"]
+        else:
+            pool = ["Kore", "Aoede", "Leda", "Zephyr"]
     else:
         if p == "low":
-            return "Charon"
+            pool = ["Charon", "Orus"]
         elif p == "high":
-            return "Fenrir"
-        return "Puck"
+            pool = ["Fenrir", "Puck"]
+        else:
+            pool = ["Charon", "Puck", "Iapetus"]
+
+    candidates = [v for v in pool if v != last_voice] or pool
+    if turn == 2 and len(candidates) > 1:
+        return candidates[-1]
+    return candidates[0]
 
 def clean_callsign_word(call: str) -> str:
     """Replaces trailing phonetic word with its letter, e.g. KD9CHARLIE -> KD9C."""
@@ -1013,6 +1020,8 @@ class SlotAudioBuffer:
         self.src_id: int = 0
         self.callsign: str = ""
         self.call_id: str = ""
+        self.speaker_turn: int = 1
+        self.acoustic_pitch: str = "medium"
         self.last_speech_time: float = 0.0
         self.silence_frames: int = 0
         self.speech_frames: int = 0
@@ -1024,16 +1033,26 @@ class SlotAudioBuffer:
         self.src_id = 0
         self.callsign = ""
         self.call_id = ""
+        self.speaker_turn = 1
+        self.acoustic_pitch = "medium"
         self.last_speech_time = 0.0
         self.silence_frames = 0
         self.speech_frames = 0
         self.chunk_seq = 0
         self.active = False
 
-    def feed_frame(self, pcm_bytes: bytes, src_id: int, callsign: str, call_id: str = "") -> Optional[bytes]:
+    def feed_frame(
+        self,
+        pcm_bytes: bytes,
+        src_id: int,
+        callsign: str,
+        call_id: str = "",
+        speaker_turn: int = 1,
+        acoustic_pitch: str = "medium"
+    ) -> Optional[Tuple[int, str, bytes, str, int, str]]:
         """
-        Feeds 16-bit 8000 Hz PCM (e.g. 960 bytes = 60 ms).
-        Returns wav bytes if a chunk is ready to dispatch, else None.
+        Feeds 16-bit 8000 Hz PCM.
+        Returns (src_id, callsign, pcm, call_id, speaker_turn, acoustic_pitch) if a chunk is ready, else None.
         """
         if not self.active:
             self.reset()
@@ -1041,6 +1060,33 @@ class SlotAudioBuffer:
             self.src_id = src_id
             self.callsign = callsign
             self.call_id = call_id
+            self.speaker_turn = speaker_turn
+            self.acoustic_pitch = acoustic_pitch
+
+        # Detect speaker or session change (e.g. new PTT keying / new call_id on the same repeater)
+        call_changed = bool(call_id and self.call_id and str(call_id) != str(self.call_id))
+        src_changed = bool(src_id and self.src_id and src_id != self.src_id)
+        if (call_changed or src_changed) and len(self.pcm) > 0:
+            duration_sec = len(self.pcm) / (8000.0 * 2.0)
+            prev_chunk = None
+            if duration_sec >= 0.8 and (self.speech_frames >= 5 or len(self.pcm) >= 16000):
+                prev_chunk = (
+                    self.src_id,
+                    self.callsign,
+                    bytes(self.pcm),
+                    self.call_id,
+                    self.speaker_turn,
+                    self.acoustic_pitch
+                )
+            self.reset()
+            self.active = True
+            self.src_id = src_id
+            self.callsign = callsign
+            self.call_id = call_id
+            self.speaker_turn = speaker_turn
+            self.acoustic_pitch = acoustic_pitch
+            self.pcm.extend(pcm_bytes)
+            return prev_chunk
 
         if src_id and not self.src_id:
             self.src_id = src_id
@@ -1048,6 +1094,10 @@ class SlotAudioBuffer:
             self.callsign = callsign
         if call_id and not self.call_id:
             self.call_id = call_id
+        if speaker_turn:
+            self.speaker_turn = speaker_turn
+        if acoustic_pitch:
+            self.acoustic_pitch = acoustic_pitch
 
         self.pcm.extend(pcm_bytes)
 
@@ -1064,7 +1114,6 @@ class SlotAudioBuffer:
         else:
             rms = 0.0
 
-        # Silence vs speech threshold
         if rms > 350.0:
             self.speech_frames += 1
             self.silence_frames = 0
@@ -1074,9 +1123,6 @@ class SlotAudioBuffer:
 
         duration_sec = len(self.pcm) / (8000.0 * 2.0)
 
-        # Trigger conditions:
-        # 1. Intra-phrase pause: >= 3.0s total audio, >= 0.7s silence (silence_frames * 0.06 >= 0.72)
-        # 2. Hard limit: >= 12.0s audio to keep latency low and fit chunks
         should_chunk = False
         if duration_sec >= 3.0 and (self.silence_frames * 0.06 >= 0.72) and (self.speech_frames >= 10):
             should_chunk = True
@@ -1084,7 +1130,15 @@ class SlotAudioBuffer:
             should_chunk = True
 
         if should_chunk:
-            return self.extract_pcm()
+            c_pcm = self.extract_pcm()
+            return (
+                self.src_id,
+                self.callsign,
+                c_pcm,
+                self.call_id,
+                self.speaker_turn,
+                self.acoustic_pitch
+            )
 
         return None
 
@@ -1096,14 +1150,20 @@ class SlotAudioBuffer:
         self.chunk_seq += 1
         return chunk
 
-    def finalize(self) -> Optional[bytes]:
+    def finalize(self) -> Optional[Tuple[int, str, bytes, str, int, str]]:
         """Called when transmission ends (PTT released / slot timeout)."""
         duration_sec = len(self.pcm) / (8000.0 * 2.0)
-        # Only dispatch if >= 0.9s of audio and had some speech
-        if duration_sec >= 0.9 and (self.speech_frames >= 5 or len(self.pcm) >= 16000):
-            chunk = bytes(self.pcm)
+        if duration_sec >= 0.8 and (self.speech_frames >= 5 or len(self.pcm) >= 16000):
+            res = (
+                self.src_id,
+                self.callsign,
+                bytes(self.pcm),
+                self.call_id,
+                self.speaker_turn,
+                self.acoustic_pitch
+            )
             self.reset()
-            return chunk
+            return res
         self.reset()
         return None
 
@@ -1148,6 +1208,7 @@ class GeminiTranscriberService:
 
         # Audio buffers per (hid, slot)
         self._buffers: Dict[str, SlotAudioBuffer] = {}
+        self._slot_dialogue_state: Dict[Tuple[str, int], dict] = {}
         # Set of active (hid, slot) keys that have transcription turned ON
         self._enabled_slots: set = set()
 
@@ -1364,15 +1425,37 @@ class GeminiTranscriberService:
             self._buffers[key] = SlotAudioBuffer(hid, slot)
         return self._buffers[key]
 
-    def feed_audio(self, hid: str, slot: int, src_id: int, callsign: str, pcm_bytes: bytes, call_id: str = ""):
+    def feed_audio(
+        self,
+        hid: str,
+        slot: int,
+        src_id: int,
+        callsign: str,
+        pcm_bytes: bytes,
+        call_id: str = "",
+        speaker_turn: int = 1,
+        acoustic_pitch: str = "medium"
+    ):
         if not self.is_slot_enabled(hid, slot):
             return
 
         buf = self._get_buffer(hid, slot)
-        chunk_pcm = buf.feed_frame(pcm_bytes, src_id, callsign, call_id=call_id)
-        if chunk_pcm:
+        chunk_tuple = buf.feed_frame(
+            pcm_bytes,
+            src_id,
+            callsign,
+            call_id=call_id,
+            speaker_turn=speaker_turn,
+            acoustic_pitch=acoustic_pitch
+        )
+        if chunk_tuple:
+            c_src, c_cs, c_pcm, c_cid, c_turn, c_pitch = chunk_tuple
             asyncio.create_task(
-                self._process_chunk(hid, slot, buf.src_id, buf.callsign, chunk_pcm, is_final=False, call_id=buf.call_id)
+                self._process_chunk(
+                    hid, slot, c_src, c_cs, c_pcm,
+                    is_final=False, call_id=c_cid,
+                    speaker_turn=c_turn, acoustic_pitch=c_pitch
+                )
             )
 
     def on_call_ended(self, hid: str, slot: int, call_id: str = ""):
@@ -1380,13 +1463,16 @@ class GeminiTranscriberService:
             return
 
         buf = self._get_buffer(hid, slot)
-        src_id = buf.src_id
-        callsign = buf.callsign
-        cid = call_id or buf.call_id
-        final_pcm = buf.finalize()
-        if final_pcm:
+        final_tuple = buf.finalize()
+        if final_tuple:
+            c_src, c_cs, c_pcm, c_cid, c_turn, c_pitch = final_tuple
+            cid = call_id or c_cid
             asyncio.create_task(
-                self._process_chunk(hid, slot, src_id, callsign, final_pcm, is_final=True, call_id=cid)
+                self._process_chunk(
+                    hid, slot, c_src, c_cs, c_pcm,
+                    is_final=True, call_id=cid,
+                    speaker_turn=c_turn, acoustic_pitch=c_pitch
+                )
             )
 
 
@@ -2217,7 +2303,7 @@ class GeminiTranscriberService:
             logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign announcement exception: {e}")
 
     async def _process_chunk(
-        self, hid: str, slot: int, src_id: int, callsign: str, pcm_bytes: bytes, is_final: bool, call_id: str = ""
+        self, hid: str, slot: int, src_id: int, callsign: str, pcm_bytes: bytes, is_final: bool, call_id: str = "", speaker_turn: int = 1, acoustic_pitch: str = "medium"
     ):
         try:
             if self.broadcast_fn:
@@ -2423,6 +2509,40 @@ class GeminiTranscriberService:
                     })
                 except Exception:
                     pass
+
+            # --- DIALOGUE & SPEAKER STATE TRACKING ---
+            slot_key = (hid, slot)
+            state = self._slot_dialogue_state.setdefault(slot_key, {
+                "last_call_id": "",
+                "last_src_id": 0,
+                "turn_index": 0,
+                "last_voice": "",
+                "last_pitch": "medium",
+                "last_time": 0.0
+            })
+
+            now_sec = time.time()
+            is_new_call = bool(call_id and state["last_call_id"] and str(call_id) != str(state["last_call_id"]))
+            is_new_src = bool(src_id and state["last_src_id"] and src_id != state["last_src_id"])
+            is_pitch_change = bool(acoustic_pitch and acoustic_pitch != "medium" and acoustic_pitch != state["last_pitch"] and (now_sec - state["last_time"]) > 1.5)
+
+            is_new_turn = False
+            if is_new_call or is_new_src or is_pitch_change:
+                state["turn_index"] = (state["turn_index"] + 1) % 4
+                is_new_turn = True
+
+            effective_turn = speaker_turn if speaker_turn in (1, 2) else ((state["turn_index"] % 2) + 1)
+            effective_pitch = acoustic_pitch if acoustic_pitch in ("low", "high") else detected_pitch
+
+            # Acoustic pitch detune for Web Audio / Piper (cents):
+            base_cents = -75 if effective_pitch == "low" else (70 if effective_pitch == "high" else 0)
+            turn_cents = -45 if effective_turn == 1 else 50
+            detune_cents = max(-140, min(140, base_cents + turn_cents))
+
+            state["last_call_id"] = str(call_id or "")
+            state["last_src_id"] = src_id
+            state["last_pitch"] = acoustic_pitch
+            state["last_time"] = now_sec
 
             target_lang_code = self.target_lang.lower().strip()
             is_direct = target_lang_code == "none"
@@ -2632,7 +2752,10 @@ class GeminiTranscriberService:
                     "callsign": callsign,
                     "lang": detected_lang,
                     "gender": detected_gender,
-                    "pitch": detected_pitch,
+                    "pitch": effective_pitch,
+                    "speaker_turn": effective_turn,
+                    "detune_cents": detune_cents,
+                    "is_new_turn": is_new_turn,
                     "text": display_text,
                     "original_text": original_text,
                     "is_final": is_final,
@@ -2700,7 +2823,8 @@ class GeminiTranscriberService:
                         return
                     actual_voice = silero_srv.resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
                 else:
-                    actual_voice = resolve_tts_voice(self.tts_voice, gender=detected_gender, pitch=detected_pitch)
+                    actual_voice = resolve_tts_voice(self.tts_voice, gender=detected_gender, pitch=effective_pitch, last_voice=state.get("last_voice", ""), turn=effective_turn)
+                    state["last_voice"] = actual_voice
                 if self.tts_engine == "piper":
                     try:
                         from piper_service import PiperService
@@ -2725,7 +2849,6 @@ class GeminiTranscriberService:
                                 should_start = True
                                 if dl_st.get("status") == "error":
                                     last_err_time = dl_st.get("timestamp", 0)
-                                    import time
                                     if time.time() - last_err_time < 60:
                                         should_start = False
                                 if should_start:
@@ -2804,8 +2927,11 @@ class GeminiTranscriberService:
                                 "engine": "piper",
                                 "voice": voice_id,
                                 "gender": detected_gender,
-                                "pitch": detected_pitch,
-                                "speed": self.tts_speed,
+                                "pitch": effective_pitch,
+                                "speaker_turn": effective_turn,
+                                "detune_cents": detune_cents,
+                                "is_new_turn": is_new_turn,
+                                "speed": (1.04 if effective_turn == 2 else 0.97) if self.tts_engine == "piper" else self.tts_speed,
                                 "ducking_level": self.tts_ducking_level,
                                 "pause_ducking_level": self.tts_pause_ducking_level,
                                 "mute_others": self.tts_mute_others
@@ -2885,7 +3011,10 @@ class GeminiTranscriberService:
                                     "engine": self.tts_engine,
                                     "voice": actual_voice,
                                     "gender": detected_gender,
-                                    "pitch": detected_pitch,
+                                    "pitch": effective_pitch,
+                                    "speaker_turn": effective_turn,
+                                    "detune_cents": detune_cents,
+                                    "is_new_turn": is_new_turn,
                                     "speed": self.tts_speed,
                                     "style": self.tts_style,
                                     "ducking_level": self.tts_ducking_level,
@@ -2943,7 +3072,10 @@ class GeminiTranscriberService:
                                 "engine": "browser",
                                 "voice": actual_voice,
                                 "gender": detected_gender,
-                                "pitch": detected_pitch,
+                                "pitch": effective_pitch,
+                                "speaker_turn": effective_turn,
+                                "detune_cents": detune_cents,
+                                "is_new_turn": is_new_turn,
                                 "speed": self.tts_speed,
                                 "ducking_level": self.tts_ducking_level,
                                 "pause_ducking_level": self.tts_pause_ducking_level,

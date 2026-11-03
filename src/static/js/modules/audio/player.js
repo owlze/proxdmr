@@ -777,8 +777,11 @@ export   class RecordingsManager {
 
       if (this.selOfflineTranscribeHotspot) {
         this.selOfflineTranscribeHotspot.innerHTML = "";
-        const list = (typeof currentHotspots !== "undefined" && Array.isArray(currentHotspots) && currentHotspots.length > 0)
-          ? currentHotspots
+        const activeHotspots = (typeof currentHotspots !== "undefined" && Array.isArray(currentHotspots))
+          ? currentHotspots.filter(h => !h.hidden)
+          : [];
+        const list = activeHotspots.length > 0
+          ? activeHotspots
           : [{ id: "default", name: "Main 📻" }];
         list.forEach(h => {
           const opt = document.createElement("option");
@@ -973,12 +976,13 @@ export   class RecordingsManager {
       if (this.offlineTranscribeBtn) {
         this.offlineTranscribeBtn.classList.toggle("active", this.isOfflineTranscribing);
         this.offlineTranscribeBtn.classList.toggle("is-transcribing", this.isOfflineTranscribing);
-        let playerHint = "Офлайн-транскрибация записей (Google AI)";
+        let playerHint = window.t ? window.t("player.offline_transcribe_hint", {}, "Офлайн-транскрибация записей (Google AI)") : "Офлайн-транскрибация записей (Google AI)";
         if (this.isOfflineTranscribing) {
-          playerHint = "Офлайн-транскрибация (в процессе, нажмите для параметров / остановки)";
           const curStats = mergedStats || prevStats;
           if (curStats && curStats.total) {
-            playerHint = `Офлайн-транскрибация [${curStats.processed || 0}/${curStats.total}] (в процессе, нажмите для параметров / остановки)`;
+            playerHint = window.t ? window.t("player.offline_transcribe_progress", { processed: curStats.processed || 0, total: curStats.total }, `Офлайн-транскрибация [${curStats.processed || 0}/${curStats.total}] (в процессе, нажмите для параметров / остановки)`) : `Офлайн-транскрибация [${curStats.processed || 0}/${curStats.total}] (в процессе, нажмите для параметров / остановки)`;
+          } else {
+            playerHint = window.t ? window.t("player.offline_transcribe_progress", { processed: 0, total: "..." }, "Офлайн-транскрибация (в процессе, нажмите для параметров / остановки)") : "Офлайн-транскрибация (в процессе, нажмите для параметров / остановки)";
           }
         }
         this.offlineTranscribeBtn.title = playerHint;
@@ -1003,16 +1007,14 @@ export   class RecordingsManager {
               btn.style.display = "inline-flex";
               btn.classList.add("transcribing");
               btn.classList.remove("transcribe-off");
-              let hint = "Офлайн-транскрибация записей";
-              if (stats && stats.total) {
-                hint += ` [${stats.processed || 0}/${stats.total}]`;
-              }
-              btn.title = `${hint} — нажмите для параметров / остановки`;
+              btn.title = (stats && stats.total)
+                ? (window.t ? window.t("player.offline_transcribe_progress", { processed: stats.processed || 0, total: stats.total }, `Офлайн-транскрибация [${stats.processed || 0}/${stats.total}] (в процессе, нажмите для параметров / остановки)`) : `Офлайн-транскрибация [${stats.processed || 0}/${stats.total}] (в процессе, нажмите для параметров / остановки)`)
+                : (window.t ? window.t("player.offline_transcribe_hint", {}, "Офлайн-транскрибация записей (Google AI)") : "Офлайн-транскрибация записей (Google AI)");
             } else {
               btn.style.display = "none";
               btn.classList.remove("transcribing");
               btn.classList.add("transcribe-off");
-              btn.title = "Офлайн-транскрибация записей (Google AI)";
+              btn.title = window.t ? window.t("player.offline_transcribe_hint", {}, "Офлайн-транскрибация записей (Google AI)") : "Офлайн-транскрибация записей (Google AI)";
             }
           }
         }
@@ -1894,7 +1896,7 @@ export   class RecordingsManager {
         const mp3Filename = (rec.filename || `${rec.id}.wav`).replace(/\.[^/.]+$/, "") + ".mp3";
         this.downloadBtn.href = `/api/recordings/${rec.id}/download?format=mp3&fn=${encodeURIComponent(mp3Filename)}`;
         this.downloadBtn.download = mp3Filename;
-        this.downloadBtn.title = "Сохранить в файл (MP3)";
+        this.downloadBtn.title = window.t ? window.t("player.download_mp3_title", {}, "Сохранить в файл (MP3)") : "Сохранить в файл (MP3)";
       }
 
       this._currentPercent = 0;

@@ -319,6 +319,12 @@ export function initAlertsSettings() {
         }
 
         setFeedback(t("alerts.save_success", "Настройки оповещений сохранены"), false);
+        if (typeof window.clearSettingsTabDirty === "function") {
+          window.clearSettingsTabDirty("tab-alerts");
+        }
+        if (typeof window.triggerModalSavePulse === "function") {
+          window.triggerModalSavePulse(btnSave, { closeSettings: false });
+        }
         await loadAlerts();
       } catch (e) {
         setFeedback(`${t("alerts.save_error", "Ошибка сохранения")}: ${e.message}`, true);

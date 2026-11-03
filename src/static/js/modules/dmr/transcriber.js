@@ -760,6 +760,16 @@ function isSlotTtsActive(hid, slot) {
 
 
 // ── AI Pipeline Stage Status Helpers ──────────────────────────────────────────
+function getCardVfoRow(card, slot) {
+  if (!card) return null;
+  const isAllStar = card.classList.contains("card-net-allstar") ||
+                    (card.dataset.networkType || "").toLowerCase() === "allstar";
+  if (isAllStar) {
+    return (slot === 1 || slot === "1") ? (card.querySelector(".vfo-allstar-row") || card.querySelector(".vfo-ts1-row")) : null;
+  }
+  return card.querySelector(slot === 1 || slot === "1" ? ".vfo-ts1-row" : ".vfo-ts2-row");
+}
+
 function ensurePipelineStage(row) {
   if (!row) return null;
   let stageBox = row.querySelector(".vfo-pipeline-stage");
@@ -806,6 +816,17 @@ function updateSlotPipelineVisibility(row, slot) {
   const stageBox = ensurePipelineStage(row);
   if (!stageBox) return;
 
+  if (row.classList.contains("vfo-allstar-row")) {
+    stageBox.style.setProperty("display", "flex", "important");
+    const iconMic = stageBox.querySelector(".icon-mic");
+    const iconTrans = stageBox.querySelector(".icon-trans");
+    const iconTts = stageBox.querySelector(".icon-tts");
+    if (iconMic) iconMic.style.display = "inline-flex";
+    if (iconTrans) iconTrans.style.display = "inline-flex";
+    if (iconTts) iconTts.style.display = "inline-flex";
+    return;
+  }
+
   const isTrans = row.classList.contains("has-transcribe") ||
                   Boolean(row.querySelector(".vfo-lang-badge.transcribe-on"));
   const ttsBadge = row.querySelector(".vfo-tts-badge");
@@ -847,7 +868,7 @@ function setPipelineStageState(hid, slot, stage, status, extraData = {}) {
                      document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
   if (!targetCard) return;
 
-  const vfoRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+  const vfoRow = getCardVfoRow(targetCard, slot);
   if (!vfoRow) return;
 
   const stageBox = ensurePipelineStage(vfoRow);
@@ -1872,7 +1893,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   const curModel = s.tts_model || (curEngine === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview");
   const curVoice = s.tts_voice || (curEngine === "piper" ? "ru_RU-terra5871-medium" : "auto");
   const rawDuck = (s.tts_ducking_level !== undefined) ? s.tts_ducking_level : 0.80;
-  const duckLevel = (rawDuck === 0.05) ? 0.80 : rawDuck;
+  const duckLevel = rawDuck;
   const duckPercent = Math.round(duckLevel * 100);
   const rawPauseDuck = (s.tts_pause_ducking_level !== undefined && s.tts_pause_ducking_level !== null) ? s.tts_pause_ducking_level : 1.0;
   const pauseDuckPercent = Math.round(rawPauseDuck * 100);
@@ -2261,6 +2282,9 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       syncTtsSoloMode();
       if (typeof window.summaryTtsReader !== "undefined" && window.summaryTtsReader && window.summaryTtsReader.isPlaying) {
         window.summaryTtsReader.applySoloMute(isSolo);
+      }
+      if (window.ttsAudioQueueManager) {
+        window.ttsAudioQueueManager.syncIdleDucking(0.08);
       }
     });
   }
@@ -2949,7 +2973,7 @@ function toggleSlotTts(row, slot) {
           } catch (_) {}
           const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${h}"]`) ||
                              (h === "default" ? document.querySelector(".radio-container") : null);
-          const otherRow = targetCard ? targetCard.querySelector(s === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row") : null;
+          const otherRow = getCardVfoRow(targetCard, s);
           if (otherRow) {
             updateSlotTtsBadge(otherRow, s, false);
           }
@@ -3042,6 +3066,12 @@ function toggleSlotTts(row, slot) {
     toggleSlotTranscribe(row, slot);
   } else {
     updateSlotPipelineVisibility(row, slot);
+    if (newState && card && card.classList.contains("card-net-allstar")) {
+      const vfoAllStar = card.querySelector(".vfo-allstar-row");
+      if (vfoAllStar && typeof vfoAllStar.setAslTextView === "function") {
+        vfoAllStar.setAslTextView(true);
+      }
+    }
   }
 
   const ws = getWs();
@@ -3072,6 +3102,7 @@ function toggleSlotTts(row, slot) {
   } else {
     if (window.ttsAudioQueueManager) {
       window.ttsAudioQueueManager.stopSlot(hid, slot);
+      window.ttsAudioQueueManager.syncIdleDucking(0.15);
     }
     showToast(
       window.t
@@ -3092,6 +3123,7 @@ class TtsAudioQueueManager {
     this.currentTtsHandle = null;
     this.activeHotspotId = null;
     this.activeSlot = null;
+    this._lastPlayedCallId = null;
   }
 
   enqueue(item) {
@@ -3118,37 +3150,52 @@ class TtsAudioQueueManager {
     this.activeHotspotId = hid;
     this.activeSlot = slot;
 
-    // Visual pulse on VFO TTS badge
-    this.setBadgeSpeaking(hid, slot, true);
+    const isNewDialogueTurn = Boolean(
+      item.call_id &&
+      this._lastPlayedCallId &&
+      String(item.call_id) !== String(this._lastPlayedCallId)
+    );
+    this._lastPlayedCallId = item.call_id ? String(item.call_id) : null;
 
-    // Duck original DMR radio channels
-    const duckLevel = (item.ducking_level !== undefined && item.ducking_level !== null)
-      ? item.ducking_level
-      : ((window.transcriberSettings && window.transcriberSettings.tts_ducking_level !== undefined)
-          ? window.transcriberSettings.tts_ducking_level
-          : 0.80);
-    const muteOthers = (item.mute_others !== undefined && item.mute_others !== null)
-      ? Boolean(item.mute_others)
-      : ((window.transcriberSettings && window.transcriberSettings.tts_mute_others !== undefined)
-          ? Boolean(window.transcriberSettings.tts_mute_others)
-          : true);
-    this.applyDucking(hid, slot, duckLevel, muteOthers);
+    const startPlayback = () => {
+      // Visual pulse on VFO TTS badge
+      this.setBadgeSpeaking(hid, slot, true);
 
-    // Playback speed: configurable 1.0x - 2.0x (default 1.1x), or 0.9x-1.0x for standalone callsign announcements
-    const effectiveSpeed = (item.speed !== undefined && item.speed !== null)
-      ? Number(item.speed)
-      : ((window.transcriberSettings && window.transcriberSettings.tts_speed !== undefined)
-          ? Number(window.transcriberSettings.tts_speed)
-          : 1.1);
-    const minSpd = item.is_callsign_announcement ? 0.85 : 1.0;
-    const speed = Math.max(minSpd, Math.min(2.0, effectiveSpeed || 1.1));
+      // Duck original DMR radio channels
+      const duckLevel = (item.ducking_level !== undefined && item.ducking_level !== null)
+        ? item.ducking_level
+        : ((window.transcriberSettings && window.transcriberSettings.tts_ducking_level !== undefined)
+            ? window.transcriberSettings.tts_ducking_level
+            : 0.80);
+      const muteOthers = (item.mute_others !== undefined && item.mute_others !== null)
+        ? Boolean(item.mute_others)
+        : ((window.transcriberSettings && window.transcriberSettings.tts_mute_others !== undefined)
+            ? Boolean(window.transcriberSettings.tts_mute_others)
+            : true);
+      this.applyDucking(hid, slot, duckLevel, muteOthers);
 
-    if (item.engine === "browser" || (!item.audio_base64 && item.text)) {
-      this.playBrowserSpeech(item, speed);
-    } else if (item.audio_base64) {
-      this.playAudioBase64(item, speed);
+      // Playback speed: configurable 1.0x - 2.0x (default 1.1x), or 0.9x-1.0x for standalone callsign announcements
+      const effectiveSpeed = (item.speed !== undefined && item.speed !== null)
+        ? Number(item.speed)
+        : ((window.transcriberSettings && window.transcriberSettings.tts_speed !== undefined)
+            ? Number(window.transcriberSettings.tts_speed)
+            : 1.1);
+      const minSpd = item.is_callsign_announcement ? 0.85 : 1.0;
+      const speed = Math.max(minSpd, Math.min(2.0, effectiveSpeed || 1.1));
+
+      if (item.engine === "browser" || (!item.audio_base64 && item.text)) {
+        this.playBrowserSpeech(item, speed);
+      } else if (item.audio_base64) {
+        this.playAudioBase64(item, speed);
+      } else {
+        this.playNext();
+      }
+    };
+
+    if (isNewDialogueTurn) {
+      setTimeout(startPlayback, 280);
     } else {
-      this.playNext();
+      startPlayback();
     }
   }
 
@@ -3165,9 +3212,11 @@ class TtsAudioQueueManager {
 
       const player = window.dmrAudioPlayer || window.audioPlayer;
       // Piper already synthesizes speech at fixed 1.1x natively on backend (via length_scale).
-      // Web Audio playbackRate for Piper is 1.0 to preserve native pitch and avoid double acceleration.
+      // Web Audio playbackRate for Piper: micro-variation 0.97x (turn 1) / 1.04x (turn 2) for dialogue separation.
       // For other engines (Gemini/fallback), effectiveRate is fixed at 1.1x.
-      const effectiveRate = (item.engine === "piper") ? 1.0 : (parseFloat(speed) || 1.1);
+      const effectiveRate = (item.engine === "piper")
+        ? (item.speaker_turn === 2 ? 1.04 : 0.97)
+        : (parseFloat(speed) || 1.1);
 
       if (player && typeof player.playTtsAudio === "function") {
         let endedCalled = false;
@@ -3181,7 +3230,8 @@ class TtsAudioQueueManager {
 
         player.playTtsAudio(hid, slot, bytes.buffer, effectiveRate, onDone, {
           isTest: Boolean(item.is_test || item.bypassMute),
-          bypassMute: Boolean(item.bypassMute || item.is_test)
+          bypassMute: Boolean(item.bypassMute || item.is_test),
+          detuneCents: typeof item.detune_cents === "number" ? item.detune_cents : 0
         })
           .then(handle => {
             this.currentTtsHandle = handle;
@@ -3348,36 +3398,66 @@ class TtsAudioQueueManager {
     const pauseDuckLevel = Math.max(0.0, Math.min(1.0, Number(rawPauseDuck)));
     const soloMode = (s.tts_mute_others !== false);
 
-    let hasActiveTts = false;
+    // 1. Gather all known hotspots across DOM, currentHotspots and player.channels
+    const allHids = new Set();
+    allHids.add("default");
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    if (Array.isArray(hsList)) {
+      hsList.forEach(h => {
+        if (h && h.id) allHids.add(resolveHotspotId(h.id));
+      });
+    }
+    if (typeof document !== "undefined") {
+      document.querySelectorAll(".radio-container[data-hotspot-id]").forEach(el => {
+        if (el.dataset.hotspotId) allHids.add(resolveHotspotId(el.dataset.hotspotId));
+      });
+    }
     if (player.channels && player.channels.forEach) {
-      player.channels.forEach((channel, hidKey) => {
-        const hid = resolveHotspotId(hidKey);
-        if (isSlotTtsActive(hid, 1) || isSlotTtsActive(hid, 2)) {
+      player.channels.forEach((_, k) => allHids.add(resolveHotspotId(k)));
+    }
+
+    // 2. Check if any slot has active TTS or summary reader playback
+    const summaryReader = (typeof window !== "undefined" && (window.summaryTtsReader || (window.__proxdmr && window.__proxdmr.summaryTtsReader))) || null;
+    const isSummaryReading = Boolean(summaryReader && summaryReader.isPlaying);
+
+    let hasActiveTts = isSummaryReading;
+    allHids.forEach(hid => {
+      [1, 2].forEach(slot => {
+        if (isSlotTtsActive(hid, slot)) {
           hasActiveTts = true;
         }
       });
-    }
-    const summaryReader = (typeof window !== "undefined" && (window.summaryTtsReader || (window.__proxdmr && window.__proxdmr.summaryTtsReader))) || null;
-    if (summaryReader && summaryReader.isPlaying) {
-      hasActiveTts = true;
-    }
+    });
 
-    if (player.channels && player.channels.forEach) {
-      player.channels.forEach((channel, hidKey) => {
-        const hid = resolveHotspotId(hidKey);
-        [1, 2].forEach(slot => {
-          if (this.isPlaying && this.activeHotspotId === hid && this.activeSlot === slot) {
-            return;
-          }
-          const isTts = isSlotTtsActive(hid, slot);
-          if (isTts && pauseDuckLevel < 0.999) {
-            channel.setSlotDucking(slot, true, pauseDuckLevel, fadeTimeSec);
+    // 3. Apply ducking to every slot across all hotspots
+    allHids.forEach(hid => {
+      [1, 2].forEach(slot => {
+        if (this.isPlaying && this.activeHotspotId === hid && this.activeSlot === slot) {
+          return; // Skip slot currently speaking
+        }
+
+        const isSlotTts = isSlotTtsActive(hid, slot);
+        const isSummarySlot = isSummaryReading &&
+          (resolveHotspotId(summaryReader.activeHotspotId) === hid) &&
+          ((parseInt(summaryReader.activeSlot, 10) || 1) === slot);
+        const isTranscribedChannel = isSlotTts || isSummarySlot;
+
+        if (isTranscribedChannel) {
+          // Channel where TTS is turned ON: duck original radio audio to pause ducking level immediately
+          if (pauseDuckLevel < 0.999) {
+            player.setSlotDucking(hid, slot, true, pauseDuckLevel, fadeTimeSec);
           } else {
-            channel.setSlotDucking(slot, false, 1.0, fadeTimeSec);
+            player.setSlotDucking(hid, slot, false, 1.0, fadeTimeSec);
           }
-        });
+        } else if (hasActiveTts && soloMode) {
+          // TTS Solo mode is ON: all other channels across all hotspots are silenced (0.0 ducking)
+          player.setSlotDucking(hid, slot, true, 0.0, fadeTimeSec);
+        } else {
+          // Normal radio audio level (no TTS active or Solo mode off)
+          player.setSlotDucking(hid, slot, false, 1.0, fadeTimeSec);
+        }
       });
-    }
+    });
   }
 
   applyDucking(hid, slot, duckLevel, muteOthers) {
@@ -3385,7 +3465,6 @@ class TtsAudioQueueManager {
     if (!player) return;
     try {
       let rawVal = (duckLevel !== undefined && duckLevel !== null) ? Number(duckLevel) : 0.80;
-      // rawVal: decimal factor (0.0..1.0) or percentage (0..100) representing DMR background volume level during TTS
       let residualGain = (rawVal > 1.0) ? (rawVal / 100.0) : rawVal;
       residualGain = Math.max(0.0, Math.min(1.0, residualGain));
 
@@ -3398,20 +3477,33 @@ class TtsAudioQueueManager {
           ? s.tts_pause_ducking_level
           : 1.0;
         const pauseDuckLevel = Math.max(0.0, Math.min(1.0, Number(rawPauseDuck)));
-        if (player.channels && player.channels.forEach) {
-          player.channels.forEach((channel, hidKey) => {
-            const chHid = resolveHotspotId(hidKey);
-            [1, 2].forEach(sl => {
-              if (chHid === hid && sl === slot) return;
-              const isTts = isSlotTtsActive(chHid, sl);
-              if (isTts && pauseDuckLevel < 0.999) {
-                channel.setSlotDucking(sl, true, pauseDuckLevel, 0.12);
-              } else {
-                channel.setSlotDucking(sl, false, 1.0, 0.12);
-              }
-            });
+
+        const allHids = new Set();
+        allHids.add("default");
+        const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+        if (Array.isArray(hsList)) {
+          hsList.forEach(h => { if (h && h.id) allHids.add(resolveHotspotId(h.id)); });
+        }
+        if (typeof document !== "undefined") {
+          document.querySelectorAll(".radio-container[data-hotspot-id]").forEach(el => {
+            if (el.dataset.hotspotId) allHids.add(resolveHotspotId(el.dataset.hotspotId));
           });
         }
+        if (player.channels && player.channels.forEach) {
+          player.channels.forEach((_, k) => allHids.add(resolveHotspotId(k)));
+        }
+
+        allHids.forEach(chHid => {
+          [1, 2].forEach(sl => {
+            if (chHid === hid && sl === slot) return;
+            const isTts = isSlotTtsActive(chHid, sl);
+            if (isTts && pauseDuckLevel < 0.999) {
+              player.setSlotDucking(chHid, sl, true, pauseDuckLevel, 0.12);
+            } else {
+              player.setSlotDucking(chHid, sl, false, 1.0, 0.12);
+            }
+          });
+        });
       }
     } catch (e) {
       console.warn("[TTS] Ducking error:", e);
@@ -3550,7 +3642,7 @@ class TtsAudioQueueManager {
     const card = document.querySelector(`.radio-container[data-hotspot-id="${resolveHotspotId(hid)}"]`) ||
                  document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
     if (!card) return;
-    const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+    const row = getCardVfoRow(card, slot);
     if (!row) return;
     const badge = row.querySelector(".vfo-tts-badge");
     if (badge) {
@@ -3619,10 +3711,26 @@ function resolveTranscribeCallsign(msg, targetCard, vfoRow, slot, callEntry) {
 function formatCaptionEntryHtml(entry) {
   if (!entry) return "";
   const cs = (entry.callsign || "DMR").trim();
-  const textHtml = formatCaptionHtml((entry.text || "").trim());
+  const rawText = (entry.text || "").trim();
+  const textHtml = formatCaptionHtml(rawText);
   const country = getCountryInfo(entry.srcId, cs);
   const flagHtml = getFlagBadgeHtml(country, false, (country && country.flag) ? country.flag : "🌐");
-  return `<div class="vfo-caption-entry"><span class="vfo-caption-badge"><span class="vfo-caption-flag">${flagHtml}</span> <strong class="vfo-caption-callsign">${safeEscapeHtml(cs)}</strong></span>: <span class="vfo-caption-text">${textHtml}</span></div>`;
+
+  // Spoken callsign extraction e.g. <call>K7ABC</call> or turn badge
+  let spokenBadge = "";
+  const callMatch = rawText.match(/<call>([A-Za-z0-9\/]{3,10})<\/call>/i);
+  if (callMatch && callMatch[1]) {
+    const spokenCs = callMatch[1].toUpperCase();
+    if (spokenCs !== cs.toUpperCase()) {
+      spokenBadge = ` <span class="vfo-spoken-cs-arrow">▸</span> <strong class="vfo-spoken-cs">${safeEscapeHtml(spokenCs)}</strong>`;
+    }
+  } else if (entry.speakerTurn && entry.speakerTurn > 0) {
+    spokenBadge = ` <span class="vfo-turn-tag turn-${entry.speakerTurn}">#${entry.speakerTurn}</span>`;
+  }
+
+  const turnClass = entry.speakerTurn ? ` speaker-turn-${entry.speakerTurn}` : "";
+
+  return `<div class="vfo-caption-entry${turnClass}"><span class="vfo-caption-badge"><span class="vfo-caption-flag">${flagHtml}</span> <strong class="vfo-caption-callsign">${safeEscapeHtml(cs)}</strong>${spokenBadge}</span>: <span class="vfo-caption-text">${textHtml}</span></div>`;
 }
 
 function updateCallLogTranscription(msg) {
@@ -3770,7 +3878,7 @@ function handleCallTranscription(msg) {
   if (!targetCard) return;
 
   const slot = msg.slot || 1;
-  const vfoRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+  const vfoRow = getCardVfoRow(targetCard, slot);
   if (!vfoRow || !vfoRow.classList.contains("has-transcribe")) return;
 
   // 1. Update language badge
@@ -3814,14 +3922,16 @@ function handleCallTranscription(msg) {
     // 1. Prune entries older than 30 minutes
     captionStream._entries = captionStream._entries.filter(e => (now - e.timestamp) <= MAX_AGE_MS);
 
-    // 2. Check if this chunk continues the last active transmission
+    // 2. Check if this chunk continues the last active transmission (dialogue separation)
     const lastEntry = captionStream._entries[captionStream._entries.length - 1];
-    const isSameCall = lastEntry && (
-      (msg.call_id && lastEntry.callId && msg.call_id === lastEntry.callId) ||
-      (lastEntry.callKey === currentCallKey && (now - (captionStream._lastMsgTime || 0)) < 12000)
+    const hasBothCallIds = Boolean(msg.call_id && lastEntry && lastEntry.callId);
+    const isSameTurn = lastEntry && (
+      hasBothCallIds
+        ? (String(msg.call_id) === String(lastEntry.callId) && !msg.is_new_turn)
+        : (lastEntry.callKey === currentCallKey && !msg.is_new_turn && (now - (captionStream._lastMsgTime || 0)) < 4500)
     );
 
-    if (isSameCall) {
+    if (isSameTurn) {
       if (!lastEntry.text.includes(newChunk)) {
         lastEntry.text = lastEntry.text ? `${lastEntry.text} ${newChunk}` : newChunk;
       }
@@ -3840,6 +3950,8 @@ function handleCallTranscription(msg) {
         callId: msg.call_id || null,
         callsign: callerCallsign,
         srcId: resolvedSrcId,
+        speakerTurn: msg.speaker_turn || 1,
+        pitch: msg.pitch || "medium",
         timestamp: now,
         text: newChunk
       });
@@ -3912,7 +4024,7 @@ function handleTranscriptionError(msg) {
   if (!targetCard) return;
 
   const slot = msg.slot || 1;
-  const vfoRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+  const vfoRow = getCardVfoRow(targetCard, slot);
   if (!vfoRow) return;
 
   const langBadge = vfoRow.querySelector(".vfo-lang-badge");
@@ -4312,9 +4424,9 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   }
 
   if (!slot && targetBadge) {
-    const cardRow = targetBadge.closest(".vfo-ts1-row, .vfo-ts2-row");
+    const cardRow = targetBadge.closest(".vfo-ts1-row, .vfo-ts2-row, .vfo-allstar-row");
     if (cardRow) {
-      slot = cardRow.classList.contains("vfo-ts1-row") ? 1 : 2;
+      slot = (cardRow.classList.contains("vfo-ts1-row") || cardRow.classList.contains("vfo-allstar-row")) ? 1 : 2;
     } else {
       slot = 1;
     }
@@ -5036,6 +5148,14 @@ function alignTranscribeCardHeight(card) {
 
 function updateCardTranscribeLayout(card) {
   if (!card) return;
+  if (card.classList.contains("card-net-allstar")) {
+    const vfoAllStar = card.querySelector(".vfo-allstar-row");
+    if (vfoAllStar && typeof vfoAllStar.setAslTextView === "function") {
+      const isTranscribeActive = vfoAllStar.classList.contains("has-transcribe");
+      vfoAllStar.setAslTextView(isTranscribeActive);
+    }
+    return;
+  }
   const ts1Row = card.querySelector(".vfo-ts1-row");
   const ts2Row = card.querySelector(".vfo-ts2-row");
   if (!ts1Row || !ts2Row) return;
@@ -5124,6 +5244,7 @@ function setSlotMaximized(row, slot, isMax, savePref = true) {
   if (!row) return;
   const card = row.closest(".radio-container");
   if (!card) return;
+  if (card.classList.contains("card-net-allstar")) return;
   const cid = resolveHotspotId(card.dataset.hotspotId || window.activeHotspotId);
 
   row.classList.toggle("is-maximized", Boolean(isMax));
@@ -5160,7 +5281,7 @@ function setSlotMaximized(row, slot, isMax, savePref = true) {
 
 // ── Font Size & Caption Box Sizing Subsystem ──
 const LS_CAPTION_FONT_SIZE_KEY = "proxdmr_caption_font_size";
-const MIN_CAPTION_FONT_SIZE = 9;
+const MIN_CAPTION_FONT_SIZE = 8;
 const MAX_CAPTION_FONT_SIZE = 19;
 const DEFAULT_CAPTION_FONT_SIZE = 11;
 
@@ -5574,7 +5695,7 @@ function disableHotspotTranscribe(hid, silent = true, notifyWs = true) {
   const cid = resolveHotspotId(hid);
   const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
   [1, 2].forEach(slot => {
-    const row = card ? card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row") : null;
+    const row = card ? getCardVfoRow(card, slot) : null;
     if (row) {
       disableSlotTranscribe(row, slot, cid, silent, false);
     } else {
@@ -5616,7 +5737,7 @@ function disableAllTranscribe(silent = true, notifyWs = true) {
   cards.forEach(card => {
     const hid = resolveHotspotId(card.dataset.hotspotId);
     [1, 2].forEach(slot => {
-      const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+      const row = getCardVfoRow(card, slot);
       if (row) {
         disableSlotTranscribe(row, slot, hid, silent, false);
       }
@@ -5668,7 +5789,7 @@ function disableAllTts(silent = true, notifyWs = true) {
       try {
         localStorage.setItem(getSlotTtsKey(hid, slot), "0");
       } catch (_) {}
-      const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+      const row = getCardVfoRow(card, slot);
       if (row) {
         updateSlotTtsBadge(row, slot, false);
       }
@@ -5767,7 +5888,7 @@ function syncCardSlotTranscribeUI(card, hid) {
   }
 
   [1, 2].forEach(slot => {
-    const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+    const row = getCardVfoRow(card, slot);
     if (!row) return;
     const isActive = isCardInTranscribeMode ? isSlotTranscribeActive(cid, slot) : false;
     row.classList.toggle("has-transcribe", isActive);
@@ -5827,7 +5948,7 @@ function initSlotTranscribeState() {
   cards.forEach(card => {
     const hid = resolveHotspotId(card.dataset.hotspotId);
     [1, 2].forEach(slot => {
-      const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+      const row = getCardVfoRow(card, slot);
       if (row) {
         row.classList.remove("has-transcribe");
         updateSlotLangBadge(row, slot, false);
@@ -6260,7 +6381,7 @@ function updateRecApiKeyUI(engine) {
     if (btnText) btnText.textContent = `Groq API (${keys.length})`;
     if (link) {
       link.href = "https://console.groq.com/keys";
-      link.textContent = "🔑 Получить ключ ↗";
+      link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
     }
     if (hint) hint.textContent = t("transcriber.rec_key_groq_hint", {}, "Бесплатный ключ на console.groq.com (до 2000 запросов/день). Нажмите для добавления и проверки.");
   }
@@ -6303,7 +6424,7 @@ function updateTransApiKeyUI(engine) {
     if (btnText) btnText.textContent = `Groq API (${keys.length})`;
     if (link) {
       link.href = "https://console.groq.com/keys";
-      link.textContent = "🔑 Получить ключ ↗";
+      link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
     }
     if (hint) hint.textContent = t("transcriber.trans_key_groq_hint", {}, "Используется для сверхбыстрого перевода через модель Llama 3.3 70B. Нажмите для добавления и проверки.");
   }
@@ -6761,6 +6882,17 @@ function initGeminiTtsFrame() {
   };
 }
 
+window.addEventListener("languageChanged", () => {
+  const optRecEng = document.getElementById("optTranscriberEngine");
+  const optTransEng = document.getElementById("optTranslationEngine");
+  if (typeof updateRecApiKeyUI === "function") {
+    updateRecApiKeyUI(optRecEng ? optRecEng.value : "groq");
+  }
+  if (typeof updateTransApiKeyUI === "function") {
+    updateTransApiKeyUI(optTransEng ? optTransEng.value : "groq");
+  }
+});
+
 function initTranscriberSettings() {
   initPiperDownloadWatcher();
   const form = document.getElementById("transcriberSettingsForm");
@@ -6991,6 +7123,9 @@ function initTranscriberSettings() {
       syncTtsSoloMode();
       if (typeof window.summaryTtsReader !== "undefined" && window.summaryTtsReader && window.summaryTtsReader.isPlaying) {
         window.summaryTtsReader.applySoloMute(isSolo);
+      }
+      if (window.ttsAudioQueueManager) {
+        window.ttsAudioQueueManager.syncIdleDucking(0.08);
       }
     });
   }
@@ -7396,6 +7531,8 @@ export {
   updateCardTranscribeLayout,
   setSlotMaximized,
   setupCaptionBoxLongPress,
+  ensureCaptionFontControls,
+  setupCaptionBoxPinchZoom,
   clearAllTranscribeLocalStorage,
   disableSlotTranscribe,
   disableHotspotTranscribe,
@@ -7464,6 +7601,8 @@ if (typeof window !== "undefined") {
   window.setupRecTtsButton = setupRecTtsButton;
   window.setupSlotLongPress = setupSlotLongPress;
   window.setupCaptionBoxLongPress = setupCaptionBoxLongPress;
+  window.ensureCaptionFontControls = ensureCaptionFontControls;
+  window.setupCaptionBoxPinchZoom = setupCaptionBoxPinchZoom;
   window.syncCardSlotTranscribeUI = syncCardSlotTranscribeUI;
   window.syncAllTranscribeSlotsToServer = syncAllTranscribeSlotsToServer;
   window.disableAllTranscribe = disableAllTranscribe;
@@ -7506,6 +7645,7 @@ if (typeof window !== "undefined") {
   window.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
   window.syncTtsSoloMode = syncTtsSoloMode;
   window.handlePipelineStage = handlePipelineStage;
+  window.getCardVfoRow = getCardVfoRow;
   window.setPipelineStageState = setPipelineStageState;
   window.updateSlotPipelineVisibility = updateSlotPipelineVisibility;
   window.isAnySlotTtsActive = isAnySlotTtsActive;

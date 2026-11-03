@@ -11,6 +11,7 @@ services:
       - ./config:/app/config
       - ./data:/app/src/data
       - ./src:/app/src
+      - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       resources:
         limits:

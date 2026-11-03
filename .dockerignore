@@ -45,3 +45,6 @@ Thumbs.db
 setup.sh
 setup.bat
 setup.ps1
+
+# Watchdog container build context
+watchdog/

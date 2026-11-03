@@ -91,6 +91,11 @@ else
     docker-compose up -d --build
 fi
 
+if [ -f "Dockerfile.asl3" ]; then
+    echo "[*] Building AllStarLink v3 sidecar image (proxdmr-asl3:latest)..."
+    docker build -t proxdmr-asl3:latest -f Dockerfile.asl3 . || echo "[!] ASL3 image will be built automatically on first use."
+fi
+
 echo ""
 echo "=========================================="
 echo " ProxDMR successfully deployed and running!"

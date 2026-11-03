@@ -210,14 +210,26 @@ class BMPingService:
         except Exception as e:
             logger.debug(f"[PING] Could not load ping history cache: {e}")
 
-    def _save_history(self):
+    def _save_history_sync(self, snapshot_data: dict):
         try:
             os.makedirs(os.path.dirname(self._cache_file), exist_ok=True)
-            data = {host: list(q) for host, q in self.history.items()}
-            with open(self._cache_file, "w", encoding="utf-8") as f:
-                json.dump(data, f)
+            tmp_file = f"{self._cache_file}.tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(snapshot_data, f)
+            os.replace(tmp_file, self._cache_file)
         except Exception as e:
             logger.debug(f"[PING] Could not save ping history cache: {e}")
+
+    def _save_history(self):
+        try:
+            data = {host: list(q) for host, q in self.history.items()}
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(asyncio.to_thread(self._save_history_sync, data))
+            except RuntimeError:
+                self._save_history_sync(data)
+        except Exception as e:
+            logger.debug(f"[PING] Could not schedule save ping history: {e}")
 
     def _load_benchmark_results(self):
         try:
@@ -232,9 +244,18 @@ class BMPingService:
 
     def _save_benchmark_results(self):
         try:
-            os.makedirs(os.path.dirname(self._benchmark_cache_file), exist_ok=True)
-            with open(self._benchmark_cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cached_benchmark_results, f, ensure_ascii=False, indent=2)
+            data = list(self.cached_benchmark_results) if isinstance(self.cached_benchmark_results, list) else self.cached_benchmark_results
+            def _write():
+                os.makedirs(os.path.dirname(self._benchmark_cache_file), exist_ok=True)
+                tmp_file = f"{self._benchmark_cache_file}.tmp"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_file, self._benchmark_cache_file)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(asyncio.to_thread(_write))
+            except RuntimeError:
+                _write()
         except Exception as e:
             logger.debug(f"[PING] Could not save benchmark cache: {e}")
 
@@ -653,13 +674,26 @@ class ClientPingService:
         except Exception as e:
             logger.debug(f"[PING] Could not load client ping history: {e}")
 
-    def _save_history(self):
+    def _save_history_sync(self, snapshot_data: list):
         try:
             os.makedirs(os.path.dirname(self._cache_file), exist_ok=True)
-            with open(self._cache_file, "w", encoding="utf-8") as f:
-                json.dump(list(self.history), f)
+            tmp_file = f"{self._cache_file}.tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(snapshot_data, f)
+            os.replace(tmp_file, self._cache_file)
         except Exception as e:
             logger.debug(f"[PING] Could not save client ping history: {e}")
+
+    def _save_history(self):
+        try:
+            data = list(self.history)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(asyncio.to_thread(self._save_history_sync, data))
+            except RuntimeError:
+                self._save_history_sync(data)
+        except Exception as e:
+            logger.debug(f"[PING] Could not schedule save client ping history: {e}")
 
     def record_client_ping(self, rtt_ms: Optional[int], is_lost: bool = False, client_loss: Optional[float] = None) -> Tuple[Optional[int], float]:
         now_ts = int(time.time())

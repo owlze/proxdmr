@@ -432,6 +432,7 @@ export function renderCardPingSparkline(card, hostVal) {
     : (PING_SCALE_HOURS[currentScale] || 1);
   const windowStartSec = nowSec - Math.round(windowHours * 3600);
 
+  let currentPing = null;
   let pts = [];
   if (isClientMode) {
     const clientHist = getClientPingHistory();
@@ -452,7 +453,7 @@ export function renderCardPingSparkline(card, hostVal) {
     const clientRtt = getCachedClientRtt();
     const ws = (typeof window !== "undefined" && window.ws);
     const isWsOpen = Boolean(ws && ws.readyState === WebSocket.OPEN);
-    const currentPing = (isWsOpen && clientRtt !== null && !isNaN(clientRtt)) ? clientRtt : null;
+    currentPing = (isWsOpen && clientRtt !== null && !isNaN(clientRtt)) ? clientRtt : null;
     if (pts.length === 0 && currentPing !== null) {
       pts = [
         { t: windowStartSec, ping: currentPing, host: "gw", isCurrent: true },
@@ -487,6 +488,12 @@ export function renderCardPingSparkline(card, hostVal) {
       if (t > 1e11) t = Math.floor(t / 1000);
       return { t, ping, host, isCurrent: (host === hostVal), orig: p, yNorm };
     }).filter(p => p && !isNaN(p.t) && !isNaN(p.ping) && p.ping !== null && p.t >= windowStartSec);
+
+    if (netProfile && netProfile.id === "allstar") {
+      if (pts.some(p => p.ping > 5)) {
+        pts = pts.filter(p => p.ping !== 1);
+      }
+    }
 
     // If card history was empty or missing older points in the window, fallback/merge from bmPingHistory[hostVal]
     const histSource = (typeof window !== "undefined" && window.bmPingHistory && window.bmPingHistory[hostVal])
@@ -531,9 +538,14 @@ export function renderCardPingSparkline(card, hostVal) {
     // If history has fewer than 2 points, synthesize flat line using current ping if available
     const hostPings = (typeof window !== "undefined" && window.cachedBmHostPings) || cachedBmHostPings;
     const bmPings = (typeof window !== "undefined" && window.cachedBmPings) || {};
-    const currentPing = (hostPings && hostPings[hostVal] !== undefined)
-      ? hostPings[hostVal]
-      : (bmPings && bmPings[cid] !== undefined ? bmPings[cid] : null);
+    const isAslNet = Boolean(netProfile && netProfile.id === "allstar");
+    currentPing = isAslNet
+      ? ((bmPings && bmPings[cid] !== undefined && bmPings[cid] !== null) ? bmPings[cid] : ((hostPings && hostPings[hostVal] !== undefined) ? hostPings[hostVal] : null))
+      : ((hostPings && hostPings[hostVal] !== undefined) ? hostPings[hostVal] : (bmPings && bmPings[cid] !== undefined ? bmPings[cid] : null));
+
+    if ((currentPing === null || isNaN(currentPing)) && card && card._lastServerPingMs !== undefined && card._lastServerPingMs !== null) {
+      currentPing = card._lastServerPingMs;
+    }
 
     if (pts.length === 0 && currentPing !== null && !isNaN(currentPing)) {
       pts = [
@@ -554,10 +566,26 @@ export function renderCardPingSparkline(card, hostVal) {
     return;
   }
 
-  // Ensure last point is anchored to current time ONLY IF link is active and last point was recent
+  // Ensure last point is anchored to current time (x = 100%) when node is active and receiving ping telemetry
   const lastRaw = pts[pts.length - 1];
-  const isLinkActive = isClientMode ? Boolean(window.ws && window.ws.readyState === WebSocket.OPEN) : true;
-  if (isLinkActive && nowSec - lastRaw.t > 0 && nowSec - lastRaw.t <= 2) {
+  const isAslNet = Boolean(netProfile && netProfile.id === "allstar");
+  const isLinkActive = isClientMode
+    ? Boolean(window.ws && window.ws.readyState === WebSocket.OPEN)
+    : (isAslNet
+        ? Boolean(currentPing !== null && !isNaN(Number(currentPing)) && Number(currentPing) >= 0)
+        : true);
+  const maxAnchorSec = isClientMode ? 3 : 12;
+  const hasValidCurrentPing = (currentPing !== null && !isNaN(Number(currentPing)) && Number(currentPing) >= 0);
+
+  if (isLinkActive && hasValidCurrentPing && nowSec - lastRaw.t > 0) {
+    pts.push({
+      t: nowSec,
+      ping: Number(currentPing),
+      host: isClientMode ? "gw" : hostVal,
+      isCurrent: true,
+      yNorm: lastRaw ? lastRaw.yNorm : undefined
+    });
+  } else if (isLinkActive && nowSec - lastRaw.t > 0 && nowSec - lastRaw.t <= maxAnchorSec) {
     pts.push({
       t: nowSec,
       ping: lastRaw.ping,

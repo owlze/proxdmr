@@ -9,7 +9,7 @@
   "haptic_feedback": true,
   "haptic_duration": 45,
   "simultaneous_slots": true,
-  "check_mic_on_tx": true,
+  "check_mic_on_tx": false,
   "theme": "dark",
   "bg_type": "pattern",
   "bg_color": "#050f1d",
@@ -17,7 +17,7 @@
   "bg_color_dark": "#050f1d",
   "bg_type_light": "pattern",
   "bg_color_light": "#f4f6f8",
-  "language": "ru",
+  "language": "en",
   "transcriber_enabled": false,
   "transcriber_api_key": "",
   "transcriber_api_keys": [],
@@ -30,14 +30,14 @@
   "gemini_use_first_key_only": false,
   "groq_use_first_key_only": false,
   "tts_enabled": false,
-  "tts_engine": "piper",
+  "tts_engine": "silero",
   "tts_model": "gemini-3.1-flash-tts-preview",
-  "tts_voice": "ru_RU-terra5871-medium",
+  "tts_voice": "aidar",
   "tts_speed": 1.0,
-  "tts_ducking_level": 0.03,
-  "tts_pause_ducking_level": 0.13,
+  "tts_ducking_level": 0.02,
+  "tts_pause_ducking_level": 0.06,
   "tts_mute_others": true,
-  "tts_announce_callsign": true,
+  "tts_announce_callsign": false,
   "tts_skip_short_callsign": true,
   "tts_style": "radio",
   "quick_mem": {},
@@ -50,30 +50,31 @@
   "hamqth_password": "",
   "client_settings": {
     "audio_rx": {
-      "pre_gain_db": -2,
+      "pre_gain_db": 7,
       "agc_enabled": true,
-      "agc_profile": "deep",
-      "agc_max_gain_db": 18,
-      "agc_min_gain_db": -18,
-      "agc_hang_time": 0.4,
-      "eq_low": -10,
-      "eq_mid": 0,
-      "eq_high": 8,
+      "agc_profile": "maximum",
+      "agc_max_gain_db": 24,
+      "agc_min_gain_db": -24,
+      "agc_hang_time": 0.45,
+      "eq_low": -12,
+      "eq_mid": 2,
+      "eq_high": 10,
       "deemphasis": false,
       "active_preset": "1",
       "presets": {
         "1": {
           "name": "Оптимум (Кастом)",
-          "preGain": 2,
-          "agcProfile": "custom",
+          "preGain": 7,
+          "agcProfile": "maximum",
           "agcBoost": 24,
           "agcAtten": -24,
-          "agcHang": 0.25,
-          "eqLow": -6,
-          "eqMid": 5,
-          "eqHigh": 12,
+          "agcHang": 0.45,
+          "eqLow": -12,
+          "eqMid": 2,
+          "eqHigh": 10,
           "deemphasis": false,
-          "jitterBuffer": 300
+          "jitterBuffer": 1000,
+          "backendBuffer": 1200
         },
         "2": {
           "name": "Мягкий эфир",
@@ -99,7 +100,9 @@
           "eqHigh": 2,
           "deemphasis": false
         }
-      }
+      },
+      "jitter_buffer": 1000,
+      "backend_buffer": 1200
     },
     "ambe_rx": {
       "uvquality": 4,
@@ -144,28 +147,28 @@
       }
     },
     "audio_tx": {
-      "mic_gain": -10,
-      "noise_suppression": true,
+      "mic_gain": -11,
+      "noise_suppression": false,
       "browser_agc": false,
       "dsp_agc": true,
       "echo_cancellation": false,
-      "gate_enabled": true,
-      "gate_threshold": -53,
+      "gate_enabled": false,
+      "gate_threshold": -45,
       "hpf_enabled": true,
-      "presence_boost": 5,
+      "presence_boost": 3,
       "active_preset": "1",
       "presets": {
         "1": {
           "name": "Оптимум (Кастом)",
-          "txMicGain": -10,
-          "txNoiseSuppression": true,
+          "txMicGain": -11,
+          "txNoiseSuppression": false,
           "txBrowserAgc": false,
           "txDspAgc": true,
           "txEchoCancellation": false,
-          "txGateEnabled": true,
-          "txGateThreshold": -53,
+          "txGateEnabled": false,
+          "txGateThreshold": -45,
           "txHpfEnabled": true,
-          "txPresenceBoost": 5
+          "txPresenceBoost": 3
         },
         "2": {
           "name": "Мягкий голос",
@@ -198,6 +201,14 @@
       "main_volume": 120,
       "global_mute": false,
       "active_slot": 1
+    },
+    "border_radius": 5,
+    "storage_dump": {
+      "proxdmr_border_radius": 5,
+      "proxdmr_jitter_buffer_ms": "1000",
+      "proxdmr_backend_buffer_ms": "1200",
+      "proxdmr_audio_rx_active_preset": "1",
+      "proxdmr_audio_tx_active_preset": "1"
     }
   },
   "recordings_settings": {
@@ -237,5 +248,7 @@
       "auto_tg_bm": true,
       "auto_record": true
     }
-  ]
+  ],
+  "border_radius": 5,
+  "transcriber_source_lang": "auto"
 }

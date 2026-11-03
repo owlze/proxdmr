@@ -7,7 +7,7 @@
 import { showCenterHudToast, showToast } from "../core/toast.js";
 import { scheduleSyncClientSettings } from "../settings/sync.js";
 import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.367";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.534";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;
@@ -687,7 +687,7 @@ export async function collapseHotspot(hid, options = {}) {
   }
   localStorage.setItem(`proxdmr_live_collapsed_${cid}`, "false");
   const btn = card.querySelector(".hotspot-collapse-btn");
-  if (btn) btn.title = (typeof window !== "undefined" && window.t) ? window.t("vfo.hotspot_expand_title") : "Развернуть этот хотспот";
+  if (btn) btn.title = (typeof window !== "undefined" && window.t) ? window.t("vfo.hotspot_expand_title", {}, "Развернуть этот хотспот (удержание: отключить из списка)") : "Развернуть этот хотспот (удержание: отключить из списка)";
 
   const nameBadge = card.querySelector(".hotspot-name-badge");
   if (nameBadge) {

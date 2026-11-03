@@ -680,7 +680,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
     if (msg.discard || (msg.duration !== undefined && msg.duration < 0.5)) {
       if (msg.call_id) {
-        heardCalls = heardCalls.filter(c => c.id !== msg.call_id);
+        heardCalls = heardCalls.filter(c => String(c.id) !== String(msg.call_id));
       } else if (msg.slot && msg.hotspot_id) {
         heardCalls = heardCalls.filter(c => !(resolveHid(c.hotspot_id) === msgHid && c.slot === msg.slot && c.active));
       }
@@ -709,10 +709,11 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
   }
 
   function resolveCaller(msg) {
-    if (!msg || !msg.src_id) return;
+    if (!msg) return;
     let updated = false;
     heardCalls.forEach(c => {
-      if (c.src_id === msg.src_id) {
+      const match = (msg.call_id && String(c.id) === String(msg.call_id)) || (!msg.call_id && msg.src_id && c.src_id === msg.src_id);
+      if (match) {
         if (msg.src_callsign) c.src_callsign = msg.src_callsign;
         if (msg.src_name) c.src_name = msg.src_name;
         if (msg.talker_alias) c.talker_alias = msg.talker_alias;
@@ -843,6 +844,20 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     const resolveHid = typeof window.resolveHotspotId === "function" ? window.resolveHotspotId : (h => h || "default");
     const effResolved = resolveHid(effectiveHid);
 
+    const curHsObj = (window.currentHotspots || []).find(h => h.id === effectiveHid);
+    const isAslSelected = (effectiveHid !== "all") && ((curHsObj?.network_type || "").toLowerCase() === "allstar");
+
+    // Dynamic headers and controls for AllStar vs DMR
+    const colStationEl = document.querySelector(".live-table-header .col-station");
+    const colTgEl = document.querySelector(".live-table-header .col-tg");
+    const colSlotEl = document.querySelector(".live-table-header .col-slot");
+    const tsCycleBtn = document.getElementById("logFilterTsCycleBtn");
+
+    if (colStationEl) colStationEl.textContent = isAslSelected ? (window.t ? window.t("live.col_asl_station", {}, "ОПЕРАТОР / УЗЕЛ") : "ОПЕРАТОР / УЗЕЛ") : (window.t ? window.t("live.col_station", {}, "Оператор / DMR ID") : "Оператор / DMR ID");
+    if (colTgEl) colTgEl.textContent = isAslSelected ? (window.t ? window.t("live.col_asl_target", {}, "ЦЕЛЕВОЙ УЗЕЛ") : "ЦЕЛЕВОЙ УЗЕЛ") : (window.t ? window.t("live.col_tg", {}, "Группа") : "Группа");
+    if (colSlotEl) colSlotEl.textContent = isAslSelected ? (window.t ? window.t("live.col_asl_type", {}, "ТИП") : "ТИП") : (window.t ? window.t("live.col_slot", {}, "Слот") : "Слот");
+    if (tsCycleBtn) tsCycleBtn.style.display = isAslSelected ? "none" : "";
+
     const filtered = heardCalls.filter(c => {
       if (totalHs > 1 && (isMobile || effectiveHid !== "all")) {
         const callHidResolved = resolveHid(c.hotspot_id);
@@ -916,91 +931,107 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
       const baseCaller = formatCallerDisplay(c.src_callsign, c.src_name, effectiveTa, c.src_id, c.caller_display);
       const callerDisplay = isTx ? `<span class="log-tx-badge">TX</span>${baseCaller}` : baseCaller;
-      const isPrivateCall = c.call_type !== "GROUP";
-      const tgText = isPrivateCall ? `ID ${c.dst_id}` : `${c.dst_id}`;
-      const tgDisplayHtml = isPrivateCall ? `ID <span class="dmr-id-text">${c.dst_id}</span>` : `${c.dst_id}`;
 
       const callNetType = (typeof window.getHotspotNetworkType === "function")
         ? window.getHotspotNetworkType(c.hotspot_id)
         : "bm";
+      const isAllStarCall = (c.network_type === "allstar" || callNetType === "allstar" || String(c.id).startsWith("asl_"));
+      const isPrivateCall = !isAllStarCall && (c.call_type !== "GROUP");
       const isNonMccNet = (callNetType === "tgif" || callNetType === "xlx");
       const callerCountry = getCountryInfo(c.src_id, c.src_callsign);
-      const tgCountry = (!isPrivateCall && !isNonMccNet) ? getCountryInfo(c.dst_id) : null;
+      const tgCountry = (!isPrivateCall && !isNonMccNet && !isAllStarCall) ? getCountryInfo(c.dst_id) : null;
 
       let isDiffCountry = false;
       let tgFlagHtml = "";
       let tgCountryName = "";
-
-      if (!isPrivateCall && tgCountry) {
-        const callerName = (callerCountry && callerCountry.name) ? callerCountry.name.trim().toLowerCase() : "";
-        const targetCountryName = (tgCountry.name) ? tgCountry.name.trim().toLowerCase() : "";
-
-        if (targetCountryName === "global" || targetCountryName.includes("worldwide")) {
-          if (callerName && callerName !== "global") {
-            isDiffCountry = true;
-          }
-        } else if (targetCountryName && targetCountryName !== "global") {
-          if (callerName !== targetCountryName) {
-            isDiffCountry = true;
-          }
-        }
-
-        if (isDiffCountry) {
-          tgFlagHtml = `<span class="tg-flag" title="${tgCountry.name || ''}">${getFlagBadgeHtml(tgCountry, c.dst_id === 9990)}</span>`;
-          if (tgCountry.name && tgCountry.name !== "Global") {
-            tgCountryName = tgCountry.name;
-          } else if (c.dst_id === 91) {
-            tgCountryName = "Worldwide";
-          } else if (c.dst_id === 92) {
-            tgCountryName = "Europe";
-          }
-        }
-      }
-
+      let tgText = "";
+      let tgDisplayHtml = "";
       let tgDesc = "";
-      if (!isPrivateCall) {
-        const netRaw = (typeof window.getNetworkRawTgName === "function")
-          ? window.getNetworkRawTgName(c.dst_id, callNetType)
-          : ((typeof window.TG_NAMES !== "undefined" && window.TG_NAMES[c.dst_id]) || "");
-        const rawName = netRaw || c.talkgroup_name || c.dst_name || "";
-        let cleaned = "";
-        if (rawName || isNonMccNet) {
-          cleaned = typeof getCleanTgDesc === "function" ? getCleanTgDesc(c.dst_id, rawName, null, callNetType) : rawName;
+      let tgDescHtml = "";
+      let tgCellTitle = "";
+
+      if (isAllStarCall) {
+        const targetNode = c.dst_id || (window.radioState && window.radioState.allstar_node) || "45113";
+        tgText = `Node ${targetNode}`;
+        tgDisplayHtml = `<span class="asl-node-badge-text">Node <strong>${targetNode}</strong></span>`;
+        tgDesc = "RX/TX";
+        const linkModeTitle = window.t ? window.t("live.asl_link_mode_tooltip", {}, "Режим линка: приём и передача (RX/TX)") : "Режим линка: приём и передача (RX/TX)";
+        tgDescHtml = `<span class="asl-link-mode-badge" title="${linkModeTitle}">RX/TX</span>`;
+        tgCellTitle = window.t ? window.t("live.asl_target_node_title", { node: targetNode }, `Целевой узел: Node ${targetNode} (RX/TX)`) : `Целевой узел: Node ${targetNode} (RX/TX)`;
+      } else {
+        tgText = isPrivateCall ? `ID ${c.dst_id}` : `${c.dst_id}`;
+        tgDisplayHtml = isPrivateCall ? `ID <span class="dmr-id-text">${c.dst_id}</span>` : `${c.dst_id}`;
+
+        if (!isPrivateCall && tgCountry) {
+          const callerName = (callerCountry && callerCountry.name) ? callerCountry.name.trim().toLowerCase() : "";
+          const targetCountryName = (tgCountry.name) ? tgCountry.name.trim().toLowerCase() : "";
+
+          if (targetCountryName === "global" || targetCountryName.includes("worldwide")) {
+            if (callerName && callerName !== "global") {
+              isDiffCountry = true;
+            }
+          } else if (targetCountryName && targetCountryName !== "global") {
+            if (callerName !== targetCountryName) {
+              isDiffCountry = true;
+            }
+          }
+
+          if (isDiffCountry) {
+            tgFlagHtml = `<span class="tg-flag" title="${tgCountry.name || ''}">${getFlagBadgeHtml(tgCountry, c.dst_id === 9990)}</span>`;
+            if (tgCountry.name && tgCountry.name !== "Global") {
+              tgCountryName = tgCountry.name;
+            } else if (c.dst_id === 91) {
+              tgCountryName = "Worldwide";
+            } else if (c.dst_id === 92) {
+              tgCountryName = "Europe";
+            }
+          }
         }
 
-        if (isDiffCountry) {
-          if (tgCountryName) {
-            if (cleaned) {
-              const lowerCleaned = cleaned.toLowerCase();
-              const lowerCountry = tgCountryName.toLowerCase();
-              if (lowerCleaned.startsWith(lowerCountry) || lowerCleaned.includes(lowerCountry)) {
-                tgDesc = cleaned;
+        if (!isPrivateCall) {
+          const netRaw = (typeof window.getNetworkRawTgName === "function")
+            ? window.getNetworkRawTgName(c.dst_id, callNetType)
+            : ((typeof window.TG_NAMES !== "undefined" && window.TG_NAMES[c.dst_id]) || "");
+          const rawName = netRaw || c.talkgroup_name || c.dst_name || "";
+          let cleaned = "";
+          if (rawName || isNonMccNet) {
+            cleaned = typeof getCleanTgDesc === "function" ? getCleanTgDesc(c.dst_id, rawName, null, callNetType) : rawName;
+          }
+
+          if (isDiffCountry) {
+            if (tgCountryName) {
+              if (cleaned) {
+                const lowerCleaned = cleaned.toLowerCase();
+                const lowerCountry = tgCountryName.toLowerCase();
+                if (lowerCleaned.startsWith(lowerCountry) || lowerCleaned.includes(lowerCountry)) {
+                  tgDesc = cleaned;
+                } else {
+                  tgDesc = `${tgCountryName} ${cleaned}`;
+                }
               } else {
-                tgDesc = `${tgCountryName} ${cleaned}`;
+                tgDesc = tgCountryName;
               }
             } else {
-              tgDesc = tgCountryName;
+              tgDesc = cleaned;
             }
           } else {
-            tgDesc = cleaned;
+            if (cleaned) {
+              const shortDesc = isNonMccNet ? cleaned : cleaned.split(/[\(\/]/)[0].trim();
+              tgDesc = shortDesc || cleaned;
+            }
           }
         } else {
-          if (cleaned) {
-            const shortDesc = isNonMccNet ? cleaned : cleaned.split(/[\(\/]/)[0].trim();
-            tgDesc = shortDesc || cleaned;
+          const userObj = (typeof USER_CALLSIGNS !== "undefined" && USER_CALLSIGNS[c.dst_id]) || null;
+          if (userObj && (userObj.callsign || userObj.name)) {
+            tgDesc = `${userObj.callsign || ''} ${userObj.name || ''}`.trim();
+          } else {
+            tgDesc = window.t ? window.t("live.private_call", {}, "Личный") : "Личный";
           }
         }
-      } else {
-        const userObj = (typeof USER_CALLSIGNS !== "undefined" && USER_CALLSIGNS[c.dst_id]) || null;
-        if (userObj && (userObj.callsign || userObj.name)) {
-          tgDesc = `${userObj.callsign || ''} ${userObj.name || ''}`.trim();
-        } else {
-          tgDesc = window.t ? window.t("live.private_call", {}, "Личный") : "Личный";
-        }
-      }
 
-      const tgDescHtml = tgDesc ? `<span class="tg-desc-text" title="${tgDesc}">${tgDesc}</span>` : "";
-      const tgCellTitle = `${tgText}${isDiffCountry && tgCountry?.name ? ' [' + tgCountry.name + ']' : ''}${tgDesc ? ' — ' + tgDesc : ''}`;
+        tgDescHtml = tgDesc ? `<span class="tg-desc-text" title="${tgDesc}">${tgDesc}</span>` : "";
+        tgCellTitle = `${tgText}${isDiffCountry && tgCountry?.name ? ' [' + tgCountry.name + ']' : ''}${tgDesc ? ' — ' + tgDesc : ''}`;
+      }
       const activeClass = c.active ? (isTx ? " active-call active-tx-call" : " active-call") : "";
       const txRowClass = isTx ? " is-tx-row" : "";
       const formatFn = (typeof window !== "undefined" && typeof window.formatHistoryTime === "function")
@@ -1046,11 +1077,31 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         }
       }
 
-      // Line 2: DMR ID + country/location
+      if (isAllStarCall && callerNameLine) {
+        // Strip any leading emoji flags to prevent duplicate flag display
+        callerNameLine = callerNameLine.replace(/^[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF\uFE00-\uFE0F\s]+/, '').trim();
+      }
+
+      // Line 2: DMR ID / AllStar Node + country/location
       const validId = c.src_id && String(c.src_id) !== "0" && String(c.src_id) !== "---" ? String(c.src_id) : "";
-      const dmrIdHtml = validId ? `<span class="dmr-id-text">${validId}</span>` : "";
-      const locText = locationInfo ? `<span class="station-country">(${locationInfo})</span>` : "";
-      const stationSubHtml = [dmrIdHtml, locText].filter(Boolean).join(" ");
+      let stationSubHtml = "";
+      if (isAllStarCall) {
+        const nodeStr = validId ? `<span class="asl-station-node">#${validId}</span>` : "";
+        const cityStr = (c.city || "").trim();
+        const countryName = (typeof window !== "undefined" && window.currentLang && window.currentLang !== "ru" && country?.name_en) ? country.name_en : (country?.name || "");
+        const locDetail = cityStr || (countryName && countryName !== "Unknown" ? countryName : "");
+        const locSpan = locDetail ? `<span class="station-country">(${locDetail})</span>` : "";
+        stationSubHtml = [nodeStr, locSpan].filter(Boolean).join(" ");
+      } else {
+        const dmrIdHtml = validId ? `<span class="dmr-id-text">${validId}</span>` : "";
+        const locText = locationInfo ? `<span class="station-country">(${locationInfo})</span>` : "";
+        stationSubHtml = [dmrIdHtml, locText].filter(Boolean).join(" ");
+      }
+
+      const srcType = c.source_type || 'VoIP';
+      const slotHtml = isAllStarCall
+        ? `<span class="asl-cell-badge asl-cell-badge-${srcType.toLowerCase()}" title="${window.t ? window.t("live.asl_source_type_tooltip", { type: srcType }, `Источник вызова: ${srcType}`) : `Источник вызова: ${srcType}`}">${srcType}</span>`
+        : `<span class="slot-text-ts${c.slot}">TS${c.slot}</span>`;
 
       const hasTranscription = Boolean(c.transcription && c.transcription.trim());
       const flagClass = hasTranscription ? "station-flag has-transcription" : "station-flag";
@@ -1079,7 +1130,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
             </div>
             <div class="cell-tg" title="${tgCellTitle}">
               <div class="tg-line-top">
-                <span class="tg-plain-link btn-quick-tune-tg ${isPrivateCall ? 'is-id' : 'is-tg'}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}" title="${window.t ? window.t("live.tune_title", { tg: tgText, slot: c.slot }) : `Tune to ${tgText} (TS${c.slot})`}">
+                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isPrivateCall ? 'is-id' : 'is-tg')}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}" title="${isAllStarCall ? `Узел ${c.dst_id}` : (window.t ? window.t("live.tune_title", { tg: tgText, slot: c.slot }) : `Tune to ${tgText} (TS${c.slot})`)}">
                   ${tgDisplayHtml}
                 </span>
                 ${tgFlagHtml}
@@ -1089,7 +1140,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
               </div>
             </div>
             <div class="cell-slot">
-              <span class="slot-text-ts${c.slot}">TS${c.slot}</span>
+              ${slotHtml}
             </div>
             <div class="cell-play">
               ${playBtnHtml}
@@ -1114,13 +1165,13 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
             </div>
             <div class="cell-tg" title="${tgCellTitle}">
               <div class="tg-line-top">
-                <span class="tg-plain-link btn-quick-tune-tg ${isPrivateCall ? 'is-id' : 'is-tg'}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}">${tgDisplayHtml}</span>
+                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isPrivateCall ? 'is-id' : 'is-tg')}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}">${tgDisplayHtml}</span>
                 ${tgFlagHtml}
               </div>
               <div class="tg-line-sub">${tgDescHtml || '—'}</div>
             </div>
             <div class="cell-slot">
-              <span class="slot-text-ts${c.slot}">TS${c.slot}</span>
+              ${slotHtml}
             </div>
             <div class="cell-play">
               ${playBtnHtml}
@@ -1172,6 +1223,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         const slot = parseInt(btn.dataset.slot, 10);
         const hid = btn.dataset.hid;
         if (hid && typeof window.switchActiveHotspot === "function") window.switchActiveHotspot(hid);
+        if (btn.classList.contains("is-asl-node")) return;
         if (tg > 0) {
           if (slot === 1 || slot === 2) {
             if (typeof window.setActiveSlot === "function") window.setActiveSlot(slot, true);

@@ -440,6 +440,10 @@
     void modalContent.offsetWidth; // Force reflow to restart animation from 0%
     modalContent.classList.add('modal-save-pulse');
 
+    if (typeof window !== 'undefined' && typeof window.clearSettingsTabDirty === 'function') {
+      try { window.clearSettingsTabDirty(); } catch (_) {}
+    }
+
     if (modalContent._savePulseTimer) {
       clearTimeout(modalContent._savePulseTimer);
     }

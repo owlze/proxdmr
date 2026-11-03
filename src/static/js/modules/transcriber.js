@@ -1103,8 +1103,7 @@ function syncTtsSoloMode() {
           localStorage.removeItem("proxdmr_pre_tts_ts_mode_" + h);
         }
       } catch (_) {}
-      if (prevMode === "doubl") prevMode = "auto";
-      if (prevMode && ["solo", "auto"].includes(prevMode) && typeof setHotspotTsAudioMode === "function") {
+      if (prevMode && ["solo", "doubl", "auto"].includes(prevMode) && typeof setHotspotTsAudioMode === "function") {
         setHotspotTsAudioMode(h, prevMode);
       }
     }
@@ -6260,7 +6259,7 @@ function updateRecApiKeyUI(engine) {
     if (btnText) btnText.textContent = `Groq API (${keys.length})`;
     if (link) {
       link.href = "https://console.groq.com/keys";
-      link.textContent = "🔑 Получить ключ ↗";
+      link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
     }
     if (hint) hint.textContent = t("transcriber.rec_key_groq_hint", {}, "Бесплатный ключ на console.groq.com (до 2000 запросов/день). Нажмите для добавления и проверки.");
   }
@@ -6303,7 +6302,7 @@ function updateTransApiKeyUI(engine) {
     if (btnText) btnText.textContent = `Groq API (${keys.length})`;
     if (link) {
       link.href = "https://console.groq.com/keys";
-      link.textContent = "🔑 Получить ключ ↗";
+      link.textContent = t("transcriber.get_api_key_btn", {}, "🔑 Получить ключ ↗");
     }
     if (hint) hint.textContent = t("transcriber.trans_key_groq_hint", {}, "Используется для сверхбыстрого перевода через модель Llama 3.3 70B. Нажмите для добавления и проверки.");
   }
@@ -6760,6 +6759,17 @@ function initGeminiTtsFrame() {
     }
   };
 }
+
+window.addEventListener("languageChanged", () => {
+  const optRecEng = document.getElementById("optTranscriberEngine");
+  const optTransEng = document.getElementById("optTranslationEngine");
+  if (typeof updateRecApiKeyUI === "function") {
+    updateRecApiKeyUI(optRecEng ? optRecEng.value : "groq");
+  }
+  if (typeof updateTransApiKeyUI === "function") {
+    updateTransApiKeyUI(optTransEng ? optTransEng.value : "groq");
+  }
+});
 
 function initTranscriberSettings() {
   initPiperDownloadWatcher();
@@ -7350,6 +7360,9 @@ function initTranscriberSettings() {
             window.ttsAudioQueueManager.syncIdleDucking(0.15);
           }
           showToast(window.t ? window.t("transcriber.settings_saved", {}, "✓ Настройки AI Транскрибатора сохранены") : "✓ Настройки AI Транскрибатора сохранены", 3000);
+          if (typeof window.clearSettingsTabDirty === "function") {
+            window.clearSettingsTabDirty("tab-transcriber");
+          }
           if (typeof window.triggerModalSavePulse === "function") {
             window.triggerModalSavePulse(form, { closeSettings: false });
           }

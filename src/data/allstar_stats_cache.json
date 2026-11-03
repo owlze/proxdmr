@@ -1,0 +1,114 @@
+{
+  "2560": {
+    "links_count": 73,
+    "traffic_level": "high",
+    "tx_duty_pct": 12.4,
+    "keyups_per_hour": 39.1,
+    "keyed": false,
+    "measured_at": 1793495558.4371324
+  },
+  "41522": {
+    "links_count": 35,
+    "traffic_level": "high",
+    "tx_duty_pct": 10.1,
+    "keyups_per_hour": 28.5,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "27339": {
+    "links_count": 22,
+    "traffic_level": "high",
+    "tx_duty_pct": 8.5,
+    "keyups_per_hour": 24.0,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "2143": {
+    "links_count": 8,
+    "traffic_level": "medium",
+    "tx_duty_pct": 3.2,
+    "keyups_per_hour": 10.5,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "2000": {
+    "links_count": 12,
+    "traffic_level": "high",
+    "tx_duty_pct": 4.5,
+    "keyups_per_hour": 14.2,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "51010": {
+    "links_count": 6,
+    "traffic_level": "medium",
+    "tx_duty_pct": 2.1,
+    "keyups_per_hour": 7.0,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "28554": {
+    "links_count": 2,
+    "traffic_level": "low",
+    "tx_duty_pct": 0.5,
+    "keyups_per_hour": 1.5,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "53085": {
+    "links_count": 10,
+    "traffic_level": "medium",
+    "tx_duty_pct": 3.8,
+    "keyups_per_hour": 11.0,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "53431": {
+    "links_count": 4,
+    "traffic_level": "medium",
+    "tx_duty_pct": 1.9,
+    "keyups_per_hour": 6.2,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "289890": {
+    "links_count": 5,
+    "traffic_level": "medium",
+    "tx_duty_pct": 2.0,
+    "keyups_per_hour": 6.8,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "41413": {
+    "links_count": 4,
+    "traffic_level": "medium",
+    "tx_duty_pct": 1.8,
+    "keyups_per_hour": 5.9,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "47280": {
+    "links_count": 1,
+    "traffic_level": "low",
+    "tx_duty_pct": 0.3,
+    "keyups_per_hour": 1.0,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "42821": {
+    "links_count": 1,
+    "traffic_level": "low",
+    "tx_duty_pct": 0.4,
+    "keyups_per_hour": 1.2,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  },
+  "487571": {
+    "links_count": 4,
+    "traffic_level": "medium",
+    "tx_duty_pct": 1.5,
+    "keyups_per_hour": 5.0,
+    "keyed": false,
+    "measured_at": 1793493758.434108
+  }
+}

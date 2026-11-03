@@ -1,7 +1,7 @@
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.380';
-import { RecordingsManager } from './modules/audio/player.js';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.527';
 import './modules/ui/theme.js';
-import './modules/dmr/bm-monitor.js?v=2.9.367';
+import './modules/dmr/bm-monitor.js?v=2.9.528';
 import './modules/dmr/log-selection.js';
 import {
   handleCallTranscription,
@@ -27,7 +27,7 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.387';
+} from './modules/dmr/transcriber.js?v=2.9.528';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
 import { initAndroidBridge } from './modules/core/android.js';
@@ -35,14 +35,14 @@ import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.367';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
 import { initLanguageManager } from './modules/settings/language.js?v=2.9.367';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
-import { initGeneralSettings } from './modules/settings/general.js?v=2.9.375';
-import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.374';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.509';
+import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.509';
 import { initSystemUpdater } from './modules/settings/system-updater.js';
 import { initOrientationLock } from './modules/ui/orientation.js';
 import {
   initQuickAssign,
   renderQuickMemButtons
-} from './modules/dmr/quick-assign.js?v=2.9.367';
+} from './modules/dmr/quick-assign.js?v=2.9.527';
 import { initStationClocks, updateClocks } from './modules/ui/clocks.js';
 import {
   renderTranscriptionSummary
@@ -60,13 +60,13 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.367';
+} from './modules/dmr/contacts.js?v=2.9.528';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
   checkBmApiStatus,
   updateGwStatus
-} from './modules/network/watchdog.js';
+} from './modules/network/watchdog.js?v=2.9.527';
 import {
   initHotspotsManager,
   loadHotspots,
@@ -77,22 +77,22 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.382';
+} from './modules/dmr/hotspots.js?v=2.9.539';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
 import {
   initAudioRouting
-} from './modules/audio/routing.js?v=2.9.387';
+} from './modules/audio/routing.js?v=2.9.527';
 import {
   initAudioDsp
-} from './modules/audio/dsp.js?v=2.9.367';
+} from './modules/audio/dsp.js?v=2.9.525';
 import {
   initPttEngine,
   updatePttLockUI,
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
-} from './modules/ptt/engine.js?v=2.9.367';
+} from './modules/ptt/engine.js?v=2.9.522';
 import { initAboutModal } from './modules/ui/about.js';
 import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.367';
 import {
@@ -126,7 +126,7 @@ import {
   selectHotspotTargetId,
   getStoredLastRx,
   saveStoredLastRx
-} from './modules/ui/vfo-display.js?v=2.9.367';
+} from './modules/ui/vfo-display.js?v=2.9.510';
 import {
   loadCardPingHistory,
   saveCardPingHistory,
@@ -145,12 +145,12 @@ import {
   updatePingElement,
   calculateCardPacketLoss,
   calculateClientPacketLoss
-} from './modules/network/ping-sparklines.js?v=2.9.367';
+} from './modules/network/ping-sparklines.js?v=2.9.495';
 import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js?v=2.9.367';
+} from './modules/settings/sync.js?v=2.9.506';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -201,7 +201,7 @@ import {
   updateRxBannerFreshness,
   updateCardRxLiveBanner,
   updateRxLiveBanner
-} from './modules/dmr/bm-banner.js?v=2.9.378';
+} from './modules/dmr/bm-banner.js?v=2.9.496';
 import {
   currentBmStatus,
   isTogglingConnection,
@@ -216,7 +216,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.387';
+} from './modules/network/ws.js?v=2.9.525';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application

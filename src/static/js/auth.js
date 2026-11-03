@@ -65,12 +65,19 @@
     }
     // Update PTT buttons
     document.querySelectorAll('.ptt-button').forEach(btn => {
+      const card = btn.closest('.radio-container');
       if (swl) {
         btn.classList.add('swl-disabled');
         btn.setAttribute('title', window.t ? window.t('vfo.swl_badge_title', {}, 'Режим радиоприёмника-наблюдателя (SWL): передача отключена') : 'Режим радиоприёмника-наблюдателя (SWL): передача отключена');
+        btn.setAttribute('data-i18n-title', 'vfo.swl_badge_title');
       } else {
         btn.classList.remove('swl-disabled');
-        btn.setAttribute('title', window.t ? window.t('ptt.dual_slot_ptt_title', {}, 'Нажмите слева для передачи на TS1, справа — на TS2') : 'Нажмите слева для передачи на TS1, справа — на TS2');
+        if (card && typeof window.updateCardPttHint === 'function') {
+          window.updateCardPttHint(card);
+        } else {
+          btn.setAttribute('title', window.t ? window.t('ptt.dual_slot_ptt_title', {}, 'Нажмите слева для передачи на TS1, справа — на TS2') : 'Нажмите слева для передачи на TS1, справа — на TS2');
+          btn.setAttribute('data-i18n-title', 'ptt.dual_slot_ptt_title');
+        }
       }
     });
   };

@@ -113,6 +113,9 @@ export function initGeneralSettings() {
 
       if (data && data.status === "ok") {
         showToast(window.t ? window.t("general.settings_saved", {}, "✓ Настройки успешно сохранены") : "✓ Настройки успешно сохранены", "success");
+        if (typeof window.clearSettingsTabDirty === "function") {
+          window.clearSettingsTabDirty("tab-general");
+        }
         if (typeof window.triggerModalSavePulse === "function") {
           window.triggerModalSavePulse(btnSave, { closeSettings: false });
         }

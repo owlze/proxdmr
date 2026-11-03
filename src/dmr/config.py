@@ -59,7 +59,7 @@ class HotspotConfig(BaseModel):
     send_talker_alias: bool = True
     collapsed: bool = False
     auto_tg_bm: bool = True
-    auto_record: bool = False
+    auto_record: bool = True
     model_config = {"extra": "allow"}
 
 class AppSettings(BaseModel):

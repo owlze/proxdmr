@@ -425,6 +425,29 @@ function renderQuickMemButtons(modalHid) {
     const hsName = getHotspotDisplayName(cid);
     const netType = getHotspotNetworkType(card || cid);
 
+    if (netType === "allstar") {
+      for (let slot = 1; slot <= 5; slot++) {
+        const btn = card.querySelector(`.btn-card-mem[data-mem="${slot}"]`);
+        if (!btn) continue;
+        const savedNode = localStorage.getItem(`proxdmr_asl_mem_${cid}_M${slot}`) || localStorage.getItem(`proxdmr_asl_mem_M${slot}`);
+        const idEl = btn.querySelector(".mem-id");
+        const descEl = btn.querySelector(".btn-card-mem-desc");
+        if (savedNode) {
+          btn.classList.add("has-data", "is-allstar");
+          btn.classList.remove("is-id", "is-tg");
+          if (idEl) idEl.textContent = savedNode;
+          if (descEl) descEl.textContent = `Node ${savedNode}`;
+          btn.title = window.t ? window.t("quick_mem.btn_asl_saved", { slot, node: savedNode }, `M${slot}: Нода ${savedNode} (Клик: подключить, Удержание: сохранить)`) : `M${slot}: Нода ${savedNode} (Клик: подключить, Удержание: сохранить)`;
+        } else {
+          btn.classList.remove("has-data", "is-allstar", "is-id", "is-tg");
+          if (idEl) idEl.textContent = "—";
+          if (descEl) descEl.textContent = "—";
+          btn.title = window.t ? window.t("quick_mem.btn_empty", { slot }, `M${slot}: Пусто (Удержание: сохранить текущую ноду)`) : `M${slot}: Пусто (Удержание: сохранить текущую ноду)`;
+        }
+      }
+      return;
+    }
+
     for (let slot = 1; slot <= 5; slot++) {
       const btn = card.querySelector(`.btn-card-mem[data-mem="${slot}"]`);
       if (!btn) continue;
@@ -468,7 +491,7 @@ function renderQuickMemButtons(modalHid) {
       }
 
       if (netType === "xlx") {
-        btn.title = "[XLX] В сети XLX память групп не используется (связь на TS2 / TG 9)";
+        btn.title = window.t ? window.t("quick_mem.btn_xlx_na", {}, "[XLX] В сети XLX память групп не используется (связь на TS2 / TG 9)") : "[XLX] В сети XLX память групп не используется (связь на TS2 / TG 9)";
       }
     }
   });
@@ -509,7 +532,8 @@ function renderQuickMemButtons(modalHid) {
           desc = `${u.callsign || ""} ${u.name || ""}`.trim();
         }
         if (descEl) descEl.textContent = desc || "";
-        modalBtn.title = `[${modalHsName}] M${slot}: ${data.type || 'TG'} ${data.id}${desc ? ' (' + desc + ')' : ''} • Нажмите для перезаписи`;
+        const descPart = desc ? ` (${desc})` : '';
+        modalBtn.title = window.t ? window.t("quick_mem.btn_overwrite", { hs: modalHsName, slot, type: data.type || 'TG', id: data.id, desc: descPart }, `[${modalHsName}] M${slot}: ${data.type || 'TG'} ${data.id}${descPart} • Нажмите для перезаписи`) : `[${modalHsName}] M${slot}: ${data.type || 'TG'} ${data.id}${descPart} • Нажмите для перезаписи`;
       } else {
         modalBtn.classList.remove("has-data", "is-id", "is-tg");
         if (idEl) {
@@ -527,9 +551,24 @@ let pendingMemClickTimer = null;
 let lastMemClickInfo = null;
 
 function executeSingleClickMem(cardMemBtn, slot, card, cid) {
-  const mem = getQuickMemory(slot, cid);
   const hsName = getHotspotDisplayName(cid);
   const netType = getHotspotNetworkType(card || cid);
+
+  if (netType === "allstar") {
+    const savedNode = localStorage.getItem(`proxdmr_asl_mem_${cid}_M${slot}`) || localStorage.getItem(`proxdmr_asl_mem_M${slot}`);
+    if (savedNode) {
+      const ws = (typeof getWs === "function" ? getWs() : window.ws);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "allstar_connect_node", hotspot_id: cid, node: savedNode }));
+      }
+      showToast(`📻 [${hsName}] M${slot}: подключение к ноде #${savedNode}...`, 2500);
+    } else {
+      showToast(`💡 [${hsName}] M${slot} пуста. Зажмите M${slot} для сохранения текущей ноды`, 3000);
+    }
+    return;
+  }
+
+  const mem = getQuickMemory(slot, cid);
 
   if (!mem || !mem.id) {
     showToast(`💡 [${hsName}] Ячейка M${slot} пуста. Зажмите M${slot} долгим нажатием для записи ID из PTT.`, 3500);
@@ -549,6 +588,15 @@ function executeSingleClickMem(cardMemBtn, slot, card, cid) {
 function handleMemDoubleClick(cardMemBtn, slot, card, cid) {
   const hsName = getHotspotDisplayName(cid);
   const netType = getHotspotNetworkType(card || cid);
+
+  if (netType === "allstar") {
+    localStorage.removeItem(`proxdmr_asl_mem_${cid}_M${slot}`);
+    localStorage.removeItem(`proxdmr_asl_mem_M${slot}`);
+    renderQuickMemButtons(cid);
+    showToast(`🗑️ [${hsName}] Память M${slot} очищена`, 2000);
+    return;
+  }
+
   const oldMem = getQuickMemory(slot, cid);
 
   clearQuickMemory(slot, cid);
@@ -811,7 +859,7 @@ function openQuickMemPicker(target) {
   currentModalQuickMemHid = resolveHotspotId(target.hotspotId || window.activeHotspotId || "default");
 
   const hsList = (Array.isArray(window.currentHotspots) && window.currentHotspots.length > 0)
-    ? window.currentHotspots
+    ? window.currentHotspots.filter(h => !h.hidden)
     : [{ id: "default", name: "Основной хотспот", status: "ONLINE", callsign: "", dmr_id: "" }];
 
   const tabsWrap = document.getElementById("quickMemPickerHsWrap");
@@ -962,7 +1010,7 @@ function openDirectCallModal(target) {
   }
 
   const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length > 0)
-    ? window.currentHotspots
+    ? window.currentHotspots.filter(hs => !hs.hidden)
     : [{ id: "default", name: "Основной хотспот", status: "ONLINE", callsign: "", dmr_id: "" }];
 
   // Filter out hotspots where auto_tg_bm is disabled
@@ -1668,18 +1716,21 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
     if (!isBmNet) {
       actionHtml = `<span style="font-size:0.75rem; color:#8b949e;">Переход в группу по нажатию PTT</span>`;
     } else if (isSubbed) {
+      const delTitle = window.t ? window.t("quick_mem.del_static_tg", { tg: tgNum, slot: subSlot }, `Удалить TG ${tgNum} из статики TS${subSlot}`) : `Удалить TG ${tgNum} из статики TS${subSlot}`;
       actionHtml = `
-        <button type="button" class="btn-bm-act btn-bm-act-del" data-action="delete" data-slot="${subSlot}" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="Удалить TG ${tgNum} из статики TS${subSlot}">
+        <button type="button" class="btn-bm-act btn-bm-act-del" data-action="delete" data-slot="${subSlot}" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="${delTitle}">
           ✕ Удалить из TS${subSlot}
         </button>
       `;
     } else {
+      const addTitle1 = window.t ? window.t("quick_mem.add_static_tg", { tg: tgNum, slot: 1 }, `Добавить TG ${tgNum} в статику TS1 хотспота`) : `Добавить TG ${tgNum} в статику TS1 хотспота`;
+      const addTitle2 = window.t ? window.t("quick_mem.add_static_tg", { tg: tgNum, slot: 2 }, `Добавить TG ${tgNum} в статику TS2 хотспота`) : `Добавить TG ${tgNum} в статику TS2 хотспота`;
       actionHtml = `
         <div class="bm-action-btn-group">
-          <button type="button" class="btn-bm-act btn-bm-act-add" data-action="add" data-slot="1" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="Добавить TG ${tgNum} в статику TS1 хотспота">
+          <button type="button" class="btn-bm-act btn-bm-act-add" data-action="add" data-slot="1" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="${addTitle1}">
             + В статику TS1
           </button>
-          <button type="button" class="btn-bm-act btn-bm-act-add" data-action="add" data-slot="2" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="Добавить TG ${tgNum} в статику TS2 хотспота">
+          <button type="button" class="btn-bm-act btn-bm-act-add" data-action="add" data-slot="2" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="${addTitle2}">
             + В статику TS2
           </button>
         </div>
@@ -3689,15 +3740,28 @@ document.addEventListener("pointerdown", (e) => {
 
       const slot = parseInt(cardMemBtn.dataset.mem, 10);
       const card = cardMemBtn.closest(".radio-container") || document.getElementById("radioContainer");
+      const cid = resolveHotspotId(card ? card.dataset.hotspotId : window.activeHotspotId);
+      const hsName = getHotspotDisplayName(cid);
+      const netType = getHotspotNetworkType(card || cid);
+
+      if (netType === "allstar") {
+        const curHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
+        const curNode = String((curHs && (curHs.allstar_node || curHs.node_number)) || "1999").trim();
+        localStorage.setItem(`proxdmr_asl_mem_${cid}_M${slot}`, curNode);
+        renderQuickMemButtons(cid);
+        showToast(`💾 [${hsName}] M${slot}: сохранена нода #${curNode}`, 3000);
+        return;
+      }
+
       const pttTarget = getCardPttTarget(card);
 
       saveQuickMemory(slot, pttTarget, pttTarget.cid);
 
-      const hsName = getHotspotDisplayName(pttTarget.cid);
+      const targetHsName = getHotspotDisplayName(pttTarget.cid);
       const cleanDesc = getCleanTgDesc(pttTarget.value, pttTarget.name);
       const displayStr = `${pttTarget.type || 'TG'} ${pttTarget.value}${cleanDesc ? ' (' + cleanDesc + ')' : ''}`;
 
-      showToast(window.t ? window.t("mem.saved_toast", { name: hsName, slot, target: displayStr, slot_target: pttTarget.slot }, `💾 [${hsName}] M${slot}: записан ${displayStr} (из PTT TS${pttTarget.slot})`) : `💾 [${hsName}] M${slot}: записан ${displayStr} (из PTT TS${pttTarget.slot})`, 3500);
+      showToast(window.t ? window.t("mem.saved_toast", { name: targetHsName, slot, target: displayStr, slot_target: pttTarget.slot }, `💾 [${targetHsName}] M${slot}: записан ${displayStr} (из PTT TS${pttTarget.slot})`) : `💾 [${targetHsName}] M${slot}: записан ${displayStr} (из PTT TS${pttTarget.slot})`, 3500);
     }, 250);
 
     function onMemPointerMove(moveEvent) {

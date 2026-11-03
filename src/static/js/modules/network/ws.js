@@ -16,7 +16,7 @@ import {
   setWsReconnectTimer,
   clearWsReconnectTimer
 } from './watchdog.js';
-import { getVuState, ensureVuMeterLoop, updateHotspotVuMeter } from '../audio/dsp.js';
+import { getVuState, ensureVuMeterLoop, updateHotspotVuMeter } from '../audio/dsp.js?v=2.9.525';
 import { getHotspotMute, getHotspotTsAudioMode, syncAllSlotMutesToServer, updateCardRecUI, updateAllHotspotRecUI } from '../audio/routing.js';
 import {
   handleCallTranscription,
@@ -430,25 +430,7 @@ export function connectWebSocket(force = false) {
         }
         if (!slot) slot = 1;
 
-        // 1. Update VU meter on the SPECIFIC hotspot card and slot that received audio
-        updateHotspotVuMeter(hotspotId, slot, pcmBuffer);
-
-        const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${hotspotId}"]`);
-        if (targetCard && slot) {
-          const vfoRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
-          if (vfoRow && !vfoRow.classList.contains("vfo-rx-active")) {
-            vfoRow.classList.add("vfo-rx-active");
-            updateCardModeBadge(targetCard);
-          }
-          if (!targetCard._lastRx) targetCard._lastRx = {};
-          if (!targetCard._lastRx[slot]) {
-            targetCard._lastRx[slot] = { active: true, slot: slot };
-          }
-          targetCard._lastRx[slot].lastAudioTime = Date.now() / 1000;
-          targetCard._lastRx[slot].active = true;
-        }
-
-        // 2. Multi-layer selective muting and simultaneous slot checks
+        // 1. Multi-layer selective muting and simultaneous slot checks
         const cid = resolveHotspotId(hotspotId);
 
         // Check per-hotspot GW disconnect state (decoupled GW button)
@@ -473,27 +455,98 @@ export function connectWebSocket(force = false) {
           pcmBuffer = pcmBuffer.slice(0, pcmBuffer.byteLength - 1);
         }
 
-        // 2.5 Prevent duplicate audio burst playback (stutter/doubling & 0.5x speed reduction protection)
+        // 2. Exact duplicate guard ONLY for non-silent frames arriving within 10ms
         const burstKey = `${cid}_${slot}`;
-        const nowMs = Date.now();
+        const nowMs = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
         const prevBurst = lastRxBurstMap.get(burstKey);
-        let sampleHash = pcmBuffer.byteLength;
-        if (pcmBuffer.byteLength >= 16) {
+        let sampleHash = 2166136261;
+        let nonZeroSamples = 0;
+        if (pcmBuffer.byteLength >= 4) {
           try {
-            const u32 = new Uint32Array(pcmBuffer.buffer || pcmBuffer, pcmBuffer.byteOffset || 0, Math.min(8, Math.floor(pcmBuffer.byteLength / 4)));
-            sampleHash = (u32[0] ^ u32[u32.length - 1] ^ pcmBuffer.byteLength) >>> 0;
+            const u32 = new Uint32Array(pcmBuffer.buffer || pcmBuffer, pcmBuffer.byteOffset || 0, Math.floor(pcmBuffer.byteLength / 4));
+            for (let i = 0; i < u32.length; i++) {
+              const v = u32[i];
+              if (v !== 0) nonZeroSamples++;
+              sampleHash = Math.imul(sampleHash ^ v, 16777619);
+            }
+            sampleHash = (sampleHash ^ pcmBuffer.byteLength) >>> 0;
           } catch (_) {
             sampleHash = pcmBuffer.byteLength;
           }
         }
-        if (prevBurst && prevBurst.hash === sampleHash && (nowMs - prevBurst.time) < 40) {
-          // Exact duplicate audio burst arriving within 40ms; drop immediately
+        if (nonZeroSamples > 8 && prevBurst && prevBurst.hash === sampleHash && (nowMs - prevBurst.time) < 10) {
           return;
         }
         lastRxBurstMap.set(burstKey, { hash: sampleHash, time: nowMs });
 
-        // 3. Play audio through speakers into isolated channel
-        audioPlayer.feed(pcmBuffer, cid, slot);
+        // 3. VU meter must read the buffer BEFORE feed(): feed() transfers the
+        // ArrayBuffer to the AudioWorklet and detaches it on this thread.
+        updateHotspotVuMeter(hotspotId, slot, pcmBuffer);
+
+        // 4. Feed audio to AudioWorklet before any other DOM/UI work
+        if (window.audioPlayer && typeof audioPlayer.feed === "function") {
+          audioPlayer.feed(pcmBuffer, cid, slot);
+        }
+
+        const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${hotspotId}"]`);
+        if (targetCard && slot) {
+          const isAllStar = targetCard.classList.contains("card-net-allstar") || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(hotspotId) === "allstar");
+          if (isAllStar) {
+            const aslHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => String(h.id) === String(hotspotId));
+            if (aslHs) {
+              aslHs._aslLastRxAudioMs = Date.now();
+            }
+            const aslRow = targetCard.querySelector(".vfo-allstar-row");
+            let stateChanged = false;
+            if (aslRow && !aslRow.classList.contains("allstar-rx-active")) {
+              aslRow.classList.add("allstar-rx-active");
+              stateChanged = true;
+            }
+            if (targetCard._aslRxSilenceTimer) {
+              clearTimeout(targetCard._aslRxSilenceTimer);
+            }
+            targetCard._aslRxSilenceTimer = setTimeout(() => {
+              targetCard._aslRxSilenceTimer = null;
+              const lastSec = targetCard._lastRx?.[1]?.lastAudioTime || 0;
+              if ((Date.now() / 1000) - lastSec >= 0.85) {
+                const r = targetCard.querySelector(".vfo-allstar-row");
+                if (r) r.classList.remove("allstar-rx-active");
+                if (aslHs) {
+                  aslHs._aslRxActiveNode = "";
+                  aslHs._aslKeyedNodes = [];
+                }
+                if (targetCard._lastRx?.[1]) {
+                  targetCard._lastRx[1].active = false;
+                }
+                updateCardModeBadge(targetCard);
+              }
+            }, 900);
+            if (stateChanged) {
+              updateCardModeBadge(targetCard);
+            }
+          } else {
+            const vfoRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+            const rxTag = targetCard.querySelector(slot === 1 ? ".vfo-ts1-rx" : ".vfo-ts2-rx");
+            let stateChanged = false;
+            if (vfoRow && !vfoRow.classList.contains("vfo-rx-active")) {
+              vfoRow.classList.add("vfo-rx-active");
+              stateChanged = true;
+            }
+            if (rxTag && !rxTag.classList.contains("active")) {
+              rxTag.classList.add("active");
+              stateChanged = true;
+            }
+            if (stateChanged) {
+              updateCardModeBadge(targetCard);
+            }
+          }
+          if (!targetCard._lastRx) targetCard._lastRx = {};
+          if (!targetCard._lastRx[slot]) {
+            targetCard._lastRx[slot] = { active: true, slot: slot };
+          }
+          targetCard._lastRx[slot].lastAudioTime = Date.now() / 1000;
+          targetCard._lastRx[slot].active = true;
+        }
       }
     };
 
@@ -695,6 +748,20 @@ export function handleServerMessage(msg) {
       return;
     }
     if (msg.type === "state_change") {
+      if (msg.hotspot_id) {
+        const badge = document.getElementById(`allstarStatusBadge_${msg.hotspot_id}`);
+        if (badge) {
+          if (msg.is_tx) {
+            badge.className = "allstar-status-badge status-tx";
+            badge.textContent = "TX";
+          } else {
+            const card = document.querySelector(`.radio-container[data-hotspot-id="${msg.hotspot_id}"]`);
+            const isOnline = card && (card.dataset.status === "online" || card.dataset.status === "ONLINE");
+            badge.className = isOnline ? "allstar-status-badge status-online" : "allstar-status-badge status-idle";
+            badge.textContent = isOnline ? "CONNECTED" : "IDLE";
+          }
+        }
+      }
       if (msg.is_tx === false) {
         if (typeof window.onServerTxEnded === "function") {
           window.onServerTxEnded(msg);
@@ -1035,7 +1102,14 @@ export function handleServerMessage(msg) {
         const cutoff = nowSec - 86400;
         // Clean up any stale active calls and filter to retention window of 24h
         const cleanCalls = msg.calls
-          .filter(c => (c.timestamp || nowSec) >= cutoff && (c.active || (c.duration && c.duration >= 0.5) || c.transcription))
+          .filter(c => {
+            if ((c.timestamp || nowSec) < cutoff) return false;
+            const isAsl = Boolean(c.is_asl || c.mode === "asl" || String(c.hotspot_id).toLowerCase().includes("asl") || String(c.hotspot_id).toLowerCase().includes("allstar"));
+            if (isAsl && (!c.duration || c.duration < 0.8) && !c.transcription && !c.active) {
+              return false;
+            }
+            return (c.active || (c.duration && c.duration >= 0.5) || c.transcription);
+          })
           .map(c => {
             if (c.active && c.timestamp && (nowSec - c.timestamp > 3.0)) {
               return {
@@ -1492,6 +1566,10 @@ export function handleServerMessage(msg) {
       if (msg.max_gain_db !== undefined) localStorage.setItem("proxdmr_agc_max_gain_db", String(msg.max_gain_db));
       if (msg.min_gain_db !== undefined) localStorage.setItem("proxdmr_agc_min_gain_db", String(msg.min_gain_db));
       if (msg.hang_time !== undefined) localStorage.setItem("proxdmr_agc_hang_time", String(msg.hang_time));
+    } else if (msg.type === "backend_buffer_settings") {
+      if (typeof window !== "undefined" && typeof window.updateBackendBufferUI === "function") {
+        window.updateBackendBufferUI(msg.buffer_ms, false);
+      }
     } else if (msg.type === "bm_benchmark_progress") {
       if (typeof handleBmBenchmarkProgress === "function") {
         handleBmBenchmarkProgress(msg);
@@ -1583,7 +1661,242 @@ export function handleServerMessage(msg) {
         renderHotspotsList();
         renderHotspotSelect();
       }
-    } else if (msg.type === "dmr_activity") {
+    } else if (msg.type === "allstar_carrier") {
+      const cid = msg.hotspot_id;
+      const badge = document.getElementById(`allstarStatusBadge_${cid}`);
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+      if (badge) {
+        if (msg.is_rx) {
+          badge.className = "allstar-status-badge status-rx";
+          badge.textContent = "RX";
+        } else {
+          const isOnline = card && (card.dataset.status === "online" || card.dataset.status === "ONLINE");
+          badge.className = isOnline ? "allstar-status-badge status-online" : "allstar-status-badge status-idle";
+          badge.textContent = isOnline ? "CONNECTED" : "IDLE";
+        }
+      }
+      if (card) {
+        const vfoAllStar = card.querySelector(".vfo-allstar-row");
+        if (vfoAllStar) {
+          vfoAllStar.classList.toggle("allstar-rx-active", !!msg.is_rx);
+        }
+        updateCardModeBadge(card);
+      }
+      const targetHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
+      if (targetHs) {
+        targetHs._aslCarrierRx = Boolean(msg.is_rx);
+        if (msg.is_rx) {
+          targetHs._aslLastRxAudioMs = Date.now();
+        }
+        targetHs._aslRxActiveNode = msg.is_rx ? String(msg.node || "").trim() : "";
+        targetHs._aslKeyedNodes = msg.is_rx && Array.isArray(msg.keyed_nodes) ? msg.keyed_nodes.map(String) : [];
+      }
+      if (card && typeof window.syncAslMatrixButtonsState === "function") {
+        window.syncAslMatrixButtonsState(card, targetHs);
+      }
+      if (!msg.is_rx && msg.duration) {
+        if (typeof window.appendAllStarLogEntry === "function") {
+          window.appendAllStarLogEntry(cid, {
+            flag: msg.flag,
+            source_type: msg.source_type || "VoIP",
+            node: msg.node,
+            callsign: msg.callsign,
+            city: msg.city,
+            duration: msg.duration
+          });
+        }
+      } else if (msg.is_rx && msg.callsign) {
+        if (typeof window.appendAllStarLogEntry === "function") {
+          window.appendAllStarLogEntry(cid, {
+            flag: msg.flag,
+            source_type: msg.source_type || "VoIP",
+            node: msg.node,
+            callsign: msg.callsign,
+            city: msg.city,
+          });
+        }
+      }
+    } else if (msg.type === "allstar_tx_ready") {
+      if (typeof window.triggerAslTxReadyHaptic === "function") {
+        window.triggerAslTxReadyHaptic(msg.hotspot_id);
+      }
+    } else if (msg.type === "allstar_telemetry") {
+      const cid = msg.hotspot_id;
+      if (typeof window.appendAllStarTelemetryLog === "function") {
+        window.appendAllStarTelemetryLog(cid, msg.rtt, msg.jitter);
+      }
+    } else if (msg.type === "allstar_node_changed") {
+      const cid = msg.hotspot_id;
+      const targetHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
+      if (targetHs) {
+        targetHs.connected_node = msg.node;
+        targetHs.is_asl_linked = Boolean(msg.node && msg.node !== "0");
+        const nodeMode = (msg.mode === "*3" || msg.mode === "3") ? "*3" : "*2";
+        if (targetHs.is_asl_linked) {
+          targetHs.asl_links = [{ node: msg.node, mode: nodeMode, direction: "OUT" }];
+          targetHs.asl_online_count = 1;
+          targetHs._aslLinkMode = nodeMode;
+          if (typeof window.setHotspotAslMode === "function") {
+            window.setHotspotAslMode(cid, nodeMode);
+          }
+          if (typeof window.updateHotspotTsAudioModeUI === "function") {
+            window.updateHotspotTsAudioModeUI(cid);
+          }
+          targetHs.status = "ONLINE";
+          if (typeof updateBmStatus === "function") {
+            updateBmStatus("ONLINE", `Node ${msg.node}`, cid);
+          }
+        } else {
+          targetHs.asl_links = [];
+          targetHs.asl_online_count = 0;
+          targetHs.status = "ONLINE";
+          if (typeof updateBmStatus === "function") {
+            updateBmStatus("ONLINE", targetHs.allstar_node ? `Node ${targetHs.allstar_node}` : "AllStarLink активен", cid);
+          }
+        }
+      }
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+      if (card) {
+        if (card.querySelector(".asl-matrix-grid") && !(targetHs && targetHs._aslDynamicMatrixMode) && typeof window.syncAslMatrixButtonsState === "function") {
+          window.syncAslMatrixButtonsState(card, targetHs);
+        } else if (typeof window.updateCardAllStarPanel === "function") {
+          window.updateCardAllStarPanel(card, targetHs);
+        }
+      }
+      if (card && typeof window.updateCardBmBanner === "function") {
+        window.updateCardBmBanner(card, targetHs);
+      }
+    } else if (msg.type === "allstar_node_disconnected") {
+      const cid = msg.hotspot_id;
+      const targetHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
+      const wasDynamicMode = Boolean(targetHs && targetHs._aslDynamicMatrixMode);
+      if (targetHs) {
+        if (!msg.node) {
+          targetHs._aslDynamicMatrixMode = false;
+          targetHs.asl_unlisted_links = [];
+        }
+        targetHs.connected_node = "";
+        targetHs.is_asl_linked = false;
+        targetHs.asl_links = [];
+        targetHs.asl_online_count = 0;
+        targetHs.status = "ONLINE";
+        if (typeof updateBmStatus === "function") {
+          updateBmStatus("ONLINE", targetHs.allstar_node ? `Node ${targetHs.allstar_node}` : "AllStarLink активен", cid);
+        }
+      }
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+      if (card) {
+        if (card.querySelector(".asl-matrix-grid") && !wasDynamicMode && typeof window.syncAslMatrixButtonsState === "function") {
+          window.syncAslMatrixButtonsState(card, targetHs);
+        } else if (typeof window.updateCardAllStarPanel === "function") {
+          window.updateCardAllStarPanel(card, targetHs);
+        }
+      }
+      if (card && typeof window.updateCardBmBanner === "function") {
+        window.updateCardBmBanner(card, targetHs);
+      }
+        } else if (msg.type === "allstar_proc_step") {
+      const cid = msg.hotspot_id;
+      const targetHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
+      const card = document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.querySelector(".dmr-card");
+
+      const phrase = (typeof window.formatAslProcMessage === "function")
+        ? window.formatAslProcMessage(msg)
+        : (msg.code || "");
+
+      // 1. Управление статусной плашкой STANDBY
+      if (msg.show_status_banner !== false && card && typeof window.setAslProcBannerState === "function") {
+        const autoHide = (msg.state === "progress") ? 0 : (msg.tone === "negative" ? 3800 : 2400);
+        window.setAslProcBannerState(card, {
+          active: true,
+          text: phrase,
+          tone: msg.tone || "neutral",
+          autoHideMs: autoHide
+        });
+      }
+
+      // 2. Управление эффектами карточек в матрице
+      if (msg.show_card_effects !== false && targetHs) {
+        const nodeStr = String(msg.node || "").trim();
+        if (msg.proc === "disconnect") {
+          if (msg.state === "progress") {
+            if (!targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes = new Set();
+            if (nodeStr && nodeStr !== "all") targetHs._aslDisconnectingNodes.add(nodeStr);
+            else targetHs._aslDisconnectingNodes.add("all");
+          } else if (msg.state === "done" || msg.state === "failed") {
+            if (targetHs._aslDisconnectingNodes) {
+              if (nodeStr && nodeStr !== "all") targetHs._aslDisconnectingNodes.delete(nodeStr);
+              else targetHs._aslDisconnectingNodes.clear();
+            }
+            if (msg.state === "done") {
+              targetHs.connected_node = "";
+              targetHs.is_asl_linked = false;
+              targetHs.asl_links = [];
+              targetHs.asl_online_count = 0;
+            }
+          }
+        } else if (msg.proc === "connect") {
+          if (msg.state === "progress") {
+            if (targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes.clear();
+            if (!targetHs._aslConnectingNodes) targetHs._aslConnectingNodes = new Map();
+            if (nodeStr) {
+              targetHs._aslConnectingNodes.set(nodeStr, {
+                mode: msg.mode || "*2",
+                startedAt: Date.now()
+              });
+            }
+          } else if (msg.state === "done") {
+            if (targetHs._aslConnectingNodes && nodeStr) {
+              targetHs._aslConnectingNodes.delete(nodeStr);
+            }
+            if (nodeStr) {
+              const finalMode = (msg.mode === "*3" || msg.mode === "3") ? "*3" : "*2";
+              targetHs.connected_node = nodeStr;
+              targetHs.is_asl_linked = true;
+              targetHs.asl_links = [{ node: nodeStr, mode: finalMode, direction: "OUT" }];
+              targetHs.asl_online_count = 1;
+              targetHs._aslLinkMode = finalMode;
+              if (typeof window.setHotspotAslMode === "function") {
+                window.setHotspotAslMode(cid, finalMode);
+              }
+              if (typeof window.updateHotspotTsAudioModeUI === "function") {
+                window.updateHotspotTsAudioModeUI(cid);
+              }
+            }
+          } else if (msg.state === "failed") {
+            if (targetHs._aslConnectingNodes && nodeStr) {
+              targetHs._aslConnectingNodes.delete(nodeStr);
+            }
+            targetHs.connected_node = "";
+            targetHs.is_asl_linked = false;
+            targetHs.asl_links = [];
+            targetHs.asl_online_count = 0;
+          }
+        }
+
+        if (card && typeof window.syncAslMatrixButtonsState === "function" && card.querySelector(".asl-matrix-grid")) {
+          window.syncAslMatrixButtonsState(card, targetHs);
+        } else if (card && typeof window.updateCardAllStarPanel === "function") {
+          window.updateCardAllStarPanel(card, targetHs);
+        }
+      }
+    } else if (msg.type === "allstar_macro_tx_state") {
+      const cid = msg.hotspot_id;
+      const card = document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.querySelector(".dmr-card");
+      if (card) {
+        const pttBtn = card.querySelector(".ptt-button");
+        if (pttBtn) {
+          if (msg.active) {
+            pttBtn.classList.add("active", "tx-slot-2");
+          } else {
+            pttBtn.classList.remove("active", "tx-slot-2");
+          }
+        }
+        if (typeof window.updateCardModeBadge === "function") {
+          window.updateCardModeBadge(card);
+        }
+      }
+} else if (msg.type === "dmr_activity") {
       if (msg.call_entry) {
         if (window.__proxdmr && typeof window.__proxdmr.addOrUpdateCall === "function") {
           window.__proxdmr.addOrUpdateCall(msg.call_entry);
@@ -1758,7 +2071,12 @@ export function handleServerMessage(msg) {
           if (window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function") {
             try {
               const cCall = msg.src_callsign || (msg.src_id ? `ID: ${msg.src_id}` : "Unknown");
-              window.AndroidBridge.updateRadioStatus(`RX: ${cCall} -> TG${msg.dst_id} (TS${slot})`);
+              const isAsl = targetCard && (targetCard.classList.contains("card-net-allstar") || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(targetHid) === "allstar"));
+              if (isAsl) {
+                window.AndroidBridge.updateRadioStatus(`RX: ${cCall}`);
+              } else {
+                window.AndroidBridge.updateRadioStatus(`RX: ${cCall} -> TG${msg.dst_id} (TS${slot})`);
+              }
             } catch (err) {
               console.warn("[AndroidBridge] updateRadioStatus RX failed:", err);
             }
@@ -1773,6 +2091,17 @@ export function handleServerMessage(msg) {
             if (callerCallEl) callerCallEl.classList.remove("caller-active");
           }
           if (rxTag) rxTag.classList.remove("active");
+          const isAllStarCard = targetCard.classList.contains("card-net-allstar") || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(targetHid) === "allstar");
+          if (isAllStarCard) {
+            const aslRow = targetCard.querySelector(".vfo-allstar-row");
+            if (aslRow) aslRow.classList.remove("allstar-rx-active");
+            const aslHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => String(h.id) === String(targetHid));
+            if (aslHs) {
+              aslHs._aslCarrierRx = false;
+              aslHs._aslRxActiveNode = "";
+              aslHs._aslKeyedNodes = [];
+            }
+          }
           if (targetCard._lastRx && targetCard._lastRx[slot]) {
             targetCard._lastRx[slot].active = false;
             targetCard._lastRx[slot].endTime = Date.now() / 1000;
@@ -1811,7 +2140,8 @@ export function handleServerMessage(msg) {
       } else {
         let updated = false;
         (window.heardCalls || heardCalls).forEach(c => {
-          if (c.src_id === msg.src_id) {
+          const match = (msg.call_id && (c.id === msg.call_id || String(c.id) === String(msg.call_id))) || (!msg.call_id && c.src_id === msg.src_id);
+          if (match) {
             if (msg.src_callsign) c.src_callsign = msg.src_callsign;
             if (msg.src_name) c.src_name = msg.src_name;
             if (msg.talker_alias) c.talker_alias = msg.talker_alias;
@@ -1959,6 +2289,10 @@ export function handleServerMessage(msg) {
       if (hs) {
         hs.collapsed = isCol;
         if (!isCol) hs.isLiveCollapsed = false;
+        if (hs._aslDynamicMatrixMode) {
+          hs._aslDynamicMatrixMode = false;
+          hs._aslDismissedUnlisted = new Set((hs.asl_unlisted_links || []).map(l => String(l.node).trim()));
+        }
       }
       localStorage.setItem(`proxdmr_collapsed_${hid}`, isCol ? "true" : "false");
       if (hid === resolveHotspotId("default") || hid === "default" || hid === "1") {
@@ -1974,7 +2308,7 @@ export function handleServerMessage(msg) {
         card.classList.toggle("collapsed", isCol);
         card.classList.toggle("live-collapsed", isCol && isLive);
         const btn = card.querySelector(".hotspot-collapse-btn");
-        if (btn) btn.title = isCol ? (window.t ? window.t("vfo.hotspot_expand_title") : "Развернуть этот хотспот") : (window.t ? window.t("vfo.hotspot_collapse_title") : "Свернуть этот хотспот (удержание: свернуть без отключения)");
+        if (btn) btn.title = isCol ? (window.t ? window.t("vfo.hotspot_expand_title", {}, "Развернуть этот хотспот (удержание: отключить из списка)") : "Развернуть этот хотспот (удержание: отключить из списка)") : (window.t ? window.t("vfo.hotspot_collapse_title", {}, "Свернуть этот хотспот (удержание: свернуть без отключения)") : "Свернуть этот хотспот (удержание: свернуть без отключения)");
         const nBadge = card.querySelector(".hotspot-name-badge");
         if (nBadge && isCol && !isLive) nBadge.classList.remove("is-online");
       }

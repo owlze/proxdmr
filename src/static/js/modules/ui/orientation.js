@@ -1,4 +1,4 @@
-import { pendingPings, connectWebSocket } from '../network/ws.js';
+import { pendingPings, connectWebSocket } from '../network/ws.js?v=2.9.525';
 
 /**
  * Screen Orientation Lock & Shield Management

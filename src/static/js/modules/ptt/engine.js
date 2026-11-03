@@ -5,7 +5,7 @@
 
 import { getCountryInfo, updateFlagElement } from '../core/formatters.js?v=2.9.367';
 import { updateAllHotspotRecUI } from '../audio/routing.js';
-import { initAudio, applyTxDspSettings, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js';
+import { initAudio, applyTxDspSettings, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js?v=2.9.525';
 import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js';
 import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, getRogerBeepDurationMs, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js';
 import { triggerHaptic } from '../core/haptic.js';
@@ -22,6 +22,7 @@ function getTotRemainingSeconds() {
 let isPttReleasing = false;
 let pttReleaseTimer = null;
 let txSilenceInterval = null;
+let aslPttReadyVibTimer = null;
 const SILENCE_BURST_BYTES = 960; // 60ms @ 8000Hz 16-bit PCM = 480 samples = 960 bytes
 
 export function isCheckMicOnTxEnabled() {
@@ -300,6 +301,7 @@ function _isVolumeDownPttEnabled() {
     }
   window.startTransmission = startTransmission;
     if (window.isPttPressed || isTransmissionStarting) return;
+    const checkHid = targetHotspotId || window.activeHotspotId;
     if (window.isDemoMode) {
       if (typeof window.showToast === "function") {
         const msg = window.t
@@ -307,6 +309,7 @@ function _isVolumeDownPttEnabled() {
           : "🎧 Демо-режим: передача отключена (только приём)";
         window.showToast(msg, 3500);
       }
+      clearTxIndicationUI(checkHid);
       return;
     }
     if (window.isSwl) {
@@ -316,13 +319,44 @@ function _isVolumeDownPttEnabled() {
           : "🎧 Режим SWL: передача запрещена (только приём)";
         window.showToast(msg, 3500);
       }
+      clearTxIndicationUI(checkHid);
       return;
     }
-    const checkHid = targetHotspotId || window.activeHotspotId;
+    const isAslCheck = (typeof window.isAllStarHotspot === "function")
+      ? window.isAllStarHotspot(checkHid)
+      : (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(checkHid) === "allstar");
+    if (isAslCheck) {
+      const hsObj = (window.currentHotspots || []).find(
+        h => h.id === checkHid || h.id === _resolveHotspotId(checkHid)
+      );
+      const links = (hsObj && Array.isArray(hsObj.asl_links)) ? hsObj.asl_links : [];
+      const hasTxLink = links.length > 0
+        ? links.some(lk => lk && lk.mode === "*3" && !lk.connecting)
+        : (
+            Boolean(hsObj && hsObj.connected_node && hsObj.connected_node !== "0") &&
+            ((typeof window.getHotspotAslMode === "function" ? window.getHotspotAslMode(checkHid) : "*2") === "*3")
+          );
+
+      if (!hasTxLink) {
+        if (typeof window.showToast === "function") {
+          const msg = links.length > 0
+            ? "🎧 Все узлы в режиме Монитор (*2). Нажмите на плитку подключённого узла (красный *3) для передачи"
+            : "⚠️ Нет подключённых узлов на передачу (*3). Подключите узел и включите красный режим (*3)";
+          window.showToast(msg, "warning", 3200);
+        }
+        triggerTactileVibrate([40, 60, 40]);
+        const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
+        const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+        blinkPttLocked(ptt);
+        clearTxIndicationUI(checkHid);
+        return;
+      }
+    }
     if (isPttLocked(checkHid)) {
       const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
       const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
       blinkPttLocked(ptt);
+      clearTxIndicationUI(checkHid);
       return;
     }
 
@@ -332,6 +366,7 @@ function _isVolumeDownPttEnabled() {
       const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
       const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
       notifyPttConnectionBlocked(conn, ptt);
+      clearTxIndicationUI(checkHid);
       return;
     }
 
@@ -429,9 +464,17 @@ function _isVolumeDownPttEnabled() {
         const c = document.querySelector(`.radio-container[data-hotspot-id="${curHid}"]`);
         const b = c ? c.querySelector(".mode-badge") : (document.getElementById("modeBadge") || document.querySelector(".mode-badge"));
         const curSlot = _getHotspotSlot(curHid) || targetSlot || 2;
+        const isAsl = Boolean(c && (c.classList.contains("card-net-allstar") || c.dataset.networkType === "allstar" || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(curHid) === "allstar")));
         if (b && window.isPttPressed) {
-          b.className = "mode-badge mode-tx";
-          b.textContent = `TX TS${curSlot} ${Math.max(0, sec)}s`;
+          const rem = Math.max(0, sec);
+          let extraCls = "";
+          if (rem <= 10) {
+            extraCls = " mode-tx-critical";
+          } else if (rem <= 30) {
+            extraCls = " mode-tx-warn";
+          }
+          b.className = `mode-badge mode-tx${extraCls}`;
+          b.textContent = isAsl ? `TX ${rem}s` : `TX TS${curSlot} ${rem}s`;
         }
       };
 
@@ -458,38 +501,46 @@ function _isVolumeDownPttEnabled() {
         if (typeof window.updateCardPttHintForSlot === "function") {
           window.updateCardPttHintForSlot(targetCard, targetSlot);
         }
+        const isAsl = Boolean(targetCard && (targetCard.classList.contains("card-net-allstar") || targetCard.dataset.networkType === "allstar" || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(targetCard) === "allstar")));
         const mb = targetCard.querySelector(".mode-badge");
         if (mb) {
           mb.className = "mode-badge mode-tx";
-          mb.textContent = `TX TS${targetSlot} ${totRemainingSeconds}s`;
+          mb.textContent = isAsl ? `TX ${totRemainingSeconds}s` : `TX TS${targetSlot} ${totRemainingSeconds}s`;
         }
-        const txRow = targetCard.querySelector(targetSlot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
-        if (txRow) {
-          txRow.classList.add("vfo-tx-active");
-          const callerFlag = txRow.querySelector(".ts-caller-flag");
-          const callerCall = txRow.querySelector(".ts-caller-call");
-          const callerId = txRow.querySelector(".ts-caller-id");
-          const callerCountry = txRow.querySelector(".ts-caller-country");
-          const hs = (window.currentHotspots || []).find(h => h.id === hid);
-          const myCall = hs?.callsign || "N0CALL";
-          const myId = hs?.effective_id || hs?.dmr_id || 0;
-          const myCountry = getCountryInfo(myId, myCall);
+        if (!isAsl) {
+          const txRow = targetCard.querySelector(targetSlot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+          if (txRow) {
+            txRow.classList.add("vfo-tx-active");
+            const callerFlag = txRow.querySelector(".ts-caller-flag");
+            const callerCall = txRow.querySelector(".ts-caller-call");
+            const callerId = txRow.querySelector(".ts-caller-id");
+            const callerCountry = txRow.querySelector(".ts-caller-country");
+            const hs = (window.currentHotspots || []).find(h => h.id === hid);
+            const myCall = hs?.callsign || "N0CALL";
+            const myId = hs?.effective_id || hs?.dmr_id || 0;
+            const myCountry = getCountryInfo(myId, myCall);
 
-          if (callerFlag) updateFlagElement(callerFlag, myCountry);
-          if (callerCall) callerCall.textContent = `${myCall} (TX)`;
-          if (callerId) callerId.textContent = myId ? `(${myId})` : "";
-          if (callerCountry) callerCountry.textContent = myCountry?.name_en || "";
-        }
-        if (targetSlot === 1) {
-          const tx1 = targetCard.querySelector(".vfo-ts1-tx");
-          if (tx1) tx1.classList.add("active");
-        } else {
-          const tx2 = targetCard.querySelector(".vfo-ts2-tx");
-          if (tx2) tx2.classList.add("active");
+            if (callerFlag) updateFlagElement(callerFlag, myCountry);
+            if (callerCall) callerCall.textContent = `${myCall} (TX)`;
+            if (callerId) callerId.textContent = myId ? `(${myId})` : "";
+            if (callerCountry) callerCountry.textContent = myCountry?.name_en || "";
+          }
+          if (targetSlot === 1) {
+            const tx1 = targetCard.querySelector(".vfo-ts1-tx");
+            if (tx1) tx1.classList.add("active");
+          } else {
+            const tx2 = targetCard.querySelector(".vfo-ts2-tx");
+            if (tx2) tx2.classList.add("active");
+          }
         }
       }
 
       triggerTactileVibrate(50);
+
+      if (aslPttReadyVibTimer) {
+        clearTimeout(aslPttReadyVibTimer);
+        aslPttReadyVibTimer = null;
+      }
 
       totCountdownInterval = setInterval(() => {
         if (!window.isPttPressed) {
@@ -545,10 +596,17 @@ function _isVolumeDownPttEnabled() {
     } finally {
       isTransmissionStarting = false;
       window.isTransmissionStarting = false;
+      if (!window.isPttPressed) {
+        clearTxIndicationUI(checkHid);
+      }
     }
   }
 
   function clearTxIndicationUI(hid = null) {
+    if (aslPttReadyVibTimer) {
+      clearTimeout(aslPttReadyVibTimer);
+      aslPttReadyVibTimer = null;
+    }
     const targetHid = hid || window.activeTxHotspotId || window.activeHotspotId;
     window.isPttPressed = false;
     window.activeTxHotspotId = null;
@@ -559,8 +617,16 @@ function _isVolumeDownPttEnabled() {
     }
     totRemainingSeconds = null;
 
+    window.isPttHoldLatched = false;
+    document.querySelectorAll(".ptt-slide-lock-guide").forEach(el => el.remove());
     document.querySelectorAll(".ptt-button").forEach(b => {
-      b.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
+      b._isHoldLatched = false;
+      b._latchedSlot = 0;
+      b.classList.remove(
+        "active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2",
+        "ptt-hold-latched", "latched-slot-1", "latched-slot-2", "latched-slot-single"
+      );
+      b.querySelectorAll(".ptt-latched-banner").forEach(el => el.remove());
     });
     document.querySelectorAll(".vfo-row").forEach(r => r.classList.remove("vfo-tx-active"));
     document.querySelectorAll(".vfo-tx-tag").forEach(t => t.classList.remove("active"));
@@ -623,6 +689,17 @@ function _isVolumeDownPttEnabled() {
 
   function stopTransmission(options = {}) {
     window.stopTransmission = stopTransmission;
+
+window.triggerAslTxReadyHaptic = function(hotspotId) {
+  if (!window.isPttPressed) return;
+  const curHid = window.activeTxHotspotId || window.activeHotspotId;
+  if (hotspotId && curHid && String(hotspotId) !== String(curHid)) return;
+  triggerTactileVibrate(65);
+};
+    if (aslPttReadyVibTimer) {
+      clearTimeout(aslPttReadyVibTimer);
+      aslPttReadyVibTimer = null;
+    }
     const hid = window.activeTxHotspotId || window.activeHotspotId;
     const silentCancel = Boolean(options && options.silentCancel);
 

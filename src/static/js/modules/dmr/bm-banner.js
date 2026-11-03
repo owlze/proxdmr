@@ -14,7 +14,7 @@ import {
   calculateClientPacketLoss,
   calculateCardPacketLoss,
   updatePingElement
-} from "../network/ping-sparklines.js?v=2.9.367";
+} from "../network/ping-sparklines.js?v=2.9.495";
 import { openBmBenchmarkModal } from "./bm-benchmark.js";
 import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js";
 import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js?v=2.9.367";
@@ -197,8 +197,32 @@ export const DMR_NETWORK_PROFILES = {
     hasXlxModule: false,
     customIconUrl: "",
     svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>`
+  },
+  allstar: {
+    id: "allstar",
+    shortName: "ASL",
+    shortLabel: "ASL",
+    badgePrefix: "ASL",
+    fullName: "AllStarLink (IAX2)",
+    defaultHost: "127.0.0.1",
+    defaultPort: 4569,
+    defaultPassword: "testpass",
+    defaultNode: "1999",
+    defaultTgTs1: 0,
+    defaultTgTs2: 0,
+    hasBmApi: false,
+    hasRpto: false,
+    hasXlxModule: false,
+    isAllStar: true,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>`
   }
 };
+
+export const KNOWN_ALLSTAR_SERVERS = [
+  { id: "ASL-LOCAL", country: "LOCAL", country_name: "Локальный ASL", name: "Local ASL Node", host: "127.0.0.1", port: 4569, node: "1999" },
+  { id: "ASL-REG", country: "GLOBAL", country_name: "AllStarLink", name: "AllStarLink Central", host: "register.allstarlink.org", port: 4569, node: "1999" }
+];
 
 export function getDmrNetworkProfile(netType) {
   const key = String(netType || "bm").trim().toLowerCase();
@@ -257,6 +281,7 @@ export function getNetworkServersList(netType) {
     }
     return (typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["xlx"]) || KNOWN_XLX_SERVERS;
   }
+  if (key === "allstar") return KNOWN_ALLSTAR_SERVERS;
   if (key === "custom") return [];
   const bmMastersList = (typeof window !== "undefined" && window.bmMastersList) || [];
   return bmMastersList.length ? bmMastersList : KNOWN_BM_MASTERS;
@@ -404,6 +429,12 @@ export function updateCardNetworkBadge(card, hs) {
   if (!netBadge) return;
 
   const netType = (hs && hs.network_type) ? hs.network_type : "bm";
+  const profile = getDmrNetworkProfile(netType);
+  const pId = profile.id;
+  ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom"].forEach(n => {
+    card.classList.toggle(`card-net-${n}`, pId === n);
+  });
+  card.dataset.networkType = pId;
   const xlxMod = (hs && hs.xlx_module) ? hs.xlx_module : "D";
   renderNetworkBadgeElement(netBadge, netType, xlxMod);
 
@@ -490,6 +521,21 @@ export function getBmServerInfo(hostVal, networkType = "bm") {
     };
   }
 
+  if (netKey === "allstar") {
+    const isLocal = clean === "127.0.0.1" || clean === "localhost";
+    const matched = KNOWN_ALLSTAR_SERVERS.find(s => (s.host || "").toLowerCase() === clean);
+    const title = matched ? matched.name : (isLocal ? "Local Node" : (raw ? raw.split(":")[0] : "AllStarLink"));
+    return {
+      countryCode: isLocal ? "LOCAL" : "GLOBAL",
+      countryName: isLocal ? "Локальный" : "AllStarLink",
+      displayName: title,
+      host: raw || "127.0.0.1",
+      flagHtml: isLocal
+        ? `<span class="flag-badge flag-local" title="Локальный узел ASL">🏠</span>`
+        : `<span class="flag-badge flag-global" title="AllStarLink IAX2">🌐</span>`
+    };
+  }
+
   // Fallback for custom / unknown servers
   const shortHost = raw ? raw.replace(/^master\./i, "").split(".")[0].toUpperCase() : profile.shortLabel;
   return {
@@ -530,7 +576,7 @@ export function populateBmServerSelect(select, currentHost, networkType = "bm") 
     select.dataset.cacheVer = curCacheVer;
     select.dataset.pinned = pinnedStr;
 
-    if (netKey !== "custom") {
+    if (netKey !== "custom" && netKey !== "allstar") {
       const benchOpt = document.createElement("option");
       benchOpt.value = "__TEST_SERVERS__";
       benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
@@ -639,13 +685,22 @@ export function isHotspotFullyOnline(arg) {
     const target = currentHotspots.find(h => h.id === cid || h.id === arg);
     const targetLive = target ? ((typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(target.id)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(target.id))) : false;
     if (!target || (isHotspotCollapsed(target.id) && !targetLive)) return false;
-    return String(target.status || "").toUpperCase() === "ONLINE";
+
+    // Special handling for AllStarLink nodes
+    const isTargetAsl = ((target.network_type || "").toLowerCase() === "allstar") &&
+      (Boolean(target.is_asl_linked) || Boolean(target.connected_node && target.connected_node !== "0") || (typeof target.asl_online_count === "number" && target.asl_online_count > 0));
+    return isTargetAsl || String(target.status || "").toUpperCase() === "ONLINE";
   }
   if (typeof arg === "object") {
     const cid = arg.id ? resolveHotspotId(arg.id) : null;
     const isLive = cid ? ((typeof isHotspotLiveCollapsed === "function" && isHotspotLiveCollapsed(cid)) || (typeof window !== "undefined" && window.isHotspotLiveCollapsed && window.isHotspotLiveCollapsed(cid))) : false;
     if (cid && isHotspotCollapsed(cid) && !isLive) return false;
-    return String(arg.status || "").toUpperCase() === "ONLINE";
+
+    const target = cid ? currentHotspots.find(h => h.id === cid || h.id === arg.id) : null;
+    const isArgAsl = (((arg.network_type || (target && target.network_type) || "").toLowerCase() === "allstar")) &&
+      (Boolean(arg.is_asl_linked) || Boolean(arg.connected_node && arg.connected_node !== "0") || (typeof arg.asl_online_count === "number" && arg.asl_online_count > 0) ||
+       (target && (Boolean(target.is_asl_linked) || Boolean(target.connected_node && target.connected_node !== "0") || (typeof target.asl_online_count === "number" && target.asl_online_count > 0))));
+    return isArgAsl || String(arg.status || (target && target.status) || "").toUpperCase() === "ONLINE";
   }
   return false;
 }
@@ -670,21 +725,56 @@ export function updateCardBmBanner(card, hs) {
 
   const netType = (hs && hs.network_type) ? hs.network_type : (card.dataset.networkType || "bm");
   const profile = getDmrNetworkProfile(netType);
-  card.dataset.networkType = profile.id;
+  const pId = profile.id;
+  ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom"].forEach(n => {
+    card.classList.toggle(`card-net-${n}`, pId === n);
+  });
+  card.dataset.networkType = pId;
   const hostVal = (hs && hs.bm_master_host) ? hs.bm_master_host : profile.defaultHost || "2502.master.brandmeister.network";
   const info = getBmServerInfo(hostVal, netType);
 
-  // Update Flag & Short Display Name
+  // Update Flag & Short Display Name (hide separate square flag badge, show clean emoji flag + name without BM prefix)
   const flagEl = banner.querySelector(".bm-server-flag");
   if (flagEl) {
-    flagEl.innerHTML = info.flagHtml || "🌐";
+    flagEl.innerHTML = "";
+    flagEl.style.display = "none";
   }
 
   const nameEl = banner.querySelector(".bm-server-name");
   if (nameEl) {
-    const shortName = info.displayName || info.countryName || profile.shortLabel;
-    const prefix = profile.shortLabel;
-    nameEl.textContent = shortName.toUpperCase().startsWith(prefix.toUpperCase()) ? shortName : `${prefix} ${shortName}`;
+    const prefix = profile.shortLabel || "BM";
+    let rawName = (info.displayName || info.countryName || prefix).trim();
+
+    // Strip ALL leading flag emojis & Regional Indicators & pictographics & whitespace
+    const leadingEmojiRegex = /^(?:[\u{1F1E6}-\u{1F1FF}]{2}|[\p{Extended_Pictographic}\uFE0E\uFE0F\u200D]|\s)+/u;
+    rawName = rawName.replace(leadingEmojiRegex, "").trim();
+
+    // Strip redundant leading network prefix (e.g. "BM ", "FreeDMR ")
+    const pfxRegex = new RegExp(`^${prefix}\\s+`, "i");
+    if (rawName.toLowerCase() !== prefix.toLowerCase()) {
+      rawName = rawName.replace(pfxRegex, "").trim();
+    }
+
+    // Strip any leading emoji again if one was placed after the prefix
+    rawName = rawName.replace(leadingEmojiRegex, "").trim();
+
+    // Simplify redundant "(BM 2322)" to "(2322)"
+    const pfxParenRegex = new RegExp(`\\(${prefix}\\s+(\\d+)\\)`, "i");
+    rawName = rawName.replace(pfxParenRegex, "($1)");
+
+    // Resolve strictly ONE canonical flag emoji
+    let flagEmoji = "";
+    if (info.countryCode && info.countryCode !== "GLOBAL" && info.countryCode !== "LOCAL") {
+      flagEmoji = isoToEmoji(info.countryCode);
+    } else if (info.countryCode === "LOCAL") {
+      flagEmoji = "🏠";
+    }
+
+    // Construct final text: exactly ONE flag emoji + clean name
+    const cleanName = rawName || profile.shortLabel;
+    const displayText = flagEmoji ? `${flagEmoji} ${cleanName}` : cleanName;
+
+    nameEl.textContent = displayText;
     nameEl.title = `${profile.fullName}: ${info.countryName || info.displayName} — ${hostVal}`;
   }
 
@@ -919,6 +1009,11 @@ export function updateCardBmBanner(card, hs) {
       const isOfflineCard = isCollapsed || (!isOnline && !isPrimary);
       const lossData = isOfflineCard ? { lossPercent: 0, isOffline: true } : calculateCardPacketLoss(cid, hostVal);
       updatePingElement(pingEl, isOfflineCard ? null : pingMs, lossData, "server", profile.shortLabel);
+      if (profile.id === "allstar" && !isOfflineCard) {
+        const targetNode = (hs && (hs.connected_node || hs._last_asl_node || hs._active_asl_node)) || "";
+        const nodeStr = targetNode ? `Node ${targetNode}` : "ASL Hub";
+        pingEl.title = `ASL ↔ ${nodeStr} (${pingMs !== null ? pingMs + " ms" : "--"}). Клик для смены режима`;
+      }
     }
   }
 

@@ -170,9 +170,11 @@ export function updateHotspotGwStatus(hid, isOnline, detail = "") {
     ? `${host} (WSS активен)`
     : (isDisconnectedByUser ? (window.t ? window.t("status.gw_disconnected_user") : "Отключено пользователем") : `Шлюз ${host} недоступен`);
   const comment = detail || defaultComment;
-  const actionHint = effectiveOnline ? "клик для отключения" : "клик для подключения";
+  const actionHint = effectiveOnline
+    ? (window.t ? window.t("status.gw_click_disconnect", {}, "клик для отключения") : "клик для отключения")
+    : (window.t ? window.t("status.gw_click_connect", {}, "клик для подключения") : "клик для подключения");
   const icon = effectiveOnline ? "🟢" : (isConnecting ? "🟡" : "⚪");
-  const ttip = `${icon} Шлюз ProxDMR: ${comment} (${actionHint})`;
+  const ttip = window.t ? window.t("status.gw_tooltip", { icon, comment, action: actionHint }, `${icon} Шлюз ProxDMR: ${comment} (${actionHint})`) : `${icon} Шлюз ProxDMR: ${comment} (${actionHint})`;
 
   const badge = card.querySelector(".gw-status-badge");
   if (badge) {
@@ -742,22 +744,22 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
             badge.classList.add("status-online", "bm-online");
             badge.textContent = "API:ONLINE";
             comment = data.device_id ? `${apiDomain} (ID: ${data.device_id})` : `${apiDomain} (Авторизован)`;
-            tooltip = `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
+            tooltip = window.t ? window.t("status.api_online_tooltip", { net: netShort, ver: netVersion }, `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`) : `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
           } else if (status === "AUTH_FAILED") {
             badge.classList.add("status-error", "bm-error");
             badge.textContent = "API:AUTH FAIL";
             comment = data.detail || (isTgif ? "Неверный токен TGIF (401)" : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
-            tooltip = `🔴 ${netShort} API: ${comment}. Нажмите для настройки`;
+            tooltip = window.t ? window.t("status.api_auth_tooltip", { net: netShort, comment }, `🔴 ${netShort} API: ${comment}. Нажмите для настройки`) : `🔴 ${netShort} API: ${comment}. Нажмите для настройки`;
           } else if (status === "NO_KEY") {
             badge.classList.add("status-offline", "bm-offline");
             badge.textContent = "API:NO KEY";
             comment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-            tooltip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+            tooltip = window.t ? window.t("status.api_no_key_tooltip", { net: netShort }, `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`) : `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
           } else {
             badge.classList.add("status-error", "bm-error");
             badge.textContent = "API:ERROR";
             comment = data.detail || `Сервер ${apiDomain} недоступен`;
-            tooltip = `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`;
+            tooltip = window.t ? window.t("status.api_error_tooltip", { net: netShort, comment }, `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`) : `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`;
           }
 
           if (dt) {

@@ -140,6 +140,11 @@ if ($LASTEXITCODE -ne 0) {
     docker-compose up -d --build
 }
 
+if (Test-Path "Dockerfile.asl3") {
+    Write-Host "[*] Building AllStarLink v3 sidecar image (proxdmr-asl3:latest)..." -ForegroundColor Cyan
+    & $dockerExe build -t proxdmr-asl3:latest -f Dockerfile.asl3 .
+}
+
 if ($LASTEXITCODE -eq 0) {
     Write-Host ""
     Write-Host "==========================================" -ForegroundColor Green

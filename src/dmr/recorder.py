@@ -37,6 +37,26 @@ except ImportError:
 
 logger = logging.getLogger("proxdmr.recorder")
 
+import concurrent.futures
+
+_RECORDER_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="dmr_rec_io"
+)
+
+def _unlink_recording_file(file_path: Path):
+    try:
+        if file_path.exists():
+            file_path.unlink()
+    except Exception:
+        pass
+    try:
+        mp3 = file_path.with_suffix(".mp3")
+        if mp3.exists():
+            mp3.unlink()
+    except Exception:
+        pass
+
 
 class BeepMarkerGenerator:
     """
@@ -157,6 +177,7 @@ class CallAudioBuffer:
         call_type: str = "RX",
         user_id: int = 1,
     ):
+        self.is_auto_id = not bool(call_id)
         self.call_id = call_id or f"call_{int(time.time() * 1000)}"
         self.hotspot_id = hotspot_id
         self.slot = slot
@@ -549,8 +570,9 @@ class ServerAudioRecorder:
                     buf.src_name = src_name
                 if talker_alias and not buf.talker_alias:
                     buf.talker_alias = talker_alias
-                if call_id and not buf.call_id:
+                if call_id and (not buf.call_id or getattr(buf, "is_auto_id", False) or buf.call_id.startswith("call_")):
                     buf.call_id = call_id
+                    buf.is_auto_id = False
 
             buf.append(pcm_bytes)
 
@@ -563,6 +585,13 @@ class ServerAudioRecorder:
                 is_tx=False
             )
 
+    def discard_rx_call(self, hotspot_id: str, slot: int, call_id: str = "") -> None:
+        """Discards active RX buffer without writing a WAV file to disk (e.g. for filtered kerchunks)."""
+        hid_key = str(hotspot_id).strip().lower()
+        rx_key = f"{hid_key}_{slot}"
+        self._rx_buffers.pop(rx_key, None)
+        self._check_and_notify_recording_state(1)
+
     def on_rx_call_ended(self, hotspot_id: str, slot: int, call_id: str = "") -> None:
         hid_key = str(hotspot_id).strip().lower()
         rx_key = f"{hid_key}_{slot}"
@@ -571,8 +600,9 @@ class ServerAudioRecorder:
         if not buf:
             return
 
-        if call_id and not buf.call_id:
+        if call_id:
             buf.call_id = call_id
+            buf.is_auto_id = False
 
         # Save WAV (в потоке, чтобы не блокировать event loop) и записать в БД
         self._spawn_bg(self._finalize_and_persist(buf, "RX", f"{hotspot_id}_TS{slot}"))
@@ -625,8 +655,9 @@ class ServerAudioRecorder:
         if not buf:
             return
 
-        if call_id and not buf.call_id:
+        if call_id:
             buf.call_id = call_id
+            buf.is_auto_id = False
 
         self._spawn_bg(self._finalize_and_persist(buf, "TX", f"{buf.hotspot_id}_TS{buf.slot}"))
 
@@ -643,13 +674,16 @@ class ServerAudioRecorder:
 
     async def _finalize_and_persist(self, buf: "CallAudioBuffer", kind: str, where: str) -> None:
         try:
-            rec_data = await asyncio.to_thread(buf.finalize, self.min_duration_sec)
+            loop = asyncio.get_running_loop()
+            is_asl = str(getattr(buf, "call_id", "")).startswith("asl_")
+            effective_min_dur = self.min_duration_sec
+            rec_data = await loop.run_in_executor(_RECORDER_IO_EXECUTOR, buf.finalize, effective_min_dur)
             if rec_data:
                 await self._persist_and_broadcast(rec_data)
             else:
                 logger.info(
                     f"[RECORDER] {kind} call {buf.src_callsign or buf.src_id} on {where} "
-                    f"discarded: audio duration {buf.get_duration():.2f}s < min_duration {self.min_duration_sec}s"
+                    f"discarded: audio duration {buf.get_duration():.2f}s < min_duration {effective_min_dur}s"
                 )
         except Exception as e:
             logger.error(f"[RECORDER] Failed to finalize {kind} call recording: {e}", exc_info=True)
@@ -689,7 +723,8 @@ class ServerAudioRecorder:
             self._check_and_notify_recording_state(user_id)
             return None
 
-        rec_data = await asyncio.to_thread(session.finalize, self.min_duration_sec)
+        loop = asyncio.get_running_loop()
+        rec_data = await loop.run_in_executor(_RECORDER_IO_EXECUTOR, session.finalize, self.min_duration_sec)
         saved = None
         if rec_data:
             saved = await self._persist_and_broadcast(rec_data)
@@ -762,13 +797,10 @@ class ServerAudioRecorder:
                 # Delete from DB
                 await delete_recording(rec_id)
 
-                # Delete file from disk
+                # Delete file from disk in dedicated I/O executor
                 try:
-                    if file_path.exists():
-                        file_path.unlink()
-                    mp3_path = file_path.with_suffix(".mp3")
-                    if mp3_path.exists():
-                        mp3_path.unlink()
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(_RECORDER_IO_EXECUTOR, _unlink_recording_file, file_path)
                 except Exception as fe:
                     logger.warning(f"[RECORDER-QUOTA] Could not delete file {file_path}: {fe}")
 

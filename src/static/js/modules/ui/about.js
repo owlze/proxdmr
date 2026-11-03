@@ -353,6 +353,21 @@ export function initAboutModal() {
     const logoTarget = e.target.closest(".brand-logo-wrap, .brand-title");
     if (!logoTarget) return;
 
+    // Check if target is inside a hotspot card
+    const card = logoTarget.closest(".radio-container");
+    if (card) {
+      const radiosGrid = card.closest("#radiosGrid, .radios-grid");
+      const isFirstHotspot =
+        card.classList.contains("is-primary-fixed") ||
+        (radiosGrid && radiosGrid.querySelector(".radio-container") === card) ||
+        card.id === "radioContainer" ||
+        card.dataset.hotspotId === "default";
+      if (!isFirstHotspot) {
+        // Hotspots 2..7 are draggable; long press must NOT open About modal
+        return;
+      }
+    }
+
     cancelLogoLongPress();
     logoLongPressTriggered = false;
     logoPressStartX = e.clientX;

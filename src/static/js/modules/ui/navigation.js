@@ -357,6 +357,9 @@
     // 3. Settings modal
     const settingsModalEl = document.getElementById("settingsModal");
     if (settingsModalEl && settingsModalEl.classList.contains("active")) {
+      if (typeof window.autoSaveExistingHotspotIfDirty === "function") {
+        try { window.autoSaveExistingHotspotIfDirty(); } catch (_) {}
+      }
       if (typeof window.saveCurrentSettingsState === "function") {
         try {
           window.saveCurrentSettingsState();

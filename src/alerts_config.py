@@ -66,7 +66,7 @@ DEFAULT_ALERTS_CONFIG: Dict[str, Any] = {
     "rate_limit_per_hour": 10,
 }
 
-VALID_LANGUAGES = ("ru", "en", "uk", "de", "es", "fr", "it")
+VALID_LANGUAGES = ("ru", "en", "uk", "de", "es", "fr", "it", "nl")
 
 
 def get_default_data_dir() -> Path:

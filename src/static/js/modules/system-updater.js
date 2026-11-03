@@ -9,7 +9,7 @@ import { showToast } from "../core/toast.js";
 let _latestUpdateInfo = null;
 let _selectedLang = "ru";
 
-const SUPPORTED_LANGS = ["ru", "en", "uk", "de", "es", "fr", "it"];
+const SUPPORTED_LANGS = ["ru", "en", "uk", "de", "es", "fr", "it", "nl"];
 
 const LANG_NAMES = {
   ru: "🇷🇺 Русский",
@@ -18,7 +18,8 @@ const LANG_NAMES = {
   de: "🇩🇪 Deutsch",
   es: "🇪🇸 Español",
   fr: "🇫🇷 Français",
-  it: "🇮🇹 Italiano"
+  it: "🇮🇹 Italiano",
+  nl: "🇳🇱 Nederlands"
 };
 
 function getActiveLanguage() {

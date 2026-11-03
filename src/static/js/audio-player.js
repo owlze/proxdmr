@@ -326,18 +326,6 @@ class HotspotAudioSlot {
     const numSamples = int16Array.length;
     if (numSamples === 0) return;
 
-    // Discard identical consecutive chunks arriving within < 35ms on this slot (duplicate feed shield)
-    const nowMs = Date.now();
-    if (this._lastFeedTime && (nowMs - this._lastFeedTime) < 35 && this._lastFeedLen === numSamples) {
-      if (this._lastFirstSample === int16Array[0] && this._lastMidSample === int16Array[Math.floor(numSamples / 2)]) {
-        return;
-      }
-    }
-    this._lastFeedTime = nowMs;
-    this._lastFeedLen = numSamples;
-    this._lastFirstSample = int16Array[0];
-    this._lastMidSample = int16Array[Math.floor(numSamples / 2)];
-
     // 1. Digital input Pre-Gain (-20 dB to +12 dB) & soft limiter
     const preGainDb = (this.player && typeof this.player.getPreGainDb === "function") ? this.player.getPreGainDb() : 0;
     const preGainLinear = Math.pow(10.0, preGainDb / 20.0);
@@ -368,11 +356,10 @@ class HotspotAudioSlot {
       this.nextStartTime = now + jitterSec;
     } else if (this.nextStartTime < now) {
       // Ongoing transmission with a network stall (audio queue ran dry):
-      // Restore a small 40ms safety cushion so subsequent packets don't continuously underrun!
-      this.nextStartTime = now + Math.min(jitterSec, 0.040);
-    } else if ((this.nextStartTime - now) > 0.300) {
-      // Buffer drift / runaway protection: audio queue accumulated > 300ms of future audio
-      // (caused by duplicate chunks or burst delivery). Resync to avoid slow-motion / delayed playback!
+      // Restore healthy cushion (75% of target jitter, between 60ms and 400ms)
+      this.nextStartTime = now + Math.min(0.400, Math.max(0.060, jitterSec * 0.75));
+    } else if ((this.nextStartTime - now) > Math.max(0.800, jitterSec * 2.5)) {
+      // Buffer drift / runaway protection: dynamic ceiling scaled to user's configured jitter buffer up to 2000ms!
       this.nextStartTime = now + jitterSec;
     }
 
@@ -389,11 +376,11 @@ class HotspotAudioSlot {
       numOut = Math.round(numSamples * (targetRate / 8000.0));
       outSamples = new Float32Array(numOut);
 
-      // Initialize resample history on start of transmission with initial sample (prevents 2-sample delay transient)
+      // Initialize continuous 4-point Hermite resampler
       if (!this.resampleBuf || this.resampleBuf.length < 4) {
         const s0 = inSamples[0];
-        this.resampleBuf = new Float32Array([s0, s0, s0, s0]);
-        this.resamplePos = 2.0;
+        this.resampleBuf = new Float32Array([s0, s0, s0]);
+        this.resamplePos = 1.0;
       }
 
       // Concatenate leftover history with new chunk
@@ -403,15 +390,18 @@ class HotspotAudioSlot {
       combined.set(inSamples, oldLen);
 
       const bufLen = combined.length;
+      const maxPos = Math.max(1.0, bufLen - 2.001);
       let pos = this.resamplePos;
+      numOut = Math.max(0, Math.ceil((maxPos - pos) / ratio));
+      outSamples = new Float32Array(numOut);
 
       for (let j = 0; j < numOut; j++) {
         const k = Math.floor(pos);
         const t = pos - k;
-        const p0 = k >= 1 ? combined[k - 1] : combined[0];
-        const p1 = k < bufLen ? combined[k] : combined[bufLen - 1];
-        const p2 = (k + 1) < bufLen ? combined[k + 1] : combined[bufLen - 1];
-        const p3 = (k + 2) < bufLen ? combined[k + 2] : combined[bufLen - 1];
+        const p0 = combined[Math.max(0, k - 1)];
+        const p1 = combined[k];
+        const p2 = combined[Math.min(bufLen - 1, k + 1)];
+        const p3 = combined[Math.min(bufLen - 1, k + 2)];
 
         const c0 = p1;
         const c1 = 0.5 * (p2 - p0);
@@ -422,15 +412,9 @@ class HotspotAudioSlot {
         pos += ratio;
       }
 
-      // Retain leftover samples (at least 2 lookahead points) for next chunk continuity
-      const drop = Math.floor(pos) - 2;
-      if (drop > 0 && drop < combined.length) {
-        this.resampleBuf = combined.slice(drop);
-        this.resamplePos = pos - drop;
-      } else {
-        this.resampleBuf = combined;
-        this.resamplePos = pos;
-      }
+      const drop = Math.max(0, Math.floor(pos) - 1);
+      this.resampleBuf = combined.slice(drop);
+      this.resamplePos = pos - drop;
     }
 
     // 4. Create AudioBuffer at targetRate (EXACT match to AudioContext -> 0 browser resampling artifacts)
@@ -544,16 +528,44 @@ class HotspotAudioChannel {
   }
 
   setSlotDucking(slot, ducked, duckLevel = 0.20, fadeTimeSec = 0.12) {
-    const s = parseInt(slot, 10);
+    const s = parseInt(slot, 10) || 1;
     const slotObj = this.slots[s];
     if (slotObj) {
       slotObj.setDucking(ducked, duckLevel, fadeTimeSec);
     }
+    if (this.player && this.player.useWorklet && this.player.workletNode) {
+      try {
+        const lvl = !isNaN(parseFloat(duckLevel)) ? Math.max(0.0, Math.min(1.0, parseFloat(duckLevel))) : 0.20;
+        const hid = String(this.hotspotId || "default");
+        this.player.workletNode.port.postMessage({
+          type: "set_slot_ducking",
+          hotspotId: hid,
+          slot: s,
+          ducked: Boolean(ducked),
+          duckLevel: lvl
+        });
+        const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
+        const isPrimary = (hid === "default" || hid === primaryId);
+        if (isPrimary) {
+          const altId = (hid === "default") ? primaryId : "default";
+          if (altId !== hid) {
+            this.player.workletNode.port.postMessage({
+              type: "set_slot_ducking",
+              hotspotId: altId,
+              slot: s,
+              ducked: Boolean(ducked),
+              duckLevel: lvl
+            });
+          }
+        }
+      } catch (_) {}
+    }
   }
 
   setAllDucking(ducked, duckLevel = 1.0, fadeTimeSec = 0.25) {
-    if (this.slots[1]) this.slots[1].setDucking(ducked, duckLevel, fadeTimeSec);
-    if (this.slots[2]) this.slots[2].setDucking(ducked, duckLevel, fadeTimeSec);
+    this.setSlotDucking(1, ducked, duckLevel, fadeTimeSec);
+    this.setSlotDucking(2, ducked, duckLevel, fadeTimeSec);
   }
 
   feed(arrayBuffer, slot = 1) {
@@ -618,6 +630,9 @@ class DMRAudioPlayer {
     this.globalMuted = false;
     this.pttMuted = false;
     this.soloMuted = false;
+    this.workletNode = null;
+    this.useWorklet = false;
+    this.workletInitPromise = null;
     // Overall coefficient attenuated by -9 dB relative to baseline of 1.20
     this.masterVolume = 1.2 * MASTER_GAIN_9DB_ATTENUATION; // ~0.42578 (-9 dB)
     if (typeof window !== "undefined") {
@@ -630,7 +645,7 @@ class DMRAudioPlayer {
     this.eqMid = 0;
     this.eqHigh = 0;
     this.deemphasis = false;
-    this.jitterBufferMs = 120;
+    this.jitterBufferMs = 180;
 
     try {
       if (typeof localStorage !== "undefined") {
@@ -646,7 +661,7 @@ class DMRAudioPlayer {
         const savedJitter = localStorage.getItem("proxdmr_jitter_buffer_ms");
         if (savedJitter !== null) {
           const parsed = parseInt(savedJitter, 10);
-          if (!isNaN(parsed) && parsed >= 40 && parsed <= 500) {
+          if (!isNaN(parsed) && parsed >= 40 && parsed <= 2000) {
             this.jitterBufferMs = parsed;
           }
         }
@@ -658,7 +673,11 @@ class DMRAudioPlayer {
     if (!this.audioCtx) {
       const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtxClass) return;
-      this.audioCtx = existingAudioContext || new AudioCtxClass();
+      try {
+        this.audioCtx = existingAudioContext || new AudioCtxClass({ latencyHint: "playback" });
+      } catch (_) {
+        this.audioCtx = existingAudioContext || new AudioCtxClass();
+      }
     }
     if (!this.masterLimiter && this.audioCtx) {
       try {
@@ -739,10 +758,112 @@ class DMRAudioPlayer {
         console.warn("[AUDIO] Master graph init error:", e);
       }
     }
+    if (!this.useWorklet && !this.workletInitPromise && this.audioCtx && this.audioCtx.audioWorklet) {
+      this.initWorklet();
+    }
+  }
+
+  async initWorklet() {
+    if (this.workletInitPromise) return this.workletInitPromise;
+    if (!this.audioCtx || !this.audioCtx.audioWorklet) {
+      console.log("[AUDIO] AudioWorklet not supported, using classic AudioBuffer pipeline");
+      return false;
+    }
+    this.workletInitPromise = (async () => {
+      try {
+        const cacheVer = (typeof window !== "undefined" && window.CACHE_VERSION) ? window.CACHE_VERSION : "2.9.443";
+        await this.audioCtx.audioWorklet.addModule(`/static/js/worklets/dmr-audio-processor.js?v=2.9.524`);
+        this.workletNode = new AudioWorkletNode(this.audioCtx, "dmr-audio-processor", {
+          numberOfInputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [2]
+        });
+
+        // Route real-time worklet output through rxInputBus (limiter + master gain)
+        if (this.rxInputBus) {
+          this.workletNode.connect(this.rxInputBus);
+        } else if (this.masterLimiter) {
+          this.workletNode.connect(this.masterLimiter);
+        } else {
+          this.workletNode.connect(this.audioCtx.destination);
+        }
+
+        this.useWorklet = true;
+        console.log("[AUDIO] Dedicated AudioWorklet real-time pipeline initialized successfully");
+
+        // Sync initial player state to worklet
+        this._syncWorkletState();
+
+        this.workletNode.onprocessorerror = (err) => {
+          console.error("[AUDIO] AudioWorklet processor error:", err);
+          this.useWorklet = false;
+        };
+        return true;
+      } catch (err) {
+        console.warn("[AUDIO] AudioWorklet init failed, falling back to classic WebAudio:", err);
+        this.useWorklet = false;
+        return false;
+      }
+    })();
+    return this.workletInitPromise;
+  }
+
+  _syncWorkletState() {
+    if (!this.useWorklet || !this.workletNode) return;
+    try {
+      this.workletNode.port.postMessage({
+        type: "set_pre_gain",
+        db: this.preGainDb
+      });
+      this.workletNode.port.postMessage({
+        type: "set_jitter_buffer",
+        ms: this.jitterBufferMs
+      });
+      this.workletNode.port.postMessage({
+        type: "set_global_mute",
+        muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
+      });
+      this.channels.forEach((channel, hid) => {
+        this.workletNode.port.postMessage({
+          type: "set_channel_volume",
+          hotspotId: hid,
+          volume: channel.volume
+        });
+        this.workletNode.port.postMessage({
+          type: "set_channel_mute",
+          hotspotId: hid,
+          muted: channel.isMuted
+        });
+        for (const slot of [1, 2]) {
+          const slotObj = channel.slots && channel.slots[slot];
+          if (slotObj) {
+            this.workletNode.port.postMessage({
+              type: "set_slot_mute",
+              hotspotId: hid,
+              slot: slot,
+              muted: slotObj.isMuted
+            });
+            const pan = slotObj.panMode || "LR";
+            this.workletNode.port.postMessage({
+              type: "set_slot_pan",
+              hotspotId: hid,
+              slot: slot,
+              pan: pan === "L" ? "left" : (pan === "R" ? "right" : "center")
+            });
+          }
+        }
+      });
+      if (typeof window !== "undefined" && window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.syncIdleDucking === "function") {
+        try {
+          window.ttsAudioQueueManager.syncIdleDucking(0.05);
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   async init(existingAudioContext = null) {
     this.initSync(existingAudioContext);
+    await this.initWorklet();
     if (this.audioCtx && this.audioCtx.state === "suspended") {
       try {
         await this.audioCtx.resume();
@@ -808,6 +929,44 @@ class DMRAudioPlayer {
       ch.setSlotPan(1, p1);
       ch.setSlotPan(2, p2);
       this.channels.set(hid, ch);
+      if (this.useWorklet && this.workletNode) {
+        try {
+          this.workletNode.port.postMessage({
+            type: "set_channel_volume",
+            hotspotId: hid,
+            volume: ch.volume
+          });
+          this.workletNode.port.postMessage({
+            type: "set_channel_mute",
+            hotspotId: hid,
+            muted: ch.isMuted
+          });
+          this.workletNode.port.postMessage({
+            type: "set_slot_mute",
+            hotspotId: hid,
+            slot: 1,
+            muted: ch.isSlotMuted(1)
+          });
+          this.workletNode.port.postMessage({
+            type: "set_slot_mute",
+            hotspotId: hid,
+            slot: 2,
+            muted: ch.isSlotMuted(2)
+          });
+          this.workletNode.port.postMessage({
+            type: "set_slot_pan",
+            hotspotId: hid,
+            slot: 1,
+            pan: p1 === "L" ? "left" : (p1 === "R" ? "right" : "center")
+          });
+          this.workletNode.port.postMessage({
+            type: "set_slot_pan",
+            hotspotId: hid,
+            slot: 2,
+            pan: p2 === "L" ? "left" : (p2 === "R" ? "right" : "center")
+          });
+        } catch (_) {}
+      }
       if (typeof window !== "undefined" && window.ttsAudioQueueManager && typeof window.ttsAudioQueueManager.syncIdleDucking === "function") {
         try { window.ttsAudioQueueManager.syncIdleDucking(0.05); } catch (_) {}
       }
@@ -823,15 +982,45 @@ class DMRAudioPlayer {
     }
     if (this.globalMuted || this.pttMuted || this.soloMuted) return;
     const hid = (hotspotId !== undefined && hotspotId !== null && hotspotId !== "") ? String(hotspotId) : "default";
+    const s = parseInt(slot, 10) || 1;
+
+    // Check mute before sending
+    if (this.isSlotMuted(hid, s) || this.isHotspotMuted(hid)) return;
+
+    if (this.useWorklet && this.workletNode) {
+      try {
+        // Zero-copy transfer of raw PCM buffer to dedicated real-time audio thread
+        this.workletNode.port.postMessage(
+          { type: "feed", hotspotId: hid, slot: s, buffer: arrayBuffer },
+          [arrayBuffer]
+        );
+        return;
+      } catch (err) {
+        console.warn("[AUDIO] Worklet postMessage feed error:", err);
+      }
+    }
+
     const ch = this.getOrCreateChannel(hid);
-    if (ch.isMuted || ch.isSlotMuted(slot)) return;
-    ch.feed(arrayBuffer, slot);
+    if (ch.isMuted || ch.isSlotMuted(s)) return;
+    ch.feed(arrayBuffer, s);
   }
 
   setSlotMute(hotspotId, slot, muted) {
     const s = parseInt(slot, 10) || 1;
     const isMuted = Boolean(muted);
     const hid = (hotspotId !== undefined && hotspotId !== null && hotspotId !== "") ? String(hotspotId) : "default";
+
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_slot_mute",
+          hotspotId: hid,
+          slot: s,
+          muted: isMuted
+        });
+      } catch (_) {}
+    }
+
     const ch = this.getOrCreateChannel(hid);
     if (ch) ch.setSlotMute(s, isMuted);
 
@@ -845,6 +1034,16 @@ class DMRAudioPlayer {
         channel.setSlotMute(s, isMuted);
       } else if (isPrimary && (sKey === "default" || sKey === primaryId)) {
         channel.setSlotMute(s, isMuted);
+        if (this.useWorklet && this.workletNode) {
+          try {
+            this.workletNode.port.postMessage({
+              type: "set_slot_mute",
+              hotspotId: sKey,
+              slot: s,
+              muted: isMuted
+            });
+          } catch (_) {}
+        }
       }
     });
   }
@@ -871,7 +1070,20 @@ class DMRAudioPlayer {
   setSlotPan(hotspotId, slot, mode) {
     const s = parseInt(slot, 10) || 1;
     const safeMode = (mode === "L" || mode === "R") ? mode : "LR";
+    const panStr = safeMode === "L" ? "left" : (safeMode === "R" ? "right" : "center");
     const hid = (hotspotId !== undefined && hotspotId !== null && hotspotId !== "") ? String(hotspotId) : "default";
+
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_slot_pan",
+          hotspotId: hid,
+          slot: s,
+          pan: panStr
+        });
+      } catch (_) {}
+    }
+
     const ch = this.getOrCreateChannel(hid);
     if (ch) ch.setSlotPan(s, safeMode);
 
@@ -885,6 +1097,16 @@ class DMRAudioPlayer {
         channel.setSlotPan(s, safeMode);
       } else if (isPrimary && (sKey === "default" || sKey === primaryId)) {
         channel.setSlotPan(s, safeMode);
+        if (this.useWorklet && this.workletNode) {
+          try {
+            this.workletNode.port.postMessage({
+              type: "set_slot_pan",
+              hotspotId: sKey,
+              slot: s,
+              pan: panStr
+            });
+          } catch (_) {}
+        }
       }
     });
   }
@@ -928,6 +1150,11 @@ class DMRAudioPlayer {
     const source = this.audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.playbackRate.value = Math.max(0.5, Math.min(2.5, parseFloat(speed) || 1.0));
+    if (options && typeof options.detuneCents === "number" && options.detuneCents !== 0 && source.detune) {
+      try {
+        source.detune.value = Math.max(-200, Math.min(200, options.detuneCents));
+      } catch (_) {}
+    }
 
     // Dedicated gain node for this TTS playback instance
     const ttsGain = this.audioCtx.createGain();
@@ -1008,15 +1235,62 @@ class DMRAudioPlayer {
     return handle;
   }
 
+  getAllHotspotIds() {
+    const ids = new Set();
+    ids.add("default");
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    if (Array.isArray(hsList)) {
+      hsList.forEach(hs => {
+        if (hs && hs.id) ids.add(String(hs.id));
+      });
+    }
+    if (typeof document !== "undefined") {
+      document.querySelectorAll(".radio-container[data-hotspot-id]").forEach(el => {
+        if (el.dataset.hotspotId) ids.add(String(el.dataset.hotspotId));
+      });
+    }
+    if (this.channels) {
+      this.channels.forEach((_, k) => ids.add(String(k)));
+    }
+    return Array.from(ids);
+  }
+
   setSlotDucking(hotspotId, slot, ducked, duckLevel = 0.20, fadeTimeSec = 0.12) {
     const s = parseInt(slot, 10) || 1;
     const hid = (hotspotId !== undefined && hotspotId !== null && hotspotId !== "") ? String(hotspotId) : "default";
-    const ch = this.getOrCreateChannel(hid);
-    if (ch) ch.setSlotDucking(s, ducked, duckLevel, fadeTimeSec);
+    const parsedLevel = parseFloat(duckLevel);
+    const safeDuckLevel = !isNaN(parsedLevel) ? Math.max(0.0, Math.min(1.0, parsedLevel)) : 0.20;
 
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
     const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
     const isPrimary = (hid === "default" || hid === primaryId);
+
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_slot_ducking",
+          hotspotId: hid,
+          slot: s,
+          ducked: Boolean(ducked),
+          duckLevel: safeDuckLevel
+        });
+        if (isPrimary) {
+          const altId = (hid === "default") ? primaryId : "default";
+          if (altId !== hid) {
+            this.workletNode.port.postMessage({
+              type: "set_slot_ducking",
+              hotspotId: altId,
+              slot: s,
+              ducked: Boolean(ducked),
+              duckLevel: safeDuckLevel
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    const ch = this.channels.get(hid);
+    if (ch) ch.setSlotDucking(s, ducked, duckLevel, fadeTimeSec);
 
     this.channels.forEach((channel, key) => {
       const sKey = String(key);
@@ -1034,28 +1308,67 @@ class DMRAudioPlayer {
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
     const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
     const isTargetPrimary = (tHid === "default" || tHid === primaryId);
+    const parsedLevel = parseFloat(duckLevel);
+    const safeDuckLevel = !isNaN(parsedLevel) ? Math.max(0.0, Math.min(1.0, parsedLevel)) : 0.0;
 
-    this.channels.forEach((channel, key) => {
-      const sKey = String(key);
-      const isChannelPrimary = (sKey === "default" || sKey === primaryId);
-      const isSameHotspot = (sKey === tHid) || (isTargetPrimary && isChannelPrimary);
+    const allHids = this.getAllHotspotIds();
+    allHids.forEach(hid => {
+      const isChannelPrimary = (hid === "default" || hid === primaryId);
+      const isSameHotspot = (hid === tHid) || (isTargetPrimary && isChannelPrimary);
 
       [1, 2].forEach(slot => {
         if (isSameHotspot && slot === tSlot) {
           return; // Skip target speech slot
         }
-        channel.setSlotDucking(slot, ducked, duckLevel, fadeTimeSec);
+        if (this.useWorklet && this.workletNode) {
+          try {
+            this.workletNode.port.postMessage({
+              type: "set_slot_ducking",
+              hotspotId: hid,
+              slot: slot,
+              ducked: Boolean(ducked),
+              duckLevel: safeDuckLevel
+            });
+          } catch (_) {}
+        }
+        const ch = this.channels.get(hid);
+        if (ch) ch.setSlotDucking(slot, ducked, duckLevel, fadeTimeSec);
       });
     });
   }
 
   restoreAllDucking(fadeTimeSec = 0.25) {
-    this.channels.forEach(channel => {
-      channel.setAllDucking(false, 1.0, fadeTimeSec);
+    const allHids = this.getAllHotspotIds();
+    allHids.forEach(hid => {
+      [1, 2].forEach(slot => {
+        if (this.useWorklet && this.workletNode) {
+          try {
+            this.workletNode.port.postMessage({
+              type: "set_slot_ducking",
+              hotspotId: hid,
+              slot: slot,
+              ducked: false,
+              duckLevel: 1.0
+            });
+          } catch (_) {}
+        }
+        const ch = this.channels.get(hid);
+        if (ch) ch.setSlotDucking(slot, false, 1.0, fadeTimeSec);
+      });
     });
   }
 
   setHotspotMute(hotspotId, muted) {
+    const hid = String(hotspotId || "default");
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_channel_mute",
+          hotspotId: hid,
+          muted: Boolean(muted)
+        });
+      } catch (_) {}
+    }
     const ch = this.getOrCreateChannel(hotspotId);
     ch.setMuted(muted);
   }
@@ -1079,6 +1392,17 @@ class DMRAudioPlayer {
   setPttMuted(muted) {
     this.pttMuted = Boolean(muted);
     this._updateMasterGain();
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_global_mute",
+          muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
+        });
+        if (this.pttMuted) {
+          this.workletNode.port.postMessage({ type: "reset" });
+        }
+      } catch (_) {}
+    }
     if (this.pttMuted) {
       this.channels.forEach(ch => ch.reset());
     }
@@ -1096,6 +1420,17 @@ class DMRAudioPlayer {
       this.rxInputBus.gain.cancelScheduledValues(now);
       this.rxInputBus.gain.setTargetAtTime(targetRx, now, 0.015);
     }
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_global_mute",
+          muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
+        });
+        if (this.soloMuted) {
+          this.workletNode.port.postMessage({ type: "reset" });
+        }
+      } catch (_) {}
+    }
     if (this.soloMuted) {
       this.channels.forEach(ch => ch.reset());
     }
@@ -1108,6 +1443,14 @@ class DMRAudioPlayer {
   setGlobalMute(muted) {
     this.globalMuted = Boolean(muted);
     this._updateMasterGain();
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_global_mute",
+          muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
+        });
+      } catch (_) {}
+    }
   }
 
   isGlobalMuted() {
@@ -1115,6 +1458,19 @@ class DMRAudioPlayer {
   }
 
   setHotspotVolume(hotspotId, volume) {
+    const hid = String(hotspotId || "default");
+    const parsed = typeof volume === "number" ? volume : parseFloat(volume);
+    const raw = isNaN(parsed) ? 1.0 : parsed;
+    const norm = raw > 2.5 ? (raw / 100.0) : raw;
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_channel_volume",
+          hotspotId: hid,
+          volume: norm
+        });
+      } catch (_) {}
+    }
     const ch = this.getOrCreateChannel(hotspotId);
     ch.setVolume(volume);
   }
@@ -1151,6 +1507,20 @@ class DMRAudioPlayer {
 
   onTransmissionEnd(hotspotId, slot = null) {
     const cid = hotspotId || "default";
+    if (this.useWorklet && this.workletNode) {
+      try {
+        if (slot !== null && slot !== undefined) {
+          this.workletNode.port.postMessage({
+            type: "tx_ended",
+            hotspotId: cid,
+            slot: parseInt(slot, 10) || 1
+          });
+        } else {
+          this.workletNode.port.postMessage({ type: "tx_ended", hotspotId: cid, slot: 1 });
+          this.workletNode.port.postMessage({ type: "tx_ended", hotspotId: cid, slot: 2 });
+        }
+      } catch (_) {}
+    }
     const ch = this.channels.get(cid);
     if (ch) {
       ch.onTransmissionEnd(slot);
@@ -1160,6 +1530,11 @@ class DMRAudioPlayer {
   setPreGainDb(db) {
     const val = Math.max(-20, Math.min(12, Math.round(parseFloat(db) || 0)));
     this.preGainDb = val;
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({ type: "set_pre_gain", db: val });
+      } catch (_) {}
+    }
     // Input Pre-Gain is applied directly to incoming PCM samples in HotspotAudioSlot before AGC
     if (this.preGainNode && this.audioCtx) {
       const now = this.audioCtx.currentTime;
@@ -1207,8 +1582,13 @@ class DMRAudioPlayer {
   }
 
   setJitterBufferMs(ms) {
-    const val = Math.max(40, Math.min(500, parseInt(ms, 10) || 120));
+    const val = Math.max(40, Math.min(2000, parseInt(ms, 10) || 120));
     this.jitterBufferMs = val;
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({ type: "set_jitter_buffer", ms: val });
+      } catch (_) {}
+    }
     try {
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("proxdmr_jitter_buffer_ms", String(val));
@@ -1217,21 +1597,33 @@ class DMRAudioPlayer {
   }
 
   getJitterBufferMs() {
-    return this.jitterBufferMs || 120;
+    return this.jitterBufferMs || 180;
   }
 
   getJitterBufferSec() {
-    return (this.jitterBufferMs || 120) / 1000.0;
+    return (this.jitterBufferMs || 180) / 1000.0;
   }
 
 
 
   resetHotspot(hotspotId) {
-    const ch = this.channels.get(String(hotspotId || "default"));
+    const cid = String(hotspotId || "default");
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({ type: "reset", hotspotId: cid, slot: 1 });
+        this.workletNode.port.postMessage({ type: "reset", hotspotId: cid, slot: 2 });
+      } catch (_) {}
+    }
+    const ch = this.channels.get(cid);
     if (ch) ch.reset();
   }
 
   reset() {
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({ type: "reset" });
+      } catch (_) {}
+    }
     this.channels.forEach(ch => ch.reset());
   }
 

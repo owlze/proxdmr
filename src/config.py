@@ -46,7 +46,10 @@ class HotspotConfig(BaseModel):
     send_talker_alias: bool = True
     collapsed: bool = False
     auto_tg_bm: bool = True
-    auto_record: bool = False
+    auto_record: bool = True
+    allstar_node: str = "1999"
+    allstar_always_online: bool = True
+    hidden: bool = False
     model_config = {"extra": "allow"}
 
 class AppSettings(BaseModel):

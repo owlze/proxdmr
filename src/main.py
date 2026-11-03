@@ -105,6 +105,8 @@ user_clients: Dict[int, Set[WebSocket]] = {}
 ws_user_map: Dict[WebSocket, int] = {}
 ws_active_hotspots: Dict[WebSocket, Set[str]] = {}
 demo_ws_clients: Dict[WebSocket, str] = {}  # ws -> demo_sid
+ws_audio_queues: Dict[WebSocket, asyncio.Queue] = {}
+ws_audio_tasks: Dict[WebSocket, asyncio.Task] = {}
 
 def _prune_dead_ws_clients() -> None:
     dead = {
@@ -116,6 +118,13 @@ def _prune_dead_ws_clients() -> None:
         for ws_dead in dead:
             ws_active_hotspots.pop(ws_dead, None)
             demo_ws_clients.pop(ws_dead, None)
+            q_dead = ws_audio_queues.pop(ws_dead, None)
+            t_dead = ws_audio_tasks.pop(ws_dead, None)
+            if q_dead:
+                try: q_dead.put_nowait(None)
+                except Exception: pass
+            if t_dead and not t_dead.done():
+                t_dead.cancel()
             dead_uid = ws_user_map.pop(ws_dead, None)
             if dead_uid and dead_uid in user_clients:
                 user_clients[dead_uid].discard(ws_dead)
@@ -132,6 +141,13 @@ def _prune_dead_ws_clients() -> None:
                 connected_clients.discard(ws_s)
                 ws_user_map.pop(ws_s, None)
                 ws_active_hotspots.pop(ws_s, None)
+                q_s = ws_audio_queues.pop(ws_s, None)
+                t_s = ws_audio_tasks.pop(ws_s, None)
+                if q_s:
+                    try: q_s.put_nowait(None)
+                    except Exception: pass
+                if t_s and not t_s.done():
+                    t_s.cancel()
             if not u_set:
                 user_clients.pop(uid_k, None)
 
@@ -209,7 +225,7 @@ async def broadcast_user_json(user_id: int, data: dict, exclude: Optional[WebSoc
 
 async def _send_ws_bytes(ws: WebSocket, data: bytes) -> bool:
     try:
-        await asyncio.wait_for(ws.send_bytes(data), timeout=0.3)
+        await ws.send_bytes(data)
         return True
     except Exception:
         return False
@@ -221,20 +237,74 @@ async def _send_ws_text(ws: WebSocket, text: str) -> bool:
     except Exception:
         return False
 
-async def broadcast_user_binary(user_id: int, data: bytes, exclude: Optional[WebSocket] = None):
+async def _ws_audio_sender_loop(ws: WebSocket, q: asyncio.Queue) -> None:
+    """Dedicated low-latency streaming loop for a single WebSocket client.
+    Pulls audio buffers from a dedicated ring-queue and sends them over TCP without
+    task allocation overhead or contention with main API events."""
+    try:
+        while True:
+            chunk = await q.get()
+            if chunk is None:  # Exit sentinel
+                break
+            try:
+                await ws.send_bytes(chunk)
+            except Exception:
+                break
+            finally:
+                q.task_done()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.debug(f"[WS-AUDIO] Streamer loop terminated: {e}")
+
+def dispatch_user_audio(user_id: int, data: bytes, exclude: Optional[WebSocket] = None) -> None:
+    """Fast, synchronous O(1) audio packet dispatch directly into client queues.
+    Drops oldest chunk if client's buffer is backlogged (>1.92s) to maintain real-time sync."""
     sockets = user_clients.get(user_id)
     if not sockets:
         return
-    targets = [ws for ws in list(sockets) if ws != exclude and ws.client_state == WebSocketState.CONNECTED]
-    if not targets:
+    for ws in list(sockets):
+        if ws == exclude:
+            continue
+        q = ws_audio_queues.get(ws)
+        if q is not None:
+            try:
+                q.put_nowait(data)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.task_done()
+                except Exception:
+                    pass
+                try:
+                    q.put_nowait(data)
+                except Exception:
+                    pass
+
+def broadcast_binary(data: bytes, exclude: Optional[WebSocket] = None, user_id: Optional[int] = None) -> None:
+    """Synchronous fast binary audio broadcast."""
+    if user_id is not None:
+        dispatch_user_audio(int(user_id), data, exclude=exclude)
         return
-    results = await asyncio.gather(*[_send_ws_bytes(ws, data) for ws in targets], return_exceptions=True)
-    dead_clients = {ws for ws, ok in zip(targets, results) if ok is not True}
-    if dead_clients:
-        sockets.difference_update(dead_clients)
-        connected_clients.difference_update(dead_clients)
-        for ws in dead_clients:
-            ws_user_map.pop(ws, None)
+    for ws, q in list(ws_audio_queues.items()):
+        if ws == exclude:
+            continue
+        try:
+            q.put_nowait(data)
+        except asyncio.QueueFull:
+            try:
+                q.get_nowait()
+                q.task_done()
+            except Exception:
+                pass
+            try:
+                q.put_nowait(data)
+            except Exception:
+                pass
+
+async def broadcast_user_binary(user_id: int, data: bytes, exclude: Optional[WebSocket] = None) -> None:
+    """Async wrapper for backward compatibility."""
+    dispatch_user_audio(user_id, data, exclude=exclude)
 
 async def broadcast_json(data: dict, exclude: Optional[WebSocket] = None, user_id: Optional[int] = None):
     target_uid = user_id if user_id is not None else data.get("user_id")
@@ -295,21 +365,6 @@ async def broadcast_json(data: dict, exclude: Optional[WebSocket] = None, user_i
                 if uid and uid in user_clients:
                     user_clients[uid].discard(ws)
 
-async def broadcast_binary(data: bytes, exclude: Optional[WebSocket] = None, user_id: Optional[int] = None):
-    if user_id is not None:
-        await broadcast_user_binary(int(user_id), data, exclude=exclude)
-        return
-    targets = [ws for ws in list(connected_clients) if ws != exclude and ws.client_state == WebSocketState.CONNECTED]
-    if not targets:
-        return
-    results = await asyncio.gather(*[_send_ws_bytes(ws, data) for ws in targets], return_exceptions=True)
-    dead_clients = {ws for ws, ok in zip(targets, results) if ok is not True}
-    if dead_clients:
-        connected_clients.difference_update(dead_clients)
-        for ws in dead_clients:
-            uid = ws_user_map.pop(ws, None)
-            if uid and uid in user_clients:
-                user_clients[uid].discard(ws)
 
 transcriber_service = GeminiTranscriberService(broadcast_fn=broadcast_json)
 transcriber_service.configure(
@@ -354,11 +409,17 @@ def get_hotspots_for_ping():
             rt = hotspot_manager.runtimes.get(cfg.id)
             if rt:
                 d = rt.to_dict()
+                d["connected_node"] = getattr(rt, "connected_node", None)
+                d["asl_links"] = getattr(rt, "asl_links", None)
+                d["_active_asl_node"] = getattr(rt, "_active_asl_node", None)
+                d["_last_asl_node"] = getattr(rt, "_last_asl_node", None)
+                d["user_id"] = getattr(rt, "user_id", 1)
             else:
                 d = {
                     "id": cfg.id,
                     "name": cfg.name,
                     "bm_master_host": cfg.bm_master_host,
+                    "network_type": getattr(cfg, "network_type", "bm") or "bm",
                     "status": "OFFLINE",
                 }
             d["is_primary"] = (i == 0)
@@ -439,6 +500,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(xlx_hosts_mgr.periodic_update_loop())
         from dmr.dmrplus_hosts import dmrplus_hosts_mgr
         asyncio.create_task(dmrplus_hosts_mgr.periodic_update_loop())
+        from allstar_directory import allstar_dir_mgr
+        asyncio.create_task(allstar_dir_mgr.periodic_update_loop())
     except Exception as e:
         logger.warning(f"[MAIN] Failed to start xlx_hosts background loop: {e}")
     yield
@@ -450,6 +513,11 @@ async def lifespan(app: FastAPI):
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
         transcriber_service.disable_all_slots()
     await hotspot_manager.stop()
+    try:
+        from asl_container_manager import asl_container_mgr
+        asl_container_mgr.stop_all_instances()
+    except Exception as e:
+        logger.warning(f"[MAIN] Error stopping ASL containers on shutdown: {e}")
 
 app = FastAPI(title="ProxDMR Web Gateway", version="0.3.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -2081,16 +2149,20 @@ async def create_hotspot(cfg: HotspotConfig, request: Request):
     if user:
         await ensure_active_user(uid, user.get("login", ""))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
-    if len(user_sett.hotspots) >= 7:
-        raise HTTPException(status_code=400, detail="Максимум 7 виртуальных хотспотов")
-    if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
-        raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
-    for h in user_sett.hotspots:
-        if h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"SSID {cfg.bm_ssid} уже используется для DMR ID {cfg.dmr_id} в этой сети. Выберите другой SSID (например, {cfg.bm_ssid + 1})"
-            )
+    if len(user_sett.hotspots) >= 30:
+        raise HTTPException(status_code=400, detail="Максимум 30 виртуальных хотспотов")
+    active_count = len([h for h in user_sett.hotspots if not getattr(h, "hidden", False)])
+    if not getattr(cfg, "hidden", False) and active_count >= 7:
+        raise HTTPException(status_code=400, detail="Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов")
+    if getattr(cfg, "network_type", "bm") != "allstar":
+        if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
+            raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
+        for h in user_sett.hotspots:
+            if h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"SSID {cfg.bm_ssid} уже используется для DMR ID {cfg.dmr_id} в этой сети. Выберите другой SSID (например, {cfg.bm_ssid + 1})"
+                )
     rt = hotspot_manager.create_hotspot(cfg, user_id=uid)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2127,11 +2199,23 @@ async def update_hotspot(hotspot_id: str, cfg: HotspotConfig, request: Request, 
     if user:
         await ensure_active_user(uid, user.get("login", ""))
     cfg.id = hotspot_id
-    if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
-        raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
+    if getattr(cfg, "network_type", "bm") != "allstar":
+        if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
+            raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    is_now_hidden = getattr(cfg, "hidden", False)
+    cur_hs = next((h for h in user_sett.hotspots if h.id == hotspot_id), None)
+    was_hidden = getattr(cur_hs, "hidden", False) if cur_hs else False
+    if was_hidden and not is_now_hidden:
+        active_count = len([h for h in user_sett.hotspots if not getattr(h, "hidden", False) and h.id != hotspot_id])
+        if active_count >= 7:
+            raise HTTPException(status_code=400, detail="Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов")
+    if is_now_hidden and getattr(user_sett, "active_hotspot_id", "") == hotspot_id:
+        visible_hs = [h for h in user_sett.hotspots if not getattr(h, "hidden", False) and h.id != hotspot_id]
+        if visible_hs:
+            user_sett.active_hotspot_id = visible_hs[0].id
     for h in user_sett.hotspots:
-        if h.id != hotspot_id and h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
+        if getattr(cfg, "network_type", "bm") != "allstar" and h.id != hotspot_id and h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
             raise HTTPException(
                 status_code=400,
                 detail=f"SSID {cfg.bm_ssid} уже занят другим хотспотом с таким же DMR ID в этой сети. Выберите свободный SSID"
@@ -3721,6 +3805,8 @@ async def connect_hotspot(hotspot_id: str, request: Request):
     settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
     rt_check = hotspot_manager.get_runtime(uid, target_id)
+    if rt_check and getattr(rt_check.config, "hidden", False):
+        return {"status": "error", "message": "Нельзя подключить скрытый хотспот. Сначала верните его в список живых"}
     if is_demo and rt_check:
         await _prepare_demo_hotspot_ssid(uid, rt_check)
     success = await hotspot_manager.connect_hotspot(target_id, user_id=uid, persist=not is_demo)
@@ -4120,6 +4206,447 @@ async def refresh_dmrplus_hosts(request: Request = None):
         "source": dmrplus_hosts_mgr._source,
         "generated_at": int(dmrplus_hosts_mgr._last_loaded_ts)
     }
+
+@app.get("/api/allstar/nodes")
+async def get_allstar_nodes(q: str = "", limit: int = 50):
+    """Searches AllStarLink global nodes by number, callsign, name, or location."""
+    from allstar_directory import allstar_dir_mgr
+    await allstar_dir_mgr.fetch_nodes(force=False)
+    return allstar_dir_mgr.search(query=q, limit=limit)
+
+@app.post("/api/allstar/nodes/sync")
+async def sync_allstar_nodes():
+    """Force refreshes AllStarLink database from http://allmondb.allstarlink.org/."""
+    from allstar_directory import allstar_dir_mgr
+    nodes = await allstar_dir_mgr.fetch_nodes(force=True)
+    return {
+        "status": "ok",
+        "total": len(nodes),
+        "last_sync": int(allstar_dir_mgr._last_loaded_ts),
+        "source": allstar_dir_mgr._source
+    }
+
+@app.get("/api/allstar/nodes/stats")
+async def get_allstar_nodes_stats():
+    """Returns AllStarLink node database stats."""
+    from allstar_directory import allstar_dir_mgr
+    return {"status": "ok", "stats": allstar_dir_mgr.get_stats()}
+
+class AllStarCTCSSUpdate(BaseModel):
+    hotspot_id: str = "default"
+    enabled: bool = True
+
+@app.post("/api/allstar/ctcss")
+async def set_allstar_ctcss(update: AllStarCTCSSUpdate, request: Request = None):
+    """Sets CTCSS filter mode (enabled: bool) for AllStarLink hotspot."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    hid = str(update.hotspot_id).strip()
+    enabled = bool(update.enabled)
+    target_hs = (hotspot_manager.get_runtime(uid, hid) if hid else None) or hotspot_manager.get_active_runtime(uid)
+    if target_hs:
+        adapter = getattr(target_hs, "client", None)
+        if adapter and hasattr(adapter, "ctcss_filter_enabled"):
+            adapter.ctcss_filter_enabled = enabled
+        asl = getattr(target_hs, "allstar_client", None)
+        if asl and hasattr(asl, "ctcss_filter_enabled"):
+            asl.ctcss_filter_enabled = enabled
+    return {"status": "ok", "hotspot_id": hid, "ctcss_filter_enabled": enabled}
+
+class AllStarNodeAction(BaseModel):
+    hotspot_id: str = "default"
+    target_node: str
+    mode: str = "*3"
+    add_mode: Optional[bool] = None
+    show_status_banner: Optional[bool] = True
+    show_card_effects: Optional[bool] = True
+
+async def _execute_asl_disconnect_flow(
+    uid: int,
+    target_hs,
+    disc_target: str = "all",
+    show_status_banner: bool = True,
+    show_card_effects: bool = True
+) -> dict:
+    """Оркестратор отключения AllStarLink ХН с обратной связью по WebSocket."""
+    if not hasattr(target_hs, "_asl_flow_lock"):
+        target_hs._asl_flow_lock = asyncio.Lock()
+
+    async with target_hs._asl_flow_lock:
+        own_node = str(getattr(target_hs.config, "allstar_node", "1999") or "1999").strip()
+        from asl_container_manager import asl_container_mgr
+        from dmr.homebrew import BMState
+
+        loop = asyncio.get_running_loop()
+        def emit_step(step_data: dict):
+            payload = {
+                "type": "allstar_proc_step",
+                "hotspot_id": target_hs.config.id,
+                **step_data
+            }
+            asyncio.run_coroutine_threadsafe(broadcast_user_json(uid, payload), loop)
+
+        res = await asyncio.to_thread(
+            asl_container_mgr.run_disconnect_procedure,
+            user_id=str(uid),
+            node_number=own_node,
+            target_node=disc_target,
+            show_status_banner=show_status_banner,
+            show_card_effects=show_card_effects,
+            step_cb=emit_step
+        )
+
+        asl = getattr(target_hs, "allstar_client", None)
+        if asl and asl.is_connected:
+            if disc_target in ("all", "*73", "*76", "0", ""):
+                asl.send_dtmf("*73")
+            else:
+                asl.send_dtmf(f"*1{disc_target}")
+
+        is_all = disc_target in ("all", "*73", "*76", "0", "")
+        if is_all:
+            target_hs.connected_node = ""
+            target_hs.is_asl_linked = False
+            target_hs.asl_links = []
+            target_hs.asl_online_count = 0
+        else:
+            if str(getattr(target_hs, "connected_node", "")).strip() == disc_target:
+                target_hs.connected_node = ""
+                target_hs.is_asl_linked = False
+            if hasattr(target_hs, "asl_links") and isinstance(target_hs.asl_links, list):
+                target_hs.asl_links = [l for l in target_hs.asl_links if str(l.get("node", "")).strip() != disc_target]
+                target_hs.asl_online_count = len(target_hs.asl_links)
+
+        if not target_hs.connected_node and not getattr(target_hs, "asl_links", None):
+            target_hs.status = BMState.DISCONNECTED
+            target_hs.detail = "Отключен"
+            await broadcast_user_json(uid, {
+                "type": "bm_status",
+                "hotspot_id": target_hs.config.id,
+                "status": "DISCONNECTED",
+                "detail": "Отключен",
+                "user_id": uid
+            })
+
+        await broadcast_user_json(uid, {
+            "type": "allstar_node_disconnected",
+            "hotspot_id": target_hs.config.id,
+            "node": disc_target
+        })
+        return res
+
+async def _execute_asl_connect_flow(
+    uid: int,
+    target_hs,
+    node: str,
+    mode: str = "*2",
+    show_status_banner: bool = True,
+    show_card_effects: bool = True
+) -> dict:
+    """Оркестратор последовательного подключения ХН: Disconnect First -> Verify 0 Links -> Connect Next."""
+    if not hasattr(target_hs, "_asl_flow_lock"):
+        target_hs._asl_flow_lock = asyncio.Lock()
+
+    async with target_hs._asl_flow_lock:
+        own_node = str(getattr(target_hs.config, "allstar_node", "1999") or "1999").strip()
+        from asl_container_manager import asl_container_mgr
+        from dmr.homebrew import BMState
+
+        loop = asyncio.get_running_loop()
+        def emit_step(step_data: dict):
+            payload = {
+                "type": "allstar_proc_step",
+                "hotspot_id": target_hs.config.id,
+                **step_data
+            }
+            asyncio.run_coroutine_threadsafe(broadcast_user_json(uid, payload), loop)
+
+        node = str(node).strip()
+        mode_clean = "*3" if (node in ("1999", "9999") or mode in ("*3", "perm", "transceive")) else "*2"
+
+        # Шаг А: Сначала отключение старого ХН (Disconnect First)
+        current_links = await asyncio.to_thread(asl_container_mgr.get_connected_links, str(uid), own_node)
+        has_existing = bool(current_links) or bool(getattr(target_hs, "connected_node", None))
+
+        if has_existing:
+            logger.info(f"[ASL-FLOW] Existing links detected before connecting to {node}. Running disconnect flow first.")
+            disc_res = await asyncio.to_thread(
+                asl_container_mgr.run_disconnect_procedure,
+                user_id=str(uid),
+                node_number=own_node,
+                target_node="all",
+                show_status_banner=show_status_banner,
+                show_card_effects=show_card_effects,
+                step_cb=emit_step
+            )
+            target_hs.connected_node = ""
+            target_hs.is_asl_linked = False
+            target_hs.asl_links = []
+            target_hs.asl_online_count = 0
+            
+            # Короткая пауза 550 мс, чтобы глаз пользователя зафиксировал завершение отключения старого ХН
+            await asyncio.sleep(0.55)
+
+        # Шаг Б: Подключение нового ХН (Connect Next)
+        logger.info(f"[ASL-FLOW] Connecting to #{node} (mode {mode_clean}) on {own_node}")
+        res = await asyncio.to_thread(
+            asl_container_mgr.run_connect_procedure,
+            user_id=str(uid),
+            node_number=own_node,
+            target_node=node,
+            mode=mode_clean,
+            show_status_banner=show_status_banner,
+            show_card_effects=show_card_effects,
+            step_cb=emit_step
+        )
+
+        # Шаг В: Финализация состояния target_hs строго по факту res["success"]
+        if res.get("success"):
+            target_hs.connected_node = node
+            target_hs._last_asl_node = node
+            target_hs.is_asl_linked = True
+            target_hs.asl_links = res.get("links") or [{"node": node, "mode": mode_clean, "direction": "OUT"}]
+            target_hs.asl_online_count = len(target_hs.asl_links)
+            target_hs.status = BMState.ONLINE
+            target_hs.detail = f"AllStarLink Node {node}"
+
+            asl = getattr(target_hs, "allstar_client", None)
+            if asl and asl.is_connected:
+                asl.send_dtmf(f"{mode_clean}{node}")
+
+            await broadcast_user_json(uid, {
+                "type": "bm_status",
+                "hotspot_id": target_hs.config.id,
+                "status": "ONLINE",
+                "detail": f"AllStarLink Node {node}",
+                "user_id": uid
+            })
+            await broadcast_user_json(uid, {
+                "type": "allstar_node_changed",
+                "hotspot_id": target_hs.config.id,
+                "node": node,
+                "mode": mode_clean
+            })
+        else:
+            target_hs.connected_node = ""
+            target_hs.is_asl_linked = False
+            target_hs.asl_links = []
+            target_hs.asl_online_count = 0
+            target_hs.status = BMState.DISCONNECTED
+            target_hs.detail = "Отключен"
+
+            await broadcast_user_json(uid, {
+                "type": "bm_status",
+                "hotspot_id": target_hs.config.id,
+                "status": "DISCONNECTED",
+                "detail": "Отключен",
+                "user_id": uid
+            })
+            await broadcast_user_json(uid, {
+                "type": "allstar_node_disconnected",
+                "hotspot_id": target_hs.config.id,
+                "node": node,
+                "failed_node": node,
+                "reason": res.get("reason", "failed")
+            })
+
+        return res
+
+@app.post("/api/allstar/connect")
+async def api_allstar_connect(action: AllStarNodeAction, request: Request = None):
+    """Connects user's AllStarLink node to a remote node."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    target_hs = (hotspot_manager.get_runtime(uid, action.hotspot_id) if action.hotspot_id else None) or hotspot_manager.get_active_runtime(uid)
+    if not target_hs:
+        return {"status": "error", "message": "No active AllStarLink hotspot found"}
+    own_node = str(getattr(target_hs.config, "allstar_node", "1999") or "1999").strip()
+    res = await _execute_asl_connect_flow(
+        uid=uid,
+        target_hs=target_hs,
+        node=action.target_node,
+        mode="*3" if action.mode in ("*3", "perm") else "*2",
+        show_status_banner=action.show_status_banner if action.show_status_banner is not None else True,
+        show_card_effects=action.show_card_effects if action.show_card_effects is not None else True
+    )
+    return {"status": "ok" if res.get("success") else "error", "own_node": own_node, "target_node": action.target_node, "result": res}
+
+@app.post("/api/allstar/disconnect")
+async def api_allstar_disconnect(action: AllStarNodeAction, request: Request = None):
+    """Disconnects user's AllStarLink node from a remote node."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    target_hs = (hotspot_manager.get_runtime(uid, action.hotspot_id) if action.hotspot_id else None) or hotspot_manager.get_active_runtime(uid)
+    if not target_hs:
+        return {"status": "error", "message": "No active AllStarLink hotspot found"}
+    own_node = str(getattr(target_hs.config, "allstar_node", "1999") or "1999").strip()
+    disc_target = str(action.target_node or "").strip()
+    res = await _execute_asl_disconnect_flow(
+        uid=uid,
+        target_hs=target_hs,
+        disc_target=disc_target,
+        show_status_banner=action.show_status_banner if action.show_status_banner is not None else True,
+        show_card_effects=action.show_card_effects if action.show_card_effects is not None else True
+    )
+    return {"status": "ok" if res.get("success") else "error", "own_node": own_node, "target_node": action.target_node, "result": res}
+
+@app.get("/api/allstar/connected")
+async def api_allstar_connected(hotspot_id: str = "default", request: Request = None):
+    """Returns list of remote nodes currently connected to this AllStar node with telemetry."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    target_hs = (hotspot_manager.get_runtime(uid, hotspot_id) if hotspot_id else None) or hotspot_manager.get_active_runtime(uid)
+    if not target_hs:
+        return {"status": "ok", "connected_nodes": [], "online_count": 0, "rtt": 0, "jitter": 0}
+    own_node = str(getattr(target_hs.config, "allstar_node", "1999") or "1999").strip()
+    links = []
+    established_nodes = []
+    nodes = []
+    try:
+        from asl_container_manager import asl_container_mgr
+        from allstar_directory import allstar_dir_mgr
+        links = asl_container_mgr.get_connected_links(user_id=str(uid), node_number=own_node)
+        for lk in (links or []):
+            if isinstance(lk, dict) and lk.get("node"):
+                info = allstar_dir_mgr.get_node_info(str(lk["node"]).strip())
+                if info:
+                    if not lk.get("callsign"):
+                        lk["callsign"] = info.get("callsign", "")
+                    if not lk.get("name"):
+                        lk["name"] = info.get("name", "")
+                    if not lk.get("city"):
+                        lk["city"] = info.get("city", "")
+                    if not lk.get("flag"):
+                        lk["flag"] = info.get("flag", "🌐")
+        established_nodes = [l["node"] for l in links if isinstance(l, dict) and "node" in l and not l.get("connecting")] if links else []
+        nodes = [l["node"] for l in links if isinstance(l, dict) and "node" in l] if links else asl_container_mgr.get_connected_nodes(user_id=str(uid), node_number=own_node)
+    except Exception as e:
+        logger.warning(f"[ALLSTAR] Error querying links for node {own_node}: {e}")
+
+    online_count = len(established_nodes)
+    target_hs.asl_online_count = online_count
+    target_hs.asl_links = links
+
+    asl_client = getattr(target_hs, "allstar_client", None)
+    is_client_connected = bool(asl_client and asl_client.is_connected)
+    from dmr.homebrew import BMState
+
+    if established_nodes:
+        target_hs.connected_node = str(established_nodes[0])
+        target_hs.is_asl_linked = True
+        if getattr(target_hs, "status", None) != BMState.ONLINE:
+            target_hs.status = BMState.ONLINE
+            target_hs.detail = f"AllStarLink Node {established_nodes[0]}"
+            hotspot_manager._notify_async({
+                "type": "bm_status",
+                "hotspot_id": target_hs.config.id,
+                "status": "ONLINE",
+                "detail": f"AllStarLink Node {established_nodes[0]}",
+                "user_id": uid
+            }, user_id=uid)
+    else:
+        target_hs.connected_node = ""
+        target_hs.is_asl_linked = False
+        if is_client_connected and getattr(target_hs, "status", None) != BMState.ONLINE:
+            target_hs.status = BMState.ONLINE
+            target_hs.detail = f"AllStarLink (Node {own_node})"
+            hotspot_manager._notify_async({
+                "type": "bm_status",
+                "hotspot_id": target_hs.config.id,
+                "status": "ONLINE",
+                "detail": f"AllStarLink (Node {own_node})",
+                "user_id": uid
+            }, user_id=uid)
+
+    rtt = 0.0
+    jitter = 0.0
+    # Determine target node: active talking node, last transmitted node, or connected node
+    target_node = (
+        getattr(target_hs, "_active_asl_node", None)
+        or getattr(target_hs, "_last_asl_node", None)
+        or getattr(target_hs, "connected_node", None)
+    )
+    if not target_node and links:
+        target_node = links[0].get("node")
+
+    if target_node:
+        try:
+            from asl_container_manager import asl_container_mgr
+            netstats = asl_container_mgr.get_node_netstats(str(uid), own_node)
+            node_stat = netstats.get(str(target_node))
+            if node_stat and node_stat.get("rtt"):
+                rtt = float(node_stat["rtt"])
+                jitter = float(node_stat.get("jitter", 0.0))
+            else:
+                target_ip = (node_stat.get("ip") if node_stat else None) or asl_container_mgr.lookup_node_ip(str(uid), own_node, str(target_node))
+                if target_ip:
+                    from ping import measure_host_ping_and_loss
+                    p_rtt, _ = measure_host_ping_and_loss(target_ip, 2, 0.4)
+                    if p_rtt:
+                        rtt = float(p_rtt)
+        except Exception:
+            pass
+
+    if rtt == 0.0 and hasattr(bm_ping_service, "cached_pings"):
+        cached = bm_ping_service.cached_pings.get(target_hs.config.id)
+        if cached and cached > 0:
+            rtt = float(cached)
+
+    if hasattr(target_hs, "allstar_client") and target_hs.allstar_client:
+        if rtt > 0:
+            target_hs.allstar_client.current_rtt_ms = rtt
+            target_hs.allstar_client.current_jitter_ms = jitter
+        else:
+            rtt = getattr(target_hs.allstar_client, "current_rtt_ms", 0.0)
+            jitter = getattr(target_hs.allstar_client, "current_jitter_ms", 0.0)
+
+    return {
+        "status": "ok",
+        "own_node": own_node,
+        "connected_nodes": nodes,
+        "links": links,
+        "online_count": online_count,
+        "rtt": rtt,
+        "jitter": jitter,
+    }
+
+class AllStarMatrixProbeRequest(BaseModel):
+    hotspot_id: str = "default"
+    nodes: List[str] = []
+    force: bool = False
+
+@app.post("/api/allstar/matrix-status")
+async def api_allstar_matrix_status(req: AllStarMatrixProbeRequest, request: Request = None):
+    """Проверяет доступность (online/offline), RTT, количество коннектов и силу трафика для списка нод ASL."""
+    from allstar_directory import allstar_dir_mgr
+    try:
+        results = await allstar_dir_mgr.probe_nodes_batch(req.nodes, force=req.force)
+        stats_ok = not allstar_dir_mgr.is_stats_circuit_broken() if hasattr(allstar_dir_mgr, "is_stats_circuit_broken") else True
+        return {
+            "status": "ok",
+            "hotspot_id": req.hotspot_id,
+            "nodes": results,
+            "stats_api_ok": stats_ok
+        }
+    except Exception as e:
+        logger.error(f"[ALLSTAR] Matrix status probe error: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "hotspot_id": req.hotspot_id,
+            "nodes": {},
+            "stats_api_ok": False
+        }
+
+class AllStarFeedStatsRequest(BaseModel):
+    node: str
+    stats: Dict[str, Any] = {}
+
+@app.post("/api/allstar/feed-stats")
+async def api_allstar_feed_stats(req: AllStarFeedStatsRequest):
+    """Allows client to feed stats obtained directly from stats.allstarlink.org (client-side CORS)."""
+    from allstar_directory import allstar_dir_mgr
+    updated = allstar_dir_mgr.feed_node_stats(req.node, req.stats)
+    return {"status": "ok", "node": req.node, "result": updated}
 
 @app.get("/api/tg/search")
 async def search_talkgroups(q: str = "", limit: int = 50, network: str = "bm"):
@@ -6898,6 +7425,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
         connected_clients.difference_update(dead)
         for ws_dead in dead:
             dead_uid = ws_user_map.pop(ws_dead, None)
+            q_dead = ws_audio_queues.pop(ws_dead, None)
+            t_dead = ws_audio_tasks.pop(ws_dead, None)
+            if q_dead:
+                try: q_dead.put_nowait(None)
+                except Exception: pass
+            if t_dead and not t_dead.done():
+                t_dead.cancel()
             if dead_uid and dead_uid in user_clients:
                 user_clients[dead_uid].discard(ws_dead)
         if ws_user_id in user_clients:
@@ -6909,6 +7443,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             for ws_s in stale_u:
                 connected_clients.discard(ws_s)
                 ws_user_map.pop(ws_s, None)
+                q_s = ws_audio_queues.pop(ws_s, None)
+                t_s = ws_audio_tasks.pop(ws_s, None)
+                if q_s:
+                    try: q_s.put_nowait(None)
+                    except Exception: pass
+                if t_s and not t_s.done():
+                    t_s.cancel()
 
     _prune_stale_ws()
     ws_is_demo = bool(ws_user.get("is_demo"))
@@ -6962,6 +7503,12 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     ws_user_map[websocket] = ws_user_id
     if ws_is_demo:
         demo_ws_clients[websocket] = ws_demo_sid
+
+    # Start dedicated audio streaming queue & worker task for this client (Stage 2)
+    audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)  # Stage 2: expanded to 100 for up to 6s buffer margin
+    ws_audio_queues[websocket] = audio_q
+    audio_task = asyncio.create_task(_ws_audio_sender_loop(websocket, audio_q))
+    ws_audio_tasks[websocket] = audio_task
     logger.info(f"[WS] Client connected: {client_id} (user={ws_login}, demo={ws_is_demo}), total: {len(connected_clients)}, user_total: {len(user_clients[ws_user_id])}")
     asyncio.create_task(visitor_stats.record_visit(
         visitor_stats.client_ip(websocket),
@@ -7176,6 +7723,20 @@ async def websocket_radio_endpoint(websocket: WebSocket):
 
                     slot = int(data.get("slot", u_radio_state.tx_slot))
                     tg = int(data.get("tg", u_radio_state.active_tg))
+
+                    # If active hotspot is AllStarLink, enforce slot=1 and dst_id=connected_node
+                    if active_hs and getattr(active_hs.config, "network_type", "bm") == "allstar":
+                        slot = 1
+                        conn_node = getattr(active_hs, "connected_node", None)
+                        if not conn_node and getattr(active_hs, "asl_links", None):
+                            conn_node = active_hs.asl_links[0]
+                        if not conn_node:
+                            conn_node = getattr(active_hs.config, "allstar_node", 1999)
+                        try:
+                            tg = int(conn_node)
+                        except (ValueError, TypeError):
+                            tg = 1999
+
                     u_radio_state.is_transmitting = True
                     u_radio_state.transmitting_client_id = client_id
                     u_radio_state.tx_start_time = time.time()
@@ -7631,6 +8192,20 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         **settings
                     })
 
+                elif msg_type == "set_backend_buffer":
+                    buf_ms = hotspot_manager.set_backend_buffer_ms(data.get("buffer_ms", 0), user_id=ws_user_id)
+                    if not hasattr(user_settings, "client_settings") or user_settings.client_settings is None:
+                        user_settings.client_settings = {}
+                    arx = user_settings.client_settings.setdefault("audio_rx", {})
+                    arx["backend_buffer_ms"] = buf_ms
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "backend_buffer_settings",
+                        "buffer_ms": buf_ms
+                    })
+
                 elif msg_type == "save_client_settings":
                     cs = data.get("client_settings")
                     if isinstance(cs, dict):
@@ -7755,6 +8330,148 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                             await _prepare_demo_hotspot_ssid(ws_user_id, target_hs)
                         await hotspot_manager.reconnect_hotspot(target_hs.config.id, user_id=ws_user_id, persist=not ws_is_demo)
 
+                elif msg_type == "allstar_connect_node":
+                    hid = str(data.get("hotspot_id", "")).strip()
+                    node = str(data.get("node", "")).strip()
+                    mode = str(data.get("mode", "*2")).strip() or "*2"
+                    show_status_banner = data.get("show_status_banner", True)
+                    show_card_effects = data.get("show_card_effects", True)
+                    target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
+                    if target_hs and node:
+                        logger.info(f"[ALLSTAR] Connect node #{node} (mode {mode}) on hotspot {target_hs.config.id} by {ws_login}")
+                        asyncio.create_task(_execute_asl_connect_flow(
+                            uid=ws_user_id,
+                            target_hs=target_hs,
+                            node=node,
+                            mode=mode,
+                            show_status_banner=show_status_banner,
+                            show_card_effects=show_card_effects
+                        ))
+
+                elif msg_type == "allstar_disconnect_node":
+                    hid = str(data.get("hotspot_id", "")).strip()
+                    node = str(data.get("node", "")).strip()
+                    show_status_banner = data.get("show_status_banner", True)
+                    show_card_effects = data.get("show_card_effects", True)
+                    target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
+                    if target_hs and node:
+                        logger.info(f"[ALLSTAR] Disconnect node #{node} on hotspot {target_hs.config.id} by {ws_login}")
+                        asyncio.create_task(_execute_asl_disconnect_flow(
+                            uid=ws_user_id,
+                            target_hs=target_hs,
+                            disc_target=node,
+                            show_status_banner=show_status_banner,
+                            show_card_effects=show_card_effects
+                        ))
+
+                elif msg_type == "allstar_dtmf":
+                    hid = str(data.get("hotspot_id", "")).strip()
+                    digit = str(data.get("digit", "")).strip()
+                    target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
+                    if target_hs and digit:
+                        if digit in ("*73", "*76"):
+                            logger.info(f"[ALLSTAR] DTMF '{digit}' (disconnect all) on hotspot {target_hs.config.id} by {ws_login}")
+                            asyncio.create_task(_execute_asl_disconnect_flow(
+                                uid=ws_user_id,
+                                target_hs=target_hs,
+                                disc_target="all",
+                                show_status_banner=True,
+                                show_card_effects=True
+                            ))
+                        else:
+                            asl = getattr(target_hs, "allstar_client", None)
+                            if asl and asl.is_connected:
+                                asl.send_dtmf(digit)
+                                logger.info(f"[ALLSTAR] DTMF '{digit}' sent on hotspot {target_hs.config.id} by {ws_login}")
+
+                elif msg_type == "allstar_dtmf_macro":
+                    hid = str(data.get("hotspot_id", "")).strip()
+                    digits = str(data.get("digits", "")).strip()
+                    target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
+                    if target_hs and digits:
+                        own_node = str(getattr(target_hs.config, "allstar_node", "1999") or "1999").strip()
+                        from asl_container_manager import asl_container_mgr
+                        links = await asyncio.to_thread(asl_container_mgr.get_connected_links, str(ws_user_id), own_node)
+                        has_tx_node = any(lk.get("mode") in ("*3", "tx", "transceive") for lk in (links or []))
+                        if not has_tx_node and getattr(target_hs, "connected_node", None) == "1999":
+                            has_tx_node = True
+
+                        if not has_tx_node:
+                            await ws.send_text(json.dumps({
+                                "type": "allstar_proc_step",
+                                "hotspot_id": target_hs.config.id,
+                                "tone": "negative",
+                                "text": "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)",
+                                "auto_hide_ms": 3200
+                            }))
+                        else:
+                            asl_adapter = getattr(target_hs, "client", None) or getattr(target_hs, "allstar_client", None)
+                            if asl_adapter:
+                                async def _notify_macro_state(event_type: str, d: str):
+                                    try:
+                                        if event_type == "tx_start":
+                                            await ws.send_text(json.dumps({
+                                                "type": "allstar_proc_step",
+                                                "hotspot_id": target_hs.config.id,
+                                                "tone": "neutral",
+                                                "text": f"📡 Авто-TX: передача DTMF {d}...",
+                                                "auto_hide_ms": 0
+                                            }))
+                                            await ws.send_text(json.dumps({
+                                                "type": "allstar_macro_tx_state",
+                                                "hotspot_id": target_hs.config.id,
+                                                "active": True
+                                            }))
+                                        elif event_type == "tx_stop":
+                                            await ws.send_text(json.dumps({
+                                                "type": "allstar_proc_step",
+                                                "hotspot_id": target_hs.config.id,
+                                                "tone": "positive",
+                                                "text": f"✓ DTMF отправлен: {d}",
+                                                "auto_hide_ms": 2000
+                                            }))
+                                            await ws.send_text(json.dumps({
+                                                "type": "allstar_macro_tx_state",
+                                                "hotspot_id": target_hs.config.id,
+                                                "active": False
+                                            }))
+                                        elif event_type == "tx_inject":
+                                            await ws.send_text(json.dumps({
+                                                "type": "allstar_proc_step",
+                                                "hotspot_id": target_hs.config.id,
+                                                "tone": "neutral",
+                                                "text": f"📡 Передача DTMF {d}...",
+                                                "auto_hide_ms": 0
+                                            }))
+                                        elif event_type == "tx_inject_done":
+                                            await ws.send_text(json.dumps({
+                                                "type": "allstar_proc_step",
+                                                "hotspot_id": target_hs.config.id,
+                                                "tone": "positive",
+                                                "text": f"✓ DTMF отправлен: {d}",
+                                                "auto_hide_ms": 2000
+                                            }))
+                                    except Exception as err:
+                                        logger.debug(f"[ALLSTAR] Macro notify error: {err}")
+
+                                if hasattr(asl_adapter, "execute_dtmf_macro"):
+                                    asyncio.create_task(asl_adapter.execute_dtmf_macro(digits, notify_cb=_notify_macro_state))
+                                elif hasattr(asl_adapter, "client") and hasattr(asl_adapter.client, "execute_dtmf_macro"):
+                                    asyncio.create_task(asl_adapter.client.execute_dtmf_macro(digits, notify_cb=_notify_macro_state))
+
+                elif msg_type == "allstar_ctcss_filter":
+                    hid = str(data.get("hotspot_id", "")).strip()
+                    enabled = bool(data.get("enabled", True))
+                    target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
+                    if target_hs:
+                        adapter = getattr(target_hs, "client", None)
+                        if adapter and hasattr(adapter, "ctcss_filter_enabled"):
+                            adapter.ctcss_filter_enabled = enabled
+                        asl = getattr(target_hs, "allstar_client", None)
+                        if asl and hasattr(asl, "ctcss_filter_enabled"):
+                            asl.ctcss_filter_enabled = enabled
+                        logger.info(f"[ALLSTAR] CTCSS filter set to {enabled} on hotspot {target_hs.config.id} by {ws_login}")
+
                 elif msg_type in ("ping", "client_ping"):
                     seq = data.get("seq")
                     ts = data.get("ts", time.time() * 1000)
@@ -7806,6 +8523,15 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     demo_manager.end_session(sid_to_check, apply_cooldown=False)
                 await _revert_demo_runtime_state()
             asyncio.create_task(_delayed_demo_release(demo_sid_disc))
+        # Cancel and cleanup dedicated audio streaming queue
+        q_disc = ws_audio_queues.pop(websocket, None)
+        t_disc = ws_audio_tasks.pop(websocket, None)
+        if q_disc:
+            try: q_disc.put_nowait(None)
+            except Exception: pass
+        if t_disc and not t_disc.done():
+            t_disc.cancel()
+
         connected_clients.discard(websocket)
         if not connected_clients and transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
             transcriber_service.disable_all_slots()

@@ -308,7 +308,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     const jitterPresetBtns = document.querySelectorAll(".btn-jitter-preset");
 
     function updateJitterUI(ms) {
-      const val = Math.max(40, Math.min(500, parseInt(ms, 10) || 120));
+      const val = Math.max(40, Math.min(2000, parseInt(ms, 10) || 120));
       if (sliderJitterBuffer) sliderJitterBuffer.value = val;
       if (valJitterBuffer) valJitterBuffer.textContent = `${val} ms`;
       jitterPresetBtns.forEach(btn => {
@@ -320,10 +320,58 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         window.audioPlayer.setJitterBufferMs(val);
       }
     }
+    window.updateJitterUI = updateJitterUI;
+
+    // 3.6. Backend Raw Stream Buffer Controls
+    const sliderBackendBuffer = document.getElementById("sliderBackendBuffer");
+    const valBackendBuffer = document.getElementById("valBackendBuffer");
+    const backendBufferPresetBtns = document.querySelectorAll(".btn-backend-buffer-preset");
+
+    function updateBackendBufferUI(ms, sendWs = true) {
+      const val = Math.max(0, Math.min(2000, parseInt(ms, 10) || 0));
+      if (sliderBackendBuffer) sliderBackendBuffer.value = val;
+      if (valBackendBuffer) valBackendBuffer.textContent = `${val} ms`;
+      backendBufferPresetBtns.forEach(btn => {
+        const b = parseInt(btn.getAttribute("data-backend-buffer"), 10);
+        btn.classList.toggle("active", b === val);
+      });
+      localStorage.setItem("proxdmr_backend_buffer_ms", val.toString());
+      if (sendWs && window.ws && window.ws.readyState === WebSocket.OPEN) {
+        window.ws.send(JSON.stringify({
+          type: "set_backend_buffer",
+          buffer_ms: val
+        }));
+      }
+    }
+    window.updateBackendBufferUI = updateBackendBufferUI;
+
+    if (sliderBackendBuffer) {
+      const savedBackendBuf = localStorage.getItem("proxdmr_backend_buffer_ms");
+      const initBVal = savedBackendBuf !== null ? parseInt(savedBackendBuf, 10) || 1200 : 1200;
+      updateBackendBufferUI(initBVal, false);
+
+      sliderBackendBuffer.addEventListener("input", () => {
+        updateBackendBufferUI(sliderBackendBuffer.value, false);
+      });
+      sliderBackendBuffer.addEventListener("change", () => {
+        updateBackendBufferUI(sliderBackendBuffer.value, true);
+        _scheduleSyncClientSettings();
+      });
+    }
+
+    backendBufferPresetBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const b = parseInt(btn.getAttribute("data-backend-buffer"), 10);
+        if (b !== undefined && !isNaN(b)) {
+          updateBackendBufferUI(b, true);
+          _scheduleSyncClientSettings();
+        }
+      });
+    });
 
     if (sliderJitterBuffer) {
       const savedJitter = localStorage.getItem("proxdmr_jitter_buffer_ms");
-      const initVal = savedJitter !== null ? parseInt(savedJitter, 10) || 120 : 120;
+      const initVal = savedJitter !== null ? parseInt(savedJitter, 10) || 1000 : 1000;
       updateJitterUI(initVal);
 
       sliderJitterBuffer.addEventListener("input", () => {
@@ -353,16 +401,17 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     const defaultAudioRxPresets = {
       "1": {
         name: "Стандарт",
-        preGain: 0,
-        agcProfile: "standard",
-        agcBoost: 12,
-        agcAtten: -12,
-        agcHang: 0.35,
-        eqLow: 0,
-        eqMid: 0,
-        eqHigh: 0,
+        preGain: 7,
+        agcProfile: "maximum",
+        agcBoost: 24,
+        agcAtten: -24,
+        agcHang: 0.45,
+        eqLow: -12,
+        eqMid: 2,
+        eqHigh: 10,
         deemphasis: false,
-        jitterBuffer: 120
+        jitterBuffer: 1000,
+        backendBuffer: 1200
       },
       "2": {
         name: "Мягкий эфир",
@@ -375,7 +424,8 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         eqMid: 0,
         eqHigh: -3,
         deemphasis: true,
-        jitterBuffer: 140
+        jitterBuffer: 140,
+        backendBuffer: 0
       },
       "3": {
         name: "Разборчивость",
@@ -388,7 +438,8 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         eqMid: 4,
         eqHigh: 2,
         deemphasis: false,
-        jitterBuffer: 120
+        jitterBuffer: 120,
+        backendBuffer: 0
       }
     };
 
@@ -463,6 +514,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       if (data.jitterBuffer !== undefined && typeof updateJitterUI === "function") {
         updateJitterUI(data.jitterBuffer);
       }
+      if (data.backendBuffer !== undefined && typeof updateBackendBufferUI === "function") {
+        updateBackendBufferUI(data.backendBuffer, true);
+      }
 
       updateAudioRxPresetUI();
       _scheduleSyncClientSettings();
@@ -478,6 +532,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       const eqHigh = sliderEqHigh ? (parseFloat(sliderEqHigh.value) || 0) : 0;
       const deemph = chkDeemphasis ? chkDeemphasis.checked : false;
       const jBuf = sliderJitterBuffer ? (parseInt(sliderJitterBuffer.value, 10) || 120) : 120;
+      const bBuf = sliderBackendBuffer ? (parseInt(sliderBackendBuffer.value, 10) || 0) : 0;
 
       const currentData = {
         preGain: pGain,
@@ -489,7 +544,8 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         eqMid: eqMid,
         eqHigh: eqHigh,
         deemphasis: deemph,
-        jitterBuffer: jBuf
+        jitterBuffer: jBuf,
+        backendBuffer: bBuf
       };
 
       localStorage.setItem(`proxdmr_audio_rx_preset_${id}`, JSON.stringify(currentData));
@@ -699,12 +755,12 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     const defaultAudioTxPresets = {
       "1": {
         name: "Стандарт",
-        txMicGain: 0,
-        txNoiseSuppression: true,
+        txMicGain: -11,
+        txNoiseSuppression: false,
         txBrowserAgc: false,
-        txDspAgc: false,
-        txEchoCancellation: true,
-        txGateEnabled: true,
+        txDspAgc: true,
+        txEchoCancellation: false,
+        txGateEnabled: false,
         txGateThreshold: -45,
         txHpfEnabled: true,
         txPresenceBoost: 3
@@ -1210,7 +1266,10 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         peak: 0.0,
         peakHoldUntil: 0,
         mode: "IDLE",
-        lastRxTime: 0
+        lastRxTime: 0,
+        _lastRenderMs: 0,
+        _lastRenderedPct: -1,
+        _lastRenderedPeak: -1
       };
     }
     return vuHotspotStates[key];
@@ -1296,101 +1355,6 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
   }
   window.__proxdmr.updateHotspotVuMeter = updateHotspotVuMeter;
 
-  function _getVuSegDims() {
-    const isSmartphone = (typeof window !== "undefined") && (
-      window.innerWidth <= 768 ||
-      (window.matchMedia && window.matchMedia("(pointer: coarse) and (max-width: 960px), (pointer: coarse) and (max-height: 540px)").matches) ||
-      Boolean(window.AndroidBridge)
-    );
-    return isSmartphone ? { segW: 14, gapW: 3 } : { segW: 7, gapW: 2 };
-  }
-
-  function drawVuTrack(canvas, ctx, activeCount, peakIndex, isOverload, isTs2, isLight, N) {
-    if (!canvas || !ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const targetW = Math.round(rect.width * dpr);
-    const targetH = Math.round(rect.height * dpr);
-
-    if (targetW <= 0 || targetH <= 0) return;
-
-    if (canvas.width !== targetW || canvas.height !== targetH) {
-      canvas.width = targetW;
-      canvas.height = targetH;
-    }
-
-    const { segW, gapW } = _getVuSegDims();
-    const totalSegs = N || Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
-    const totalMeterW = totalSegs * segW + (totalSegs - 1) * gapW;
-    const startX = Math.floor((targetW - totalMeterW) / 2);
-    const segH = targetH;
-
-    ctx.clearRect(0, 0, targetW, targetH);
-
-    // Color definitions
-    const unlitColor = isLight ? "#cbd5e1" : "#1c2534";
-    const litColor = isTs2 
-      ? (isLight ? "#ea580c" : "#f98700") 
-      : (isLight ? "#0284c7" : "#00dbf7");
-    const peakNormalColor = isLight ? "#0f172a" : "#ffffff";
-    const peakOverloadColor = isLight ? "#dc2626" : "#ff3860";
-
-    for (let i = 0; i < totalSegs; i++) {
-      const x = startX + i * (segW + gapW);
-      const isLit = i < activeCount;
-      const isPeak = (i === peakIndex);
-
-      let color = unlitColor;
-      if (isPeak) {
-        color = isOverload ? peakOverloadColor : peakNormalColor;
-      } else if (isLit) {
-        color = litColor;
-      }
-
-      ctx.fillStyle = color;
-      ctx.fillRect(x, 0, segW, segH);
-    }
-  }
-
-  function refreshAllVuCanvases() {
-    const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
-    const dpr = window.devicePixelRatio || 1;
-    const { segW, gapW } = _getVuSegDims();
-    const allCards = document.querySelectorAll(".radio-container");
-    allCards.forEach(card => {
-      const hid = card.dataset.hotspotId || "default";
-      for (const slot of [1, 2]) {
-        const canvas = card.querySelector(slot === 1 ? ".clock-vu-canvas.track-ts1" : ".clock-vu-canvas.track-ts2");
-        if (canvas) {
-          const ctx = canvas.getContext("2d");
-          const targetW = Math.round(canvas.clientWidth * dpr);
-          const N = Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
-          const st = getVuState(hid, slot);
-          const activeCount = Math.min(N, Math.max(0, Math.round((st.current / 100.0) * N)));
-          const peakIndex = st.peak > 1.0 ? Math.min(N - 1, Math.max(0, Math.floor((st.peak / 100.0) * N))) : -1;
-          const isOverload = st.peak >= 85;
-          drawVuTrack(canvas, ctx, activeCount, peakIndex, isOverload, slot === 2, isLight, N);
-          if (card._vuEls && card._vuEls[slot]) {
-            card._vuEls[slot].lastActiveCount = activeCount;
-            card._vuEls[slot].lastPeakIndex = peakIndex;
-            card._vuEls[slot].lastOverload = isOverload;
-            card._vuEls[slot].lastLight = isLight;
-            card._vuEls[slot].lastW = canvas.clientWidth;
-            card._vuEls[slot].lastN = N;
-          }
-        }
-      }
-    });
-  }
-
-  if (typeof window !== "undefined") {
-    window.addEventListener("resize", refreshAllVuCanvases, { passive: true });
-    try {
-      const themeObs = new MutationObserver(() => refreshAllVuCanvases());
-      themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    } catch (_) {}
-  }
-
   function vuMeterTick(now) {
     const dt = Math.min(0.1, (now - lastVuTickTime) / 1000.0);
     lastVuTickTime = now;
@@ -1437,11 +1401,18 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           st.peak = Math.max(st.current, st.peak - (VU_PEAK_DECAY_RATE * dt));
           if (st.peak < 1.0) st.peak = 0;
         }
+
         if (!card._vuEls) card._vuEls = {};
-        let vuData = card._vuEls[slot];
-        if (!vuData || !vuData.canvas || !vuData.canvas.isConnected) {
-          const canvas = card.querySelector(slot === 1 ? ".clock-vu-canvas.track-ts1" : ".clock-vu-canvas.track-ts2");
-          const ctx = canvas ? canvas.getContext("2d") : null;
+        if (!card._vuEls[slot]) {
+          let peakEl = card.querySelector(slot === 1 ? ".vu-peak-ts1" : ".vu-peak-ts2");
+          if (!peakEl) {
+            const vuBar = card.querySelector(slot === 1 ? ".clock-vu-track.track-ts1, .vfo-ts1-row .vfo-vu-bar" : ".clock-vu-track.track-ts2, .vfo-ts2-row .vfo-vu-bar");
+            if (vuBar) {
+              peakEl = document.createElement("div");
+              peakEl.className = `clock-vu-peak ${slot === 1 ? "vu-peak-ts1" : "vu-peak-ts2"}`;
+              vuBar.appendChild(peakEl);
+            }
+          }
           let vertPeakEl = card.querySelector(slot === 1 ? ".vu-peak-vert-ts1" : ".vu-peak-vert-ts2");
           if (!vertPeakEl) {
             const vertVuBar = card.querySelector(slot === 1 ? ".vfo-ts1-row .vfo-vu-vert-bar" : ".vfo-ts2-row .vfo-vu-vert-bar");
@@ -1451,72 +1422,63 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
               vertVuBar.appendChild(vertPeakEl);
             }
           }
-          vuData = card._vuEls[slot] = {
-            canvas,
-            ctx,
+          card._vuEls[slot] = {
+            fillEl: card.querySelector(slot === 1 ? ".vu-fill-ts1" : ".vu-fill-ts2"),
             vertFillEl: card.querySelector(slot === 1 ? ".vu-fill-vert-ts1" : ".vu-fill-vert-ts2"),
-            vertPeakEl,
-            lastActiveCount: -1,
-            lastPeakIndex: -2,
-            lastOverload: false,
-            lastLight: null,
-            lastW: 0,
-            lastN: 0
+            peakEl,
+            vertPeakEl
           };
-          if (canvas && ctx) {
-            const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
-            const dpr = window.devicePixelRatio || 1;
-            const { segW, gapW } = _getVuSegDims();
-            const targetW = Math.round(canvas.clientWidth * dpr);
-            const N = Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
-            drawVuTrack(canvas, ctx, 0, -1, false, slot === 2, isLight, N);
-          }
         }
 
-        const isLight = document.documentElement.getAttribute("data-theme") === "light" || (document.body && document.body.getAttribute("data-theme") === "light");
+        const { fillEl, vertFillEl, peakEl, vertPeakEl } = card._vuEls[slot];
 
-        if (vuData.canvas && vuData.ctx) {
-          const dpr = window.devicePixelRatio || 1;
-          const { segW, gapW } = _getVuSegDims();
-          const curW = vuData.canvas.clientWidth;
-          const targetW = Math.round(curW * dpr);
-          const N = Math.max(1, Math.floor((targetW + gapW) / (segW + gapW)));
-          const activeCount = Math.min(N, Math.max(0, Math.round((st.current / 100.0) * N)));
-          const peakIndex = st.peak > 1.0 ? Math.min(N - 1, Math.max(0, Math.floor((st.peak / 100.0) * N))) : -1;
-          const isOverload = st.peak >= 85;
+        const shouldRender = (now - (st._lastRenderMs || 0) >= 32) || (st.current === 0 && st._lastRenderedPct > 0);
+        if (shouldRender) {
+          const curPct = Math.round(st.current * 10) / 10;
+          const curPeak = Math.round(st.peak * 10) / 10;
+          const pctChanged = Math.abs(curPct - st._lastRenderedPct) >= 0.5;
+          const peakChanged = Math.abs(curPeak - st._lastRenderedPeak) >= 0.5;
 
-          if (vuData.lastActiveCount !== activeCount ||
-              vuData.lastPeakIndex !== peakIndex ||
-              vuData.lastOverload !== isOverload ||
-              vuData.lastLight !== isLight ||
-              vuData.lastW !== curW ||
-              vuData.lastN !== N) {
-            vuData.lastActiveCount = activeCount;
-            vuData.lastPeakIndex = peakIndex;
-            vuData.lastOverload = isOverload;
-            vuData.lastLight = isLight;
-            vuData.lastW = curW;
-            vuData.lastN = N;
-            drawVuTrack(vuData.canvas, vuData.ctx, activeCount, peakIndex, isOverload, slot === 2, isLight, N);
-          }
-        }
+          if (pctChanged || peakChanged) {
+            st._lastRenderMs = now;
+            st._lastRenderedPct = curPct;
+            st._lastRenderedPeak = curPeak;
 
-        const { vertFillEl, vertPeakEl } = vuData;
-        if (vertFillEl) {
-          vertFillEl.style.height = `${st.current.toFixed(1)}%`;
-        }
-        if (vertPeakEl) {
-          if (st.peak > 1.0) {
-            vertPeakEl.style.bottom = `${Math.min(100, Math.max(0, st.peak)).toFixed(1)}%`;
-            vertPeakEl.style.opacity = "1";
-            if (st.peak >= 85) {
-              vertPeakEl.classList.add("vu-peak-overload");
-            } else {
-              vertPeakEl.classList.remove("vu-peak-overload");
+            if (fillEl && pctChanged) {
+              fillEl.style.width = `${curPct}%`;
             }
-          } else {
-            vertPeakEl.style.opacity = "0";
-            vertPeakEl.classList.remove("vu-peak-overload");
+            if (peakEl && peakChanged) {
+              if (curPeak > 1.0) {
+                peakEl.style.left = `${Math.min(100, Math.max(0, curPeak))}%`;
+                peakEl.style.opacity = "1";
+                if (curPeak >= 85) {
+                  peakEl.classList.add("vu-peak-overload");
+                } else {
+                  peakEl.classList.remove("vu-peak-overload");
+                }
+              } else {
+                peakEl.style.opacity = "0";
+                peakEl.classList.remove("vu-peak-overload");
+              }
+            }
+
+            if (vertFillEl && pctChanged) {
+              vertFillEl.style.height = `${curPct}%`;
+            }
+            if (vertPeakEl && peakChanged) {
+              if (curPeak > 1.0) {
+                vertPeakEl.style.bottom = `${Math.min(100, Math.max(0, curPeak))}%`;
+                vertPeakEl.style.opacity = "1";
+                if (curPeak >= 85) {
+                  vertPeakEl.classList.add("vu-peak-overload");
+                } else {
+                  vertPeakEl.classList.remove("vu-peak-overload");
+                }
+              } else {
+                vertPeakEl.style.opacity = "0";
+                vertPeakEl.classList.remove("vu-peak-overload");
+              }
+            }
           }
         }
 
@@ -1649,8 +1611,6 @@ export function initAudioDsp() {
 }
 
 export {
-  drawVuTrack,
-  refreshAllVuCanvases,
   setupAudioRxModal,
   setupAudioTxModal,
   applyTxDspSettings,
@@ -1680,8 +1640,6 @@ if (typeof window !== "undefined") {
   window.updateHotspotVuMeter = updateHotspotVuMeter;
   window.updateRxVuMeter = updateRxVuMeter;
   window.vuMeterTick = vuMeterTick;
-  window.drawVuTrack = drawVuTrack;
-  window.refreshAllVuCanvases = refreshAllVuCanvases;
   window.startVuMeter = startVuMeter;
   window.stopVuMeter = stopVuMeter;
   window.resetTxDsp = resetTxDsp;

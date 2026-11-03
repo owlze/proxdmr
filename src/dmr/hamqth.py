@@ -7,6 +7,7 @@ Provides authentication session management, parallel lookups, priority merging, 
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -36,6 +37,108 @@ def _clean_call(callsign: str) -> str:
         if len(parts) == 2 and parts[1].isdigit():
             call_upper = parts[0].strip()
     return call_upper
+
+
+US_STATE_GEO: Dict[str, Tuple[str, str, str]] = {
+    "AL": ("5", "8", "NA"), "AK": ("1", "2", "NA"), "AZ": ("3", "6", "NA"),
+    "AR": ("4", "8", "NA"), "CA": ("3", "6", "NA"), "CO": ("4", "7", "NA"),
+    "CT": ("5", "8", "NA"), "DE": ("5", "8", "NA"), "FL": ("5", "8", "NA"),
+    "GA": ("5", "8", "NA"), "HI": ("31", "61", "OC"), "ID": ("3", "6", "NA"),
+    "IL": ("4", "8", "NA"), "IN": ("4", "8", "NA"), "IA": ("4", "7", "NA"),
+    "KS": ("4", "7", "NA"), "KY": ("4", "8", "NA"), "LA": ("4", "8", "NA"),
+    "ME": ("5", "8", "NA"), "MD": ("5", "8", "NA"), "MA": ("5", "8", "NA"),
+    "MI": ("4", "8", "NA"), "MN": ("4", "7", "NA"), "MS": ("4", "8", "NA"),
+    "MO": ("4", "7", "NA"), "MT": ("4", "7", "NA"), "NE": ("4", "7", "NA"),
+    "NV": ("3", "6", "NA"), "NH": ("5", "8", "NA"), "NJ": ("5", "8", "NA"),
+    "NM": ("4", "7", "NA"), "NY": ("5", "8", "NA"), "NC": ("5", "8", "NA"),
+    "ND": ("4", "7", "NA"), "OH": ("4", "8", "NA"), "OK": ("4", "7", "NA"),
+    "OR": ("3", "6", "NA"), "PA": ("5", "8", "NA"), "RI": ("5", "8", "NA"),
+    "SC": ("5", "8", "NA"), "SD": ("4", "7", "NA"), "TN": ("4", "8", "NA"),
+    "TX": ("4", "8", "NA"), "UT": ("3", "6", "NA"), "VT": ("5", "8", "NA"),
+    "VA": ("5", "8", "NA"), "WA": ("3", "6", "NA"), "WV": ("5", "8", "NA"),
+    "WI": ("4", "8", "NA"), "WY": ("4", "7", "NA"), "DC": ("5", "8", "NA"),
+    "PR": ("8", "11", "NA"), "VI": ("8", "11", "NA"), "GU": ("27", "64", "OC"),
+    "AS": ("32", "62", "OC"), "MP": ("27", "64", "OC")
+}
+
+US_STATE_NAMES: Dict[str, str] = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC", "puerto rico": "PR",
+    "virgin islands": "VI", "guam": "GU"
+}
+
+
+def resolve_us_state(val: str) -> str:
+    """Normalizes US state string (2-letter or full name) to 2-letter uppercase abbreviation."""
+    v = (val or "").strip().upper()
+    if v in US_STATE_GEO:
+        return v
+    return US_STATE_NAMES.get((val or "").strip().lower(), "")
+
+
+def _is_us_callsign(call: str) -> bool:
+    """Returns True if callsign matches US FCC prefix patterns (W, K, N, AA-AL)."""
+    c = _clean_call(call)
+    return bool(re.match(r"^([KWN][A-Z]?|A[A-L])[0-9]{1,3}[A-Z]{1,4}$", c))
+
+
+def maidenhead_to_latlon(grid: str) -> Optional[Tuple[float, float]]:
+    """Converts a 4- or 6-character Maidenhead locator to (lat, lon) degrees."""
+    g = (grid or "").strip().upper()
+    if len(g) < 4:
+        return None
+    try:
+        lon = (ord(g[0]) - ord("A")) * 20.0 - 180.0
+        lat = (ord(g[1]) - ord("A")) * 10.0 - 90.0
+        lon += int(g[2]) * 2.0
+        lat += int(g[3]) * 1.0
+        if len(g) >= 6:
+            lon += (ord(g[4]) - ord("A") + 0.5) * (2.0 / 24.0)
+            lat += (ord(g[5]) - ord("A") + 0.5) * (1.0 / 24.0)
+        else:
+            lon += 1.0
+            lat += 0.5
+        return round(lat, 5), round(lon, 5)
+    except Exception:
+        return None
+
+
+def latlon_to_maidenhead(lat: float, lon: float) -> str:
+    """Converts (lat, lon) in decimal degrees to 6-character Maidenhead locator."""
+    try:
+        adj_lon = (lon + 180.0) % 360.0
+        adj_lat = lat + 90.0
+        if adj_lat < 0.0:
+            adj_lat = 0.0
+        elif adj_lat > 180.0:
+            adj_lat = 180.0
+
+        f1 = chr(ord("A") + int(adj_lon / 20.0))
+        f2 = chr(ord("A") + int(adj_lat / 10.0))
+        rem_lon = adj_lon % 20.0
+        rem_lat = adj_lat % 10.0
+
+        s1 = str(int(rem_lon / 2.0))
+        s2 = str(int(rem_lat / 1.0))
+        rem_lon %= 2.0
+        rem_lat %= 1.0
+
+        ss1 = chr(ord("a") + int(rem_lon / (2.0 / 24.0)))
+        ss2 = chr(ord("a") + int(rem_lat / (1.0 / 24.0)))
+        return f"{f1}{f2}{s1}{s2}{ss1}{ss2}"
+    except Exception:
+        return ""
 
 
 class HamQTHService:
@@ -421,13 +524,141 @@ class HamQTHService:
             return {"status": "error", "message": str(e)}
 
     # ──────────────────────────────────────────────────────────────────────────
-    # 5. Multi-Portal Parallel Lookup & Priority Merge
+    # 3. Callook.info (FCC US Amateur Radio Database) Implementation
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _sync_lookup_callook(self, callsign: str) -> Dict[str, Any]:
+        """
+        Queries callook.info free JSON API for US (FCC) amateur radio licenses.
+        Provides grid square, coordinates, operator class, license dates, and FCC ULS record.
+        """
+        call_upper = _clean_call(callsign)
+        if not call_upper or not _is_us_callsign(call_upper):
+            return {"status": "not_us", "found": False, "source": "Callook.info", "callsign": call_upper}
+
+        url = f"https://callook.info/{urllib.parse.quote(call_upper)}/json"
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+        except Exception as e:
+            logger.warning(f"[Callook] Lookup error for {call_upper}: {e}")
+            return {"status": "error", "message": f"Callook error: {e}", "found": False, "source": "Callook.info"}
+
+        if data.get("status") != "VALID":
+            return {"status": "not_found", "found": False, "source": "Callook.info", "callsign": call_upper}
+
+        loc = data.get("location") or {}
+        addr = data.get("address") or {}
+        curr = data.get("current") or {}
+        other = data.get("otherInfo") or {}
+
+        raw_name = (data.get("name") or "").strip()
+        formatted_name = raw_name.title() if raw_name else ""
+        nick = formatted_name.split()[0] if formatted_name else ""
+
+        line2 = (addr.get("line2") or "").strip()
+        city = ""
+        state = ""
+        if line2:
+            parts = line2.split(",")
+            if len(parts) >= 2:
+                city = parts[0].strip().title()
+                sm = re.search(r"\b([A-Z]{2})\b", parts[1].strip())
+                if sm:
+                    state = sm.group(1).upper()
+            else:
+                city = line2.title()
+
+        grid = (loc.get("gridsquare") or "").strip()
+        lat = str(loc.get("latitude") or "").strip()
+        lon = str(loc.get("longitude") or "").strip()
+
+        if grid and (not lat or not lon):
+            c = maidenhead_to_latlon(grid)
+            if c:
+                lat, lon = str(c[0]), str(c[1])
+        elif (lat and lon) and not grid:
+            try:
+                grid = latlon_to_maidenhead(float(lat), float(lon))
+            except Exception:
+                pass
+
+        cq, itu, cont = "", "", ""
+        st_resolved = resolve_us_state(state)
+        if st_resolved and st_resolved in US_STATE_GEO:
+            cq, itu, cont = US_STATE_GEO[st_resolved]
+        else:
+            cont = "NA"
+
+        grant_date = (other.get("grantDate") or "").strip()
+        lic_year = grant_date.split("/")[-1] if "/" in grant_date else ""
+
+        oper_class = (curr.get("operClass") or "").strip().title()
+        expiry_date = (other.get("expiryDate") or "").strip()
+        uls_url = (other.get("ulsUrl") or "").strip()
+        frn = (other.get("frn") or "").strip()
+
+        record = {
+            "callsign": call_upper,
+            "nick": nick,
+            "name": formatted_name,
+            "adr_name": formatted_name,
+            "city": city,
+            "adr_city": city,
+            "us_state": state or st_resolved,
+            "us_county": "",
+            "country": "United States",
+            "adif": "291",
+            "grid": grid,
+            "latitude": lat,
+            "longitude": lon,
+            "itu": itu,
+            "cq": cq,
+            "continent": cont,
+            "utc_offset": "",
+            "qsl": "",
+            "qsldirect": "",
+            "qsl_via": "",
+            "lotw": "",
+            "eqsl": "",
+            "mail": "",
+            "email": "",
+            "web": "",
+            "picture": "",
+            "qslpic": "",
+            "bio": "",
+            "lookups": "",
+            "lic_year": lic_year,
+            "birth_year": "",
+            "iota": "",
+            "oper_class": oper_class,
+            "lic_grant": grant_date,
+            "lic_expires": expiry_date,
+            "uls_url": uls_url,
+            "frn": frn
+        }
+
+        return {
+            "status": "ok",
+            "found": True,
+            "source": "Callook.info",
+            "callsign": call_upper,
+            "data": record
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 4. Multi-Portal Parallel Lookup & Priority Merge
     # ──────────────────────────────────────────────────────────────────────────
 
     async def lookup_callsign_multi(self, callsign: str, creds: Dict[str, Tuple[str, str]]) -> Dict[str, Any]:
         """
         Queries all configured portals in parallel via asyncio.gather and merges fields
-        by strict priority: 1. QRZ.com -> 2. HamQTH.com
+        by strict priority: 1. QRZ.com -> 2. HamQTH.com, and enriches US callsigns via Callook.info (FCC).
         """
         call_upper = _clean_call(callsign)
         if not call_upper:
@@ -440,6 +671,8 @@ class HamQTHService:
             ttl = self.LOOKUP_SUCCESS_TTL if res.get("found") else self.LOOKUP_NOT_FOUND_TTL
             if now - ts < ttl:
                 return res
+
+        is_us = _is_us_callsign(call_upper)
 
         # Filter active credentials
         tasks = []
@@ -454,6 +687,12 @@ class HamQTHService:
         if hamqth_u.strip() and hamqth_p.strip():
             portal_order.append("HamQTH.com")
             tasks.append(asyncio.to_thread(self._sync_lookup_hamqth, call_upper, hamqth_u, hamqth_p))
+
+        # Include free FCC Callook lookup for US callsigns
+        if is_us:
+            portal_order.append("Callook.info")
+            tasks.append(asyncio.to_thread(self._sync_lookup_callook, call_upper))
+
         if not tasks:
             return {
                 "status": "no_credentials",
@@ -473,12 +712,13 @@ class HamQTHService:
                 if r.get("status") == "error":
                     errors.append(f"{p_name}: {r.get('message', 'Ошибка')}")
 
-        # Check if found in any portal
+        # Check which sources were found
         sources_found = [p for p in ("QRZ.com", "HamQTH.com") if results_by_portal.get(p, {}).get("found")]
+        callook_found = results_by_portal.get("Callook.info", {}).get("found", False)
 
-        if not sources_found:
+        if not sources_found and not callook_found:
             all_not_found = all(
-                results_by_portal.get(p, {}).get("status") == "not_found"
+                results_by_portal.get(p, {}).get("status") in ("not_found", "not_us")
                 for p in portal_order
                 if p in results_by_portal
             )
@@ -503,7 +743,8 @@ class HamQTHService:
             "district", "us_state", "us_county", "dok", "country", "adif", "grid",
             "latitude", "longitude", "itu", "cq", "continent", "utc_offset",
             "qsl", "qsldirect", "qsl_via", "lotw", "eqsl", "mail", "email",
-            "web", "picture", "qslpic", "bio", "lookups", "lic_year", "birth_year", "iota"
+            "web", "picture", "qslpic", "bio", "lookups", "lic_year", "birth_year", "iota",
+            "oper_class", "lic_grant", "lic_expires", "uls_url", "frn"
         ]
 
         merged: Dict[str, Any] = {}
@@ -516,6 +757,61 @@ class HamQTHService:
                     val = v
                     break
             merged[fld] = val
+
+        # If Callook found, enrich missing or FCC-certified fields
+        if callook_found:
+            c_data = results_by_portal.get("Callook.info", {}).get("data", {})
+            # FCC fields
+            for f in ("oper_class", "lic_grant", "lic_expires", "uls_url", "frn"):
+                if c_data.get(f):
+                    merged[f] = c_data[f]
+
+            # Missing primary fields
+            for f in ("grid", "latitude", "longitude", "us_state", "city", "adr_city", "name", "adr_name", "nick", "lic_year"):
+                if not merged.get(f) and c_data.get(f):
+                    merged[f] = c_data[f]
+
+            # If QRZ stripped grid or coords (free account limitation), take Callook's exact FCC coords
+            if c_data.get("grid") and (not merged.get("grid") or merged.get("grid") == "—"):
+                merged["grid"] = c_data["grid"]
+            if c_data.get("latitude") and (not merged.get("latitude") or not merged.get("longitude")):
+                merged["latitude"] = c_data["latitude"]
+                merged["longitude"] = c_data["longitude"]
+
+            sources_found.append("Callook (FCC)")
+
+        # Post-merge Geo and Zone enrichment (Maidenhead <-> Lat/Lon & CQ/ITU zones)
+        if merged.get("grid") and (not merged.get("latitude") or not merged.get("longitude")):
+            c = maidenhead_to_latlon(merged["grid"])
+            if c:
+                merged["latitude"] = str(c[0])
+                merged["longitude"] = str(c[1])
+        elif (merged.get("latitude") and merged.get("longitude")) and not merged.get("grid"):
+            try:
+                merged["grid"] = latlon_to_maidenhead(float(merged["latitude"]), float(merged["longitude"]))
+            except Exception:
+                pass
+
+        # US State CQ / ITU zones & continent resolution
+        st_resolved = resolve_us_state(merged.get("us_state", ""))
+        if st_resolved and st_resolved in US_STATE_GEO:
+            cq_val, itu_val, cont_val = US_STATE_GEO[st_resolved]
+            if not merged.get("cq"):
+                merged["cq"] = cq_val
+            if not merged.get("itu"):
+                merged["itu"] = itu_val
+            if not merged.get("continent"):
+                merged["continent"] = cont_val
+        elif is_us:
+            if not merged.get("continent"):
+                merged["continent"] = "NA"
+
+        if is_us or st_resolved:
+            if not merged.get("country"):
+                merged["country"] = "United States"
+            if not merged.get("adif"):
+                merged["adif"] = "291"
+
         merged["sources_found"] = sources_found
         merged["sources_queried"] = portal_order
 

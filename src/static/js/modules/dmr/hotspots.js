@@ -5,6 +5,7 @@
  */
 
 import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName, getCountryInfo, getFlagBadgeHtml, getCleanTgDesc } from '../core/formatters.js?v=2.9.380';
+import { initGridDragReorder } from '../ui/grid-drag-reorder.js?v=2.9.469';
 import { showToast } from '../core/toast.js';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js';
 import { openBmBenchmarkModal } from './bm-benchmark.js';
@@ -22,10 +23,18 @@ import {
 } from '../audio/routing.js';
 import {
   setupSlotLongPress,
+  setupSlotTranscribeClick,
+  setupSlotTtsClick,
+  updateSlotLangBadge,
+  updateSlotTtsBadge,
+  isSlotTranscribeActive,
+  isSlotTtsActive,
   syncCardSlotTranscribeUI,
   syncAllTranscribeSlotsToServer,
-  disableHotspotTranscribe
-} from './transcriber.js?v=2.9.367';
+  disableHotspotTranscribe,
+  ensureCaptionFontControls,
+  setupCaptionBoxPinchZoom
+} from './transcriber.js?v=2.9.464';
 import {
   startTransmission,
   stopTransmission,
@@ -39,7 +48,7 @@ import {
   notifyPttConnectionBlocked
 } from '../ptt/engine.js?v=2.9.367';
 import { wireCardStatusInteractions, renderHotspotAuxStatusBadge, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js';
-import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.378';
+import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.496';
 import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
 import { showLongPressEffect } from '../ui/long-press.js';
 
@@ -254,7 +263,7 @@ export async function loadHotspots() {
 export function renderHotspotSelect() {
     const headerHotspotSelect = document.getElementById("headerHotspotSelect");
     if (!headerHotspotSelect) return;
-    const currentHotspots = window.currentHotspots || [];
+    const currentHotspots = (window.currentHotspots || []).filter(hs => !hs.hidden);
     const activeHotspotId = window.activeHotspotId || "default";
     headerHotspotSelect.innerHTML = "";
     currentHotspots.forEach(hs => {
@@ -323,14 +332,17 @@ export function switchActiveHotspot(newId) {
 export function triggerAddNewHotspot() {
     const callsignDisplay = document.getElementById("callsignDisplay");
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
-    if (currentHotspots.length >= 7) {
+    if (currentHotspots.length >= 30) {
+      const msg30 = window.t ? window.t("hotspots.limit_reached_30", {}, "Максимальное общее количество виртуальных хотспотов — 30 штук.") : "Максимальное общее количество виртуальных хотспотов — 30 штук.";
       if (window.showAppAlert) {
-        window.showAppAlert("Максимальное общее количество виртуальных хотспотов — 7 штук.", { title: "Лимит хотспотов", icon: "⚠️" });
+        window.showAppAlert(msg30, { title: "Лимит хотспотов", icon: "⚠️" });
       } else {
-        window.showAppAlert ? window.showAppAlert(window.t ? window.t("hotspots.limit_reached", {}, "Максимальное общее количество виртуальных хотспотов — 7 штук.") : "Максимальное общее количество виртуальных хотспотов — 7 штук.", { title: window.t ? window.t("hotspots.limit_title", {}, "Ограничение") : "Ограничение" }) : alert(window.t ? window.t("hotspots.limit_reached", {}, "Максимальное общее количество виртуальных хотспотов — 7 штук.") : "Максимальное общее количество виртуальных хотспотов — 7 штук.");
+        alert(msg30);
       }
       return;
     }
+    const activeCount = currentHotspots.filter(h => !h.hidden).length;
+    const shouldBeHidden = activeCount >= 7;
     const settingsModal = document.getElementById("settingsModal");
     if (settingsModal) {
       settingsModal.classList.add("active");
@@ -375,8 +387,15 @@ export function triggerAddNewHotspot() {
       duplex: true,
       autoconnect: true,
       auto_tg_bm: true,
-      auto_record: false,
+      auto_record: true,
+      allstar_node: "1999",
+      allstar_always_online: true,
+      hidden: shouldBeHidden
     });
+    if (shouldBeHidden) {
+      const hintMsg = window.t ? window.t("hotspots.new_hs_auto_hidden", {}, "Активных хотспотов уже 7 — новый хотспот создан со статусом «Исключен из списка живых»") : "Активных хотспотов уже 7 — новый хотспот создан со статусом «Исключен из списка живых»";
+      showToast(hintMsg, "info", 4500);
+    }
   }
 
 export function saveCurrentSettingsState() {
@@ -459,6 +478,9 @@ export function openHotspotSettings(hs, tabToActivate = null) {
     }
     const activeTab = document.getElementById(targetTabId) || document.getElementById("tab-account");
     if (activeTab) activeTab.classList.add("active");
+    if (typeof updateSettingsHeaderSaveBtn === "function") {
+      updateSettingsHeaderSaveBtn();
+    }
 
     const effectiveTab = activeTab ? activeTab.id : targetTabId;
     if (effectiveTab === "tab-account") {
@@ -568,7 +590,83 @@ function setupCollapseButtonLongPress(btn, cid) {
 
     const isCollapsed = isHotspotCollapsed(cid);
     if (isCollapsed) {
-      // If already collapsed, clicking will expand, no need for long-press timer
+      // Длинное удержание на стрелке свернутого хотспота: отправка в архив (hidden: true) с подтверждением
+      timer = setTimeout(async () => {
+        timer = null;
+        didLongPress = true;
+        try {
+          if (typeof showLongPressEffect === "function") {
+            showLongPressEffect(coords.x, coords.y);
+          } else if (navigator.vibrate) {
+            navigator.vibrate([40, 60, 40]);
+          }
+        } catch (_) {}
+
+        const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const existing = currentHotspots.find(h => (typeof resolveHotspotId === "function" ? resolveHotspotId(h.id) === resolveHotspotId(cid) : h.id === cid) || h.id === cid);
+        if (!existing) return;
+
+        const hsName = existing.name || existing.callsign || "Хотспот";
+        const titleText = window.t ? window.t("hotspots.archive_confirm_title", {}, "Отправка в архив") : "Отправка в архив";
+        const confirmMsg = window.t
+          ? window.t("hotspots.archive_confirm_msg", { name: hsName }, `Вы уверены, что хотите отправить хотспот «${hsName}» в архив?`)
+          : `Вы уверены, что хотите отправить хотспот «${hsName}» в архив?`;
+        const confirmBtnText = window.t ? window.t("hotspots.btn_to_archive", {}, "В архив") : "В архив";
+        const cancelBtnText = window.t ? window.t("buttons.cancel", {}, "Отмена") : "Отмена";
+
+        const confirmed = typeof window.showAppConfirm === "function"
+          ? await window.showAppConfirm({
+              title: titleText,
+              icon: "📦",
+              message: confirmMsg,
+              confirmText: confirmBtnText,
+              cancelText: cancelBtnText,
+              confirmStyle: "primary"
+            })
+          : true;
+
+        if (!confirmed) {
+          return;
+        }
+
+        const card = btn.closest(".radio-container");
+        if (card) {
+          card.style.transition = "opacity 0.25s ease, transform 0.25s ease";
+          card.style.opacity = "0.35";
+          card.style.transform = "scale(0.98)";
+        }
+
+        try {
+          const resp = await fetch(`/api/hotspots/${encodeURIComponent(existing.id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...existing, hidden: true })
+          });
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.detail || resp.statusText);
+          }
+          existing.hidden = true;
+          const msg = window.t
+            ? window.t("hotspots.hs_archived_toast", { name: hsName }, `Хотспот «${hsName}» отправлен в архив`)
+            : `Хотспот «${hsName}» отправлен в архив`;
+          if (typeof showToast === "function") {
+            showToast(msg, "info", 3000);
+          }
+          if (typeof loadHotspots === "function") {
+            await loadHotspots();
+          }
+        } catch (err) {
+          console.error("[HOTSPOTS] Failed to exclude collapsed hotspot on long-press:", err);
+          if (card) {
+            card.style.opacity = "";
+            card.style.transform = "";
+          }
+          if (typeof showToast === "function") {
+            showToast(err.message || "Ошибка отправки в архив", "error", 4000);
+          }
+        }
+      }, 500);
       return;
     }
 
@@ -627,6 +725,11 @@ function setupCollapseButtonLongPress(btn, cid) {
     const lastAction = (typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || window._lastHotspotCollapseActionTimes["default"])) || 0;
     if (Date.now() - lastAction < 600) {
       return;
+    }
+    const targetHsForCol = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => resolveHotspotId(h.id) === cid || h.id === cid);
+    if (targetHsForCol && targetHsForCol._aslDynamicMatrixMode) {
+      targetHsForCol._aslDynamicMatrixMode = false;
+      targetHsForCol._aslDismissedUnlisted = new Set((targetHsForCol.asl_unlisted_links || []).map(l => String(l.node).trim()));
     }
     const isCollapsed = isHotspotCollapsed(cid);
     if (isCollapsed) {
@@ -934,10 +1037,10 @@ export function updateCardXlxPanel(card, hs) {
           `).join("")}
         </div>
         <div class="xlx-controls-col">
-          <div class="xlx-active-mod-pill ${isExtendedMod ? 'active-xlx-mod' : ''}" role="button" tabindex="0" title="Текущий модуль: ${curMod}. Кликните для выбора любого модуля A–Z">${modLabel} <strong>${curMod}</strong></div>
+          <div class="xlx-active-mod-pill ${isExtendedMod ? 'active-xlx-mod' : ''}" role="button" tabindex="0" title="${window.t ? window.t("xlx.current_mod_title", { mod: curMod }, `Текущий модуль: ${curMod}. Кликните для выбора любого модуля A–Z`) : `Текущий модуль: ${curMod}. Кликните для выбора любого модуля A–Z`}">${modLabel} <strong>${curMod}</strong></div>
           <div class="xlx-actions-row">
-            <button type="button" class="btn-xlx-all ${isExtendedMod ? 'active-xlx-mod' : ''}" title="Все 26 модулей A–Z (выбор в 1 клик)">🔤 ${isExtendedMod ? curMod : 'A–Z'} ▾</button>
-            <button type="button" class="btn-xlx-unlink" title="Отключить модуль (Unlink TG 4000)">🔌 4000</button>
+            <button type="button" class="btn-xlx-all ${isExtendedMod ? 'active-xlx-mod' : ''}" title="${window.t ? window.t("xlx.all_mods_title", {}, `Все 26 модулей A–Z (выбор в 1 клик)`) : `Все 26 модулей A–Z (выбор в 1 клик)`}">🔤 ${isExtendedMod ? curMod : 'A–Z'} ▾</button>
+            <button type="button" class="btn-xlx-unlink" title="${window.t ? window.t("xlx.unlink_title", {}, `Отключить модуль (Unlink TG 4000)`) : `Отключить модуль (Unlink TG 4000)`}">🔌 4000</button>
           </div>
         </div>
       </div>
@@ -972,6 +1075,10 @@ export function updateCardXlxPanel(card, hs) {
         e.stopPropagation();
         linkHotspotXlxModule(cid, null);
       };
+    }
+
+    if (typeof updateCardPttHint === "function") {
+      updateCardPttHint(card);
     }
   } else {
     if (vfoTs1) vfoTs1.style.removeProperty("display");
@@ -1116,7 +1223,7 @@ export function updateCardDmrPlusPanel(card, hs) {
 
   dmrPlusBar.innerHTML = `
     <div class="dmrplus-ref-header">
-      <div class="dmrplus-ref-current" title="Текущий рефлектор TS2 (Голос в TG 9)">
+      <div class="dmrplus-ref-current" title="${window.t ? window.t("dmrplus.ref_current_title", {}, `Текущий рефлектор TS2 (Голос в TG 9)`) : `Текущий рефлектор TS2 (Голос в TG 9)`}">
         <span class="dmrplus-ref-icon">📡</span>
         <span class="dmrplus-ref-label">${refLabel}</span>
         <span class="dmrplus-ref-badge ${curRef ? 'active' : 'unlinked'}">${curRefDisplay}</span>
@@ -1124,7 +1231,7 @@ export function updateCardDmrPlusPanel(card, hs) {
       <div class="dmrplus-ref-actions">
         <button type="button" class="btn-dmrplus-action btn-dmrplus-unlink" title="${unlinkTitle}">🔌 4000</button>
         <button type="button" class="btn-dmrplus-action btn-dmrplus-status" title="${statusTitle}">ℹ️ 5000</button>
-        <button type="button" class="btn-dmrplus-action btn-dmrplus-custom" title="Ввести номер рефлектора (4001–4999)">🔢 4xxx</button>
+        <button type="button" class="btn-dmrplus-action btn-dmrplus-custom" title="${window.t ? window.t("dmrplus.ref_custom_title", {}, `Ввести номер рефлектора (4001–4999)`) : `Ввести номер рефлектора (4001–4999)`}">🔢 4xxx</button>
       </div>
     </div>
     <div class="dmrplus-ref-quick-row">
@@ -1179,6 +1286,3196 @@ export function updateCardDmrPlusPanel(card, hs) {
   }
 }
 
+
+
+export function openAllStarDtmfPopover(cid, anchorEl) {
+  document.querySelectorAll(".allstar-dtmf-popover").forEach(el => el.remove());
+  const popover = document.createElement("div");
+  popover.className = "allstar-dtmf-popover";
+
+  const keys = [
+    ["1", "2", "3", "A"],
+    ["4", "5", "6", "B"],
+    ["7", "8", "9", "C"],
+    ["*", "0", "#", "D"]
+  ];
+
+  let html = `<div class="dtmf-popover-header"><span>⌨️ DTMF Keypad</span><button type="button" class="btn-close-dtmf">✕</button></div>`;
+  html += `<div class="dtmf-grid">`;
+  keys.forEach(row => {
+    html += `<div class="dtmf-row">`;
+    row.forEach(k => {
+      html += `<button type="button" class="btn-dtmf-key" data-key="${k}">${k}</button>`;
+    });
+    html += `</div>`;
+  });
+  html += `</div>`;
+  html += `<div class="dtmf-quick-actions">
+    <button type="button" class="btn-dtmf-cmd" data-cmd="*70" title="Node Status">ℹ️ *70</button>
+    <button type="button" class="btn-dtmf-cmd" data-cmd="*81" title="Say Time">⏰ *81</button>
+    <button type="button" class="btn-dtmf-cmd" data-cmd="*73" title="Unlink All">🔌 *73</button>
+  </div>`;
+
+  popover.innerHTML = html;
+  document.body.appendChild(popover);
+
+  const rect = anchorEl.getBoundingClientRect();
+  popover.style.position = "fixed";
+  popover.style.top = `${Math.min(window.innerHeight - 250, rect.bottom + 6)}px`;
+  popover.style.left = `${Math.max(10, Math.min(window.innerWidth - 220, rect.left - 40))}px`;
+  popover.style.zIndex = "10050";
+
+  const sendDtmfKey = (k) => {
+    const ws = (typeof getWs === "function" ? getWs() : window.ws);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "allstar_dtmf", hotspot_id: cid, digit: k }));
+    }
+    if (typeof showToast === "function") {
+      showToast(`DTMF: ${k}`, "info", 1000);
+    }
+  };
+
+  popover.querySelectorAll(".btn-dtmf-key").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      sendDtmfKey(btn.dataset.key);
+    };
+  });
+
+  popover.querySelectorAll(".btn-dtmf-cmd").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const cmd = btn.dataset.cmd;
+      if (cmd === "*73") {
+        const hsObj = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => resolveHotspotId(h.id) === cid || h.id === cid);
+        if (hsObj) {
+          hsObj._aslDynamicMatrixMode = false;
+          hsObj.asl_unlisted_links = [];
+          if (hsObj._aslDismissedUnlisted) hsObj._aslDismissedUnlisted.clear();
+        }
+      }
+      for (const ch of cmd) {
+        sendDtmfKey(ch);
+      }
+    };
+  });
+
+  popover.querySelector(".btn-close-dtmf").onclick = (e) => {
+    e.stopPropagation();
+    popover.remove();
+  };
+
+  const onDocClick = (e) => {
+    if (!popover.contains(e.target) && e.target !== anchorEl) {
+      popover.remove();
+      document.removeEventListener("click", onDocClick);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", onDocClick), 50);
+}
+
+function renderActiveLinkChipsHtml(targetHs, cid) {
+  const activeLinks = (targetHs && targetHs.asl_links) || [];
+  const connNode = String((targetHs && (targetHs.connected_node || targetHs.target_node)) || "").trim();
+  const isLinked = Boolean(connNode && connNode !== "0");
+
+  const list = (activeLinks.length > 0)
+    ? activeLinks
+    : (isLinked ? [{ node: connNode, mode: (typeof window.getHotspotAslMode === "function" ? window.getHotspotAslMode(cid) : "*2"), flag: "🌐", clients: targetHs.asl_online_count || 1 }] : []);
+
+  if (!list.length) return "";
+
+  return list.map(lk => {
+    const isConnecting = (lk.connecting === true || lk.status === "connecting");
+    const isTx = (lk.mode === "*3");
+    let chipClass = "asl-chip-mode-monitor";
+    let modeLabel = "*2 Monitor (Зеленый)";
+    if (isConnecting) {
+      chipClass = "asl-chip-mode-connecting";
+      modeLabel = "Подключение (до 9с)...";
+    } else if (isTx) {
+      chipClass = "asl-chip-mode-tx";
+      modeLabel = "*3 RX/TX (Алый)";
+    }
+    const titleText = isConnecting
+      ? `Узел #${safeEscapeHtml(lk.node)}: Подключение (ожидание ответа до 9с)... Клик по ✕: отменить`
+      : `Узел #${safeEscapeHtml(lk.node)}: ${modeLabel}. Клик: переключить режим, Клик по ✕: отключить`;
+    const clientCountStr = (!isConnecting && lk.clients !== undefined) ? ` (${lk.clients})` : "";
+    return `
+      <div class="asl-link-chip ${chipClass}" data-node="${safeEscapeHtml(lk.node)}" data-mode="${safeEscapeHtml(lk.mode || "*2")}" data-connecting="${isConnecting ? "1" : "0"}" title="${titleText}">
+        <span class="chip-flag">${safeEscapeHtml(lk.flag || "🌐")}</span>
+        <span class="chip-text">${safeEscapeHtml(lk.node)}${clientCountStr}</span>
+        <span class="chip-del" data-del-node="${safeEscapeHtml(lk.node)}" title="${window.t ? window.t("asl.unlink_chip_title", { node: safeEscapeHtml(lk.node) }, `Отключить узел #${safeEscapeHtml(lk.node)}`) : `Отключить узел #${safeEscapeHtml(lk.node)}`}">✕</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function setupActiveLinkChipHandlers(linksBar, cid, targetHs, card) {
+  if (!linksBar) return;
+  linksBar.querySelectorAll(".chip-del").forEach(btn => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const nodeToDel = btn.dataset.delNode;
+      if (!nodeToDel) return;
+      fetch("/api/allstar/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hotspot_id: cid, target_node: nodeToDel })
+      })
+      .then(r => r.json())
+      .then(() => {
+        if (typeof showToast === "function") {
+          showToast(`Узел #${nodeToDel} отключен`, "info", 1500);
+        }
+        if (targetHs && targetHs.asl_links) {
+          targetHs.asl_links = targetHs.asl_links.filter(x => String(x.node) !== String(nodeToDel));
+          targetHs.asl_online_count = targetHs.asl_links.length;
+          targetHs.connected_node = targetHs.asl_links.length > 0 ? targetHs.asl_links[0].node : "";
+          targetHs.is_asl_linked = Boolean(targetHs.connected_node);
+          if (targetHs.is_asl_linked) {
+            targetHs.status = "ONLINE";
+            if (typeof updateBmStatus === "function") updateBmStatus("ONLINE", `Node ${targetHs.connected_node}`, cid);
+          } else {
+            targetHs.status = "ONLINE";
+            if (typeof updateBmStatus === "function") updateBmStatus("ONLINE", targetHs.allstar_node ? `Node ${targetHs.allstar_node}` : "AllStarLink активен", cid);
+          }
+        }
+        if (typeof window.updateCardAllStarPanel === "function") {
+          window.updateCardAllStarPanel(card, targetHs);
+        }
+        if (typeof window.updateCardBmBanner === "function") {
+          window.updateCardBmBanner(card, targetHs);
+        }
+      })
+      .catch(() => {});
+    };
+  });
+
+  linksBar.querySelectorAll(".asl-link-chip").forEach(chip => {
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      if (chip.classList.contains("asl-chip-mode-connecting")) {
+        if (typeof showToast === "function") {
+          showToast(`Узел #${chip.dataset.node || ""} еще подключается (таймаут 9с)...`, "info", 1500);
+        }
+        return;
+      }
+      const nodeNum = chip.dataset.node;
+      const curMode = chip.dataset.mode || "*2";
+      const nextMode = (curMode === "*2") ? "*3" : "*2";
+      const nextName = (nextMode === "*3") ? "RX/TX (*3, Алый)" : "Monitor (*2, Зеленый)";
+
+      if (targetHs) {
+        targetHs._aslConnectingNodes = targetHs._aslConnectingNodes || new Map();
+        targetHs.asl_links = targetHs.asl_links || [];
+
+        // STRICT GUARD: When switching chip to *3 mode, demote any other *3 node on UI with dashed green
+        if (nextMode === "*3") {
+          targetHs.asl_links.forEach(lk => {
+            const otherN = String(lk.node).trim();
+            if (otherN !== String(nodeNum).trim() && lk.mode === "*3") {
+              lk.connecting = true;
+              lk.mode = "*2";
+              targetHs._aslConnectingNodes.set(otherN, { mode: "*2", startedAt: Date.now() });
+            }
+          });
+        }
+
+        targetHs._aslConnectingNodes.set(String(nodeNum).trim(), { mode: nextMode, startedAt: Date.now() });
+        const item = targetHs.asl_links.find(x => String(x.node).trim() === String(nodeNum).trim());
+        if (item) {
+          item.mode = nextMode;
+          item.connecting = true;
+        }
+        syncAslMatrixButtonsState(card, targetHs);
+        if (typeof window.updateCardAllStarPanel === "function") {
+          window.updateCardAllStarPanel(card, targetHs);
+        }
+      }
+
+      fetch("/api/allstar/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: cid,
+          target_node: nodeNum,
+          mode: nextMode
+        })
+      })
+      .then(r => r.json())
+      .then(() => {
+        if (typeof showToast === "function") {
+          showToast(`Узел #${nodeNum}: переход в ${nextName}...`, "info", 1800);
+        }
+        setTimeout(() => { if (typeof fetchAslLinks === "function") fetchAslLinks(); }, 400);
+      })
+      .catch(() => {});
+    };
+  });
+}
+
+
+export async function fetchDirectAslNodeStats(nodeStr) {
+  const n = String(nodeStr || "").trim();
+  if (!n || !/^\d+$/.test(n) || n === "1999" || n === "9998" || n === "9999") {
+    return null;
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4500);
+  try {
+    const res = await fetch(`https://stats.allstarlink.org/api/stats/${encodeURIComponent(n)}`, {
+      signal: controller.signal,
+      headers: { "Accept": "application/json" }
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = (json && (json.stats?.data || json.stats || json.data)) || {};
+
+    const linked = data.linkedNodes || data.links || [];
+    const links_count = Array.isArray(linked) ? linked.length : (parseInt(data.links_count, 10) || 0);
+    const keyed = Boolean(data.keyed);
+    const uptimeSec = Math.max(1, parseInt(data.apprptuptime, 10) || 0);
+    const txSec = Math.max(0, parseInt(data.totaltxtime, 10) || 0);
+    const keyups = Math.max(0, parseInt(data.totalkeyups, 10) || 0);
+
+    let tx_duty_pct = 0.0;
+    let keyups_per_hour = 0.0;
+    if (uptimeSec >= 60) {
+      tx_duty_pct = Math.round(Math.min(100.0, (txSec / uptimeSec) * 100.0) * 10) / 10;
+      keyups_per_hour = Math.round((keyups / Math.max(0.1, uptimeSec / 3600.0)) * 10) / 10;
+    }
+
+    let traffic_level = "low";
+    if (keyed) {
+      traffic_level = "live";
+    } else if (tx_duty_pct >= 8.0 || keyups_per_hour >= 35.0 || links_count >= 20) {
+      traffic_level = "high";
+    } else if (tx_duty_pct >= 1.5 || keyups_per_hour >= 6.0 || links_count >= 3) {
+      traffic_level = "medium";
+    }
+
+    const telemetry = {
+      node: n,
+      online: true,
+      links_count,
+      keyed,
+      traffic_level,
+      tx_duty_pct,
+      keyups_per_hour,
+      checked_stats: true,
+      checked_at: Math.floor(Date.now() / 1000)
+    };
+
+    // Feed back to backend asynchronously so server cache and other clients get fresh data
+    fetch("/api/allstar/feed-stats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ node: n, stats: data })
+    }).catch(() => {});
+
+    return telemetry;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
+let _isProcessingDirectStatsQueue = false;
+
+export async function processDirectStatsQueue(nodesList, card, targetHs) {
+  if (_isProcessingDirectStatsQueue || !Array.isArray(nodesList) || !nodesList.length) return;
+  _isProcessingDirectStatsQueue = true;
+  try {
+    for (const rawNode of nodesList) {
+      const n = String(rawNode).trim();
+      if (!n || n === "1999" || n === "9998" || n === "9999") continue;
+
+      // Check if already refreshed recently (within 5 minutes)
+      const existing = (window._aslGlobalNodeProbeCache && window._aslGlobalNodeProbeCache[n]) || null;
+      if (existing && existing.checked_stats && (Date.now() - (existing.checked_at || 0) * 1000) < 300000) {
+        continue;
+      }
+
+      try {
+        const direct = await fetchDirectAslNodeStats(n);
+        if (direct && targetHs) {
+          targetHs._aslNodeProbeMap = targetHs._aslNodeProbeMap || {};
+          const cur = targetHs._aslNodeProbeMap[n] || { node: n, online: true, pong: true };
+          Object.assign(cur, direct);
+          targetHs._aslNodeProbeMap[n] = cur;
+          if (window._aslGlobalNodeProbeCache) {
+            window._aslGlobalNodeProbeCache[n] = cur;
+          }
+          if (card) {
+            syncAslMatrixButtonsState(card, targetHs);
+          }
+        }
+      } catch (err) {
+        console.debug(`[ALLSTAR] Direct stats error for #${n}:`, err);
+      }
+
+      // Sequential pacing with random delay 250-1000 ms strictly per user instruction
+      const delay = Math.floor(250 + Math.random() * 750);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  } finally {
+    _isProcessingDirectStatsQueue = false;
+  }
+}
+
+export async function probeAslMatrixNodes(card, targetHs, force = false) {
+  if (!card || !targetHs) return;
+  const buttons = card.querySelectorAll(".btn-allstar-node");
+  if (!buttons.length) return;
+
+  const nodes = [];
+  buttons.forEach(b => {
+    if (b.dataset.role === "dtmf") return;
+    const n = String(b.dataset.node || "").trim();
+    if (n && n !== "0") nodes.push(n);
+  });
+  if (!nodes.length) return;
+
+  const cid = targetHs.id || card.dataset.hotspotId || "default";
+  try {
+    const res = await fetch("/api/allstar/matrix-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hotspot_id: cid, nodes, force: Boolean(force) })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.nodes) {
+        window._aslGlobalNodeProbeCache = window._aslGlobalNodeProbeCache || {};
+        Object.assign(window._aslGlobalNodeProbeCache, data.nodes);
+        targetHs._aslNodeProbeMap = Object.assign(targetHs._aslNodeProbeMap || {}, data.nodes);
+        syncAslMatrixButtonsState(card, targetHs);
+
+        // Fallback: check if memory buttons have online nodes with 0 links due to server stats block
+        const needsDirect = Object.entries(data.nodes)
+          .filter(([n, p]) => (
+            p && p.online && p.links_count === 0 && (data.stats_api_ok === false || !p.checked_stats) && n !== "1999" && n !== "9998" && n !== "9999"
+          ))
+          .map(([n]) => n);
+
+        if (needsDirect.length > 0) {
+          processDirectStatsQueue(needsDirect, card, targetHs);
+        }
+      }
+    }
+  } catch (err) {
+    console.debug("[ALLSTAR] Matrix probe error:", err);
+  }
+}
+
+if (typeof window !== "undefined" && !window._aslMatrixProbeInterval) {
+  window._aslMatrixProbeInterval = setInterval(() => {
+    try {
+      const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
+      const aslHs = hsList.find(h => ((h && h.network_type) || "").toLowerCase() === "allstar");
+      if (!aslHs) return;
+      const cid = aslHs.id || "default";
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+      if (card && typeof probeAslMatrixNodes === "function") {
+        probeAslMatrixNodes(card, aslHs, false);
+      }
+    } catch (_) {}
+  }, 120000); // 2 minutes (gentle background poll)
+}
+
+
+// =========================================================================
+// ASL CONNECTION LIFECYCLE PROCEDURES & STATUS BANNER
+// =========================================================================
+
+const ASL_PROC_FALLBACK_TEXTS = {
+  disc_init: "Отключение #{node}: отправка сброса...",
+  disc_all_init: "Сброс линков (*73): отправка команды...",
+  disc_closing: "Отключение #{node}: закрытие IAX2-канала...",
+  disc_ok: "✓ Узел #{node} отключён (канал закрыт)",
+  disc_all_ok: "✓ Все узлы отключены (канал чист)",
+  disc_timeout: "✕ Сбой отключения #{node}: таймаут канала",
+  conn_dns: "Узел #{node}: поиск адреса в базе ASL...",
+  conn_dns_fail: "✕ Отказ #{node}: узел не найден в DNS ASL",
+  conn_calling: "Узел #{node} ({ip}): запрос IAX2 ({mode})...",
+  conn_token: "Узел #{node}: проверка токена (CTOKEN)...",
+  conn_verifying: "Узел #{node}: ответ получен, допуск хаба...",
+  conn_ok: "✓ Узел #{node}: принят и подключён ({mode})",
+  conn_rejected: "✕ Отказ #{node}: сброс вызова хабом (HANGUP)",
+  conn_timeout: "✕ Недоступен #{node} ({ip}): нет ответа (таймаут)"
+};
+
+export function formatAslProcMessage(data) {
+  if (!data) return "";
+  const code = data.code || "";
+  const node = data.node || "";
+  const mode = data.mode || "*2";
+  const ip = data.ip || "";
+  const key = "asl_proc." + code;
+  
+  let text = "";
+  if (typeof window.t === "function") {
+    text = window.t(key, { node, mode, ip });
+  }
+  if (!text || text === key) {
+    text = ASL_PROC_FALLBACK_TEXTS[code] || "";
+    text = text.replace(/\{node\}/g, node).replace(/\{mode\}/g, mode).replace(/\{ip\}/g, ip);
+  }
+  return text || code;
+}
+
+export function setAslProcBannerState(card, {
+  active = true,
+  text = "",
+  tone = "neutral",
+  autoHideMs = 0
+} = {}) {
+  if (!card) return;
+  const screenTopBar = card.querySelector(".screen-top-bar");
+  const modeBadge = card.querySelector(".mode-badge");
+  if (!screenTopBar || !modeBadge) return;
+
+  if (card._aslBannerHideTimer) {
+    clearTimeout(card._aslBannerHideTimer);
+    card._aslBannerHideTimer = null;
+  }
+
+  if (!active) {
+    screenTopBar.classList.remove("asl-proc-banner-active");
+    modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
+    if (typeof window.updateCardModeBadge === "function") {
+      window.updateCardModeBadge(card);
+    }
+    return;
+  }
+
+  screenTopBar.classList.add("asl-proc-banner-active");
+  modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
+  modeBadge.classList.add(`asl-tone-${tone}`);
+  modeBadge.textContent = text;
+  modeBadge.title = text;
+
+  if (autoHideMs > 0) {
+    card._aslBannerHideTimer = setTimeout(() => {
+      card._aslBannerHideTimer = null;
+      screenTopBar.classList.remove("asl-proc-banner-active");
+      modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
+      if (typeof window.updateCardModeBadge === "function") {
+        window.updateCardModeBadge(card);
+      }
+    }, autoHideMs);
+  }
+}
+
+export function aslDisconnectNodeProcedure(cid, targetNode = "all", {
+  showStatusBanner = true,
+  showCardEffects = true
+} = {}) {
+  const card = document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.querySelector(".dmr-card");
+  const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || []));
+  const targetHs = hsList.find(h => String(h.id) === String(cid)) || hsList[0] || null;
+  const cleanN = String(targetNode || "").trim();
+
+  if (targetHs) {
+    if (!targetHs._aslDisconnectingNodes) {
+      targetHs._aslDisconnectingNodes = new Set();
+    }
+    if (cleanN && cleanN !== "all") {
+      targetHs._aslDisconnectingNodes.add(cleanN);
+    } else {
+      targetHs._aslDisconnectingNodes.add("all");
+      if (Array.isArray(targetHs.asl_links)) {
+        targetHs.asl_links.forEach(l => { if (l && l.node) targetHs._aslDisconnectingNodes.add(String(l.node).trim()); });
+      }
+      if (targetHs.connected_node) {
+        targetHs._aslDisconnectingNodes.add(String(targetHs.connected_node).trim());
+      }
+    }
+
+    if (showCardEffects && card) {
+      syncAslMatrixButtonsState(card, targetHs);
+    }
+  }
+
+  if (showStatusBanner && card) {
+    const isAll = (!cleanN || cleanN === "all" || cleanN === "*73");
+    const initCode = isAll ? "disc_all_init" : "disc_init";
+    const initMsg = formatAslProcMessage({ code: initCode, node: cleanN });
+    setAslProcBannerState(card, { active: true, text: initMsg, tone: "neutral", autoHideMs: 0 });
+  }
+
+  const ws = (typeof getWs === "function" ? getWs() : window.ws);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: "allstar_disconnect_node",
+      hotspot_id: cid,
+      node: cleanN,
+      show_status_banner: showStatusBanner,
+      show_card_effects: showCardEffects
+    }));
+  } else {
+    fetch("/api/allstar/disconnect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: cid,
+        target_node: cleanN,
+        show_status_banner: showStatusBanner,
+        show_card_effects: showCardEffects
+      })
+    }).catch(e => console.warn("[ASL] Disconnect fetch error:", e));
+  }
+}
+
+export function aslConnectNodeProcedure(cid, targetNode, mode = "*2", {
+  showStatusBanner = true,
+  showCardEffects = true
+} = {}) {
+  const card = document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.querySelector(".dmr-card");
+  const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || []));
+  const targetHs = hsList.find(h => String(h.id) === String(cid)) || hsList[0] || null;
+  const cleanN = String(targetNode || "").trim();
+  const isEchoNode = (cleanN === "1999" || cleanN === "9999");
+  const cleanMode = (isEchoNode || mode === "*3" || mode === "perm" || mode === "transceive") ? "*3" : "*2";
+
+  if (targetHs) {
+    const existingNode = String(targetHs.connected_node || (Array.isArray(targetHs.asl_links) && targetHs.asl_links[0] && targetHs.asl_links[0].node) || "").trim();
+    const isSameNode = existingNode && cleanN && (existingNode === cleanN);
+    const hasExisting = Boolean(targetHs.connected_node || (Array.isArray(targetHs.asl_links) && targetHs.asl_links.length > 0));
+
+    if (isSameNode) {
+      if (targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes.delete(cleanN);
+      if (!targetHs._aslConnectingNodes) targetHs._aslConnectingNodes = new Map();
+      targetHs._aslConnectingNodes.set(cleanN, { mode: cleanMode, startedAt: Date.now() });
+    } else if (hasExisting) {
+      if (!targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes = new Set();
+      if (targetHs.connected_node) targetHs._aslDisconnectingNodes.add(String(targetHs.connected_node).trim());
+      if (Array.isArray(targetHs.asl_links)) {
+        targetHs.asl_links.forEach(l => { if (l && l.node) targetHs._aslDisconnectingNodes.add(String(l.node).trim()); });
+      }
+      if (!targetHs._aslConnectingNodes) targetHs._aslConnectingNodes = new Map();
+      targetHs._aslConnectingNodes.set(cleanN, { mode: cleanMode, startedAt: Date.now() });
+    } else {
+      if (!targetHs._aslConnectingNodes) targetHs._aslConnectingNodes = new Map();
+      targetHs._aslConnectingNodes.set(cleanN, { mode: cleanMode, startedAt: Date.now() });
+    }
+
+    targetHs._aslLinkMode = cleanMode;
+    if (typeof window.setHotspotAslMode === "function") {
+      window.setHotspotAslMode(cid, cleanMode);
+    }
+    if (typeof window.updateHotspotTsAudioModeUI === "function") {
+      window.updateHotspotTsAudioModeUI(cid);
+    }
+
+    if (showCardEffects && card) {
+      syncAslMatrixButtonsState(card, targetHs);
+    }
+  }
+
+  if (showStatusBanner && card) {
+    const initMsg = formatAslProcMessage({ code: "conn_dns", node: cleanN, mode: cleanMode });
+    setAslProcBannerState(card, { active: true, text: initMsg, tone: "neutral", autoHideMs: 0 });
+  }
+
+  const ws = (typeof getWs === "function" ? getWs() : window.ws);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: "allstar_connect_node",
+      hotspot_id: cid,
+      node: cleanN,
+      mode: cleanMode,
+      show_status_banner: showStatusBanner,
+      show_card_effects: showCardEffects
+    }));
+  } else {
+    fetch("/api/allstar/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: cid,
+        target_node: cleanN,
+        mode: cleanMode,
+        show_status_banner: showStatusBanner,
+        show_card_effects: showCardEffects
+      })
+    }).catch(e => console.warn("[ASL] Connect fetch error:", e));
+  }
+}
+
+export function syncAslMatrixButtonsState(card, targetHs) {
+  if (!card || !targetHs) return;
+  const buttons = card.querySelectorAll(".btn-allstar-node");
+  if (!buttons.length) return;
+
+  const rawLinks = Array.isArray(targetHs.asl_links) ? targetHs.asl_links : [];
+  const linkedModesMap = new Map();
+  const connectingModesMap = new Map();
+  const keyedSet = new Set();
+
+  if (targetHs._aslConnectingNodes instanceof Map) {
+    const now = Date.now();
+    for (const [cn, info] of targetHs._aslConnectingNodes.entries()) {
+      if (now - info.startedAt < 30000) {
+        connectingModesMap.set(cn, info.mode === "*3" ? "*3" : "*2");
+      } else {
+        targetHs._aslConnectingNodes.delete(cn);
+      }
+    }
+  }
+
+  if (rawLinks.length > 0) {
+    rawLinks.forEach(lk => {
+      if (lk && lk.node) {
+        const cn = String(lk.node).trim();
+        const mode = lk.mode === "*3" ? "*3" : "*2";
+        if (lk.connecting || lk.status === "connecting") {
+          connectingModesMap.set(cn, mode);
+        } else {
+          linkedModesMap.set(cn, mode);
+          if (targetHs._aslConnectingNodes instanceof Map) {
+            targetHs._aslConnectingNodes.delete(cn);
+          }
+          if (lk.keyed) {
+            keyedSet.add(cn);
+          }
+        }
+      }
+    });
+  } else {
+    const connNode = String(targetHs.connected_node || targetHs.target_node || "").trim();
+    if (connNode && connNode !== "0") {
+      const cid = targetHs.id || card.dataset.hotspotId || "default";
+      const fallbackMode = (typeof window.getHotspotAslMode === "function" ? window.getHotspotAslMode(cid) : "*2");
+      linkedModesMap.set(connNode, fallbackMode);
+      if (targetHs._aslConnectingNodes instanceof Map) {
+        targetHs._aslConnectingNodes.delete(connNode);
+      }
+    }
+  }
+
+  if (targetHs._aslRxActiveNode) {
+    keyedSet.add(String(targetHs._aslRxActiveNode).trim());
+  }
+  if (Array.isArray(targetHs._aslKeyedNodes)) {
+    targetHs._aslKeyedNodes.forEach(kn => keyedSet.add(String(kn).trim()));
+  }
+
+  const matrixNodeSet = new Set();
+  const probeMap = Object.assign({}, window._aslGlobalNodeProbeCache || {}, targetHs._aslNodeProbeMap || {});
+  const disconnectingSet = targetHs._aslDisconnectingNodes || new Set();
+  buttons.forEach(btn => {
+    if (btn.dataset.role === "dtmf") {
+      btn.classList.add("asl-node-role-dtmf");
+      const connsEl = btn.querySelector(".asl-btn-conns");
+      if (connsEl) {
+        connsEl.className = "asl-btn-conns asl-conns-dtmf";
+        connsEl.textContent = "DTMF";
+      }
+      return;
+    }
+    const n = String(btn.dataset.node || "").trim();
+    if (n) matrixNodeSet.add(n);
+    const linkMode = n ? (linkedModesMap.get(n) || "") : "";
+    const connMode = n ? (connectingModesMap.get(n) || "") : "";
+    const isDisconnecting = Boolean(n && (disconnectingSet.has(n) || disconnectingSet.has("all")));
+    const isEstablished = !isDisconnecting && Boolean(linkMode === "*2" || linkMode === "*3");
+    const isConnecting = !isDisconnecting && !isEstablished && Boolean(connMode);
+
+    btn.dataset.linkMode = isEstablished ? linkMode : (isConnecting ? connMode : "");
+    btn.dataset.connecting = isConnecting ? "true" : "false";
+
+    btn.classList.toggle("asl-node-linked-monitor", isEstablished && linkMode === "*2");
+    btn.classList.toggle("asl-node-linked-tx", isEstablished && linkMode === "*3");
+
+    btn.classList.toggle("asl-node-connecting", isConnecting);
+    btn.classList.toggle("asl-node-connecting-monitor", isConnecting && connMode === "*2");
+    btn.classList.toggle("asl-node-connecting-tx", isConnecting && connMode === "*3");
+    btn.classList.toggle("asl-node-disconnecting", isDisconnecting);
+
+    // Indication of currently talking node (keyed: true / RX)
+    const isTalking = Boolean(n && keyedSet.has(n));
+    btn.classList.toggle("asl-node-rx-talking", isTalking);
+
+    const descEl = btn.querySelector(".asl-btn-desc");
+    const label = (descEl && descEl.textContent && descEl.textContent !== "[настроить]") ? descEl.textContent : "";
+
+    const connsEl = btn.querySelector(".asl-btn-conns");
+    const probe = n ? probeMap[n] : null;
+
+    if (connsEl) {
+      if (isDisconnecting) {
+        connsEl.className = "asl-btn-conns asl-conns-connecting";
+        connsEl.textContent = "...";
+        connsEl.title = window.t ? window.t("asl.conns_disconnecting", { node: n }, `Отключение узла #${n}...`) : `Отключение узла #${n}...`;
+        btn.classList.remove("asl-node-offline");
+      } else if (isConnecting) {
+        connsEl.className = "asl-btn-conns asl-conns-connecting";
+        connsEl.textContent = "...";
+        connsEl.title = window.t ? window.t("asl.conns_connecting", { node: n }, `Подключение к узлу #${n}...`) : `Подключение к узлу #${n}...`;
+        btn.classList.remove("asl-node-offline");
+      } else if (!n || !probe) {
+        connsEl.className = "asl-btn-conns asl-conns-hidden";
+        connsEl.textContent = "";
+        btn.classList.remove("asl-node-offline");
+      } else if (!probe.online && linkMode !== "*2" && linkMode !== "*3") {
+        btn.classList.add("asl-node-offline");
+        connsEl.className = "asl-btn-conns asl-conns-offline";
+        connsEl.textContent = "OFF";
+        connsEl.title = window.t ? window.t("asl.probe_offline", {}, "Узел недоступен / Офлайн") : "Узел недоступен / Офлайн";
+      } else {
+        btn.classList.remove("asl-node-offline");
+        const isLoc = (n === "1999" || n === "9998" || n === "9999");
+        const linksNum = isLoc ? "LOC" : (probe.links_count !== undefined ? probe.links_count : 0);
+        const isStale = Boolean(probe.is_stale && !isLoc);
+        let connsClass = "asl-conns-zero";
+        let connsText = String(linksNum);
+        let connsTitle = window.t ? window.t("asl.conns_count", { count: linksNum }, `Активных подключений: ${linksNum}`) : `Активных подключений: ${linksNum}`;
+
+        if (isLoc) {
+          connsClass = "asl-conns-zero";
+          connsText = "LOC";
+          connsTitle = window.t ? window.t("asl.conns_echo", {}, "Локальное эхо / Parrot") : "Локальное эхо / Parrot";
+        } else if (isStale) {
+          connsClass = "asl-conns-stale";
+          connsText = String(linksNum);
+          let ageStr = "";
+          if (probe.stats_age_sec !== undefined && probe.stats_age_sec !== null) {
+            const m = Math.floor(probe.stats_age_sec / 60);
+            const h = Math.floor(m / 60);
+            ageStr = h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+          }
+          connsTitle = window.t ? window.t("asl.conns_high_activity", { count: linksNum }, `Высокая активность: ${linksNum} подключений`) : `Высокая активность: ${linksNum} подключений`;
+        } else if (probe.keyed) {
+          connsClass = "asl-conns-hot";
+          connsText = `• ${linksNum}`;
+          connsTitle = window.t ? window.t("asl.conns_live_now", {}, "В эфире прямо сейчас 🔥") : "В эфире прямо сейчас 🔥";
+        } else if (probe.traffic_level === "high" || (typeof linksNum === "number" && linksNum >= 10)) {
+          connsClass = "asl-conns-hot";
+          connsTitle = window.t ? window.t("asl.conns_high_activity", { count: linksNum }, `Высокая активность: ${linksNum} подключений`) : `Высокая активность: ${linksNum} подключений`;
+        } else if (probe.traffic_level === "medium" || (typeof linksNum === "number" && linksNum > 0)) {
+          connsClass = "asl-conns-active";
+          connsTitle = window.t ? window.t("asl.conns_count", { count: linksNum }, `Активных подключений: ${linksNum}`) : `Активных подключений: ${linksNum}`;
+        } else {
+          connsClass = "asl-conns-zero";
+          connsText = "0";
+          connsTitle = window.t ? window.t("asl.conns_count", { count: 0 }, "Подключений: 0") : "Подключений: 0";
+        }
+
+        connsEl.className = `asl-btn-conns ${connsClass}`;
+        connsEl.textContent = connsText;
+        connsEl.title = connsTitle;
+      }
+    }
+
+    if (n) {
+      let probeSuffix = "";
+      if (probe) {
+        if (!probe.online && linkMode !== "*2" && linkMode !== "*3") {
+          probeSuffix = " · [⚠️ Узел недоступен / Офлайн]";
+        } else {
+          const pInfo = [];
+          const connCountStr = window.t ? window.t("asl.conns_count", { count: probe.links_count || 0 }, `Коннектов: ${probe.links_count || 0}`) : `Коннектов: ${probe.links_count || 0}`;
+          pInfo.push(connCountStr);
+          if (probe.rtt_ms) pInfo.push(`${probe.rtt_ms}ms`);
+          if (probe.tx_duty_pct) {
+            const airStr = window.t ? window.t("asl.probe_air", { pct: probe.tx_duty_pct }, `Эфир: ${probe.tx_duty_pct}%`) : `Эфир: ${probe.tx_duty_pct}%`;
+            pInfo.push(airStr);
+          }
+          const onlineWord = window.t ? window.t("asl.probe_online", {}, "Онлайн") : "Онлайн";
+          probeSuffix = ` · [${onlineWord} · ${pInfo.join(" · ")}]`;
+        }
+      }
+      const lblPrefix = label ? label + " " : "";
+      if (linkMode === "*2") {
+        btn.title = window.t ? window.t("asl.node_tooltip_monitor", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) [Монитор *2] — Клик: переключить на Передачу (*3), Удержание: отключить узел (*1)${probeSuffix}`) : `${lblPrefix}(#${n}) [Монитор *2] — Клик: переключить на Передачу (*3), Удержание: отключить узел (*1)${probeSuffix}`;
+      } else if (linkMode === "*3") {
+        btn.title = window.t ? window.t("asl.node_tooltip_tx", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) [Передача *3] — Клик: переключить на Монитор (*2), Удержание: отключить узел (*1)${probeSuffix}`) : `${lblPrefix}(#${n}) [Передача *3] — Клик: переключить на Монитор (*2), Удержание: отключить узел (*1)${probeSuffix}`;
+      } else {
+        btn.title = window.t ? window.t("asl.node_tooltip_idle", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) - Клик: подключить, Удержание: изменить${probeSuffix}`) : `${lblPrefix}(#${n}) - Клик: подключить, Удержание: изменить${probeSuffix}`;
+      }
+    }
+  });
+
+  const unlistedLinks = rawLinks.filter(lk => lk && lk.node && !matrixNodeSet.has(String(lk.node).trim()));
+  targetHs.asl_unlisted_links = unlistedLinks;
+}
+
+
+// =========================================================================
+// ASL MATRIX CARD CONTEXT MENU & MOVE MODE HELPERS
+// =========================================================================
+
+const _activeAslMenuCleanups = new Set();
+let _activeAslMoveCleanup = null;
+
+export function clearAslMoveCancelListener() {
+  if (typeof _activeAslMoveCleanup === "function") {
+    try { _activeAslMoveCleanup(); } catch (_) {}
+    _activeAslMoveCleanup = null;
+  }
+}
+
+export function closeAslCardContextMenu(card, targetHs = null) {
+  // 1. Всегда вызываем все зарегистрированные cleanup-колбэки на document
+  // (даже если сам DOM-элемент .asl-card-context-menu уже был удалён через innerHTML!)
+  _activeAslMenuCleanups.forEach(fn => {
+    try { fn(); } catch (_) {}
+  });
+  _activeAslMenuCleanups.clear();
+
+  // 2. Удаляем все DOM-элементы меню
+  document.querySelectorAll(".asl-card-context-menu").forEach(el => el.remove());
+
+  if (targetHs) {
+    targetHs._aslOpenMenuIdx = null;
+  }
+}
+
+export function saveAslUserNodes(cid, userNodes) {
+  try {
+    const serialized = JSON.stringify(userNodes);
+    localStorage.setItem(`proxdmr_asl_quick_nodes_${cid}`, serialized);
+    localStorage.setItem("proxdmr_asl_quick_nodes_global", serialized);
+  } catch (e) {
+    console.warn("Failed to save ASL quick nodes:", e);
+  }
+}
+
+
+export function openAslCardEditPopover({ idx, cid, card, targetHs, userNodes }) {
+  document.querySelectorAll(".asl-card-edit-popover").forEach(el => el.remove());
+  if (typeof closeAslCardContextMenu === "function") {
+    closeAslCardContextMenu(card, targetHs);
+  }
+
+  const matrixContainer = card.querySelector(`#aslMatrixContainer_${cid}`) || card.querySelector(".asl-matrix-container") || card;
+  matrixContainer.style.position = "relative";
+
+  const curItem = userNodes[idx] || { node: "", label: "", flag: "🌐", role: "node", scan: false };
+  const initialIsDtmf = isAslDtmfCard(curItem);
+  let selectedRole = initialIsDtmf ? "dtmf" : "node";
+
+  const pop = document.createElement("div");
+  pop.className = "asl-card-edit-popover";
+  pop.innerHTML = `
+    <div class="asl-edit-header">
+      <span class="asl-edit-title">${curItem.node ? (window.t ? window.t("asl.edit_cell_title", { idx: idx + 1 }, `✎ Ячейка #${idx + 1}`) : `✎ Ячейка #${idx + 1}`) : (window.t ? window.t("asl.add_cell_title", { idx: idx + 1 }, `➕ Добавить в ячейку #${idx + 1}`) : `➕ Добавить в ячейку #${idx + 1}`)}</span>
+      <button type="button" class="asl-edit-close" title="${window.t ? window.t("asl.edit_close_esc", {}, "Закрыть (Esc)") : "Закрыть (Esc)"}">✕</button>
+    </div>
+
+    <div class="asl-edit-role-switch">
+      <button type="button" class="asl-role-pill ${selectedRole === "node" ? "active-node" : ""}" data-role="node">
+        🌐 Узел
+      </button>
+      <button type="button" class="asl-role-pill ${selectedRole === "dtmf" ? "active-dtmf" : ""}" data-role="dtmf">
+        ☎️ DTMF Макрос
+      </button>
+    </div>
+
+    <div class="asl-edit-row asl-edit-row-autocomplete">
+      <label class="asl-edit-label" id="aslEditCodeLabel">${selectedRole === "dtmf" ? "Команда DTMF:" : "Номер узла:"}</label>
+      <input type="text" class="asl-edit-input" id="aslEditNodeInput" value="${safeEscapeHtml(curItem.node || "")}" placeholder="${selectedRole === "dtmf" ? "Напр. *81, *70, 73#" : "Напр. 41522, 28554"}" autocomplete="off" />
+      <div class="asl-edit-autocomplete-dropdown" id="aslEditAutocompleteDropdown" style="display:none;"></div>
+    </div>
+
+    <div class="asl-edit-row">
+      <label class="asl-edit-label">Подпись:</label>
+      <input type="text" class="asl-edit-input" id="aslEditLabelInput" value="${safeEscapeHtml(curItem.label || "")}" placeholder="Короткое имя" maxlength="18" autocomplete="off" />
+    </div>
+
+    <div class="asl-edit-actions">
+      <button type="button" class="asl-edit-btn asl-edit-cancel">Отмена</button>
+      <button type="button" class="asl-edit-btn asl-edit-save">Сохранить</button>
+    </div>
+  `;
+
+  const stopEv = (e) => e.stopPropagation();
+  pop.addEventListener("pointerdown", stopEv);
+  pop.addEventListener("mousedown", stopEv);
+  pop.addEventListener("click", stopEv);
+
+  matrixContainer.appendChild(pop);
+
+  const nodeInput = pop.querySelector("#aslEditNodeInput");
+  const labelInput = pop.querySelector("#aslEditLabelInput");
+  const codeLabel = pop.querySelector("#aslEditCodeLabel");
+
+  const applyRoleUI = (role) => {
+    selectedRole = role;
+    pop.querySelectorAll(".asl-role-pill").forEach(b => {
+      b.classList.toggle("active-node", b.dataset.role === "node" && role === "node");
+      b.classList.toggle("active-dtmf", b.dataset.role === "dtmf" && role === "dtmf");
+    });
+    if (role === "dtmf") {
+      if (codeLabel) codeLabel.textContent = "Команда DTMF:";
+      if (nodeInput) nodeInput.placeholder = "Напр. *81, *70, 73#";
+    } else {
+      if (codeLabel) codeLabel.textContent = "Номер узла:";
+      if (nodeInput) nodeInput.placeholder = "Напр. 41522";
+    }
+  };
+
+  pop.querySelectorAll(".asl-role-pill").forEach(btn => {
+    btn.onclick = () => applyRoleUI(btn.dataset.role);
+  });
+
+  // ASL Autocomplete search dropdown logic
+  const autoDropdown = pop.querySelector("#aslEditAutocompleteDropdown");
+  let autoTimer = null;
+  let autoAbort = null;
+
+  const hideAutocomplete = () => {
+    if (autoDropdown) {
+      autoDropdown.style.display = "none";
+      autoDropdown.innerHTML = "";
+    }
+  };
+
+  // Автопереключение в роль DTMF при вводе *, #, A-D + поиск узлов
+  nodeInput.addEventListener("input", () => {
+    const val = (nodeInput.value || "").trim();
+    if (/[*#ABCDabcd]/.test(val) && selectedRole !== "dtmf") {
+      applyRoleUI("dtmf");
+      hideAutocomplete();
+      return;
+    }
+    if (selectedRole === "dtmf" || val.length < 2) {
+      hideAutocomplete();
+      return;
+    }
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(async () => {
+      if (autoAbort) autoAbort.abort();
+      autoAbort = new AbortController();
+      try {
+        const res = await fetch(`/api/allstar/nodes?q=${encodeURIComponent(val)}&limit=5`, { signal: autoAbort.signal });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = (data && data.nodes) || [];
+        if (!list.length || !autoDropdown) {
+          hideAutocomplete();
+          return;
+        }
+        autoDropdown.innerHTML = list.map(item => {
+          const isEL = String(item.node).trim().startsWith("3") && String(item.node).trim().length >= 5;
+          return `
+            <div class="asl-auto-item" data-node="${safeEscapeHtml(item.node)}" data-name="${safeEscapeHtml(item.callsign || item.name || '')}" data-flag="${safeEscapeHtml(item.flag || '🌐')}">
+              
+              <span class="asl-auto-flag">${item.flag || '🌐'}</span>
+              <strong class="asl-auto-node">#${item.node}</strong>
+              <span class="asl-auto-title">${safeEscapeHtml(item.callsign ? item.callsign + ' · ' + (item.name || '') : item.name || '')}</span>
+            </div>
+          `;
+        }).join("");
+        autoDropdown.style.display = "block";
+
+        autoDropdown.querySelectorAll(".asl-auto-item").forEach(el => {
+          el.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const chosenNode = el.dataset.node;
+            const chosenName = el.dataset.name;
+            const chosenFlag = el.dataset.flag;
+            if (nodeInput) nodeInput.value = chosenNode;
+            if (labelInput && (!labelInput.value || labelInput.value.trim() === "" || labelInput.value.startsWith("Node"))) {
+              labelInput.value = chosenName.slice(0, 18);
+            }
+            curItem.flag = chosenFlag;
+            hideAutocomplete();
+          });
+        });
+      } catch (e) {
+        if (e.name !== "AbortError") hideAutocomplete();
+      }
+    }, 180);
+  });
+
+  const closePop = () => {
+    document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("keydown", onKey, true);
+    pop.remove();
+  };
+
+  const savePop = () => {
+    const trimmedNode = (nodeInput.value || "").trim();
+    if (!trimmedNode) {
+      userNodes[idx] = { node: "", label: "", flag: "➕", role: "node", scan: false };
+    } else {
+      const finalRole = selectedRole;
+      let finalFlag = "🌐";
+      if (finalRole === "dtmf") {
+        finalFlag = "☎️";
+      } else if (curItem.flag && curItem.flag !== "➕" && curItem.flag !== "☎️") {
+        finalFlag = curItem.flag;
+      }
+      userNodes[idx] = {
+        node: trimmedNode,
+        label: (labelInput.value || "").trim(),
+        flag: finalFlag,
+        role: finalRole,
+        scan: finalRole === "dtmf" ? false : Boolean(curItem.scan),
+        prefMode: curItem.prefMode
+      };
+    }
+    saveAslUserNodes(cid, userNodes);
+    closePop();
+    updateCardAllStarPanel(card, targetHs);
+  };
+
+  pop.querySelector(".asl-edit-close").onclick = closePop;
+  pop.querySelector(".asl-edit-cancel").onclick = closePop;
+  pop.querySelector(".asl-edit-save").onclick = savePop;
+
+  const onOutside = (e) => {
+    if (!pop.contains(e.target)) closePop();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePop();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      savePop();
+    }
+  };
+
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onOutside, true);
+    document.addEventListener("keydown", onKey, true);
+    nodeInput.focus();
+    nodeInput.select();
+  }, 20);
+}
+
+export function openAslCardContextMenu({
+  btn, idx, cid, card, targetHs, userNodes,
+  triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
+}) {
+  closeAslCardContextMenu(card, targetHs);
+
+  // Если до этого был включён режим Move — сбрасываем его слушатель
+  clearAslMoveCancelListener();
+  if (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined) {
+    targetHs._aslMovingIdx = null;
+    card.querySelectorAll(".asl-node-moving-source, .asl-node-move-target").forEach(el => {
+      el.classList.remove("asl-node-moving-source", "asl-node-move-target");
+    });
+    const gridEl = card.querySelector(".asl-matrix-grid");
+    if (gridEl) gridEl.classList.remove("asl-matrix-move-mode");
+  }
+
+  const matrixContainer = card.querySelector(`#aslMatrixContainer_${cid}`) || card.querySelector(".asl-matrix-container");
+  if (!matrixContainer) return;
+  matrixContainer.style.position = "relative";
+
+  const item = userNodes[idx];
+  if (!item || !item.node) return;
+  const cleanNode = String(item.node).trim();
+  if (targetHs) {
+    targetHs._aslOpenMenuIdx = idx;
+  }
+
+  // Текущий эффективный режим
+  const currentMode = String(btn.dataset.linkMode || item.prefMode || (targetHs && targetHs._aslLinkMode) || "2");
+  const isScanActive = Boolean(item.scan);
+  const isCurrentlyTx = (currentMode === "*3" || currentMode === "3");
+
+  const isDtmf = isAslDtmfCard(item);
+  const nextScanActionText = isScanActive ? "OFF" : "ON";
+  const scanTitle = isScanActive
+    ? "Выключить участие узла в сканировании (переключить в OFF)"
+    : "Включить участие узла в сканировании (переключить в ON)";
+
+  const menu = document.createElement("div");
+  menu.className = "asl-card-context-menu";
+  if (isDtmf) {
+    const tRoleDtmf = window.t ? window.t("asl.ctx_switch_node", {}, "Сменить роль: переключить на обычный узел (ХН)") : "Сменить роль: переключить на обычный узел (ХН)";
+    const tEditDtmf = window.t ? window.t("asl.ctx_edit_dtmf", {}, "Редактировать код DTMF и описание") : "Редактировать код DTMF и описание";
+    const tMoveCard = window.t ? window.t("asl.ctx_move", {}, "Переместить карточку в другую ячейку") : "Переместить карточку в другую ячейку";
+    const tDeleteCard = window.t ? window.t("asl.ctx_delete", {}, "Удалить карточку из ячейки") : "Удалить карточку из ячейки";
+    menu.innerHTML = `
+      <div class="asl-card-context-header">☎️ ${safeEscapeHtml(cleanNode)}</div>
+      <button type="button" class="asl-card-context-btn" data-action="toggle-role" title="${tRoleDtmf}">
+        <span class="ctx-btn-label">Роль</span>
+        <span class="ctx-btn-badge" style="background: rgba(139, 92, 246, 0.4); color: #ede9fe;">DTMF ➔ ХН</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="edit" title="${tEditDtmf}">
+        <span class="ctx-btn-label">Edit</span>
+        <span class="ctx-btn-icon">✎</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="move" title="${tMoveCard}">
+        <span class="ctx-btn-label">Move</span>
+        <span class="ctx-btn-icon">✥</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="delete" title="${tDeleteCard}">
+        <span class="ctx-btn-label">Delete</span>
+        <span class="ctx-btn-icon">✕</span>
+      </button>
+    `;
+  } else {
+    const tTxRx = window.t ? window.t("asl.ctx_toggle_txrx", {}, "Переключить режим Monitor (*2) / Transceive (*3)") : "Переключить режим Monitor (*2) / Transceive (*3)";
+    const tRoleNode = window.t ? window.t("asl.ctx_switch_dtmf", {}, "Сменить роль: переключить на макрос DTMF") : "Сменить роль: переключить на макрос DTMF";
+    const tEditNode = window.t ? window.t("asl.ctx_edit_node", {}, "Редактировать номер узла, название и флаг") : "Редактировать номер узла, название и флаг";
+    const tMoveCard = window.t ? window.t("asl.ctx_move", {}, "Переместить карточку в другую ячейку") : "Переместить карточку в другую ячейку";
+    const tDiscon = window.t ? window.t("asl.ctx_disconnect", {}, "Отключиться от этого узла (ХН)") : "Отключиться от этого узла (ХН)";
+    const tDeleteCard = window.t ? window.t("asl.ctx_delete", {}, "Удалить карточку из ячейки") : "Удалить карточку из ячейки";
+    menu.innerHTML = `
+      <div class="asl-card-context-header">#${safeEscapeHtml(cleanNode)}</div>
+      <button type="button" class="asl-card-context-btn ${isCurrentlyTx ? "mode-tx" : "mode-rx"}" data-action="txrx" title="${tTxRx}">
+        <span class="ctx-btn-label">TX-RX</span>
+        <span class="ctx-btn-badge">${isCurrentlyTx ? "*3" : "*2"}</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="toggle-role" title="${tRoleNode}">
+        <span class="ctx-btn-label">Роль</span>
+        <span class="ctx-btn-badge" style="background: rgba(56, 189, 248, 0.3); color: #bae6fd;">ХН ➔ DTMF</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="edit" title="${tEditNode}">
+        <span class="ctx-btn-label">Edit</span>
+        <span class="ctx-btn-icon">✎</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="move" title="${tMoveCard}">
+        <span class="ctx-btn-label">Move</span>
+        <span class="ctx-btn-icon">✥</span>
+      </button>
+      <button type="button" class="asl-card-context-btn ${!isScanActive ? "scan-active" : ""}" data-action="scan" title="${scanTitle}">
+        <span class="ctx-btn-label">Scan</span>
+        <span class="ctx-btn-badge">${nextScanActionText}</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="disconnect" title="${tDiscon}">
+        <span class="ctx-btn-label">Disconnect</span>
+        <span class="ctx-btn-icon">⏏</span>
+      </button>
+      <button type="button" class="asl-card-context-btn" data-action="delete" title="${tDeleteCard}">
+        <span class="ctx-btn-label">Delete</span>
+        <span class="ctx-btn-icon">✕</span>
+      </button>
+    `;
+  }
+
+  const stopMenuPointer = (ev) => {
+    ev.stopPropagation();
+  };
+  menu.addEventListener("pointerdown", stopMenuPointer);
+  menu.addEventListener("mousedown", stopMenuPointer);
+  menu.addEventListener("touchstart", stopMenuPointer, { passive: true });
+
+  matrixContainer.appendChild(menu);
+
+  const contRect = matrixContainer.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+
+  let left = (btnRect.right - contRect.left) + 6;
+  if (left + menuRect.width > contRect.width - 4) {
+    left = (btnRect.left - contRect.left) - menuRect.width - 6;
+  }
+  left = Math.max(4, Math.min(left, contRect.width - menuRect.width - 4));
+
+  const maxTop = Math.max(2, contRect.height - menuRect.height - 14);
+  let top = (btnRect.top - contRect.top) + (btnRect.height / 2) - (menuRect.height / 2) - 12;
+  top = Math.max(2, Math.min(top, maxTop));
+
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(left)}px`;
+
+  const onOutsidePointerDown = (e) => {
+    if (!menu.isConnected) {
+      cleanupThisMenu();
+      return;
+    }
+    if (!menu.contains(e.target)) {
+      closeAslCardContextMenu(card, targetHs);
+    }
+  };
+
+  const onKeyDown = (e) => {
+    if (!menu.isConnected) {
+      cleanupThisMenu();
+      return;
+    }
+    if (e.key === "Escape") {
+      closeAslCardContextMenu(card, targetHs);
+      if (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined) {
+        targetHs._aslMovingIdx = null;
+        updateCardAllStarPanel(card, targetHs);
+      }
+    }
+  };
+
+  function cleanupThisMenu() {
+    document.removeEventListener("pointerdown", onOutsidePointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    _activeAslMenuCleanups.delete(cleanupThisMenu);
+  }
+
+  _activeAslMenuCleanups.add(cleanupThisMenu);
+  document.addEventListener("pointerdown", onOutsidePointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+
+  let actionHandled = false;
+  const executeMenuAction = (ev) => {
+    const actionBtn = ev.target.closest(".asl-card-context-btn");
+    if (!actionBtn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (actionHandled) return;
+    actionHandled = true;
+
+    const action = actionBtn.dataset.action;
+
+    if (action === "toggle-role") {
+      closeAslCardContextMenu(card, targetHs);
+      item.role = isDtmf ? "node" : "dtmf";
+      if (item.role === "dtmf") {
+        item.scan = false;
+        item.flag = "☎️";
+      } else if (item.flag === "☎️") {
+        item.flag = "🌐";
+      }
+      saveAslUserNodes(cid, userNodes);
+      updateCardAllStarPanel(card, targetHs);
+      if (typeof showToast === "function") {
+        showToast(item.role === "dtmf" ? `Ячейка «${cleanNode}»: роль DTMF-макрос` : `Ячейка #${cleanNode}: роль ХН (вызов узла)`, "info", 2000);
+      }
+    } else if (action === "edit") {
+      closeAslCardContextMenu(card, targetHs);
+      openAslCardEditPopover({ idx, cid, card, targetHs, userNodes });
+    } else if (action === "txrx") {
+      closeAslCardContextMenu(card, targetHs);
+      const nextMode = isCurrentlyTx ? "*2" : "*3";
+      item.prefMode = nextMode === "*3" ? "3" : "2";
+      if (targetHs) targetHs._aslLinkMode = nextMode;
+      btn.dataset.linkMode = nextMode;
+      saveAslUserNodes(cid, userNodes);
+      if (typeof window.setHotspotAslMode === "function") {
+        window.setHotspotAslMode(cid, nextMode);
+      }
+      if (typeof window.updateHotspotTsAudioModeUI === "function") {
+        window.updateHotspotTsAudioModeUI(cid);
+      }
+
+      if (typeof aslConnectNodeProcedure === "function") {
+        aslConnectNodeProcedure(cid, cleanNode, nextMode, { showStatusBanner: true, showCardEffects: true });
+      } else if (typeof window.aslConnectNodeProcedure === "function") {
+        window.aslConnectNodeProcedure(cid, cleanNode, nextMode, { showStatusBanner: true, showCardEffects: true });
+      }
+      updateCardAllStarPanel(card, targetHs);
+    } else if (action === "move") {
+      closeAslCardContextMenu(card, targetHs);
+      if (targetHs) targetHs._aslMovingIdx = idx;
+      updateCardAllStarPanel(card, targetHs);
+    } else if (action === "delete") {
+      closeAslCardContextMenu(card, targetHs);
+      if (isNodeCurrentlyLinked()) {
+        if (typeof aslDisconnectNodeProcedure === "function") {
+          aslDisconnectNodeProcedure(cid, cleanNode, { showStatusBanner: true, showCardEffects: true });
+        } else if (typeof window.aslDisconnectNodeProcedure === "function") {
+          window.aslDisconnectNodeProcedure(cid, cleanNode, { showStatusBanner: true, showCardEffects: true });
+        }
+      }
+      if (targetHs) {
+        if (!targetHs._aslDismissedUnlisted) targetHs._aslDismissedUnlisted = new Set();
+        targetHs._aslDismissedUnlisted.add(cleanNode);
+      }
+      userNodes[idx] = { node: "", label: "", flag: "➕", scan: false };
+      saveAslUserNodes(cid, userNodes);
+      updateCardAllStarPanel(card, targetHs);
+    } else if (action === "disconnect") {
+      closeAslCardContextMenu(card, targetHs);
+      if (typeof triggerDisconnectNode === "function") {
+        triggerDisconnectNode(cleanNode);
+      } else if (typeof aslDisconnectNodeProcedure === "function") {
+        aslDisconnectNodeProcedure(cid, cleanNode, { showStatusBanner: true, showCardEffects: true });
+      } else if (typeof window.aslDisconnectNodeProcedure === "function") {
+        window.aslDisconnectNodeProcedure(cid, cleanNode, { showStatusBanner: true, showCardEffects: true });
+      }
+    } else if (action === "scan") {
+      item.scan = !Boolean(item.scan);
+      saveAslUserNodes(cid, userNodes);
+      closeAslCardContextMenu(card, targetHs);
+      updateCardAllStarPanel(card, targetHs);
+      if (typeof showToast === "function") {
+        showToast(`Scan для #${cleanNode}: ${item.scan ? "ВКЛ" : "ВЫКЛ"}`, "info", 1800);
+      }
+    }
+  };
+
+  menu.addEventListener("click", executeMenuAction);
+}
+
+
+// =========================================================================
+// ASL MATRIX CARD ROLES (NODE vs DTMF) & SCAN ENGINE
+// =========================================================================
+
+export function isAslDtmfCard(item) {
+  if (!item || !item.node) return false;
+  if (item.role === "dtmf") return true;
+  if (item.role === "node") return false;
+  return /[*#ABCDabcd]/.test(String(item.node).trim());
+}
+
+export function executeAslDtmfMacroAction(cid, card, btn, digits) {
+  if (!digits) return;
+  const chips = card ? card.querySelectorAll(".asl-link-chip") : [];
+  let isTxModeActive = false;
+  chips.forEach(chip => {
+    if (chip.dataset.mode === "*3" || chip.dataset.node === "1999") {
+      isTxModeActive = true;
+    }
+  });
+  if (!isTxModeActive) {
+    const curHs = (typeof window !== "undefined" && window.currentHotspots ? window.currentHotspots : []).find(h => h.id === cid);
+    if (curHs && (curHs._aslLinkMode === "*3" || curHs.connected_node === "1999")) {
+      isTxModeActive = true;
+    }
+  }
+
+  if (!isTxModeActive) {
+    if (typeof setAslProcBannerState === "function") {
+      setAslProcBannerState(card, {
+        active: true,
+        text: "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)",
+        tone: "negative",
+        autoHideMs: 3200
+      });
+    }
+    if (navigator.vibrate) {
+      try { navigator.vibrate([40, 40, 40]); } catch (_) {}
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.classList.add("asl-dtmf-sending");
+    setTimeout(() => { btn.classList.remove("asl-dtmf-sending"); }, 1500);
+  }
+
+  if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+    window.ws.send(JSON.stringify({
+      type: "allstar_dtmf_macro",
+      hotspot_id: cid,
+      digits: digits
+    }));
+  }
+}
+
+const DEFAULT_ASL_SCAN_CONFIG = {
+  mode: "timer",
+  timerHoldSec: 15,
+  releaseHoldSec: 3,
+  dwellSec: 5
+};
+
+export function getAslScanConfig(cid) {
+  try {
+    const raw = localStorage.getItem(`proxdmr_asl_scan_cfg_${cid}`) || localStorage.getItem("proxdmr_asl_scan_cfg_global");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        mode: (parsed.mode === "wait" || parsed.mode === "timer") ? parsed.mode : "timer",
+        timerHoldSec: Math.max(5, Math.min(120, parseInt(parsed.timerHoldSec, 10) || 15)),
+        releaseHoldSec: Math.max(1, Math.min(45, parseInt(parsed.releaseHoldSec, 10) || 3)),
+        dwellSec: 5
+      };
+    }
+  } catch (_) {}
+  return { ...DEFAULT_ASL_SCAN_CONFIG };
+}
+
+export function saveAslScanConfig(cid, cfg) {
+  try {
+    const serialized = JSON.stringify(cfg);
+    localStorage.setItem(`proxdmr_asl_scan_cfg_${cid}`, serialized);
+    localStorage.setItem("proxdmr_asl_scan_cfg_global", serialized);
+  } catch (_) {}
+}
+
+export function isAslNodeRxActive(card, targetHs) {
+  const nowMs = Date.now();
+  const nowSec = nowMs / 1000;
+
+  // 1. Проверяем реальное поступление голосовых PCM-пакетов за последние 950 мс
+  if (card && card._lastRx && card._lastRx[1] && card._lastRx[1].lastAudioTime) {
+    if ((nowSec - card._lastRx[1].lastAudioTime) < 0.95) {
+      return true;
+    }
+  }
+  if (targetHs && targetHs._aslLastRxAudioMs) {
+    if ((nowMs - targetHs._aslLastRxAudioMs) < 950) {
+      return true;
+    }
+  }
+
+  // 2. Проверяем активный флаг keyed в списке подключённых линков
+  if (targetHs && Array.isArray(targetHs.asl_links)) {
+    if (targetHs.asl_links.some(lk => lk && lk.keyed)) {
+      return true;
+    }
+  }
+
+  // 3. Проверяем флаг несущей allstar_carrier, только если звук не прекратился давно
+  if (targetHs && targetHs._aslCarrierRx) {
+    const lastAudioMs = targetHs._aslLastRxAudioMs || ((card?._lastRx?.[1]?.lastAudioTime || 0) * 1000);
+    if (!lastAudioMs || (nowMs - lastAudioMs) < 1500) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink = true, silent = false } = {}) {
+  if (targetHs) {
+    targetHs._aslScanActive = false;
+    targetHs._aslScanRunId = (targetHs._aslScanRunId || 0) + 1;
+    targetHs._aslScanningNode = "";
+  }
+  if (card) {
+    const scanBtn = card.querySelector(".btn-allstar-scan");
+    if (scanBtn) scanBtn.classList.remove("scan-running");
+    card.querySelectorAll(".btn-allstar-node.asl-node-scanning-now").forEach(b => {
+      b.classList.remove("asl-node-scanning-now");
+    });
+    if (!silent) {
+      setAslProcBannerState(card, {
+        active: true,
+        text: "⏹ Сканирование остановлено",
+        tone: "neutral",
+        autoHideMs: 2000
+      });
+    }
+  }
+  if (!keepCurrentLink && typeof aslDisconnectNodeProcedure === "function") {
+    aslDisconnectNodeProcedure(cid, "all", { showStatusBanner: false, showCardEffects: true });
+  }
+}
+
+export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
+  if (!card || !targetHs) return;
+
+  const scanTargets = (userNodes || []).filter(item => item && item.node && item.scan && !isAslDtmfCard(item));
+  if (scanTargets.length === 0) {
+    setAslProcBannerState(card, {
+      active: true,
+      text: "✕ Нет узлов для сканирования: включите Scan: ON в меню карточек",
+      tone: "negative",
+      autoHideMs: 3200
+    });
+    if (navigator.vibrate) {
+      try { navigator.vibrate([40, 40, 40]); } catch (_) {}
+    }
+    return;
+  }
+
+  const runId = (targetHs._aslScanRunId || 0) + 1;
+  targetHs._aslScanRunId = runId;
+  targetHs._aslScanActive = true;
+
+  const scanBtn = card.querySelector(".btn-allstar-scan");
+  if (scanBtn) scanBtn.classList.add("scan-running");
+
+  const isStillRunning = () => Boolean(targetHs._aslScanActive && targetHs._aslScanRunId === runId);
+  const sleepMs = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  let cursor = 0;
+
+  while (isStillRunning()) {
+    const currentTargets = (userNodes || []).filter(item => item && item.node && item.scan && !isAslDtmfCard(item));
+    if (currentTargets.length === 0) {
+      stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: false });
+      return;
+    }
+
+    const targetItem = currentTargets[cursor % currentTargets.length];
+    cursor = (cursor + 1) % currentTargets.length;
+    const nodeNum = String(targetItem.node).trim();
+    targetHs._aslScanningNode = nodeNum;
+
+    card.querySelectorAll(".btn-allstar-node").forEach(b => {
+      b.classList.toggle("asl-node-scanning-now", String(b.dataset.node || "").trim() === nodeNum);
+    });
+
+    // Сбрасываем индикаторы приёма от предыдущего узла перед новым подключением
+    const connStartedAt = Date.now();
+    targetHs._aslCarrierRx = false;
+    targetHs._aslLastRxAudioMs = 0;
+    targetHs._aslRxActiveNode = "";
+    targetHs._aslKeyedNodes = [];
+    if (card._lastRx && card._lastRx[1]) {
+      card._lastRx[1].active = false;
+      card._lastRx[1].lastAudioTime = 0;
+    }
+    const vfoRowClean = card.querySelector(".vfo-allstar-row");
+    if (vfoRowClean) vfoRowClean.classList.remove("allstar-rx-active");
+
+    // 1. Подключаемся к узлу в режиме *2 (Monitor)
+    aslConnectNodeProcedure(cid, nodeNum, "*2", {
+      showStatusBanner: true,
+      showCardEffects: true
+    });
+
+    let waitConnMs = 0;
+    let isConnected = false;
+    while (waitConnMs < 6500 && isStillRunning()) {
+      if (
+        targetHs.connected_node === nodeNum ||
+        (Array.isArray(targetHs.asl_links) && targetHs.asl_links.some(l => String(l.node).trim() === nodeNum && !l.connecting))
+      ) {
+        isConnected = true;
+        break;
+      }
+      if (
+        waitConnMs >= 1000 &&
+        targetHs._aslConnectingNodes &&
+        !targetHs._aslConnectingNodes.has(nodeNum) &&
+        !targetHs.connected_node
+      ) {
+        break;
+      }
+      await sleepMs(200);
+      waitConnMs += 200;
+    }
+
+    if (!isStillRunning()) return;
+
+    if (!isConnected) {
+      await sleepMs(350);
+      continue;
+    }
+
+    const cfg = getAslScanConfig(cid);
+
+    // РЕЖИМ 1: «⏱ ТАЙМЕР» — отсчитывает заданное в настройках время timerHoldSec (например, 25 сек)
+    if (cfg.mode === "timer") {
+      const totalHoldMs = (cfg.timerHoldSec || 15) * 1000;
+      let elapsedHold = 0;
+      while (elapsedHold < totalHoldMs && isStillRunning()) {
+        const activeNow = isAslNodeRxActive(card, targetHs);
+        const remSec = Math.ceil((totalHoldMs - elapsedHold) / 1000);
+        setAslProcBannerState(card, {
+          active: true,
+          text: activeNow
+            ? `🔍 Скан #${nodeNum} [Эфир · Таймер: ${remSec}с]`
+            : `🔍 Скан #${nodeNum} [Таймер: ${remSec}с]`,
+          tone: activeNow ? "positive" : "neutral",
+          autoHideMs: 0
+        });
+        await sleepMs(250);
+        elapsedHold += 250;
+      }
+    } else {
+      // РЕЖИМ 2: «🎙 ОЖИДАНИЕ» — ждёт активность dwellSec (5с), при наличии речи держит до конца передачи + releaseHoldSec
+      const dwellMs = (cfg.dwellSec || 5) * 1000;
+      let elapsedDwell = 0;
+      let activityDetected = Boolean(
+        (targetHs._aslLastRxAudioMs && targetHs._aslLastRxAudioMs >= connStartedAt + 250) ||
+        isAslNodeRxActive(card, targetHs)
+      );
+
+      while (!activityDetected && elapsedDwell < dwellMs && isStillRunning()) {
+        if (isAslNodeRxActive(card, targetHs)) {
+          activityDetected = true;
+          break;
+        }
+        const remSec = Math.ceil((dwellMs - elapsedDwell) / 1000);
+        setAslProcBannerState(card, {
+          active: true,
+          text: `🔍 Скан #${nodeNum}: ожидание (${remSec}с)...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+        await sleepMs(200);
+        elapsedDwell += 200;
+      }
+
+      if (!isStillRunning()) return;
+
+      if (!activityDetected) {
+        aslDisconnectNodeProcedure(cid, nodeNum, { showStatusBanner: false, showCardEffects: true });
+        await sleepMs(250);
+        continue;
+      }
+
+      let releaseElapsedMs = 0;
+      const releaseTargetMs = (cfg.releaseHoldSec || 3) * 1000;
+
+      while (releaseElapsedMs < releaseTargetMs && isStillRunning()) {
+        const activeCfg = getAslScanConfig(cid);
+        const curReleaseTargetMs = (activeCfg.releaseHoldSec || 3) * 1000;
+        if (isAslNodeRxActive(card, targetHs)) {
+          releaseElapsedMs = 0;
+          setAslProcBannerState(card, {
+            active: true,
+            text: `🔍 Скан #${nodeNum} [Активность в эфире]`,
+            tone: "positive",
+            autoHideMs: 0
+          });
+        } else {
+          const remRelease = Math.ceil(Math.max(0, curReleaseTargetMs - releaseElapsedMs) / 1000);
+          setAslProcBannerState(card, {
+            active: true,
+            text: `🔍 Скан #${nodeNum} [Отпускание: ${remRelease}с]`,
+            tone: "neutral",
+            autoHideMs: 0
+          });
+          releaseElapsedMs += 250;
+          if (releaseElapsedMs >= curReleaseTargetMs) break;
+        }
+        await sleepMs(250);
+      }
+    }
+
+    if (!isStillRunning()) return;
+
+    // По завершении удержания отключаем текущий узел и переходим к следующему
+    aslDisconnectNodeProcedure(cid, nodeNum, { showStatusBanner: false, showCardEffects: true });
+    await sleepMs(250);
+  }
+}
+
+export function openAslScanSettingsPopover(cid, anchorEl, card) {
+  document.querySelectorAll(".asl-scan-settings-popover").forEach(el => el.remove());
+  if (!anchorEl || !card) return;
+
+  const cfg = getAslScanConfig(cid);
+  const popover = document.createElement("div");
+  popover.className = "asl-scan-settings-popover";
+  popover.innerHTML = `
+    <div class="scan-popover-title">
+      <span>⚙️ Настройки сканирования ASL</span>
+      <span class="scan-popover-close">✕</span>
+    </div>
+    <div class="scan-mode-toggle">
+      <button type="button" class="scan-mode-btn ${cfg.mode === "timer" ? "active" : ""}" data-mode="timer" title="Фиксированное время на активном узле">
+        ⏱ Таймер
+      </button>
+      <button type="button" class="scan-mode-btn ${cfg.mode === "wait" ? "active" : ""}" data-mode="wait" title="До окончания передачи + таймер отпускания">
+        🎙 Ожидание
+      </button>
+    </div>
+    <div class="scan-field-group scan-group-timer" style="display: ${cfg.mode === "timer" ? "block" : "none"};">
+      <div class="scan-field-label">
+        <span>Таймер активности (сек):</span>
+        <span class="scan-field-val" id="aslScanTimerVal">${cfg.timerHoldSec}с</span>
+      </div>
+      <input type="range" id="aslScanTimerRange" min="5" max="120" step="5" value="${cfg.timerHoldSec}">
+    </div>
+    <div class="scan-field-group scan-group-wait" style="display: ${cfg.mode === "wait" ? "block" : "none"};">
+      <div class="scan-field-label">
+        <span>Таймер отпускания (сек):</span>
+        <span class="scan-field-val" id="aslScanReleaseVal">${cfg.releaseHoldSec}с</span>
+      </div>
+      <input type="range" id="aslScanReleaseRange" min="1" max="45" step="1" value="${cfg.releaseHoldSec}">
+    </div>
+  `;
+
+  popover.querySelector(".scan-popover-close").onclick = (e) => {
+    e.stopPropagation();
+    popover.remove();
+  };
+
+  const timerGroup = popover.querySelector(".scan-group-timer");
+  const waitGroup = popover.querySelector(".scan-group-wait");
+
+  popover.querySelectorAll(".scan-mode-btn").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      popover.querySelectorAll(".scan-mode-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      cfg.mode = btn.dataset.mode;
+      timerGroup.style.display = (cfg.mode === "timer") ? "block" : "none";
+      waitGroup.style.display = (cfg.mode === "wait") ? "block" : "none";
+      saveAslScanConfig(cid, cfg);
+    };
+  });
+
+  const timerRange = popover.querySelector("#aslScanTimerRange");
+  const timerVal = popover.querySelector("#aslScanTimerVal");
+  if (timerRange) {
+    timerRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.timerHoldSec = parseInt(timerRange.value, 10);
+      if (timerVal) timerVal.textContent = `${cfg.timerHoldSec}с`;
+      saveAslScanConfig(cid, cfg);
+    };
+  }
+
+  const releaseRange = popover.querySelector("#aslScanReleaseRange");
+  const releaseVal = popover.querySelector("#aslScanReleaseVal");
+  if (releaseRange) {
+    releaseRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.releaseHoldSec = parseInt(releaseRange.value, 10);
+      if (releaseVal) releaseVal.textContent = `${cfg.releaseHoldSec}с`;
+      saveAslScanConfig(cid, cfg);
+    };
+  }
+
+  const stopProp = (e) => e.stopPropagation();
+  popover.addEventListener("pointerdown", stopProp);
+  popover.addEventListener("mousedown", stopProp);
+  popover.addEventListener("click", stopProp);
+
+  const vfoRow = card.querySelector(".vfo-allstar-row") || card;
+  vfoRow.style.position = "relative";
+  vfoRow.appendChild(popover);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const vfoRect = vfoRow.getBoundingClientRect();
+  popover.style.left = `${Math.max(4, Math.min(vfoRect.width - 270, rect.left - vfoRect.left))}px`;
+  popover.style.top = `${Math.round(rect.bottom - vfoRect.top + 6)}px`;
+
+  const onOutsideClick = (e) => {
+    if (!popover.contains(e.target) && e.target !== anchorEl) {
+      document.removeEventListener("pointerdown", onOutsideClick, true);
+      popover.remove();
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onOutsideClick, true);
+  }, 20);
+}
+
+export function updateCardAllStarPanel(card, hs) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const isAllStarNet = ((targetHs && targetHs.network_type) || card.dataset.networkType || "bm").toLowerCase() === "allstar";
+  card.classList.toggle("card-net-allstar", isAllStarNet);
+  if (isAllStarNet) {
+    card.dataset.networkType = "allstar";
+  }
+
+  const vfoTs1 = card.querySelector(".vfo-ts1-row");
+  const vfoTs2 = card.querySelector(".vfo-ts2-row");
+  let vfoAllStar = card.querySelector(".vfo-allstar-row");
+
+  if (isAllStarNet) {
+    if (vfoTs1) vfoTs1.style.setProperty("display", "none", "important");
+    if (vfoTs2) vfoTs2.style.setProperty("display", "none", "important");
+    const apiRow = card.querySelector(".api-status-row");
+    if (apiRow) apiRow.style.setProperty("display", "none", "important");
+
+    if (!vfoAllStar) {
+      vfoAllStar = document.createElement("div");
+      vfoAllStar.className = "vfo-row vfo-allstar-row";
+      if (vfoTs2 && vfoTs2.parentElement) {
+        vfoTs2.parentElement.insertBefore(vfoAllStar, vfoTs2);
+      } else {
+        const screenEl = card.querySelector(".radio-screen") || card;
+        screenEl.appendChild(vfoAllStar);
+      }
+    } else {
+      vfoAllStar.style.removeProperty("display");
+    }
+
+    const cid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+    const ownNode = String((targetHs && (targetHs.config?.allstar_node || targetHs.allstar_node || targetHs.node_number)) || "45113").trim();
+    const connNode = String((targetHs && (targetHs.connected_node || targetHs.target_node)) || "").trim();
+    const isLinked = Boolean(connNode && connNode !== "0");
+
+    // Запрос активных линков с бэкенда при рендере
+    const fetchAslLinks = () => {
+      fetch(`/api/allstar/connected?hotspot_id=${encodeURIComponent(cid)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.status === "ok") {
+            const nodes = data.connected_nodes || [];
+            const links = data.links || [];
+            targetHs.asl_links = links;
+            targetHs.asl_online_count = data.online_count || links.filter(l => !l.connecting).length || nodes.length;
+            const establishedFirst = nodes[0] || (links.find(l => !l.connecting) && links.find(l => !l.connecting).node) || "";
+            if (establishedFirst || targetHs.asl_online_count > 0) {
+              targetHs.connected_node = establishedFirst;
+              targetHs.is_asl_linked = Boolean(establishedFirst);
+            }
+            if (Array.isArray(links)) {
+              links.forEach(lk => {
+                if (lk && lk.node) {
+                  const cn = String(lk.node).trim();
+                  if (lk.connecting || lk.status === "connecting") {
+                    if (targetHs._aslConnectingNodes instanceof Map) {
+                      const ex = targetHs._aslConnectingNodes.get(cn);
+                      targetHs._aslConnectingNodes.set(cn, {
+                        mode: lk.mode || (ex && ex.mode) || "*2",
+                        startedAt: ex ? ex.startedAt : Date.now()
+                      });
+                    }
+                  } else {
+                    if (targetHs._aslConnectingNodes instanceof Map) {
+                      targetHs._aslConnectingNodes.delete(cn);
+                    }
+                  }
+                }
+              });
+            }
+            if (targetHs.is_asl_linked) {
+              targetHs.status = "ONLINE";
+              if (typeof updateBmStatus === "function") {
+                updateBmStatus("ONLINE", `Node ${targetHs.connected_node || ""}`, cid);
+              }
+            } else if (targetHs.status === "ONLINE" || targetHs.status === "CONNECTING") {
+              targetHs.status = "ONLINE";
+              if (typeof updateBmStatus === "function") {
+                updateBmStatus("ONLINE", (data.own_node || targetHs.allstar_node) ? `Node ${data.own_node || targetHs.allstar_node}` : "AllStarLink активен", cid);
+              }
+            }
+            if (typeof updateCardBmBanner === "function") {
+              updateCardBmBanner(card, targetHs);
+            }
+            // If in dynamic matrix mode or unlisted links present, re-render panel if structure changed
+            if ((targetHs._aslDynamicMatrixMode || (targetHs.asl_unlisted_links && targetHs.asl_unlisted_links.length > 0)) && !card.querySelector(".asl-card-context-menu")) {
+              updateCardAllStarPanel(card, targetHs);
+            } else {
+              syncAslMatrixButtonsState(card, targetHs);
+            }
+            const linksBar = card.querySelector(".asl-active-links-bar");
+            if (linksBar) {
+              linksBar.innerHTML = renderActiveLinkChipsHtml(targetHs, cid);
+              setupActiveLinkChipHandlers(linksBar, cid, targetHs, card);
+            }
+          }
+        })
+        .catch(() => {});
+    };
+
+    if (targetHs && targetHs._aslInitialFetchDone !== true) {
+      targetHs._aslInitialFetchDone = true;
+      fetchAslLinks();
+    }
+
+    // Задача 1: Полное удаление выпадающего списка серверов (.bm-server-label-wrap) и установка чистой плашки
+    const labelWrap = card.querySelector(".bm-server-label-wrap");
+    if (labelWrap) {
+      labelWrap.style.setProperty("display", "none", "important");
+    }
+    const infoBanner = card.querySelector(".bm-info-banner") || (labelWrap && labelWrap.parentElement);
+    let aslHeaderBadge = card.querySelector(".asl-header-status-badge");
+    if (!aslHeaderBadge && infoBanner) {
+      aslHeaderBadge = document.createElement("span");
+      aslHeaderBadge.className = "asl-header-status-badge";
+      if (labelWrap && labelWrap.parentElement === infoBanner) {
+        infoBanner.insertBefore(aslHeaderBadge, labelWrap);
+      } else {
+        infoBanner.prepend(aslHeaderBadge);
+      }
+    }
+    if (aslHeaderBadge) {
+      aslHeaderBadge.style.removeProperty("display");
+      aslHeaderBadge.textContent = `Node ${ownNode} · ASL3 Local`;
+      aslHeaderBadge.className = `asl-header-status-badge ${isLinked ? "asl-badge-linked" : "asl-badge-idle"}`;
+      aslHeaderBadge.title = isLinked ? `Подключен к сети ASL3 (активен линк)` : `Узел ASL3 в режиме ожидания (нет активных линков)`;
+    }
+
+    // Задача 2: Верхняя статусная строка VFO (между STANDBY и E2E)
+    const callsignEl = card.querySelector(".callsign-display");
+    if (callsignEl) {
+      const myCall = String((targetHs && targetHs.callsign) || "N0CALL").trim();
+      const countStr = (targetHs && targetHs.asl_online_count !== undefined && targetHs.asl_online_count > 0) ? ` (${targetHs.asl_online_count})` : "";
+      if (isLinked) {
+        callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">Link <strong class="asl-vfo-target-node">${safeEscapeHtml(connNode)}</strong>${countStr}</span>`;
+      } else {
+        callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">Ожидание</span>`;
+      }
+    }
+
+    // Configurable quick nodes (stored in localStorage) - 5x4 матрица памяти (20 узлов)
+    const DEFAULT_NODES = [
+      // Ряд 1 (Отображается в основном доке)
+      { node: "1999",   label: "Parrot Echo",flag: "🦜" },
+      { node: "41522",  label: "HUBNet UK",  flag: "🇬🇧" },
+      { node: "27339",  label: "East Coast", flag: "🇺🇸" },
+      { node: "2143",   label: "WAN RS",     flag: "🇺🇸" },
+      // Ряд 2
+      { node: "2000",   label: "Western Ref",flag: "🇺🇸" },
+      { node: "51010",  label: "World Conf", flag: "🌐" },
+      { node: "28554",  label: "RU3AID Hub", flag: "🇷🇺" },
+      { node: "2560",   label: "WIN System", flag: "🇺🇸" },
+      // Ряд 3
+      { node: "2462",   label: "Alaska Net", flag: "🇺🇸" },
+      { node: "52495",  label: "DL-Nordwest",flag: "🇩🇪" },
+      { node: "52319",  label: "Canada Hub", flag: "🇨🇦" },
+      { node: "27170",  label: "Florida Hub",flag: "🇺🇸" },
+      // Ряд 4
+      { node: "53085",  label: "PA Hub",     flag: "🇺🇸" },
+      { node: "53431",  label: "Alabama Net",flag: "🇺🇸" },
+      { node: "289890", label: "PA-Wide",    flag: "🇺🇸" },
+      { node: "41413",  label: "Santiago Pk",flag: "🇺🇸" },
+      // Ряд 5
+      { node: "47280",  label: "Georgia Net",flag: "🇺🇸" },
+      { node: "42821",  label: "Germany DL", flag: "🇩🇪" },
+      { node: "487571", label: "Australia",  flag: "🇦🇺" },
+      { node: "500691", label: "Texas Hub",  flag: "🇺🇸" }
+    ];
+
+    const getDefaultNodes = (targetCid) => {
+      try {
+        const customDef = localStorage.getItem(`proxdmr_asl_default_nodes_${targetCid}`) || localStorage.getItem("proxdmr_asl_default_nodes_global");
+        if (customDef) {
+          const parsed = JSON.parse(customDef);
+          if (Array.isArray(parsed) && parsed.length === 20) return parsed;
+        }
+      } catch (_) {}
+      return [...DEFAULT_NODES];
+    };
+
+    const activeDefaults = getDefaultNodes(cid);
+    let userNodes = [...activeDefaults];
+    try {
+      const saved = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const seen = new Set();
+          userNodes = activeDefaults.map((defNode, idx) => {
+            let item = parsed[idx];
+            if (!item) return { ...defNode, scan: false };
+            let nodeStr = String(item.node || "").trim();
+            if (!nodeStr) {
+              return { node: "", label: item.label || "", flag: item.flag || "➕", scan: Boolean(item.scan), role: item.role || "node" };
+            }
+            if (nodeStr === "2502") {
+              item = { node: "28554", label: "RU3AID Hub", flag: "🇷🇺", scan: item.scan };
+              nodeStr = "28554";
+            }
+            if (nodeStr === "1999") {
+              item.label = "Parrot Echo";
+              item.flag = "🦜";
+            }
+            if (nodeStr === "9999") {
+              item = { node: "2000", label: "Western Ref", flag: "🇺🇸", scan: item.scan };
+              nodeStr = "2000";
+            }
+            if (seen.has(nodeStr)) {
+              return { ...defNode, scan: false };
+            }
+            seen.add(nodeStr);
+            const itemRole = item.role || (/[*#ABCDabcd]/.test(nodeStr) ? "dtmf" : "node");
+            return {
+              node: nodeStr,
+              label: item.label || "",
+              flag: (itemRole === "dtmf" ? "☎️" : (item.flag || "🌐")),
+              scan: Boolean(item.scan),
+              role: itemRole,
+              prefMode: (item.prefMode === "2" || item.prefMode === "3") ? item.prefMode : undefined
+            };
+          });
+        }
+      }
+    } catch (e) {}
+
+    const isAddMode = (typeof window.isHotspotAslAddMode === "function") ? window.isHotspotAslAddMode(cid) : false;
+
+    // Build linked modes map and compute unlisted links
+    const linkedModesMap = new Map();
+    const rawLinks = Array.isArray(targetHs && targetHs.asl_links) ? targetHs.asl_links : [];
+    if (rawLinks.length > 0) {
+      rawLinks.forEach(lk => {
+        if (lk && lk.node) {
+          linkedModesMap.set(String(lk.node).trim(), lk.mode === "*3" ? "*3" : "*2");
+        }
+      });
+    } else if (isLinked && connNode) {
+      const fallbackMode = (typeof window.getHotspotAslMode === "function" ? window.getHotspotAslMode(cid) : "*2");
+      linkedModesMap.set(connNode, fallbackMode);
+    }
+
+    const presetNodeMap = new Map();
+    userNodes.forEach(u => {
+      const cn = String(u.node || "").trim();
+      if (cn) presetNodeMap.set(cn, u);
+    });
+
+    const unlistedLinks = rawLinks.filter(lk => lk && lk.node && !presetNodeMap.has(String(lk.node).trim()));
+    if (targetHs) {
+      targetHs.asl_unlisted_links = unlistedLinks;
+      if (unlistedLinks.length > 0) {
+        const hasNewUnlisted = unlistedLinks.some(l => !targetHs._aslDismissedUnlisted || !targetHs._aslDismissedUnlisted.has(String(l.node).trim()));
+        if (hasNewUnlisted) {
+          targetHs._aslDynamicMatrixMode = true;
+        }
+      }
+    }
+
+    let displayNodes = userNodes;
+    if (targetHs && targetHs._aslDynamicMatrixMode === true) {
+      // Dynamic Matrix Mode: active connected preset nodes + external incoming nodes, then empty dynamic slots up to 20
+      const connectedPresetNodes = userNodes.filter(u => u.node && linkedModesMap.has(String(u.node).trim()));
+      const externalNodes = unlistedLinks.map(lk => {
+        const cleanN = String(lk.node).trim();
+        return {
+          node: cleanN,
+          label: lk.callsign || lk.name || lk.city || (lk.direction === "IN" ? "Входящий" : "Внешний"),
+          flag: lk.flag || "🌐",
+          isExternal: true
+        };
+      });
+      const activeConnected = [...connectedPresetNodes, ...externalNodes];
+      const emptySlotsNeeded = Math.max(0, 20 - activeConnected.length);
+      const dynamicEmptySlots = Array.from({ length: emptySlotsNeeded }, () => ({
+        node: "",
+        label: "",
+        flag: "➕",
+        isDynamicEmpty: true
+      }));
+      displayNodes = [...activeConnected, ...dynamicEmptySlots].slice(0, 20);
+    }
+
+    const prevSliderContainer = vfoAllStar.querySelector(".asl-slider-container");
+    const wasTextView = prevSliderContainer ? prevSliderContainer.classList.contains("is-text-view") : false;
+
+    closeAslCardContextMenu(card, targetHs);
+    clearAslMoveCancelListener();
+
+    vfoAllStar.innerHTML = `
+      <div class="allstar-top-section">
+        <div class="allstar-top-left-actions">
+          <button type="button" class="btn-allstar-scan" title="${window.t ? window.t("asl.scan_btn_title", {}, "Клик: запуск/остановка сканирования узлов (Scan: ON). Удержание: настройки сканирования") : "Клик: запуск/остановка сканирования узлов (Scan: ON). Удержание: настройки сканирования"}" data-i18n-title="asl.scan_btn_title">
+            <span class="asl-scan-dot"></span>
+            <span class="asl-action-text">Scan</span>
+          </button>
+          <button type="button" class="btn-allstar-unlink" title="${window.t ? window.t("asl.unlink_all_title", {}, "Разорвать все линки (*73)") : "Разорвать все линки (*73)"}" data-i18n-title="asl.unlink_all_title">
+            <span class="asl-action-text">*73</span>
+          </button>
+        </div>
+        <div class="vfo-pipeline-stage asl-pipeline-stage">
+          <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+            <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+              <line x1="9" y1="5" x2="15" y2="5"/>
+              <line x1="9" y1="8" x2="15" y2="8"/>
+              <path d="M5 10a7 7 0 0 0 14 0"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+            </svg>
+          </div>
+          <div class="vfo-pipeline-icon icon-trans" title="Перевод текста" data-i18n-title="vfo.pipeline_trans_title">
+            <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="17 1 21 5 17 9"/>
+              <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+              <polyline points="7 23 3 19 7 15"/>
+              <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+            </svg>
+          </div>
+          <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+            <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+            </svg>
+          </div>
+        </div>
+        <div class="allstar-top-right-actions">
+          <span class="vfo-tts-badge asl-top-badge" id="vfoTtsBadge_${cid}" role="button" tabindex="0" title="Озвучка речи (TTS): клик — вкл/выкл, удержание — выбор голоса" data-i18n-title="vfo.tts_badge_title">
+            <span class="tts-icon-spk">🔊</span>
+            <span class="tts-lang-code">RUS</span>
+          </span>
+          <span class="vfo-lang-badge asl-top-badge" id="vfoLangBadge_${cid}" role="button" tabindex="0" title="Транскрибатор: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts1_title">
+            <span class="lang-icon-mic">🎙️</span>
+            <span class="lang-code-text">TXT</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="asl-slider-container" id="aslSliderContainer_${cid}">
+        <!-- Верхняя секция: Текстовое окно транскрибации речи (по умолчанию свернуто) -->
+        <div class="asl-text-panel" id="aslTextPanel_${cid}" inert>
+          <div class="asl-live-caption-box vfo-caption-box" id="aslCaptionBox_${cid}" title="AI Расшифровка речи" data-i18n-title="vfo.caption_box_title">
+            <div class="vfo-caption-stream asl-caption-stream" id="aslCaptionStream_${cid}" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Ожидание речи..."></div>
+          </div>
+        </div>
+
+        <!-- Разделитель-шторка (Notch Handle) -->
+        <div class="asl-dock-notch" id="aslDockNotch_${cid}" title="${window.t ? window.t("asl.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации"}" role="button" tabindex="0" aria-label="${window.t ? window.t("asl.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации"}" data-i18n-title="asl.notch_title" data-i18n-aria-label="asl.notch_title">
+          <span class="asl-notch-pill"></span>
+        </div>
+
+        <!-- Нижняя секция: Матрица 5х4 кнопок быстрого вызова нод (по умолчанию открыта) -->
+        <div class="asl-matrix-container" id="aslMatrixContainer_${cid}">
+          <div class="asl-matrix-grid ${targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined ? "asl-matrix-move-mode" : ""}">
+            ${displayNodes.map((pn, idx) => {
+              const isEmpty = !pn.node;
+              const isExternal = Boolean(pn.isExternal);
+              const isDynamicEmpty = Boolean(pn.isDynamicEmpty);
+              const cleanNode = !isEmpty ? String(pn.node).trim() : "";
+              const linkMode = cleanNode ? (linkedModesMap.get(cleanNode) || "") : "";
+              const stateClass = linkMode === "*3"
+                ? "asl-node-linked-tx"
+                : (linkMode === "*2" ? "asl-node-linked-monitor" : "");
+              const externalClass = isExternal ? "asl-node-external-lilac" : "";
+              const dynamicEmptyClass = isDynamicEmpty ? "asl-node-dynamic-slot" : "";
+              const emptyNodeWord = window.t ? window.t("asl.empty_node_btn", {}, "Свободно") : "Свободно";
+              const cfgHintWord = window.t ? window.t("asl.configure_node_btn", {}, "[настроить]") : "[настроить]";
+              const nodeNum = cleanNode ? safeEscapeHtml(cleanNode) : emptyNodeWord;
+              const nodeDesc = pn.label ? safeEscapeHtml(pn.label) : (isEmpty ? cfgHintWord : "");
+              const isDtmf = !isEmpty && isAslDtmfCard(pn);
+              const isScanOn = Boolean(pn.scan) && !isEmpty && !isDtmf;
+              const roleClass = isDtmf ? "asl-node-role-dtmf" : "";
+              const nodeFlag = isEmpty ? "➕" : (isDtmf ? "☎️" : (pn.flag || "🌐"));
+              const isActive = !isEmpty && cleanNode === connNode;
+
+              const isMoveModeActive = (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined);
+              const isMovingSource = (isMoveModeActive && targetHs._aslMovingIdx === idx);
+              const isMoveTarget = (isMoveModeActive && !isMovingSource);
+
+              let titleText = "";
+              const pnLabel = safeEscapeHtml(pn.label || "");
+              const pfx = pnLabel ? pnLabel + " " : "";
+              if (isMovingSource) {
+                titleText = window.t ? window.t("asl.move_source_title", { node: cleanNode }, `Перемещение #${cleanNode}: выберите ячейку для переноса (клик по этой ячейке отменяет перенос)`) : `Перемещение #${cleanNode}: выберите ячейку для переноса (клик по этой ячейке отменяет перенос)`;
+              } else if (isMoveModeActive) {
+                const srcNode = displayNodes[targetHs._aslMovingIdx]?.node || "";
+                titleText = isEmpty ? (window.t ? window.t("asl.move_to_empty", { node: srcNode }, `Перенести #${srcNode} в эту свободную ячейку`) : `Перенести #${srcNode} в эту свободную ячейку`) : (window.t ? window.t("asl.swap_with", { node: cleanNode }, `Поменять местами с #${cleanNode}`) : `Поменять местами с #${cleanNode}`);
+              } else if (isEmpty) {
+                titleText = isDynamicEmpty ? (window.t ? window.t("asl.empty_slot_dynamic", {}, "Свободный слот") : "Свободный слот") : (window.t ? window.t("asl.empty_cell_title", { idx: idx + 1 }, `Ячейка #${idx + 1}: Свободно - Клик: настроить узел`) : `Ячейка #${idx + 1}: Свободно - Клик: настроить узел`);
+              } else if (isDtmf) {
+                titleText = window.t ? window.t("asl.dtmf_tooltip", { code: nodeNum }, `Макрос DTMF «${nodeNum}» — Клик: передать DTMF (авто-TX), Удержание: меню действий`) : `Макрос DTMF «${nodeNum}» — Клик: передать DTMF (авто-TX), Удержание: меню действий`;
+              } else if (linkMode === "*2") {
+                titleText = window.t ? window.t("asl.node_tooltip_monitor_menu", { label: pfx, node: cleanNode }, `${pfx}(#${cleanNode}) [Монитор *2] — Клик: переключить на Передачу (*3), Удержание: меню действий`) : `${pfx}(#${cleanNode}) [Монитор *2] — Клик: переключить на Передачу (*3), Удержание: меню действий`;
+              } else if (linkMode === "*3") {
+                titleText = window.t ? window.t("asl.node_tooltip_tx_menu", { label: pfx, node: cleanNode }, `${pfx}(#${cleanNode}) [Передача *3] — Клик: переключить на Монитор (*2), Удержание: меню действий`) : `${pfx}(#${cleanNode}) [Передача *3] — Клик: переключить на Монитор (*2), Удержание: меню действий`;
+              } else {
+                titleText = window.t ? window.t("asl.node_tooltip_menu", { label: pfx, node: cleanNode }, `${pfx}(#${cleanNode}) - Клик: подключить, Удержание: меню действий`) : `${pfx}(#${cleanNode}) - Клик: подключить, Удержание: меню действий`;
+              }
+              const scanBadgeTitle = window.t ? window.t("asl.scan_badge_on", {}, "Scan: ВКЛ") : "Scan: ВКЛ";
+              return `
+                <button type="button" class="btn-allstar-node ${stateClass} ${externalClass} ${dynamicEmptyClass} ${isActive ? "active-asl-node" : ""} ${isEmpty ? "asl-node-empty" : ""} ${isMovingSource ? "asl-node-moving-source" : ""} ${isMoveTarget ? "asl-node-move-target" : ""} ${isScanOn ? "asl-node-scan-on" : ""} ${roleClass}" data-node="${cleanNode}" data-link-mode="${linkMode}" data-idx="${idx}" data-role="${isDtmf ? "dtmf" : "node"}" ${isExternal ? 'data-external="1"' : ''} title="${titleText}">
+                  <div class="asl-btn-header">
+                    <span class="asl-btn-flag">${nodeFlag}</span>
+                    <strong class="asl-btn-num">${nodeNum}</strong>
+                    ${isScanOn ? `<span class="asl-btn-scan-badge" title="${scanBadgeTitle}">S</span>` : ''}
+                  </div>
+                  <div class="asl-btn-footer">
+                    ${isDtmf ? '<span class="asl-btn-conns asl-conns-dtmf">DTMF</span>' : '<span class="asl-btn-conns asl-conns-hidden"></span>'}
+                    <small class="asl-btn-desc">${nodeDesc}</small>
+                  </div>
+                </button>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+
+    vfoAllStar.setAttribute("data-slot", "1");
+    setupSlotTranscribeClick(vfoAllStar, 1);
+    setupSlotTtsClick(vfoAllStar, 1);
+    const aslTs1TranscribeActive = isSlotTranscribeActive(cid, 1);
+    const aslTs1TtsActive = isSlotTtsActive(cid, 1);
+    vfoAllStar.classList.toggle("has-transcribe", aslTs1TranscribeActive);
+    updateSlotLangBadge(vfoAllStar, 1, aslTs1TranscribeActive);
+    updateSlotTtsBadge(vfoAllStar, 1, aslTs1TtsActive);
+
+    // Управление шрифтом в окне транскрибации ASL (правый нижний угол)
+    const aslCaptionBox = vfoAllStar.querySelector(".asl-live-caption-box");
+    if (aslCaptionBox) {
+      ensureCaptionFontControls(aslCaptionBox);
+      setupCaptionBoxPinchZoom(aslCaptionBox);
+    }
+
+    // Manual refresh button removed - background automatic polling is active
+
+    // Сразу синхронно применяем закэшированные бейджи коннектов и активные статусы до отрисовки кадра браузером
+    syncAslMatrixButtonsState(card, targetHs);
+    probeAslMatrixNodes(card, targetHs, false);
+
+    // Управление шторкой ASL: Переключение между Матрицей 5x4 (по умолчанию) и Окном транскрибации речи
+    const sliderContainer = vfoAllStar.querySelector(".asl-slider-container");
+    const textPanel = vfoAllStar.querySelector(".asl-text-panel");
+    const dockNotch = vfoAllStar.querySelector(".asl-dock-notch");
+    const matrixContainer = vfoAllStar.querySelector(".asl-matrix-container");
+
+    const setAslTextView = (isText) => {
+      if (!sliderContainer) return;
+      if (isText) {
+        sliderContainer.classList.add("is-text-view");
+        if (textPanel) textPanel.removeAttribute("inert");
+        if (matrixContainer) matrixContainer.setAttribute("inert", "");
+        if (dockNotch) {
+          dockNotch.title = "Свайп вверх или клик: Память Узлов";
+          dockNotch.setAttribute("aria-label", "Свайп вверх или клик: Память Узлов");
+        }
+      } else {
+        sliderContainer.classList.remove("is-text-view");
+        if (textPanel) textPanel.setAttribute("inert", "");
+        if (matrixContainer) matrixContainer.removeAttribute("inert");
+        if (dockNotch) {
+          dockNotch.title = "Свайп вниз или клик: текст транскрибации";
+          dockNotch.setAttribute("aria-label", "Свайп вниз или клик: текст транскрибации");
+        }
+      }
+      if (vfoAllStar) {
+        vfoAllStar.scrollTop = 0;
+        vfoAllStar.scrollLeft = 0;
+      }
+    };
+
+    vfoAllStar.setAslTextView = setAslTextView;
+    if (wasTextView) {
+      setAslTextView(true);
+    }
+
+    // Автоматическое переключение экрана при изменении статуса транскрибации (MutationObserver)
+    if (vfoAllStar._transcribeObserver) {
+      try { vfoAllStar._transcribeObserver.disconnect(); } catch (_) {}
+    }
+    let prevHasTranscribe = vfoAllStar.classList.contains("has-transcribe");
+    const aslObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === "attributes" && m.attributeName === "class") {
+          const curHasTranscribe = vfoAllStar.classList.contains("has-transcribe");
+          if (curHasTranscribe !== prevHasTranscribe) {
+            prevHasTranscribe = curHasTranscribe;
+            setAslTextView(curHasTranscribe);
+          }
+        }
+      }
+    });
+    aslObserver.observe(vfoAllStar, { attributes: true, attributeFilter: ["class"] });
+    vfoAllStar._transcribeObserver = aslObserver;
+
+    // Автоматическое переключение на панель текста при включении озвучки речи (TTS)
+    const aslTtsBadge = vfoAllStar.querySelector(".vfo-tts-badge");
+    if (aslTtsBadge) {
+      aslTtsBadge.addEventListener("click", () => {
+        setTimeout(() => {
+          if (typeof isSlotTtsActive === "function" && isSlotTtsActive(cid, 1)) {
+            setAslTextView(true);
+          }
+        }, 60);
+      });
+    }
+
+    // Защита от паразитного скролла контейнера VFO при Tab-навигации
+    if (vfoAllStar) {
+      vfoAllStar.scrollTop = 0;
+      vfoAllStar.scrollLeft = 0;
+      vfoAllStar.addEventListener("scroll", () => {
+        if (vfoAllStar.scrollTop !== 0) vfoAllStar.scrollTop = 0;
+        if (vfoAllStar.scrollLeft !== 0) vfoAllStar.scrollLeft = 0;
+      }, { passive: true });
+    }
+
+    // Глобальный флаг свайпа, чтобы клик по кнопке не срабатывал после жеста свайпа
+    let wasSwipeGesture = false;
+    let activePressTimer = null;
+
+    const cancelActivePress = () => {
+      if (activePressTimer) {
+        clearTimeout(activePressTimer);
+        activePressTimer = null;
+      }
+    };
+
+    // --- Обработка жестов для Матрицы (Свайп ВНИЗ -> открытие текста) ---
+    let matrixStartY = 0;
+    let matrixStartX = 0;
+    let isMatrixTracking = false;
+    let isMatrixCaptured = false;
+
+    const startMatrixDrag = (clientY, clientX) => {
+      isMatrixTracking = true;
+      isMatrixCaptured = false;
+      matrixStartY = clientY;
+      matrixStartX = clientX;
+    };
+
+    const moveMatrixDrag = (clientY, clientX, pointerId, targetEl) => {
+      if (!isMatrixTracking) return;
+      const dy = clientY - matrixStartY; // > 0 при движении вниз
+      const dx = Math.abs(clientX - matrixStartX);
+      if (Math.abs(dy) > 10) {
+        cancelActivePress();
+        if (!isMatrixCaptured && targetEl && pointerId !== undefined) {
+          isMatrixCaptured = true;
+          try { targetEl.setPointerCapture(pointerId); } catch (_) {}
+        }
+      }
+      if (dy > 25 && dy > dx * 0.9) {
+        isMatrixTracking = false;
+        cancelActivePress();
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        if (targetEl && pointerId !== undefined) {
+          try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+        }
+        setAslTextView(true);
+      }
+    };
+
+    const endMatrixDrag = (pointerId, targetEl) => {
+      isMatrixTracking = false;
+      if (isMatrixCaptured && targetEl && pointerId !== undefined) {
+        try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+      }
+      isMatrixCaptured = false;
+    };
+
+    if (matrixContainer) {
+      matrixContainer.addEventListener("pointerdown", (e) => {
+        // Проверка комбо на уровне контейнера (страховка для мыши на ПК)
+        if (armedCornerIdx !== null) {
+          const btn = e.target.closest(".btn-allstar-node");
+          if (btn) {
+            const cIdx = parseInt(btn.dataset.idx, 10);
+            const targetOpposite = (armedCornerIdx === 3) ? 16 : 3;
+            if (cIdx === targetOpposite) {
+              e.preventDefault();
+              e.stopPropagation();
+              disarmCornerCombo();
+              openAslMatrixManageModal(cid, card, targetHs, userNodes);
+              return;
+            }
+          }
+        }
+        if (e.button !== undefined && e.button !== 0) return;
+        startMatrixDrag(e.clientY, e.clientX);
+        // Не вызываем setPointerCapture на pointerdown, чтобы не ломать клики мыши
+      });
+      matrixContainer.addEventListener("pointermove", (e) => {
+        moveMatrixDrag(e.clientY, e.clientX, e.pointerId, matrixContainer);
+      });
+      matrixContainer.addEventListener("pointerup", (e) => {
+        endMatrixDrag(e.pointerId, matrixContainer);
+      });
+      matrixContainer.addEventListener("pointercancel", (e) => {
+        endMatrixDrag(e.pointerId, matrixContainer);
+      });
+
+      // Touch fallback для максимальной совместимости
+      matrixContainer.addEventListener("touchstart", (e) => {
+        if (e.touches && e.touches[0]) {
+          startMatrixDrag(e.touches[0].clientY, e.touches[0].clientX);
+        }
+      }, { passive: true });
+      matrixContainer.addEventListener("touchmove", (e) => {
+        if (e.touches && e.touches[0]) {
+          moveMatrixDrag(e.touches[0].clientY, e.touches[0].clientX);
+        }
+      }, { passive: true });
+      matrixContainer.addEventListener("touchend", () => endMatrixDrag(), { passive: true });
+      matrixContainer.addEventListener("touchcancel", () => endMatrixDrag(), { passive: true });
+    }
+
+    // --- Обработка жестов для Текстового окна (Свайп ВВЕРХ -> возврат к матрице) ---
+    let textStartY = 0;
+    let textStartX = 0;
+    let isTextTracking = false;
+
+    const startTextDrag = (clientY, clientX) => {
+      isTextTracking = true;
+      textStartY = clientY;
+      textStartX = clientX;
+    };
+
+    const moveTextDrag = (clientY, clientX, pointerId, targetEl) => {
+      if (!isTextTracking) return;
+      const dy = textStartY - clientY; // > 0 при движении вверх
+      const dx = Math.abs(clientX - textStartX);
+      if (dy > 25 && dy > dx * 0.9) {
+        isTextTracking = false;
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        if (targetEl && pointerId !== undefined) {
+          try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+        }
+        setAslTextView(false);
+      }
+    };
+
+    const endTextDrag = (pointerId, targetEl) => {
+      isTextTracking = false;
+      if (targetEl && pointerId !== undefined) {
+        try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+      }
+    };
+
+    if (textPanel) {
+      textPanel.addEventListener("pointerdown", (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        startTextDrag(e.clientY, e.clientX);
+        try { textPanel.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      textPanel.addEventListener("pointermove", (e) => {
+        moveTextDrag(e.clientY, e.clientX, e.pointerId, textPanel);
+      });
+      textPanel.addEventListener("pointerup", (e) => {
+        endTextDrag(e.pointerId, textPanel);
+      });
+      textPanel.addEventListener("pointercancel", (e) => {
+        endTextDrag(e.pointerId, textPanel);
+      });
+
+      // Touch fallback
+      textPanel.addEventListener("touchstart", (e) => {
+        if (e.touches && e.touches[0]) {
+          startTextDrag(e.touches[0].clientY, e.touches[0].clientX);
+        }
+      }, { passive: true });
+      textPanel.addEventListener("touchmove", (e) => {
+        if (e.touches && e.touches[0]) {
+          moveTextDrag(e.touches[0].clientY, e.touches[0].clientX);
+        }
+      }, { passive: true });
+      textPanel.addEventListener("touchend", () => endTextDrag(), { passive: true });
+      textPanel.addEventListener("touchcancel", () => endTextDrag(), { passive: true });
+    }
+
+    // --- Обработка клика и свайпа на самой плашке-разделителе (Notch handle) ---
+    if (dockNotch) {
+      let notchStartY = 0;
+      let isNotchTracking = false;
+
+      dockNotch.addEventListener("pointerdown", (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        isNotchTracking = true;
+        notchStartY = e.clientY;
+        try { dockNotch.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      dockNotch.addEventListener("pointermove", (e) => {
+        if (!isNotchTracking) return;
+        const dy = e.clientY - notchStartY;
+        const isCurrentText = sliderContainer ? sliderContainer.classList.contains("is-text-view") : false;
+        // Тянем вниз из режима матрицы -> открываем текст
+        if (!isCurrentText && dy > 20) {
+          isNotchTracking = false;
+          wasSwipeGesture = true;
+          setTimeout(() => { wasSwipeGesture = false; }, 320);
+          try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+          setAslTextView(true);
+        }
+        // Тянем вверх из режима текста -> открываем матрицу
+        else if (isCurrentText && dy < -20) {
+          isNotchTracking = false;
+          wasSwipeGesture = true;
+          setTimeout(() => { wasSwipeGesture = false; }, 320);
+          try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+          setAslTextView(false);
+        }
+      });
+      dockNotch.addEventListener("pointerup", (e) => {
+        isNotchTracking = false;
+        try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+      });
+      dockNotch.addEventListener("pointercancel", (e) => {
+        isNotchTracking = false;
+        try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+      });
+
+      dockNotch.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (wasSwipeGesture) return;
+        const isCurrentText = sliderContainer ? sliderContainer.classList.contains("is-text-view") : false;
+        setAslTextView(!isCurrentText);
+      });
+      dockNotch.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          const isCurrentText = sliderContainer ? sliderContainer.classList.contains("is-text-view") : false;
+          setAslTextView(!isCurrentText);
+        }
+      });
+    }
+
+    // Закрытие текстового окна по клавише Escape
+    vfoAllStar.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && sliderContainer && sliderContainer.classList.contains("is-text-view")) {
+        setAslTextView(false);
+      }
+    });
+
+    // --- Модальное окно управления памятью узлов AllStarLink ---
+    const openAslMatrixManageModal = (targetCid, targetCard, hsData, currentNodes) => {
+      const existing = document.getElementById("aslMatrixManageModal");
+      if (existing) existing.remove();
+
+      const modal = document.createElement("div");
+      modal.id = "aslMatrixManageModal";
+      modal.className = "asl-matrix-modal-backdrop";
+      modal.innerHTML = `
+        <div class="asl-matrix-modal-card" role="dialog" aria-modal="true" aria-labelledby="aslModalTitle">
+          <div class="asl-modal-header">
+            <div class="asl-modal-title-wrap">
+              <span class="asl-modal-icon">⚙️</span>
+              <h3 id="aslModalTitle" class="asl-modal-title">Память Узлов AllStarLink</h3>
+            </div>
+            <button type="button" class="asl-modal-close" title="Закрыть (Esc)">✕</button>
+          </div>
+          <p class="asl-modal-subtitle">Выберите действие для матрицы из 20 ячеек быстрого вызова:</p>
+
+          <div class="asl-modal-actions">
+            <button type="button" class="asl-modal-btn asl-btn-reset-zero" data-action="zero">
+              <span class="asl-btn-action-icon">🧹</span>
+              <div class="asl-btn-action-text">
+                <strong>Сброс в «ноль»</strong>
+                <small>Полная очистка всех 20 ячеек (все ячейки станут [+] Свободно)</small>
+              </div>
+            </button>
+
+            <button type="button" class="asl-modal-btn asl-btn-reset-default" data-action="default">
+              <span class="asl-btn-action-icon">🔄</span>
+              <div class="asl-btn-action-text">
+                <strong>Сброс в «по умолчанию»</strong>
+                <small>Восстановить базовый список из 20 узлов</small>
+              </div>
+            </button>
+
+            <button type="button" class="asl-modal-btn asl-btn-save-default" data-action="save_default">
+              <span class="asl-btn-action-icon">💾</span>
+              <div class="asl-btn-action-text">
+                <strong>Сохранить текущую как «по умолчанию»</strong>
+                <small>Перезаписать текущую матрицу в качестве нового шаблона по умолчанию ⭐</small>
+              </div>
+            </button>
+          </div>
+
+          <div class="asl-modal-footer">
+            <button type="button" class="asl-modal-cancel-btn">Отмена</button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+      requestAnimationFrame(() => modal.classList.add("is-visible"));
+
+      const closeModal = () => {
+        modal.classList.remove("is-visible");
+        setTimeout(() => { modal.remove(); }, 200);
+      };
+
+      modal.querySelector(".asl-modal-close").addEventListener("click", closeModal);
+      modal.querySelector(".asl-modal-cancel-btn").addEventListener("click", closeModal);
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) closeModal();
+      });
+
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          closeModal();
+          document.removeEventListener("keydown", onKey);
+        }
+      };
+      document.addEventListener("keydown", onKey);
+
+      modal.querySelectorAll(".asl-modal-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const act = btn.dataset.action;
+          if (act === "zero") {
+            const emptyNodes = Array.from({ length: 20 }, () => ({ node: "", label: "", flag: "➕" }));
+            try {
+              localStorage.setItem(`proxdmr_asl_quick_nodes_${targetCid}`, JSON.stringify(emptyNodes));
+            } catch (_) {}
+            closeModal();
+            updateCardAllStarPanel(targetCard, hsData);
+            if (typeof showToast === "function") {
+              showToast("Матрица памяти узлов очищена (все ячейки пусты)", "info", 3000);
+            }
+          } else if (act === "default") {
+            const defNodes = getDefaultNodes(targetCid);
+            try {
+              localStorage.setItem(`proxdmr_asl_quick_nodes_${targetCid}`, JSON.stringify(defNodes));
+            } catch (_) {}
+            closeModal();
+            updateCardAllStarPanel(targetCard, hsData);
+            if (typeof showToast === "function") {
+              showToast("Матрица памяти сброшена к значениям по умолчанию", "success", 3000);
+            }
+          } else if (act === "save_default") {
+            try {
+              localStorage.setItem(`proxdmr_asl_default_nodes_${targetCid}`, JSON.stringify(currentNodes));
+            } catch (_) {}
+            closeModal();
+            if (typeof showToast === "function") {
+              showToast("Текущая матрица сохранена как новый шаблон по умолчанию ⭐", "success", 3500);
+            }
+          }
+        });
+      });
+    };
+
+    // --- Обработка комбо угловых кнопок (индексы 3 и 16) ---
+    let armedCornerIdx = null;
+    let armedTimeout = null;
+
+    const disarmCornerCombo = () => {
+      if (armedTimeout) {
+        clearTimeout(armedTimeout);
+        armedTimeout = null;
+      }
+      if (armedCornerIdx !== null) {
+        vfoAllStar.querySelectorAll(".btn-allstar-node").forEach(b => {
+          b.classList.remove("asl-combo-armed");
+        });
+        armedCornerIdx = null;
+      }
+    };
+
+    const armCornerCombo = (cornerIdx, cornerBtn) => {
+      disarmCornerCombo();
+      armedCornerIdx = cornerIdx;
+      cornerBtn.classList.add("asl-combo-armed");
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate([60, 50, 60]); } catch (_) {}
+      }
+      if (typeof showToast === "function") {
+        showToast("Угловая кнопка зафиксирована! Нажмите противоположный угол для меню сброса матрицы ⚙️", "info", 4500);
+      }
+      armedTimeout = setTimeout(() => {
+        disarmCornerCombo();
+      }, 4500);
+    };
+
+    // Connect node on click / edit on long-press (для всех 20 кнопок матрицы)
+    vfoAllStar.querySelectorAll(".btn-allstar-node").forEach(btn => {
+      let isLongPress = false;
+      const idx = parseInt(btn.dataset.idx, 10);
+      const isCornerBtn = (idx === 3 || idx === 16);
+      let cornerHoldTimer = null;
+      let cornerArmedTriggered = false;
+
+      const isNodeCurrentlyLinked = () => {
+        const n = String(btn.dataset.node || "").trim();
+        if (!n) return false;
+        if (btn.dataset.linkMode === "*2" || btn.dataset.linkMode === "*3") return true;
+        if (btn.dataset.connecting === "true") return true;
+        if (targetHs && targetHs._aslConnectingNodes instanceof Map && targetHs._aslConnectingNodes.has(n)) return true;
+        if (targetHs && Array.isArray(targetHs.asl_links)) {
+          return targetHs.asl_links.some(x => String(x.node).trim() === n);
+        }
+        return false;
+      };
+
+      const triggerDisconnectNode = (nodeToDisc) => {
+        const cleanN = String(nodeToDisc || "").trim();
+        if (!cleanN) return;
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          try { navigator.vibrate(45); } catch (_) {}
+        }
+        aslDisconnectNodeProcedure(cid, cleanN, { showStatusBanner: true, showCardEffects: true });
+      };
+
+      const clearAllHoldTimers = () => {
+        cancelActivePress();
+        if (cornerHoldTimer) {
+          clearTimeout(cornerHoldTimer);
+          cornerHoldTimer = null;
+        }
+      };
+
+      const checkAndTriggerCombo = (e) => {
+        if (armedCornerIdx !== null) {
+          const targetOpposite = (armedCornerIdx === 3) ? 16 : 3;
+          if (idx === targetOpposite) {
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            disarmCornerCombo();
+            openAslMatrixManageModal(cid, card, targetHs, userNodes);
+            return true;
+          }
+        }
+        return false;
+      };
+
+      const triggerConnect = () => {
+        const n = btn.dataset.node;
+        if (!n) return;
+        const cleanTargetN = String(n).trim();
+        const isEchoNode = (cleanTargetN === "1999" || cleanTargetN === "9999");
+
+        if (isEchoNode) {
+          if (targetHs) targetHs._aslLinkMode = "*3";
+          btn.dataset.linkMode = "*3";
+          if (typeof window.setHotspotAslMode === "function") {
+            window.setHotspotAslMode(cid, "*3");
+          }
+          if (typeof window.updateHotspotTsAudioModeUI === "function") {
+            window.updateHotspotTsAudioModeUI(cid);
+          }
+          aslConnectNodeProcedure(cid, cleanTargetN, "*3", { showStatusBanner: true, showCardEffects: true });
+          return;
+        }
+
+        const existingLink = (targetHs && Array.isArray(targetHs.asl_links))
+          ? targetHs.asl_links.find(x => String(x.node).trim() === cleanTargetN)
+          : null;
+        const currentLinkMode = (existingLink && existingLink.mode) || btn.dataset.linkMode || "";
+
+        if (currentLinkMode === "*2" || currentLinkMode === "*3") {
+          const nextMode = (currentLinkMode === "*2") ? "*3" : "*2";
+          if (targetHs) targetHs._aslLinkMode = nextMode;
+          btn.dataset.linkMode = nextMode;
+          if (typeof window.setHotspotAslMode === "function") {
+            window.setHotspotAslMode(cid, nextMode);
+          }
+          if (typeof window.updateHotspotTsAudioModeUI === "function") {
+            window.updateHotspotTsAudioModeUI(cid);
+          }
+          aslConnectNodeProcedure(cid, cleanTargetN, nextMode, { showStatusBanner: true, showCardEffects: true });
+          return;
+        }
+
+        const currentMode = (typeof window.getHotspotAslMode === "function") ? window.getHotspotAslMode(cid) : "*2";
+        aslConnectNodeProcedure(cid, cleanTargetN, currentMode, { showStatusBanner: true, showCardEffects: true });
+      };
+
+      const triggerEdit = () => {
+        openAslCardEditPopover({ idx, cid, card, targetHs, userNodes });
+      };
+
+      const startHold = (e) => {
+        // Если уже взведена противоположная кнопка — мгновенно открываем меню при нажатии!
+        if (checkAndTriggerCombo(e)) return;
+
+        isLongPress = false;
+        cornerArmedTriggered = false;
+        clearAllHoldTimers();
+
+        if (isCornerBtn) {
+          // Угловая кнопка: при удержании > 1400мс взводим комбо сброса
+          cornerHoldTimer = setTimeout(() => {
+            cornerArmedTriggered = true;
+            isLongPress = true;
+            closeAslCardContextMenu(card);
+            armCornerCombo(idx, btn);
+          }, 1400);
+
+          // Таймер 650мс
+          activePressTimer = setTimeout(() => {
+            isLongPress = true;
+            if (!btn.dataset.node) {
+              if (!targetHs || !targetHs._aslDynamicMatrixMode) {
+                triggerEdit();
+              }
+            } else {
+              openAslCardContextMenu({
+                btn, idx, cid, card, targetHs, userNodes,
+                triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
+              });
+            }
+          }, 650);
+        } else {
+          activePressTimer = setTimeout(() => {
+            isLongPress = true;
+            if (!btn.dataset.node) {
+              if (!targetHs || !targetHs._aslDynamicMatrixMode) {
+                triggerEdit();
+              }
+            } else {
+              openAslCardContextMenu({
+                btn, idx, cid, card, targetHs, userNodes,
+                triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
+              });
+            }
+          }, 650);
+        }
+      };
+
+      const endHold = (e) => {
+        if (checkAndTriggerCombo(e)) return;
+        clearAllHoldTimers();
+        if (isLongPress) {
+          if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      };
+
+      btn.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        startHold(e);
+      });
+      btn.addEventListener("touchstart", (e) => {
+        startHold(e);
+      }, { passive: true });
+      btn.addEventListener("mouseup", (e) => endHold(e));
+      btn.addEventListener("touchend", (e) => endHold(e));
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isLongPress) return;
+        if (!btn.dataset.node) {
+          if (!targetHs || !targetHs._aslDynamicMatrixMode) {
+            triggerEdit();
+          }
+        } else {
+          openAslCardContextMenu({
+            btn, idx, cid, card, targetHs, userNodes,
+            triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
+          });
+        }
+      });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (checkAndTriggerCombo(e)) return;
+        if (isLongPress || wasSwipeGesture) {
+          e.preventDefault();
+          isLongPress = false;
+          return;
+        }
+
+        // Если активен режим переноса карточки (Move)
+        if (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined) {
+          clearAslMoveCancelListener();
+          const sourceIdx = Number(targetHs._aslMovingIdx);
+          const targetIdx = idx;
+          targetHs._aslMovingIdx = null;
+
+          if (
+            Number.isInteger(sourceIdx) &&
+            sourceIdx >= 0 && sourceIdx < 20 &&
+            targetIdx >= 0 && targetIdx < 20 &&
+            sourceIdx !== targetIdx
+          ) {
+            const temp = userNodes[sourceIdx];
+            userNodes[sourceIdx] = userNodes[targetIdx] || { node: "", label: "", flag: "➕", scan: false };
+            userNodes[targetIdx] = temp;
+            saveAslUserNodes(cid, userNodes);
+          }
+
+          updateCardAllStarPanel(card, targetHs);
+          return;
+        }
+
+        // Если ячейка пустая -> в штатном режиме открываем настройку, в динамическом игнорируем
+        if (!btn.dataset.node) {
+          if (!targetHs || !targetHs._aslDynamicMatrixMode) {
+            triggerEdit();
+          }
+          return;
+        }
+
+        // Если это карточка DTMF-макроса!
+        if (btn.dataset.role === "dtmf") {
+          executeAslDtmfMacroAction(cid, card, btn, cleanNode);
+          return;
+        }
+
+        // Ручной клик по ноде останавливает активное сканирование
+        if (targetHs && targetHs._aslScanActive) {
+          stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
+        }
+
+        triggerConnect();
+      });
+    });
+
+    // Scan button
+    const scanBtn = vfoAllStar.querySelector(".btn-allstar-scan");
+    if (scanBtn) {
+      if (targetHs && targetHs._aslScanActive) {
+        scanBtn.classList.add("scan-running");
+      }
+      let scanHoldTimer = null;
+      let isScanLongPress = false;
+
+      const startScanHold = (e) => {
+        isScanLongPress = false;
+        if (scanHoldTimer) clearTimeout(scanHoldTimer);
+        scanHoldTimer = setTimeout(() => {
+          isScanLongPress = true;
+          scanHoldTimer = null;
+          if (navigator.vibrate) {
+            try { navigator.vibrate([40, 30, 40]); } catch (_) {}
+          }
+          openAslScanSettingsPopover(cid, scanBtn, card);
+        }, 550);
+      };
+
+      const clearScanHold = () => {
+        if (scanHoldTimer) {
+          clearTimeout(scanHoldTimer);
+          scanHoldTimer = null;
+        }
+      };
+
+      scanBtn.addEventListener("pointerdown", startScanHold);
+      scanBtn.addEventListener("pointerup", clearScanHold);
+      scanBtn.addEventListener("pointercancel", clearScanHold);
+      scanBtn.addEventListener("pointerleave", clearScanHold);
+
+      scanBtn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearScanHold();
+        openAslScanSettingsPopover(cid, scanBtn, card);
+      });
+
+      scanBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (isScanLongPress) {
+          isScanLongPress = false;
+          return;
+        }
+        if (targetHs && targetHs._aslScanActive) {
+          stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: true });
+        } else {
+          startAslMatrixScan(cid, card, targetHs, userNodes);
+        }
+      };
+    }
+
+    // Unlink button
+    const unlinkBtn = vfoAllStar.querySelector(".btn-allstar-unlink");
+    if (unlinkBtn) {
+      unlinkBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (targetHs && targetHs._aslScanActive) {
+          stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: false, silent: true });
+        }
+        aslDisconnectNodeProcedure(cid, "all", { showStatusBanner: true, showCardEffects: true });
+      };
+    }
+
+
+
+    // Отмена режима Move при клике мимо матрицы
+    clearAslMoveCancelListener();
+    if (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined) {
+      const onMoveCancelClick = (e) => {
+        if (!targetHs || targetHs._aslMovingIdx === null || targetHs._aslMovingIdx === undefined) {
+          clearAslMoveCancelListener();
+          return;
+        }
+        if (!e.target.closest(".asl-matrix-grid") && !e.target.closest(".asl-card-context-menu")) {
+          clearAslMoveCancelListener();
+          targetHs._aslMovingIdx = null;
+          updateCardAllStarPanel(card, targetHs);
+        }
+      };
+      const timerId = setTimeout(() => {
+        document.addEventListener("click", onMoveCancelClick, true);
+      }, 30);
+      _activeAslMoveCleanup = () => {
+        clearTimeout(timerId);
+        document.removeEventListener("click", onMoveCancelClick, true);
+      };
+    }
+
+    // Add button removed - strict single-node mode enforced
+
+    // CTCSS filter pair setup for AllStar
+    const dsdPair = card.querySelector(".control-pair-btn.dsd-pair");
+    let ctcssPair = card.querySelector(".control-pair-btn.allstar-ctcss-pair");
+    const oldCodecPair = card.querySelector(".control-pair-btn.allstar-codec-pair");
+    if (oldCodecPair) oldCodecPair.remove();
+
+    if (dsdPair) dsdPair.style.setProperty("display", "none", "important");
+    if (!ctcssPair && dsdPair && dsdPair.parentElement) {
+      ctcssPair = document.createElement("div");
+      ctcssPair.className = "control-pair-btn allstar-ctcss-pair ctcss-mode-filter";
+      ctcssPair.innerHTML = `
+        <button type="button" class="btn-action-trigger btn-asl-ctcss-trigger" title="Фильтр CTCSS субтонов (< 300 Гц): срезает низкочастотный гул (67–254 Гц) аналоговых репитеров. Кликните для быстрого переключения Filter ⇄ Bypass.">
+          <span class="btn-action-label">CTCSS</span>
+        </button>
+        <div class="preset-dropdown-wrapper">
+          <button type="button" class="btn-mini-preset btn-asl-ctcss-mini-preset" data-dropdown="asl-ctcss" title="Режим фильтра CTCSS (Filter / Bypass)">
+            <span class="mini-preset-label">Filter</span>
+            <span class="mini-preset-caret">▾</span>
+          </button>
+          <div class="mini-preset-menu asl-ctcss-menu">
+            <button type="button" class="mini-preset-item active" data-ctcss="filter" title="Фильтр высоких частот (HPF 300 Гц): срезает субтоны и низкочастотный рокот репитеров">
+              <span class="mini-preset-name">Filter (300Hz)</span>
+            </button>
+            <button type="button" class="mini-preset-item" data-ctcss="bypass" title="Прямой пропуск звука без фильтра субтонов (Bypass)">
+              <span class="mini-preset-name">Bypass</span>
+            </button>
+          </div>
+        </div>
+      `;
+      dsdPair.parentElement.insertBefore(ctcssPair, dsdPair);
+    }
+    if (ctcssPair) {
+      ctcssPair.style.display = "inline-flex";
+      const isFilter = (localStorage.getItem(`proxdmr_asl_ctcss_${cid}`) !== "bypass");
+      const ctcssLabel = ctcssPair.querySelector(".mini-preset-label");
+      const actionTrigger = ctcssPair.querySelector(".btn-asl-ctcss-trigger");
+      const miniBtn = ctcssPair.querySelector(".btn-asl-ctcss-mini-preset");
+      const menu = ctcssPair.querySelector(".asl-ctcss-menu");
+
+      const updateCTCSSUI = (enabled) => {
+        if (ctcssLabel) {
+          ctcssLabel.textContent = enabled ? "Filter" : "Bypass";
+        }
+        if (ctcssPair) {
+          ctcssPair.classList.toggle("ctcss-mode-filter", enabled);
+          ctcssPair.classList.toggle("ctcss-mode-bypass", !enabled);
+        }
+        if (actionTrigger) {
+          actionTrigger.title = enabled
+            ? "CTCSS: Filter ВКЛЮЧЕН (HPF 300 Гц, срезает гул субтонов 67–254 Гц). Кликните для переключения в Bypass."
+            : "CTCSS: Bypass (звук без фильтра субтонов). Кликните для включения фильтра 300 Гц.";
+        }
+        if (menu) {
+          menu.querySelectorAll(".mini-preset-item").forEach(it => {
+            const val = it.dataset.ctcss === "filter";
+            it.classList.toggle("active", val === enabled);
+          });
+        }
+      };
+
+      updateCTCSSUI(isFilter);
+
+      // Send state to backend on card init
+      const ws = (typeof getWs === "function" ? getWs() : window.ws);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "allstar_ctcss_filter", hotspot_id: cid, enabled: isFilter }));
+      }
+
+      // Main button: 1-click toggle Filter ⇄ Bypass
+      if (actionTrigger && !actionTrigger._wired) {
+        actionTrigger._wired = true;
+        actionTrigger.onclick = (e) => {
+          e.stopPropagation();
+          const current = (localStorage.getItem(`proxdmr_asl_ctcss_${cid}`) !== "bypass");
+          const next = !current;
+          localStorage.setItem(`proxdmr_asl_ctcss_${cid}`, next ? "filter" : "bypass");
+          updateCTCSSUI(next);
+          const currentWs = (typeof getWs === "function" ? getWs() : window.ws);
+          if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+            currentWs.send(JSON.stringify({ type: "allstar_ctcss_filter", hotspot_id: cid, enabled: next }));
+          }
+          if (typeof showToast === "function") {
+            showToast(
+              next ? "🔔 CTCSS: Filter включен (HPF 300 Гц, срез субтонов)" : "🔕 CTCSS: Bypass (прямой пропуск звука)",
+              next ? "info" : "warning",
+              1800
+            );
+          }
+        };
+      }
+
+      // Dropdown menu toggle
+      if (miniBtn && menu && !miniBtn._wired) {
+        miniBtn._wired = true;
+        miniBtn.onclick = (e) => {
+          e.stopPropagation();
+          menu.classList.toggle("open");
+        };
+        menu.querySelectorAll(".mini-preset-item").forEach(item => {
+          item.onclick = (e) => {
+            e.stopPropagation();
+            const mode = item.dataset.ctcss || "filter";
+            const next = (mode === "filter");
+            localStorage.setItem(`proxdmr_asl_ctcss_${cid}`, next ? "filter" : "bypass");
+            updateCTCSSUI(next);
+            menu.classList.remove("open");
+            const currentWs = (typeof getWs === "function" ? getWs() : window.ws);
+            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+              currentWs.send(JSON.stringify({ type: "allstar_ctcss_filter", hotspot_id: cid, enabled: next }));
+            }
+            if (typeof showToast === "function") {
+              showToast(
+                next ? "🔔 CTCSS: Filter включен (HPF 300 Гц, срез субтонов)" : "🔕 CTCSS: Bypass (прямой пропуск)",
+                next ? "info" : "warning",
+                1800
+              );
+            }
+          };
+        });
+      }
+    }
+
+    // Wire Contacts button on AllStar card to open the ASL directory tab
+    const contactsBtn = card.querySelector(".btn-my-contacts") || card.querySelector(".btn-open-contacts");
+    if (contactsBtn && !contactsBtn._aslWired) {
+      contactsBtn._aslWired = true;
+      contactsBtn.title = "Справочник контактов и узлов AllStarLink";
+      contactsBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (typeof window.openMyContactsModal === "function") {
+          window.openMyContactsModal(cid, "allstar");
+        }
+      };
+    }
+
+    // Unified ASL Nodes Directory button wiring
+    const btnAslDir = card.querySelector(".btn-asl-nodes-dir");
+    if (btnAslDir && !btnAslDir._aslWired) {
+      btnAslDir._aslWired = true;
+      btnAslDir.onclick = (e) => {
+        e.stopPropagation();
+        if (typeof window.openMyContactsModal === "function") {
+          window.openMyContactsModal(cid, "allstar");
+        }
+      };
+    }
+
+    // Quick direct dial placeholder and tooltips for AllStar
+    const quickInput = card.querySelector(".quick-tg-input");
+    const quickBox = card.querySelector(".quick-tg-box");
+    const quickApply = card.querySelector(".btn-quick-tg-apply");
+    if (quickInput) {
+      quickInput.placeholder = "Node #";
+      quickInput.setAttribute("title", "Быстрый набор номера ноды AllStarLink (Enter для подключения)");
+    }
+    if (quickBox) {
+      quickBox.setAttribute("title", "Быстрый переход на ноду AllStarLink (введите номер ноды и нажмите Enter или кнопку)");
+    }
+    if (quickApply) {
+      quickApply.setAttribute("title", "Подключиться к ноде AllStarLink");
+    }
+
+    // Direct JS visibility toggle for ASL directory button
+    const btnSrch = card.querySelector(".btn-srch-tg-id");
+    if (btnSrch) btnSrch.style.display = "none";
+    if (btnAslDir) btnAslDir.style.display = "flex";
+
+    if (typeof window.updateCardTsAudioModeUI === "function") {
+      window.updateCardTsAudioModeUI(card, cid);
+    }
+
+    if (typeof updateCardPttHint === "function") {
+      updateCardPttHint(card);
+    }
+    if (typeof window.renderQuickMemButtons === "function") {
+      window.renderQuickMemButtons(cid);
+    }
+  } else {
+    const labelWrap = card.querySelector(".bm-server-label-wrap");
+    if (labelWrap) labelWrap.style.removeProperty("display");
+    const selectEl = card.querySelector(".bm-server-select");
+    if (selectEl) selectEl.style.removeProperty("display");
+    const aslHeaderBadge = card.querySelector(".asl-header-status-badge");
+    if (aslHeaderBadge) aslHeaderBadge.style.display = "none";
+    const btnSrch = card.querySelector(".btn-srch-tg-id");
+    const btnAslDir = card.querySelector(".btn-asl-nodes-dir");
+    if (btnSrch) btnSrch.style.removeProperty("display");
+    if (btnAslDir) btnAslDir.style.display = "none";
+    if (vfoAllStar) vfoAllStar.style.setProperty("display", "none", "important");
+    if (!card.classList.contains("card-net-xlx")) {
+      if (vfoTs1) vfoTs1.style.removeProperty("display");
+    }
+    if (vfoTs2) vfoTs2.style.removeProperty("display");
+    const dsdPair = card.querySelector(".control-pair-btn.dsd-pair");
+    const codecPair = card.querySelector(".control-pair-btn.allstar-codec-pair");
+    const ctcssPair = card.querySelector(".control-pair-btn.allstar-ctcss-pair");
+    if (dsdPair) dsdPair.style.removeProperty("display");
+    if (codecPair) codecPair.style.display = "none";
+    if (ctcssPair) ctcssPair.style.display = "none";
+
+    const quickInput = card.querySelector(".quick-tg-input");
+    const quickBox = card.querySelector(".quick-tg-box");
+    const quickApply = card.querySelector(".btn-quick-tg-apply");
+    if (quickInput) {
+      quickInput.placeholder = "TG #";
+      quickInput.setAttribute("title", "Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)");
+    }
+    if (quickBox) {
+      quickBox.setAttribute("title", "Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)");
+    }
+    if (quickApply) {
+      quickApply.setAttribute("title", "Установить TalkGroup для передачи");
+    }
+  }
+}
+
+
 export function renderRadiosGrid() {
     const radiosGrid = document.getElementById("radiosGrid");
     if (!radiosGrid) return;
@@ -1193,17 +4490,20 @@ export function renderRadiosGrid() {
     const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
       ? window.currentHotspots
       : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
-    const displayHotspots = allHs.slice(0, 7);
-    if (!displayHotspots.length) return;
+    const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
+    if (!displayHotspots.length) {
+      radiosGrid.querySelectorAll(".radio-container").forEach(c => c.remove());
+      return;
+    }
 
     const template = document.getElementById("radioCardTemplate");
     const existingCards = Array.from(radiosGrid.querySelectorAll(".radio-container"));
     const allowedIds = new Set(displayHotspots.map(h => h.id));
 
-    // Remove obsolete cards if more than current count
+    // Remove hidden or obsolete cards immediately
     existingCards.forEach((c) => {
       const cid = c.dataset.hotspotId;
-      if (cid && !allowedIds.has(cid) && existingCards.length > displayHotspots.length) {
+      if (cid && !allowedIds.has(cid)) {
         c.remove();
       }
     });
@@ -1255,6 +4555,10 @@ export function renderRadiosGrid() {
       }
 
       // Active state highlight
+            // Drag-and-drop reorder markers: 1st hotspot is fixed, 2..7 are draggable
+      card.classList.toggle("is-primary-fixed", idx === 0);
+      card.classList.toggle("is-draggable-hotspot", idx > 0);
+
       card.classList.toggle("active-hotspot", hs.id === activeHotspotId);
 
       // Collapse state sync
@@ -1265,8 +4569,8 @@ export function renderRadiosGrid() {
       const collapseBtn = card.querySelector(".hotspot-collapse-btn");
       if (collapseBtn) {
         collapseBtn.title = isCollapsed
-          ? (window.t ? window.t("vfo.hotspot_expand_title") : "Развернуть этот хотспот")
-          : (window.t ? window.t("vfo.hotspot_collapse_title") : "Свернуть этот хотспот (удержание: свернуть без отключения)");
+          ? (window.t ? window.t("vfo.hotspot_expand_title", {}, "Развернуть этот хотспот (удержание: отправить в архив)") : "Развернуть этот хотспот (удержание: отправить в архив)")
+          : (window.t ? window.t("vfo.hotspot_collapse_title", {}, "Свернуть этот хотспот (удержание: свернуть без отключения)") : "Свернуть этот хотспот (удержание: свернуть без отключения)");
       }
 
       // Populate text
@@ -1292,16 +4596,23 @@ export function renderRadiosGrid() {
       const idDisplay = card.querySelector(".dmr-id-display");
       if (idDisplay) idDisplay.textContent = `ID: ${hs.effective_id || hs.dmr_id || 0}`;
 
+      const netTypeLower = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+      ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom"].forEach(n => {
+        card.classList.toggle(`card-net-${n}`, netTypeLower === n);
+      });
+      card.dataset.networkType = netTypeLower;
+
       updateCardBmBanner(card, hs);
 
-      const isXlxNet = ((hs && hs.network_type) || "bm").toLowerCase() === "xlx";
+      const isXlxNet = netTypeLower === "xlx";
       card.classList.toggle("card-net-xlx", isXlxNet);
 
-      const isDmrPlusNet = ((hs && hs.network_type) || "bm").toLowerCase() === "dmrplus";
+      const isDmrPlusNet = netTypeLower === "dmrplus";
       card.classList.toggle("card-net-dmrplus", isDmrPlusNet);
 
       updateCardXlxPanel(card, hs);
       updateCardDmrPlusPanel(card, hs);
+      updateCardAllStarPanel(card, hs);
       if (isXlxNet) {
         setCardSlot(card, 2, false);
       }
@@ -1663,7 +4974,20 @@ export function renderRadiosGrid() {
             e.stopPropagation();
             const cid = card.dataset.hotspotId || hs.id;
             switchActiveHotspot(cid);
-            openMyContactsModal(cid);
+            const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+            openMyContactsModal(cid, netType === "allstar" ? "allstar" : "dmr");
+          };
+        }
+
+        const btnAslNodesDir = card.querySelector(".btn-asl-nodes-dir");
+        if (btnAslNodesDir) {
+          btnAslNodesDir.onclick = (e) => {
+            e.stopPropagation();
+            const cid = card.dataset.hotspotId || hs.id;
+            switchActiveHotspot(cid);
+            if (typeof openMyContactsModal === "function") {
+              openMyContactsModal(cid, "allstar");
+            }
           };
         }
 
@@ -1930,6 +5254,70 @@ export function renderRadiosGrid() {
           const PTT_DOUBLE_TAP_MS = 320;
           const PTT_HOLD_DELAY_MS = 180;
 
+          let holdSlideOriginX = 0;
+          let holdSlideOriginY = 0;
+          let holdSlideSlot = 2;
+          let holdSlideHasTimeslots = true;
+          let isHoldSlideTracking = false;
+          const HOLD_SLIDE_LOCK_THRESHOLD_PX = 52;
+
+          const removePttSlideLockGuide = () => {
+            document.querySelectorAll(".ptt-slide-lock-guide").forEach(el => el.remove());
+            isHoldSlideTracking = false;
+          };
+
+          const clearPttHoldLatchUI = (btnEl) => {
+            removePttSlideLockGuide();
+            const targets = btnEl ? [btnEl] : document.querySelectorAll(".ptt-button");
+            targets.forEach(b => {
+              b._isHoldLatched = false;
+              b._latchedSlot = 0;
+              b.classList.remove("ptt-hold-latched", "latched-slot-1", "latched-slot-2", "latched-slot-single");
+              b.querySelectorAll(".ptt-latched-banner").forEach(el => el.remove());
+            });
+            if (typeof window !== "undefined") {
+              window.isPttHoldLatched = false;
+            }
+          };
+
+          const showPttSlideLockGuide = (clientX, clientY, slot, hasTimeslots) => {
+            removePttSlideLockGuide();
+            const rect = cardPttBtn.getBoundingClientRect();
+            let minX = rect.left + 26;
+            let maxX = rect.right - 26;
+            if (hasTimeslots) {
+              const midX = rect.left + rect.width / 2;
+              if (slot === 1) {
+                maxX = Math.max(minX, midX - 10);
+              } else {
+                minX = Math.min(maxX, midX + 10);
+              }
+            }
+            const anchorX = Math.max(minX, Math.min(maxX, clientX));
+            const anchorY = Math.min(clientY - 12, rect.top + 10);
+
+            const slotLabel = hasTimeslots ? `TS${slot}` : "TX";
+            const slotClass = hasTimeslots ? `slot-ts${slot}` : "slot-single";
+
+            const guide = document.createElement("div");
+            guide.className = `ptt-slide-lock-guide ${slotClass}`;
+            guide.style.left = `${Math.round(anchorX)}px`;
+            guide.style.top = `${Math.round(anchorY)}px`;
+            guide.style.setProperty("--slide-progress", "0");
+            guide.innerHTML = `
+              <div class="slide-lock-header">
+                <span class="slide-lock-icon">🔓</span>
+                <span class="slide-lock-slot-pill">${slotLabel}</span>
+              </div>
+              <div class="slide-lock-arrows">
+                <span>⌃</span>
+                <span>⌃</span>
+              </div>
+            `;
+            document.body.appendChild(guide);
+            isHoldSlideTracking = true;
+          };
+
           cardPttBtn.addEventListener("pointerdown", (e) => {
             const cid = resolveHotspotId(card.dataset.hotspotId || hs.id || "default");
             const rect = cardPttBtn.getBoundingClientRect();
@@ -1967,6 +5355,24 @@ export function renderRadiosGrid() {
               return;
             }
 
+            if (hs && hs._aslScanActive) {
+              stopAslMatrixScan(cid, card, hs, { keepCurrentLink: true, silent: true });
+            }
+
+            if (cardPttBtn._isHoldLatched || (typeof window !== "undefined" && window.isPttHoldLatched)) {
+              e.preventDefault();
+              e.stopPropagation();
+              clearPttHoldLatchUI(cardPttBtn);
+              cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
+              updateCardPttHint(card);
+              if (typeof window.stopTransmission === "function") {
+                window.stopTransmission();
+              } else {
+                stopTransmission();
+              }
+              return;
+            }
+
             // 2. Branch: Lock status check - if locked, blink button border + vibrate, DO NOT TRANSMIT!
             if (isPttLocked(cid)) {
               e.preventDefault();
@@ -1991,8 +5397,10 @@ export function renderRadiosGrid() {
             }
 
             // Determine targetSlot based on left (TS1) vs right (TS2) click coordinate
-            const isXlx = ((hs && hs.network_type) || "bm").toLowerCase() === "xlx";
-            const targetSlot = isXlx ? 2 : ((relX < (rect.width / 2)) ? 1 : 2);
+            const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+            const isAllStar = netType === "allstar";
+            const isXlx = netType === "xlx";
+            const targetSlot = (isAllStar || isXlx) ? 2 : ((relX < (rect.width / 2)) ? 1 : 2);
             const now = Date.now();
 
             // Проверка на ДВОЙНОЙ ТАП (<= 320 мс)
@@ -2007,6 +5415,22 @@ export function renderRadiosGrid() {
               cardPttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2");
               if (typeof window.stopTransmission === "function") {
                 window.stopTransmission({ silentCancel: true });
+              }
+              if (isAllStar) {
+                const ws = (typeof getWs === "function" ? getWs() : window.ws);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: "allstar_dtmf", hotspot_id: cid, digit: "*73" }));
+                }
+                if (typeof showToast === "function") {
+                  showToast("DTMF: *73 (Unlink All)", "info", 1500);
+                }
+                const targetHs = (getCurrentHotspots().find(h => h.id === cid) || null);
+                if (targetHs) {
+                  targetHs.connected_node = "";
+                  targetHs.is_asl_linked = false;
+                  updateCardAllStarPanel(card, targetHs);
+                }
+                return;
               }
               setCardSlot(card, targetSlot, true);
               switchActiveHotspot(cid);
@@ -2053,14 +5477,68 @@ export function renderRadiosGrid() {
             cardPttBtn.classList.remove("tx-slot-1", "tx-slot-2");
             cardPttBtn.classList.add(`tx-slot-${targetSlot}`);
             switchActiveHotspot(cid);
+
+            const netTypeHold = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+            const hasTimeslots = (netTypeHold !== "allstar" && netTypeHold !== "xlx");
+            holdSlideOriginX = e.clientX;
+            holdSlideOriginY = e.clientY;
+            holdSlideSlot = targetSlot;
+            holdSlideHasTimeslots = hasTimeslots;
+            clearPttHoldLatchUI(cardPttBtn);
+            isHoldSlideTracking = true;
+
             if (pttHoldStartTimer) clearTimeout(pttHoldStartTimer);
             pttHoldStartTimer = setTimeout(() => {
               pttHoldStartTimer = null;
               startTransmission(cid, targetSlot);
+              if (!cardPttBtn._isHoldLatched) {
+                showPttSlideLockGuide(holdSlideOriginX, holdSlideOriginY, holdSlideSlot, holdSlideHasTimeslots);
+              }
             }, PTT_HOLD_DELAY_MS);
           });
 
           cardPttBtn.addEventListener("pointermove", (e) => {
+            if (isHoldSlideTracking && !cardPttBtn._isHoldLatched) {
+              const upDy = holdSlideOriginY - e.clientY;
+              const progress = Math.min(1, Math.max(0, upDy / HOLD_SLIDE_LOCK_THRESHOLD_PX));
+              const guideEl = document.querySelector(".ptt-slide-lock-guide");
+              if (guideEl) {
+                guideEl.style.setProperty("--slide-progress", progress.toFixed(2));
+              }
+
+              if (upDy >= HOLD_SLIDE_LOCK_THRESHOLD_PX) {
+                const cid = resolveHotspotId(card.dataset.hotspotId || hs.id || "default");
+                if (pttHoldStartTimer) {
+                  clearTimeout(pttHoldStartTimer);
+                  pttHoldStartTimer = null;
+                  startTransmission(cid, holdSlideSlot);
+                }
+                removePttSlideLockGuide();
+                cardPttBtn._isHoldLatched = true;
+                cardPttBtn._latchedSlot = holdSlideSlot;
+                if (typeof window !== "undefined") {
+                  window.isPttHoldLatched = true;
+                }
+
+                const latchClass = holdSlideHasTimeslots ? `latched-slot-${holdSlideSlot}` : "latched-slot-single";
+                cardPttBtn.classList.add("ptt-hold-latched", latchClass);
+
+                const slotLabel = holdSlideHasTimeslots ? `TS${holdSlideSlot}` : "TX";
+                let banner = cardPttBtn.querySelector(".ptt-latched-banner");
+                if (!banner) {
+                  banner = document.createElement("span");
+                  banner.className = "ptt-latched-banner";
+                  cardPttBtn.appendChild(banner);
+                }
+                banner.textContent = `🔒 ${slotLabel} ЗАФИКСИРОВАН`;
+
+                if (navigator.vibrate) {
+                  try { navigator.vibrate([35, 40, 60]); } catch (_) {}
+                }
+              }
+              return;
+            }
+
             if (lockPressTimer) {
               const dist = Math.hypot(e.clientX - lockPressStartX, e.clientY - lockPressStartY);
               if (dist > 14) {
@@ -2072,11 +5550,17 @@ export function renderRadiosGrid() {
             }
 
             // When not actively transmitting, provide hover hint based on cursor X position (left -> TS1, right -> TS2)
-            if (!(typeof window !== "undefined" && window.isPttPressed)) {
+            if (!(typeof window !== "undefined" && (window.isPttPressed || window.isPttHoldLatched)) && !cardPttBtn._isHoldLatched) {
               const rect = cardPttBtn.getBoundingClientRect();
               const relX = e.clientX - rect.left;
               if (relX >= 0 && relX <= rect.width) {
-                const isXlx = ((hs && hs.network_type) || "bm").toLowerCase() === "xlx";
+                const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+                const isAllStar = netType === "allstar";
+                const isXlx = netType === "xlx";
+                if (isAllStar) {
+                  cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
+                  return;
+                }
                 const hoverSlot = isXlx ? 2 : ((relX < (rect.width / 2)) ? 1 : 2);
                 const wasSlot1 = cardPttBtn.classList.contains("hover-slot-1");
                 const wasSlot2 = cardPttBtn.classList.contains("hover-slot-2");
@@ -2091,6 +5575,17 @@ export function renderRadiosGrid() {
           });
 
           cardPttBtn.addEventListener("pointerup", (e) => {
+            removePttSlideLockGuide();
+            if (cardPttBtn._isHoldLatched) {
+              e.preventDefault();
+              try {
+                if (cardPttBtn.hasPointerCapture && cardPttBtn.hasPointerCapture(e.pointerId)) {
+                  cardPttBtn.releasePointerCapture(e.pointerId);
+                }
+              } catch (err) {}
+              return;
+            }
+
             const lockIconEl = cardPttBtn.querySelector(".ptt-lock-icon");
             if (lockIconEl) lockIconEl.classList.remove("lock-pressing");
 
@@ -2156,6 +5651,11 @@ export function renderRadiosGrid() {
           });
 
           cardPttBtn.addEventListener("pointercancel", (e) => {
+            removePttSlideLockGuide();
+            if (cardPttBtn._isHoldLatched) {
+              return;
+            }
+
             if (lockPressTimer) {
               clearTimeout(lockPressTimer);
               lockPressTimer = null;
@@ -2196,6 +5696,10 @@ export function renderRadiosGrid() {
             }
             const lockIconEl = cardPttBtn.querySelector(".ptt-lock-icon");
             if (lockIconEl) lockIconEl.classList.remove("lock-pressing");
+
+            if (cardPttBtn._isHoldLatched || (typeof window !== "undefined" && window.isPttHoldLatched)) {
+              return;
+            }
 
             cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
             updateCardPttHint(card);
@@ -2301,6 +5805,51 @@ export function renderRadiosGrid() {
           const num = parseInt(cleanDigits, 10);
           if (!cleanDigits || isNaN(num) || num <= 0 || num > 9999999) {
             hideQuickPreview();
+            return;
+          }
+
+          const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+          if (netType === "allstar") {
+            let nodesDir = [];
+            if (typeof window.getAllStarNodesDirectory === "function") {
+              nodesDir = window.getAllStarNodesDirectory();
+            } else {
+              try {
+                const s = localStorage.getItem("proxdmr_allstar_directory");
+                if (s) nodesDir = JSON.parse(s);
+              } catch (e) {}
+            }
+            if (!Array.isArray(nodesDir) || nodesDir.length === 0) {
+              nodesDir = [
+                { node: "1999",  name: "Local Echo", hub: "Local Loopback Echo Audio Test", country: "ECHO", flag: "🔄" },
+                { node: "41522", name: "HUBNet UK", hub: "National AllStar Repeater Network", country: "UK", flag: "🇬🇧" },
+                { node: "27339", name: "East Coast Reflector", hub: "WAN Repeater System Hub", country: "US", flag: "🇺🇸" },
+                { node: "2143",  name: "WAN RS", hub: "Western Area Repeater Network", country: "US", flag: "🇺🇸" },
+                { node: "9999",  name: "AllStar Parrot", hub: "Global Parrot Repeater", country: "GLOBAL", flag: "🦜" },
+                { node: "51010", name: "World Conference", hub: "International ASL Bridge", country: "GLOBAL", flag: "🌐" },
+                { node: "2502",  name: "ASL Russia", hub: "Российский узел AllStarLink", country: "RU", flag: "🇷🇺" },
+                { node: "52495", name: "ASL Germany", hub: "DL AllStarLink Repeater Network", country: "DE", flag: "🇩🇪" }
+              ];
+            }
+
+            const found = nodesDir.find(item => String(item.node) === String(num));
+            const flag = found ? (found.flag || "🌐") : "🌐";
+            const nodeTitle = found ? (found.name || `Node ${num}`) : `Node ${num}`;
+            const nodeDesc = found ? (found.hub || found.country || "AllStarLink Hub") : (num === 1999 ? "Local Echo" : (num === 9999 ? "Parrot" : "AllStarLink Node"));
+
+            previewPopup.innerHTML = `
+              <div class="quick-tg-pop-header">
+                <span class="quick-tg-pop-flag">${flag}</span>
+                <span class="quick-tg-pop-badge is-tg" style="background:#0284c7;color:#fff;">Node ${num}</span>
+                <span class="quick-tg-pop-country">AllStarLink</span>
+                <span class="quick-tg-pop-tx-hint">TX ⏎</span>
+              </div>
+              <div class="quick-tg-pop-quote is-known">
+                <strong>${safeEscapeHtml(nodeTitle)}</strong>
+                <span class="quick-tg-pop-sub">${safeEscapeHtml(nodeDesc)}</span>
+              </div>
+            `;
+            previewPopup.classList.add("visible");
             return;
           }
 
@@ -2494,7 +6043,37 @@ export function renderRadiosGrid() {
           const val = parseInt(valStr, 10);
           const cid = card.dataset.hotspotId || hs.id;
           const slot = card._activeSlot || getHotspotSlot(cid);
+          const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
           hideQuickPreview();
+
+          if (netType === "allstar") {
+            if (!isNaN(val) && val > 0 && val <= 9999999) {
+              switchActiveHotspot(cid);
+              const ws = (typeof getWs === "function" ? getWs() : window.ws);
+              const currentMode = (typeof window.getHotspotAslMode === "function") ? window.getHotspotAslMode(cid) : "*2";
+              aslConnectNodeProcedure(cid, String(val), currentMode, { showStatusBanner: true, showCardEffects: true });
+              if (typeof showToast === "function") {
+                const mLabel = (currentMode === "*2") ? "Monitor" : "RX/TX";
+                const addLabel = isAdd ? " [+]" : "";
+                showToast(`Подключение к ноде #${val} (${mLabel}${addLabel})...`, "info", 2000);
+              }
+              quickInput.value = "";
+              quickInput.placeholder = "Node #";
+              const box = quickInput.closest(".quick-tg-box");
+              if (box) {
+                box.style.borderColor = "#38bdf8";
+                box.style.boxShadow = "0 0 10px rgba(56, 189, 248, 0.4)";
+                setTimeout(() => {
+                  if (box) {
+                    box.style.borderColor = "";
+                    box.style.boxShadow = "";
+                  }
+                }, 600);
+              }
+            }
+            return;
+          }
+
           if (!isNaN(val) && val > 0 && val <= 9999999) {
             switchActiveHotspot(cid);
             setHotspotTg(cid, slot, val, true);
@@ -2591,9 +6170,10 @@ export function renderRadiosGrid() {
       updateCardTgDisplay(card);
 
       // Ensure static Quick TG placeholder
+      const isAslCard = card.classList.contains("card-net-allstar") || ((hs.network_type || "bm").toLowerCase() === "allstar");
       const quickInp = card.querySelector(".quick-tg-input");
       if (quickInp) {
-        quickInp.placeholder = "TG #";
+        quickInp.placeholder = isAslCard ? "Node #" : "TG #";
       }
 
       // Sync volume & mute UI on this card
@@ -2680,6 +6260,9 @@ export function renderRadiosGrid() {
     }
     if (typeof window.updateLogVisibility === "function") {
       window.updateLogVisibility(false);
+    }
+    if (radiosGrid && typeof initGridDragReorder === "function") {
+      initGridDragReorder(radiosGrid, reorderHotspots);
     }
   }
 export function applyActiveHotspotToUI() {
@@ -2927,6 +6510,13 @@ export function renderBmMastersDropdown(currentHost, networkTypeOverride = null)
     const hostVal = (currentHost !== undefined && currentHost !== null) ? currentHost : (editHsHost ? editHsHost.value : "");
     editHsMasterSelect.innerHTML = "";
 
+    if (netType === "allstar") {
+      editHsMasterSelect.innerHTML = "";
+      const masterSelectGroup = document.getElementById("editHsMasterSelectGroup");
+      if (masterSelectGroup) masterSelectGroup.style.display = "none";
+      return;
+    }
+
     if (netType !== "custom") {
       const benchOpt = document.createElement("option");
       benchOpt.value = "__TEST_SERVERS__";
@@ -3144,6 +6734,8 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_dmrplus", {}, "🔒 Сеть HS • IPSC2 + StartRef (RPTO)") : "🔒 Сеть HS • IPSC2 + StartRef (RPTO)";
       } else if (cleanType === "xlx") {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_xlx", { mod: curMod, tg: modTg }, `🔒 Сеть HS • Модуль ${curMod} (TG ${modTg} на TS2)`) : `🔒 Сеть HS • Модуль ${curMod} (TG ${modTg} на TS2)`;
+      } else if (cleanType === "allstar") {
+        existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_allstar", {}, "🔒 Сеть HS • AllStarLink (IAX2)") : "🔒 Сеть HS • AllStarLink (IAX2)";
       } else {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_custom", {}, "🔒 Сеть HS • Custom MMDVM") : "🔒 Сеть HS • Custom MMDVM";
       }
@@ -3153,7 +6745,7 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const formEl = document.getElementById("hotspotEditForm");
     if (formEl) {
       formEl.classList.add("hs-edit-dynamic-panel");
-      ["bm", "tgif", "freedmr", "dmrplus", "xlx", "custom"].forEach(t => {
+      ["bm", "tgif", "freedmr", "dmrplus", "xlx", "allstar", "custom"].forEach(t => {
         formEl.classList.remove(`hs-net-theme-${t}`);
       });
       formEl.classList.add(`hs-net-theme-${cleanType}`);
@@ -3172,6 +6764,7 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const btnBuildRptoFromTg = document.getElementById("btnBuildRptoFromTg");
     const btnSendRptoNow = document.getElementById("btnSendRptoNow");
     const xlxGroup = document.getElementById("editHsXlxGroup");
+    const allstarGroup = document.getElementById("editHsAllStarGroup");
     const tgRow = document.getElementById("editHsTgRow");
     const pwdLabel = document.getElementById("editHsPasswordLabel");
     const masterLabel = document.getElementById("editHsMasterSelectLabel");
@@ -3203,7 +6796,37 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     if (btnBuildRptoFromTg) btnBuildRptoFromTg.style.display = hasRpto ? "inline-flex" : "none";
     if (btnSendRptoNow) btnSendRptoNow.style.display = (!isNewHotspot && hasRpto) ? "inline-flex" : "none";
     if (xlxGroup) xlxGroup.style.display = hasXlxModule ? "" : "none";
-    if (tgRow) tgRow.style.display = (cleanType === "xlx") ? "none" : "flex";
+    if (allstarGroup) allstarGroup.style.display = (cleanType === "allstar") ? "block" : "none";
+    if (tgRow) tgRow.style.display = (cleanType === "xlx" || cleanType === "allstar") ? "none" : "flex";
+
+    // AllStarLink: hide DMR-specific fields (DMR ID, SSID, Talker Alias, Master server selector, Host/Port)
+    const talkerAliasGroup = document.getElementById("editHsTalkerAliasGroup");
+    const callsignGroup = document.getElementById("editHsCallsignGroup");
+    const dmrIdGroup = document.getElementById("editHsDmrIdGroup");
+    const ssidGroup = document.getElementById("editHsSsidGroup");
+    const masterSelectGroup = document.getElementById("editHsMasterSelectGroup");
+    const hostPortRow = document.getElementById("editHsHostPortRow");
+    const editHsDmrId = document.getElementById("editHsDmrId");
+
+    if (cleanType === "allstar") {
+      if (talkerAliasGroup) talkerAliasGroup.style.display = "none";
+      if (dmrIdGroup) dmrIdGroup.style.display = "none";
+      if (ssidGroup) ssidGroup.style.display = "none";
+      if (masterSelectGroup) masterSelectGroup.style.display = "none";
+      if (hostPortRow) hostPortRow.style.display = "none";
+      if (callsignGroup) callsignGroup.style.flex = "1";
+      if (editHsDmrId) editHsDmrId.removeAttribute("required");
+      if (editHsHost) editHsHost.removeAttribute("required");
+    } else {
+      if (talkerAliasGroup) talkerAliasGroup.style.display = "";
+      if (dmrIdGroup) dmrIdGroup.style.display = "";
+      if (ssidGroup) ssidGroup.style.display = "";
+      if (masterSelectGroup) masterSelectGroup.style.display = "";
+      if (hostPortRow) hostPortRow.style.display = "";
+      if (callsignGroup) callsignGroup.style.flex = "2";
+      if (editHsDmrId) editHsDmrId.setAttribute("required", "required");
+      if (editHsHost) editHsHost.setAttribute("required", "required");
+    }
 
     // Dynamic API key & instructions texts per network
     const apiKeyLabel = document.getElementById("editHsApiKeyLabel");
@@ -3278,6 +6901,9 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
       } else if (cleanType === "xlx") {
         pwdLabel.textContent = window.t ? window.t("hs_edit.xlx_password", {}, "Пароль рефлектора XLX (стандартный: passw0rd)") : "Пароль рефлектора XLX (стандартный: passw0rd)";
         if (editHsPassword) editHsPassword.placeholder = "passw0rd";
+      } else if (cleanType === "allstar") {
+        pwdLabel.textContent = window.t ? window.t("hs_edit.allstar_password", {}, "Пароль узла AllStarLink (IAX2 Secret / passw0rd)") : "Пароль узла AllStarLink (IAX2 Secret / passw0rd)";
+        if (editHsPassword) editHsPassword.placeholder = "passw0rd / IAX2 Secret";
       } else {
         pwdLabel.textContent = window.t ? window.t("hs_edit.net_password", { network: shortLabel }, `Пароль сервера (${shortLabel})`) : `Пароль сервера (${shortLabel})`;
         if (editHsPassword) editHsPassword.placeholder = "passw0rd";
@@ -3301,7 +6927,9 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
       }
     }
     if (editHsHost) {
-      editHsHost.placeholder = profile.defaultHost || "127.0.0.1";
+      editHsHost.placeholder = cleanType === "allstar"
+        ? (window.t ? window.t("hs_edit.allstar_host_placeholder", {}, "127.0.0.1 (или домен/IP ноды ASL)") : "127.0.0.1 (или домен/IP ноды ASL)")
+        : (profile.defaultHost || "127.0.0.1");
     }
 
     // Customize TS1 / TS2 labels per network
@@ -3394,7 +7022,69 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
   }
 
   // =========================================================================
+let _isProgrammaticPopulating = false;
+
 export function populateEditHotspotFormFields(hs) {
+  _isProgrammaticPopulating = true;
+  try {
+  const editHsAliveToggle = document.getElementById("editHsAliveToggle");
+  if (editHsAliveToggle && !editHsAliveToggle._wired) {
+    editHsAliveToggle._wired = true;
+    editHsAliveToggle.addEventListener("change", async () => {
+      const isAlive = Boolean(editHsAliveToggle.checked);
+      const editHsId = document.getElementById("editHsId");
+      const id = editHsId ? editHsId.value : "";
+      const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+      const existing = currentHotspots.find(h => h.id === id);
+
+      // Validate 7 active hotspots limit when turning on an existing hotspot
+      if (isAlive && id && id !== "__new__") {
+        const activeCount = currentHotspots.filter(h => !h.hidden && h.id !== id).length;
+        if (activeCount >= 7) {
+          editHsAliveToggle.checked = false;
+          updateHsFormAliveState(false);
+          const max7Msg = window.t ? window.t("hotspots.max_active_7", {}, "Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов") : "Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов";
+          showToast(max7Msg, "warning", 4000);
+          return;
+        }
+      }
+
+      // Directively update UI state
+      updateHsFormAliveState(isAlive);
+
+      // Directive persistence: immediately save state to backend for existing hotspot
+      if (id && id !== "__new__" && existing) {
+        try {
+          editHsAliveToggle.disabled = true;
+          const payload = { ...existing, hidden: !isAlive };
+          const resp = await fetch(`/api/hotspots/${encodeURIComponent(id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.detail || resp.statusText);
+          }
+          existing.hidden = !isAlive;
+          const statusMsg = isAlive
+            ? (window.t ? window.t("hotspots.hs_enabled", {}, "Хотспот включен") : "Хотспот включен")
+            : (window.t ? window.t("hotspots.hs_disabled", {}, "Хотспот отключен") : "Хотспот отключен");
+          showToast(statusMsg, "success", 2000);
+          if (typeof loadHotspots === "function") {
+            await loadHotspots();
+          }
+        } catch (err) {
+          console.error("[HOTSPOTS] Failed to persist alive state:", err);
+          editHsAliveToggle.checked = !isAlive;
+          updateHsFormAliveState(!isAlive);
+          showToast(err.message || "Ошибка сохранения состояния хотспота", "error", 4000);
+        } finally {
+          editHsAliveToggle.disabled = false;
+        }
+      }
+    });
+  }
     if (!hs) return;
     const editHsId = document.getElementById("editHsId");
     const editHsName = document.getElementById("editHsName");
@@ -3420,8 +7110,12 @@ export function populateEditHotspotFormFields(hs) {
     const editHsAutoconnect = document.getElementById("editHsAutoconnect");
     const editHsAutoTgBm = document.getElementById("editHsAutoTgBm");
 
-    const isNewHotspot = !hs.id || hs.id === "__new__";
-    const netType = (hs.network_type || "bm").toLowerCase();
+    const isNewHotspot = Boolean(!hs || !hs.id || hs.id === "__new__");
+    const editHsSubmitFooter = document.getElementById("editHsSubmitFooter");
+    if (editHsSubmitFooter) {
+      editHsSubmitFooter.style.display = isNewHotspot ? "" : "none";
+    }
+    const netType = (hs && hs.network_type ? hs.network_type : "bm").toLowerCase();
     const netProfile = getDmrNetworkProfile(netType);
 
     if (editHsNetworkType) {
@@ -3459,6 +7153,12 @@ export function populateEditHotspotFormFields(hs) {
       editHsDmrPlusRelink.value = mRel ? mRel[1] : "60";
     }
     if (editHsXlxModule) editHsXlxModule.value = ((hs.xlx_module || "D").trim().toUpperCase().slice(0, 1)) || "D";
+    const editHsAllStarNode = document.getElementById("editHsAllStarNode");
+    if (editHsAllStarNode) editHsAllStarNode.value = hs.allstar_node || "1999";
+    const editHsAllStarAlwaysOnline = document.getElementById("editHsAllStarAlwaysOnline");
+    if (editHsAllStarAlwaysOnline) {
+      editHsAllStarAlwaysOnline.checked = (hs.allstar_always_online !== undefined) ? Boolean(hs.allstar_always_online) : true;
+    }
     if (editHsPassword) {
       editHsPassword.value = hs.bm_password || (netType === "xlx" ? "passw0rd" : "");
       editHsPassword.type = "password";
@@ -3481,6 +7181,13 @@ export function populateEditHotspotFormFields(hs) {
     if (editHsAutoTgBm) {
       editHsAutoTgBm.checked = hs.auto_tg_bm !== undefined && hs.auto_tg_bm !== null ? Boolean(hs.auto_tg_bm) : true;
     }
+    const isAlive = !(hs && hs.hidden);
+    if (editHsAliveToggle) {
+      editHsAliveToggle.checked = isAlive;
+    }
+    if (typeof updateHsFormAliveState === "function") {
+      updateHsFormAliveState(isAlive);
+    }
 
     applyEditHsNetworkTypeUI(netType, { applyDefaults: false, isNewHotspot });
     updateEditHsToolbarUI(hs);
@@ -3495,7 +7202,223 @@ export function populateEditHotspotFormFields(hs) {
         });
       }
     }
+    if (typeof clearSettingsTabDirty === "function") {
+      clearSettingsTabDirty("tab-edit-hs");
+    }
+  } finally {
+    _isProgrammaticPopulating = false;
+    if (typeof clearSettingsTabDirty === "function") {
+      clearSettingsTabDirty("tab-edit-hs");
+    }
   }
+}
+
+export function ensureCustomHsDropdownElements() {
+  const editHsSelect = document.getElementById("editHsSelect");
+  if (!editHsSelect) return null;
+
+  let customDd = document.getElementById("editHsCustomDropdown");
+  if (!customDd) {
+    customDd = document.createElement("div");
+    customDd.id = "editHsCustomDropdown";
+    customDd.className = "hs-custom-dropdown";
+    customDd.style.flex = "1";
+    customDd.style.minWidth = "130px";
+    customDd.style.position = "relative";
+
+    editHsSelect.parentNode.insertBefore(customDd, editHsSelect);
+    customDd.appendChild(editHsSelect);
+    editHsSelect.style.display = "none";
+
+    const trigger = document.createElement("div");
+    trigger.id = "editHsCustomTrigger";
+    trigger.className = "hs-custom-dropdown-trigger";
+    trigger.tabIndex = 0;
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.innerHTML = '<span class="hs-custom-dropdown-label" id="editHsCustomLabel">...</span><span class="hs-custom-dropdown-arrow" aria-hidden="true">▾</span>';
+    customDd.appendChild(trigger);
+
+    const menu = document.createElement("div");
+    menu.id = "editHsCustomMenu";
+    menu.className = "hs-custom-dropdown-menu";
+    menu.setAttribute("role", "listbox");
+    menu.style.display = "none";
+    customDd.appendChild(menu);
+  } else {
+    editHsSelect.style.display = "none";
+  }
+
+  wireCustomHsDropdownEvents();
+  return customDd;
+}
+
+export function wireCustomHsDropdownEvents() {
+  const trigger = document.getElementById("editHsCustomTrigger");
+  if (trigger && !trigger._hsDropdownWired) {
+    trigger._hsDropdownWired = true;
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCustomHsDropdown();
+    });
+    trigger.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+        e.preventDefault();
+        toggleCustomHsDropdown();
+      } else if (e.key === "Escape") {
+        closeCustomHsDropdown();
+      }
+    });
+  }
+
+  const lbl = document.querySelector('label[for="editHsSelect"]');
+  if (lbl && !lbl._hsDdLabelWired) {
+    lbl._hsDdLabelWired = true;
+    lbl.addEventListener("click", (e) => {
+      e.preventDefault();
+      toggleCustomHsDropdown();
+    });
+  }
+
+  if (typeof window !== "undefined" && !window._hsCustomDdGlobalWired) {
+    window._hsCustomDdGlobalWired = true;
+    document.addEventListener("click", (e) => {
+      const dd = document.getElementById("editHsCustomDropdown");
+      if (dd && !dd.contains(e.target)) {
+        closeCustomHsDropdown();
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closeCustomHsDropdown();
+      }
+    });
+  }
+}
+
+export function toggleCustomHsDropdown() {
+  const customDd = document.getElementById("editHsCustomDropdown");
+  const customMenu = document.getElementById("editHsCustomMenu");
+  const customTrigger = document.getElementById("editHsCustomTrigger");
+  if (!customDd || !customMenu) return;
+
+  const isOpen = customDd.classList.contains("is-open");
+  if (isOpen) {
+    closeCustomHsDropdown();
+  } else {
+    if (typeof window.closeAllServerComboboxes === "function") {
+      window.closeAllServerComboboxes();
+    }
+    customDd.classList.add("is-open");
+    customMenu.style.display = "block";
+    if (customTrigger) customTrigger.setAttribute("aria-expanded", "true");
+    const sel = customMenu.querySelector(".is-selected");
+    if (sel && typeof sel.scrollIntoView === "function") {
+      sel.scrollIntoView({ block: "nearest" });
+    }
+  }
+}
+
+export function closeCustomHsDropdown() {
+  const customDd = document.getElementById("editHsCustomDropdown");
+  const customMenu = document.getElementById("editHsCustomMenu");
+  const customTrigger = document.getElementById("editHsCustomTrigger");
+  if (customDd) customDd.classList.remove("is-open");
+  if (customMenu) customMenu.style.display = "none";
+  if (customTrigger) customTrigger.setAttribute("aria-expanded", "false");
+}
+
+export function selectCustomHsOption(val) {
+  const editHsSelect = document.getElementById("editHsSelect");
+  if (editHsSelect) {
+    editHsSelect.value = val;
+    editHsSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  closeCustomHsDropdown();
+  if (typeof clearSettingsTabDirty === "function") {
+    clearSettingsTabDirty("tab-edit-hs");
+  }
+}
+
+export function syncCustomHsDropdownUI(curId, hs, netColors, isLight) {
+  ensureCustomHsDropdownElements();
+  const customMenu = document.getElementById("editHsCustomMenu");
+  const customTrigger = document.getElementById("editHsCustomTrigger");
+  const customLabel = document.getElementById("editHsCustomLabel");
+  if (!customMenu || !customTrigger || !customLabel) return;
+
+  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+  customMenu.innerHTML = "";
+
+  currentHotspots.forEach(h => {
+    const item = document.createElement("div");
+    const netType = (h.network_type || "bm").toLowerCase();
+    item.className = `hs-custom-dropdown-item hs-opt-net-${netType}${h.hidden ? " is-hidden-hs" : ""}${h.id === curId ? " is-selected" : ""}`;
+    item.dataset.value = h.id;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", h.id === curId ? "true" : "false");
+
+    const netProf = getDmrNetworkProfile(netType);
+    const netTag = `[${netProf.badgePrefix}] `;
+    const ssidStr = (h.bm_ssid !== undefined && h.bm_ssid !== null) ? ` · SSID ${h.bm_ssid}` : "";
+    const dispCall = (window.isDemoMode || h.callsign === "Ваш позывной")
+      ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
+      : (h.callsign || "");
+    const callStr = dispCall ? ` (${dispCall}${ssidStr})` : "";
+    const hiddenTag = h.hidden ? " [скрыт]" : "";
+    item.textContent = `${netTag}${h.name || "Хотспот"}${callStr}${hiddenTag}`;
+
+    const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
+    item.style.color = c;
+    if (h.hidden) {
+      item.style.opacity = "0.75";
+    }
+
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectCustomHsOption(h.id);
+    });
+    customMenu.appendChild(item);
+  });
+
+  if (!curId) {
+    const newItem = document.createElement("div");
+    newItem.className = "hs-custom-dropdown-item hs-opt-new is-selected";
+    newItem.dataset.value = "__new__";
+    newItem.setAttribute("role", "option");
+    newItem.setAttribute("aria-selected", "true");
+    newItem.textContent = window.t ? window.t("hotspots.new_opt", {}, "+ Новый хотспот...") : "+ Новый хотспот...";
+    newItem.style.color = isLight ? "#2563eb" : "#4884FF";
+    newItem.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectCustomHsOption("__new__");
+    });
+    customMenu.appendChild(newItem);
+  }
+
+  const activeHs = currentHotspots.find(h => h.id === curId) || hs;
+  if (activeHs) {
+    const netType = (activeHs.network_type || "bm").toLowerCase();
+    const netProf = getDmrNetworkProfile(netType);
+    const netTag = `[${netProf.badgePrefix}] `;
+    const ssidStr = (activeHs.bm_ssid !== undefined && activeHs.bm_ssid !== null) ? ` · SSID ${activeHs.bm_ssid}` : "";
+    const dispCall = (window.isDemoMode || activeHs.callsign === "Ваш позывной")
+      ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
+      : (activeHs.callsign || "");
+    const callStr = dispCall ? ` (${dispCall}${ssidStr})` : "";
+    const hiddenTag = activeHs.hidden ? " [скрыт]" : "";
+    customLabel.textContent = `${netTag}${activeHs.name || "Хотспот"}${callStr}${hiddenTag}`;
+
+    const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
+    customLabel.style.color = c;
+    customTrigger.style.borderColor = (netType === "allstar" && !isLight) ? "rgba(255, 255, 255, 0.45)" : c;
+  } else {
+    customLabel.textContent = window.t ? window.t("hotspots.new_opt", {}, "+ Новый хотспот...") : "+ Новый хотспот...";
+    customLabel.style.color = isLight ? "#2563eb" : "#4884FF";
+    customTrigger.style.borderColor = isLight ? "#cbd5e1" : "rgba(255, 255, 255, 0.25)";
+  }
+}
 
 export function updateEditHsToolbarUI(hs) {
   const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
@@ -3508,20 +7431,41 @@ export function updateEditHsToolbarUI(hs) {
 
   const curId = hs ? hs.id : "";
 
-  // 1. Dropdown options
+  // 1. Dropdown options with network brand colors
   if (editHsSelect) {
     editHsSelect.innerHTML = "";
+    const isLight = document.documentElement.getAttribute("data-theme") === "light" || document.body.classList.contains("theme-light");
+    const netColors = {
+      bm: isLight ? "#c2410c" : "#ff8c5a",
+      allstar: isLight ? "#0f172a" : "#ffffff",
+      freedmr: isLight ? "#047857" : "#34d399",
+      tgif: isLight ? "#0e7490" : "#22d3ee",
+      xlx: isLight ? "#b45309" : "#fbbf24",
+      dmrplus: isLight ? "#6d28d9" : "#c4b5fd",
+      custom: isLight ? "#475569" : "#cbd5e1"
+    };
+
     currentHotspots.forEach(h => {
       const opt = document.createElement("option");
       opt.value = h.id;
-      const netProf = getDmrNetworkProfile(h.network_type || "bm");
+      const netType = (h.network_type || "bm").toLowerCase();
+      const netProf = getDmrNetworkProfile(netType);
       const netTag = `[${netProf.badgePrefix}] `;
       const ssidStr = (h.bm_ssid !== undefined && h.bm_ssid !== null) ? ` · SSID ${h.bm_ssid}` : "";
       const dispCall = (window.isDemoMode || h.callsign === "Ваш позывной")
         ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
         : (h.callsign || "");
       const callStr = dispCall ? ` (${dispCall}${ssidStr})` : "";
-      opt.textContent = `${netTag}${h.name || "Хотспот"}${callStr}`;
+      const hiddenTag = h.hidden ? " [скрыт]" : "";
+      opt.textContent = `${netTag}${h.name || "Хотспот"}${callStr}${hiddenTag}`;
+      opt.className = `hs-opt-net-${netType}${h.hidden ? " is-hidden-hs" : ""}`;
+      const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
+      opt.style.color = c;
+      opt.style.backgroundColor = isLight ? "#ffffff" : "#161b22";
+      if (h.hidden) {
+        opt.style.opacity = "0.75";
+      }
+
       if (h.id === curId) opt.selected = true;
       editHsSelect.appendChild(opt);
     });
@@ -3533,6 +7477,18 @@ export function updateEditHsToolbarUI(hs) {
       newOpt.selected = true;
       editHsSelect.appendChild(newOpt);
     }
+
+    const activeHs = currentHotspots.find(h => h.id === curId) || hs;
+    if (activeHs) {
+      const netType = (activeHs.network_type || "bm").toLowerCase();
+      const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
+      editHsSelect.style.color = c;
+      editHsSelect.style.borderColor = (netType === "allstar" && !isLight) ? "rgba(255, 255, 255, 0.45)" : c;
+    } else {
+      editHsSelect.style.color = isLight ? "#0f172a" : "#e2e8f0";
+      editHsSelect.style.borderColor = isLight ? "#cbd5e1" : "rgba(255, 255, 255, 0.25)";
+    }
+    syncCustomHsDropdownUI(curId, hs, netColors, isLight);
   }
 
   // 2. Delete button state: disabled if <= 1 hotspot or currently adding new
@@ -3722,7 +7678,10 @@ export function renderHotspotOrderList() {
       <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
         <span style="font-weight: 700; font-size: 0.95rem; color: #58a6ff; width: 28px; text-align: center; flex-shrink: 0; background: rgba(88, 166, 255, 0.12); padding: 2px 6px; border-radius: 0px;">#${idx + 1}</span>
         <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary, #ffffff);">${safeEscapeHtml(hs.name || "Хотспот")}</div>
+          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary, #ffffff); display: flex; align-items: center; gap: 6px;">
+            <span>${safeEscapeHtml(hs.name || "Хотспот")}</span>
+            ${hs.hidden ? `<span style="font-size: 0.68rem; color: #ff7b72; background: rgba(248, 81, 73, 0.12); padding: 1px 6px; border: 1px solid rgba(248, 81, 73, 0.35); border-radius: var(--app-border-radius, 0px); font-weight: 700;">${window.t ? window.t("hotspots.hidden_badge", {}, "скрыт") : "скрыт"}</span>` : ""}
+          </div>
           <div style="font-size: 0.78rem; color: var(--text-muted);">${safeEscapeHtml(hs.callsign || "")}${ssidStr} · ID: ${hs.effective_id || hs.dmr_id || "-"}</div>
         </div>
       </div>
@@ -3767,7 +7726,130 @@ export function closeHotspotOrderModal() {
   }
 }
 
+// ─── Settings Dirty State Tracker & Pinned Header Save Button ─────────────
+const _settingsDirtyByTab = {
+  "tab-general": false,
+  "tab-edit-hs": false,
+  "tab-transcriber": false,
+  "tab-alerts": false,
+  "tab-account": false
+};
+
+export function getActiveSettingsTabId() {
+  const activeBtn = document.querySelector("#settingsModal .tab-btn.active");
+  return activeBtn ? (activeBtn.dataset.tab || "tab-general") : "tab-general";
+}
+
+export function updateSettingsHeaderSaveBtn() {
+  const saveBtn = document.getElementById("btnSettingsHeaderSave");
+  if (!saveBtn) return;
+
+  const activeTabId = getActiveSettingsTabId();
+
+  if (activeTabId === "tab-account") {
+    const demoBtn = document.getElementById("adminDemoSaveBtn");
+    const demoBlock = demoBtn ? demoBtn.closest(".account-subtab-content") : null;
+    if (demoBtn && demoBlock && demoBlock.classList.contains("active") && window.getComputedStyle && window.getComputedStyle(demoBtn).display !== "none") {
+      saveBtn.style.display = "inline-flex";
+      saveBtn.disabled = false;
+      const isDirty = Boolean(_settingsDirtyByTab["tab-account"]);
+      if (isDirty) saveBtn.classList.add("is-dirty");
+      else saveBtn.classList.remove("is-dirty");
+    } else {
+      saveBtn.style.display = "inline-flex";
+      saveBtn.disabled = true;
+      saveBtn.classList.remove("is-dirty");
+      saveBtn.title = (window.t ? window.t("account.no_general_save", {}, "В разделе аккаунта действия выполняются точечно") : "В разделе аккаунта действия выполняются точечно");
+    }
+    return;
+  }
+
+  saveBtn.style.display = "inline-flex";
+  saveBtn.disabled = false;
+
+  const isDirty = Boolean(_settingsDirtyByTab[activeTabId]);
+  if (isDirty) {
+    saveBtn.classList.add("is-dirty");
+    saveBtn.title = (window.t ? window.t("buttons.save_unsaved_changes", {}, "Есть несохранённые изменения! Нажмите для сохранения") : "Есть несохранённые изменения! Нажмите для сохранения");
+  } else {
+    saveBtn.classList.remove("is-dirty");
+    saveBtn.title = (window.t ? window.t("buttons.save_settings", {}, "Сохранить настройки") : "Сохранить настройки");
+  }
+}
+
+export function setSettingsTabDirty(tabId, isDirty = true) {
+  if (!tabId) tabId = getActiveSettingsTabId();
+  _settingsDirtyByTab[tabId] = Boolean(isDirty);
+  updateSettingsHeaderSaveBtn();
+}
+
+export function clearSettingsTabDirty(tabId) {
+  if (!tabId) tabId = getActiveSettingsTabId();
+  _settingsDirtyByTab[tabId] = false;
+  updateSettingsHeaderSaveBtn();
+}
+
+export function handleSettingsHeaderSaveClick() {
+  const activeTabId = getActiveSettingsTabId();
+
+  if (activeTabId === "tab-general") {
+    const btn = document.getElementById("btnSaveGeneralSettings");
+    if (btn) btn.click();
+  } else if (activeTabId === "tab-edit-hs") {
+    const form = document.getElementById("hotspotEditForm");
+    if (form) {
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      } else {
+        const sub = form.querySelector('button[type="submit"]');
+        if (sub) sub.click();
+        else form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+      }
+    }
+  } else if (activeTabId === "tab-transcriber") {
+    const form = document.getElementById("transcriberSettingsForm");
+    if (form) {
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      } else {
+        const sub = form.querySelector('button[type="submit"]');
+        if (sub) sub.click();
+        else form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+      }
+    }
+  } else if (activeTabId === "tab-alerts") {
+    const btn = document.getElementById("btnSaveAlerts");
+    if (btn) btn.click();
+  } else if (activeTabId === "tab-account") {
+    const demoBtn = document.getElementById("adminDemoSaveBtn");
+    if (demoBtn && !demoBtn.disabled) demoBtn.click();
+  }
+}
+
+export function autoSaveExistingHotspotIfDirty() {
+  if (_settingsDirtyByTab && _settingsDirtyByTab["tab-edit-hs"]) {
+    const editHsId = document.getElementById("editHsId");
+    const id = editHsId ? editHsId.value.trim() : "";
+    if (id && id !== "__new__") {
+      const form = document.getElementById("hotspotEditForm");
+      if (form) {
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+        } else {
+          const sub = form.querySelector('button[type="submit"]');
+          if (sub) sub.click();
+          else form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+        }
+      }
+    }
+  }
+}
+
 export function initHotspotsManager() {
+  const radiosGrid = document.getElementById("radiosGrid");
+  if (radiosGrid && typeof initGridDragReorder === "function") {
+    initGridDragReorder(radiosGrid, reorderHotspots);
+  }
   const headerHotspotSelect = document.getElementById("headerHotspotSelect");
   if (headerHotspotSelect && !headerHotspotSelect._wired) {
     headerHotspotSelect._wired = true;
@@ -4117,6 +8199,7 @@ export function initHotspotsManager() {
     });
   }
 
+  ensureCustomHsDropdownElements();
   const editHsSelect = document.getElementById("editHsSelect");
   if (editHsSelect && !editHsSelect._wired) {
     editHsSelect._wired = true;
@@ -4130,6 +8213,9 @@ export function initHotspotsManager() {
         if (found) {
           populateEditHotspotFormFields(found);
         }
+      }
+      if (typeof clearSettingsTabDirty === "function") {
+        clearSettingsTabDirty("tab-edit-hs");
       }
     });
   }
@@ -4316,12 +8402,13 @@ export function initHotspotsManager() {
 
       const nameVal = (editHsName ? editHsName.value.trim() : "") || (id === "default" ? "Main" : `Хотспот #${(window.currentHotspots || []).length + 1}`);
       const callsignVal = (editHsCallsign ? editHsCallsign.value.trim().toUpperCase() : "") || "N0CALL";
-      const talkerAliasVal = editHsTalkerAlias ? editHsTalkerAlias.value.trim() : "";
-      const sendTalkerAliasVal = editHsSendTalkerAlias ? editHsSendTalkerAlias.checked : true;
-      const dmrIdVal = parseInt(editHsDmrId ? editHsDmrId.value : "0", 10) || 0;
+      const isAllStar = networkTypeVal === "allstar";
+      const talkerAliasVal = isAllStar ? "" : (editHsTalkerAlias ? editHsTalkerAlias.value.trim() : "");
+      const sendTalkerAliasVal = isAllStar ? false : (editHsSendTalkerAlias ? editHsSendTalkerAlias.checked : true);
+      const dmrIdVal = isAllStar ? 0 : (parseInt(editHsDmrId ? editHsDmrId.value : "0", 10) || 0);
       const rawSsid = editHsSsid ? editHsSsid.value.trim() : "";
       const parsedSsid = rawSsid !== "" ? parseInt(rawSsid, 10) : 1;
-      if (rawSsid !== "" && (isNaN(parsedSsid) || parsedSsid < 1 || parsedSsid > 99)) {
+      if (!isAllStar && rawSsid !== "" && (isNaN(parsedSsid) || parsedSsid < 1 || parsedSsid > 99)) {
         if (window._settingsModalAutoCloseTimer) {
           clearTimeout(window._settingsModalAutoCloseTimer);
           window._settingsModalAutoCloseTimer = null;
@@ -4335,7 +8422,7 @@ export function initHotspotsManager() {
         }
         return;
       }
-      const ssidVal = isNaN(parsedSsid) ? 1 : Math.max(1, Math.min(99, parsedSsid));
+      const ssidVal = isAllStar ? 1 : (isNaN(parsedSsid) ? 1 : Math.max(1, Math.min(99, parsedSsid)));
       let passwordVal = editHsPassword ? editHsPassword.value.trim() : "";
       if (networkTypeVal === "xlx" && !passwordVal) {
         passwordVal = "passw0rd";
@@ -4352,9 +8439,23 @@ export function initHotspotsManager() {
 
       const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
       const existing = currentHotspots.find(h => h.id === id) || {};
-      const autoRecordVal = existing.auto_record !== undefined ? Boolean(existing.auto_record) : false;
+      const autoRecordVal = existing.auto_record !== undefined ? Boolean(existing.auto_record) : true;
+      const editHsAliveToggle = document.getElementById("editHsAliveToggle");
+      const hiddenVal = editHsAliveToggle ? !editHsAliveToggle.checked : Boolean(existing.hidden);
+
+      // Validate 7 active hotspots limit when creating or unhiding
+      const wasHidden = Boolean(existing.hidden);
+      if ((!id || id === "__new__" || wasHidden) && !hiddenVal) {
+        const activeCount = currentHotspots.filter(h => !h.hidden && h.id !== id).length;
+        if (activeCount >= 7) {
+          const max7Msg = window.t ? window.t("hotspots.max_active_7", {}, "Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов") : "Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов";
+          showToast(max7Msg, "warning", 4000);
+          return;
+        }
+      }
 
       const payload = {
+        hidden: hiddenVal,
         name: nameVal,
         callsign: callsignVal,
         talker_alias: talkerAliasVal,
@@ -4362,6 +8463,8 @@ export function initHotspotsManager() {
         dmr_id: dmrIdVal,
         bm_ssid: ssidVal,
         network_type: networkTypeVal,
+        allstar_node: (document.getElementById("editHsAllStarNode") ? document.getElementById("editHsAllStarNode").value.trim() : (existing.allstar_node || "1999")),
+        allstar_always_online: (document.getElementById("editHsAllStarAlwaysOnline") ? Boolean(document.getElementById("editHsAllStarAlwaysOnline").checked) : (existing.allstar_always_online !== undefined ? Boolean(existing.allstar_always_online) : true)),
         rpto_options: rptoOptionsVal,
         xlx_module: xlxModuleVal,
         dmrplus_reflector: (document.getElementById("editHsDmrPlusRef") ? document.getElementById("editHsDmrPlusRef").value.trim() : (existing.dmrplus_reflector || "4530")),
@@ -4413,6 +8516,9 @@ export function initHotspotsManager() {
         const data = await resp.json();
         const savedHs = data.hotspot || payload;
         showToast(window.t ? window.t("hotspots.settings_saved", {}, "Настройки хотспота сохранены") : "Настройки хотспота сохранены", 2500);
+        if (typeof clearSettingsTabDirty === "function") {
+          clearSettingsTabDirty("tab-edit-hs");
+        }
         if (typeof window.triggerModalSavePulse === "function") {
           window.triggerModalSavePulse(hotspotEditForm, { closeSettings: false });
         }
@@ -4477,6 +8583,7 @@ export function initHotspotsManager() {
   if (closeSettingsBtn && !closeSettingsBtn._wired) {
     closeSettingsBtn._wired = true;
     closeSettingsBtn.onclick = () => {
+      autoSaveExistingHotspotIfDirty();
       saveCurrentSettingsState();
       const modal = document.getElementById("settingsModal");
       if (modal) {
@@ -4487,10 +8594,20 @@ export function initHotspotsManager() {
     };
   }
 
+  const headerSaveBtn = document.getElementById("btnSettingsHeaderSave");
+  if (headerSaveBtn && !headerSaveBtn._wired) {
+    headerSaveBtn._wired = true;
+    headerSaveBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      handleSettingsHeaderSaveClick();
+    });
+  }
+
   if (settingsModal && !settingsModal._wired) {
     settingsModal._wired = true;
     settingsModal.onclick = (e) => {
       if (e.target === settingsModal) {
+        autoSaveExistingHotspotIfDirty();
         saveCurrentSettingsState();
         settingsModal.classList.remove("active");
         settingsModal.style.display = "";
@@ -4532,6 +8649,10 @@ export function initHotspotsManager() {
           localStorage.setItem("proxdmr_settings_last_tab", targetId);
         } catch (_) {}
 
+        if (typeof updateSettingsHeaderSaveBtn === "function") {
+          updateSettingsHeaderSaveBtn();
+        }
+
         const modalBody = document.querySelector("#settingsModal .settings-modal-body");
         let savedScroll = 0;
         let savedFocusId = null;
@@ -4558,6 +8679,28 @@ export function initHotspotsManager() {
   });
 
   const modalBody = document.querySelector("#settingsModal .settings-modal-body");
+  if (modalBody && !modalBody._dirtyWatcherWired) {
+    modalBody._dirtyWatcherWired = true;
+    const onUserEdit = (e) => {
+      if (_isProgrammaticPopulating) return;
+      const target = e.target;
+      if (!target) return;
+      if (target.id === "editHsSelect" || (target.closest && (target.closest(".hs-manager-toolbar") || target.closest("#editHsCustomDropdown")))) {
+        return;
+      }
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+        if (target.type === "button" || target.type === "submit" || target.type === "reset") return;
+        const tabContent = target.closest(".tab-content");
+        if (tabContent && tabContent.id) {
+          setSettingsTabDirty(tabContent.id, true);
+        }
+      }
+    };
+    modalBody.addEventListener("input", onUserEdit, { passive: true });
+    modalBody.addEventListener("change", onUserEdit, { passive: true });
+  }
+
   if (modalBody && !modalBody._scrollWired) {
     modalBody._scrollWired = true;
     let scrollDebounce = null;
@@ -4603,6 +8746,19 @@ window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
 window.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
 window.openXlxAllModulesPopover = openXlxAllModulesPopover;
 window.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
+window.syncAslMatrixButtonsState = syncAslMatrixButtonsState;
+window.setAslProcBannerState = setAslProcBannerState;
+window.formatAslProcMessage = formatAslProcMessage;
+window.aslDisconnectNodeProcedure = aslDisconnectNodeProcedure;
+window.aslConnectNodeProcedure = aslConnectNodeProcedure;
+window.closeAslCardContextMenu = closeAslCardContextMenu;
+window.saveAslUserNodes = saveAslUserNodes;
+window.setSettingsTabDirty = setSettingsTabDirty;
+window.clearSettingsTabDirty = clearSettingsTabDirty;
+window.updateSettingsHeaderSaveBtn = updateSettingsHeaderSaveBtn;
+window.handleSettingsHeaderSaveClick = handleSettingsHeaderSaveClick;
+window.openAslCardContextMenu = openAslCardContextMenu;
+window.probeAslMatrixNodes = probeAslMatrixNodes; window.fetchDirectAslNodeStats = fetchDirectAslNodeStats; window.processDirectStatsQueue = processDirectStatsQueue;
 window.applyActiveHotspotToUI = applyActiveHotspotToUI;
 window.renderHotspotsList = renderHotspotsList;
 window.fetchBmMasters = fetchBmMasters;
@@ -4611,6 +8767,16 @@ window.applyEditHsNetworkTypeUI = applyEditHsNetworkTypeUI;
 window.populateEditHotspotFormFields = populateEditHotspotFormFields;
 window.openEditHotspotForm = openEditHotspotForm;
 window.initHotspotsManager = initHotspotsManager;
+window.isAslDtmfCard = isAslDtmfCard;
+window.executeAslDtmfMacroAction = executeAslDtmfMacroAction;
+window.getAslScanConfig = getAslScanConfig;
+window.saveAslScanConfig = saveAslScanConfig;
+window.isAslNodeRxActive = isAslNodeRxActive;
+window.startAslMatrixScan = startAslMatrixScan;
+window.stopAslMatrixScan = stopAslMatrixScan;
+window.openAslScanSettingsPopover = openAslScanSettingsPopover;
+window.openAslCardEditPopover = openAslCardEditPopover;
+window.autoSaveExistingHotspotIfDirty = autoSaveExistingHotspotIfDirty;
 window.saveCurrentSettingsState = saveCurrentSettingsState;
 window.reorderHotspots = reorderHotspots;
 window.moveHotspotInOrder = moveHotspotInOrder;
@@ -4630,6 +8796,14 @@ window.__proxdmr.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
 window.__proxdmr.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
 window.__proxdmr.openXlxAllModulesPopover = openXlxAllModulesPopover;
 window.__proxdmr.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
+window.__proxdmr.syncAslMatrixButtonsState = syncAslMatrixButtonsState;
+window.__proxdmr.setAslProcBannerState = setAslProcBannerState;
+window.__proxdmr.formatAslProcMessage = formatAslProcMessage;
+window.__proxdmr.aslDisconnectNodeProcedure = aslDisconnectNodeProcedure;
+window.__proxdmr.aslConnectNodeProcedure = aslConnectNodeProcedure;
+window.__proxdmr.closeAslCardContextMenu = closeAslCardContextMenu;
+window.__proxdmr.saveAslUserNodes = saveAslUserNodes;
+window.__proxdmr.openAslCardContextMenu = openAslCardContextMenu;
 window.__proxdmr.applyActiveHotspotToUI = applyActiveHotspotToUI;
 window.__proxdmr.renderHotspotsList = renderHotspotsList;
 window.__proxdmr.fetchBmMasters = fetchBmMasters;
@@ -4638,12 +8812,15 @@ window.__proxdmr.applyEditHsNetworkTypeUI = applyEditHsNetworkTypeUI;
 window.__proxdmr.populateEditHotspotFormFields = populateEditHotspotFormFields;
 window.__proxdmr.openEditHotspotForm = openEditHotspotForm;
 window.__proxdmr.initHotspotsManager = initHotspotsManager;
+window.__proxdmr.autoSaveExistingHotspotIfDirty = autoSaveExistingHotspotIfDirty;
 window.__proxdmr.saveCurrentSettingsState = saveCurrentSettingsState;
 window.__proxdmr.reorderHotspots = reorderHotspots;
 window.__proxdmr.moveHotspotInOrder = moveHotspotInOrder;
 window.__proxdmr.renderHotspotOrderList = renderHotspotOrderList;
 window.__proxdmr.openHotspotOrderModal = openHotspotOrderModal;
 window.__proxdmr.closeHotspotOrderModal = closeHotspotOrderModal;
+window.__proxdmr.toggleCustomHsDropdown = toggleCustomHsDropdown;
+window.__proxdmr.closeCustomHsDropdown = closeCustomHsDropdown;
 
 window.addEventListener("languageChanged", () => {
   const editHsNetworkType = document.getElementById("editHsNetworkType");
@@ -4662,6 +8839,7 @@ window.addEventListener("languageChanged", () => {
     }
   }
   renderBmMastersDropdown();
+  renderRadiosGrid();
 });
 
 export function checkAndRenderFailoverBadges() {
@@ -4753,4 +8931,98 @@ window.onServerProbeComplete = function(msg) {
   }
 };
 
-if (typeof window !== 'undefined') { window.updateCardXlxPanel = updateCardXlxPanel; window.updateCardDmrPlusPanel = updateCardDmrPlusPanel; window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector; }
+export function appendAllStarLogEntry(cid, entry) {
+  // Чистый режим транскрибации: системные и VoIP логи не выводятся в текстовое окно
+  return;
+}
+
+export function appendAllStarTelemetryLog(cid, rtt, jitter) {
+  // Чистый режим транскрибации: телеметрия не выводится в текстовое окно
+  return;
+}
+
+if (typeof window !== "undefined" && !window._aslOnlinePollInterval) {
+  window._aslOnlinePollInterval = setInterval(() => {
+    try {
+      const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
+      const aslHs = hsList.find(h => ((h && h.network_type) || "").toLowerCase() === "allstar");
+      if (!aslHs) return;
+      const cid = aslHs.id || "default";
+      fetch(`/api/allstar/connected?hotspot_id=${encodeURIComponent(cid)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.status === "ok") {
+            const nodes = data.connected_nodes || [];
+            const links = data.links || [];
+            aslHs.asl_links = links;
+            const prevCount = aslHs.asl_online_count;
+            const newCount = data.online_count || links.filter(l => !l.connecting).length || nodes.length;
+            aslHs.asl_online_count = newCount;
+            if (nodes.length > 0 && nodes[0] !== aslHs.connected_node) {
+              aslHs.connected_node = nodes[0];
+              aslHs.is_asl_linked = true;
+            }
+            if (Array.isArray(links)) {
+              links.forEach(lk => {
+                if (lk && lk.node) {
+                  const cn = String(lk.node).trim();
+                  if (lk.connecting || lk.status === "connecting") {
+                    if (aslHs._aslConnectingNodes instanceof Map) {
+                      const ex = aslHs._aslConnectingNodes.get(cn);
+                      aslHs._aslConnectingNodes.set(cn, {
+                        mode: lk.mode || (ex && ex.mode) || "*2",
+                        startedAt: ex ? ex.startedAt : Date.now()
+                      });
+                    }
+                  } else {
+                    if (aslHs._aslConnectingNodes instanceof Map) {
+                      aslHs._aslConnectingNodes.delete(cn);
+                    }
+                  }
+                }
+              });
+            }
+            const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+            if (card) {
+              const hasUnlisted = Array.isArray(aslHs.asl_unlisted_links) && aslHs.asl_unlisted_links.length > 0;
+              if ((!card.querySelector(".asl-matrix-grid") || aslHs._aslDynamicMatrixMode || hasUnlisted) && !card.querySelector(".asl-card-context-menu")) {
+                updateCardAllStarPanel(card, aslHs);
+              } else {
+                syncAslMatrixButtonsState(card, aslHs);
+              }
+            }
+          }
+        })
+        .catch(() => {});
+    } catch (e) {}
+  }, 10000);
+}
+
+if (typeof window !== 'undefined') { window.updateCardXlxPanel = updateCardXlxPanel; window.updateCardDmrPlusPanel = updateCardDmrPlusPanel; window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector; window.updateCardAllStarPanel = updateCardAllStarPanel; window.appendAllStarLogEntry = appendAllStarLogEntry; window.appendAllStarTelemetryLog = appendAllStarTelemetryLog; window.openAllStarDtmfPopover = openAllStarDtmfPopover; }
+
+
+export function updateHsFormAliveState(isAlive) {
+  const form = document.getElementById("hotspotEditForm");
+  const tabEditHs = document.getElementById("tab-edit-hs");
+  if (!form) return;
+  if (isAlive) {
+    form.classList.remove("hs-form-excluded");
+    if (tabEditHs) tabEditHs.classList.remove("hs-is-excluded");
+    form.querySelectorAll("input, select, textarea, button").forEach(el => {
+      if (el.id !== "editHsAliveToggle") {
+        el.disabled = false;
+      }
+    });
+  } else {
+    form.classList.add("hs-form-excluded");
+    if (tabEditHs) tabEditHs.classList.add("hs-is-excluded");
+    form.querySelectorAll("input, select, textarea, button").forEach(el => {
+      if (el.id !== "editHsAliveToggle" && el.type !== "submit" && el.id !== "btnSaveHotspot") {
+        el.disabled = true;
+      }
+    });
+  }
+}
+if (typeof window !== "undefined") {
+  window.updateHsFormAliveState = updateHsFormAliveState;
+}

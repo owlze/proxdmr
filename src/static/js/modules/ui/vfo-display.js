@@ -398,21 +398,48 @@ export function updateCardModeBadge(card) {
   const modeBadgeEl = card.querySelector(".mode-badge");
   if (!modeBadgeEl) return;
   const activeHid = getActiveHotspotId();
-  const hid = card.dataset.hotspotId || activeHid;
+  const rawCid = card.dataset.hotspotId || activeHid;
+  const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(rawCid)
+    : (rawCid || "default");
+  const netType = (typeof getHotspotNetworkType === "function") ? getHotspotNetworkType(cid) : "";
+  const isAllStar = (netType === "allstar" || card.classList.contains("card-net-allstar") || card.dataset.networkType === "allstar");
 
   const txHid = (typeof window !== "undefined" && window.activeTxHotspotId) || activeHid;
-  if (getIsPttPressed() && (hid === activeHid || hid === txHid)) {
-    const slot = card._activeSlot || getHotspotSlot(hid) || 1;
+  if (getIsPttPressed() && (cid === activeHid || cid === txHid)) {
+    const slot = card._activeSlot || getHotspotSlot(cid) || 1;
     modeBadgeEl.className = "mode-badge mode-tx";
     const rem = (typeof window !== "undefined" && typeof window.getTotRemainingSeconds === "function") ? window.getTotRemainingSeconds() : null;
-    modeBadgeEl.textContent = (rem !== null && rem !== undefined) ? `TX TS${slot} ${rem}s` : `TX TS${slot}`;
+    if (isAllStar) {
+      modeBadgeEl.textContent = (rem !== null && rem !== undefined) ? `TX ${rem}s` : `TX`;
+    } else {
+      modeBadgeEl.textContent = (rem !== null && rem !== undefined) ? `TX TS${slot} ${rem}s` : `TX TS${slot}`;
+    }
     return;
   }
+
+  const vfoAllStar = card.querySelector(".vfo-allstar-row");
+  const isAslRx = Boolean(vfoAllStar && vfoAllStar.classList.contains("allstar-rx-active"));
 
   const vfo1 = card.querySelector(".vfo-ts1-row");
   const vfo2 = card.querySelector(".vfo-ts2-row");
   const isTs1Rx = Boolean(vfo1 && vfo1.classList.contains("vfo-rx-active"));
   const isTs2Rx = Boolean(vfo2 && vfo2.classList.contains("vfo-rx-active"));
+
+  if (isAllStar) {
+    if (isAslRx || isTs1Rx || isTs2Rx) {
+      modeBadgeEl.className = "mode-badge mode-rx";
+      modeBadgeEl.textContent = "RX";
+    } else {
+      const screenTopBar = card.querySelector(".screen-top-bar");
+      if (screenTopBar && screenTopBar.classList.contains("asl-proc-banner-active")) {
+        return;
+      }
+      modeBadgeEl.className = "mode-badge mode-standby";
+      modeBadgeEl.textContent = "STANDBY";
+    }
+    return;
+  }
 
   if (isTs1Rx && isTs2Rx) {
     modeBadgeEl.className = "mode-badge mode-rx";
@@ -424,6 +451,10 @@ export function updateCardModeBadge(card) {
     modeBadgeEl.className = "mode-badge mode-rx";
     modeBadgeEl.textContent = "RX TS2";
   } else {
+    const screenTopBar = card.querySelector(".screen-top-bar");
+    if (screenTopBar && screenTopBar.classList.contains("asl-proc-banner-active")) {
+      return;
+    }
     modeBadgeEl.className = "mode-badge mode-standby";
     modeBadgeEl.textContent = "STANDBY";
   }

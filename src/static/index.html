@@ -39,8 +39,9 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.388">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.539">
   <script>
+    window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
     window.isSwl = {{ 'true' if is_swl else 'false' }};
     window.APP_VERSION = "{{ app_version | default('0.85') }}";
@@ -140,6 +141,8 @@
         document.documentElement.style.backgroundSize = _savedScale + "px " + _savedScale + "px";
         document.documentElement.style.backgroundAttachment = "fixed";
       }
+      var _savedRadius = (window.currentUserId ? localStorage.getItem(_uKey + "border_radius") : null) || localStorage.getItem("proxdmr_border_radius") || "0";
+      document.documentElement.style.setProperty("--app-border-radius", _savedRadius + "px");
       function updateVuMeterGrid() {
         var dpr = window.devicePixelRatio || 1;
         var isSmartphone = window.innerWidth <= 768 || (window.matchMedia && window.matchMedia('(pointer: coarse) and (max-width: 960px), (pointer: coarse) and (max-height: 540px)').matches) || Boolean(window.AndroidBridge);
@@ -218,6 +221,10 @@
           <button type="button" class="onboarding-lang-card" data-lang="it">
             <img src="/static/flags/it.svg" class="onboarding-lang-flag" alt="IT">
             <span class="onboarding-lang-label">Italiano</span>
+          </button>
+          <button type="button" class="onboarding-lang-card" data-lang="nl">
+            <img src="/static/flags/nl.svg" class="onboarding-lang-flag" alt="NL">
+            <span class="onboarding-lang-label">Nederlands</span>
           </button>
           <button type="button" class="onboarding-lang-card selected" data-lang="ru">
             <img src="/static/flags/ru.svg" class="onboarding-lang-flag" alt="RU">
@@ -315,13 +322,13 @@
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;">Login</label>
           <input type="text" id="authLoginInput" autocomplete="username" placeholder="login"
-                 style="width:100%;padding:8px 10px;border-radius: 0px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
+                 style="width:100%;padding:8px 10px;border-radius: var(--app-border-radius, 0px);border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
         </div>
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:0.85em;margin-bottom:4px;opacity:0.7;">Password</label>
           <div style="position:relative;display:flex;align-items:center;width:100%;">
             <input type="password" id="authPasswordInput" autocomplete="current-password" placeholder="password"
-                   style="width:100%;padding:8px 38px 8px 10px;border-radius: 0px;border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
+                   style="width:100%;padding:8px 38px 8px 10px;border-radius: var(--app-border-radius, 0px);border:1px solid #555;background:#2a2a2e;color:#fff;font-size:1em;box-sizing:border-box;">
             <button type="button" id="btnToggleAuthPassword" class="password-toggle-btn"
                     title="Show/hide password" tabindex="-1">👁️</button>
           </div>
@@ -331,15 +338,15 @@
           <label for="authRememberMe" style="font-size:0.85em;opacity:0.8;cursor:pointer;">Remember me</label>
         </div>
         <div id="authLoginError" style="color:#ff5555;font-size:0.85em;min-height:1.2em;margin-bottom:8px;"></div>
-        <button id="authLoginBtn" type="button" class="btn-primary" style="width:100%;padding:10px;font-size:1em;border-radius: 0px;cursor:pointer;">Sign In</button>
+        <button id="authLoginBtn" type="button" class="btn-primary" style="width:100%;padding:10px;font-size:1em;border-radius: var(--app-border-radius, 0px);cursor:pointer;">Sign In</button>
         <div style="margin-top:10px;">
-          <button id="authImportConfigBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: 0px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#242830;border:1px solid #444;color:#ddd;">
+          <button id="authImportConfigBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: var(--app-border-radius, 0px);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#242830;border:1px solid #444;color:#ddd;">
             <span>📥</span>
             <span>Load configuration from file</span>
           </button>
         </div>
         <div id="authServerSettingsRow" style="margin-top:10px; display: none;">
-          <button id="authServerSettingsBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: 0px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#1e2430;border:1px solid rgba(88,166,255,0.4);color:#58a6ff;">
+          <button id="authServerSettingsBtn" type="button" class="btn-secondary" style="width:100%;padding:9px 10px;font-size:0.9em;border-radius: var(--app-border-radius, 0px);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;background:#1e2430;border:1px solid rgba(88,166,255,0.4);color:#58a6ff;">
             <span>⚙️</span>
             <span>Server Settings</span>
           </button>
@@ -371,8 +378,8 @@
         Вы действительно хотите выйти из аккаунта?
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
-        <button type="button" id="btnCancelLogoutModal" class="btn-secondary" style="padding:7px 16px;border-radius: 0px;cursor:pointer;font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
-        <button type="button" id="btnConfirmLogoutModal" class="btn-danger" style="padding:7px 18px;border-radius: 0px;cursor:pointer;font-size:0.9em;background:#da3633;color:#fff;border:1px solid #f85149;font-weight:600;" data-i18n="account.logout_btn_confirm">Выйти</button>
+        <button type="button" id="btnCancelLogoutModal" class="btn-secondary" style="padding:7px 16px;border-radius: var(--app-border-radius, 0px);cursor:pointer;font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
+        <button type="button" id="btnConfirmLogoutModal" class="btn-danger" style="padding:7px 18px;border-radius: var(--app-border-radius, 0px);cursor:pointer;font-size:0.9em;background:#da3633;color:#fff;border:1px solid #f85149;font-weight:600;" data-i18n="account.logout_btn_confirm">Выйти</button>
       </div>
     </div>
   </div>
@@ -391,21 +398,21 @@
         Обнаружен архив суперадмина. Выберите режим восстановления:
       </div>
       <div class="sa-import-options" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">
-        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: 0px; border:1px solid var(--border-color, #30363d);">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: var(--app-border-radius, 0px); border:1px solid var(--border-color, #30363d);">
           <input type="radio" name="saImportMode" value="superadmin_only" checked style="margin-top:3px;">
           <div>
             <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt1_title">1. Восстановить только суперадмина</strong>
             <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt1_desc">Конфигурация, хотспоты и оперативные данные суперадмина. Другие пользователи в базе не изменяются.</div>
           </div>
         </label>
-        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: 0px; border:1px solid var(--border-color, #30363d);">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: var(--app-border-radius, 0px); border:1px solid var(--border-color, #30363d);">
           <input type="radio" name="saImportMode" value="all_users" style="margin-top:3px;">
           <div>
             <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt2_title">2. Суперадмин + все пользователи</strong>
             <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;" data-i18n="account.sa_import_opt2_desc">Полное восстановление всей базы (учетные записи, пароли, хотспоты и настройки всех пользователей).</div>
           </div>
         </label>
-        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: 0px; border:1px solid var(--border-color, #30363d);">
+        <label class="sa-import-option" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:0.88rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: var(--app-border-radius, 0px); border:1px solid var(--border-color, #30363d);">
           <input type="radio" name="saImportMode" value="selected_users" style="margin-top:3px;">
           <div>
             <strong style="color:var(--text-primary);" data-i18n="account.sa_import_opt3_title">3. Суперадмин + выбранные пользователи</strong>
@@ -415,7 +422,7 @@
       </div>
 
       <!-- Users checklist block (visible when option 3 is selected) -->
-      <div id="saImportUsersChecklistBlock" style="display:none; margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color, #30363d); border-radius: 0px; padding:10px;">
+      <div id="saImportUsersChecklistBlock" style="display:none; margin-bottom:14px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color, #30363d); border-radius: var(--app-border-radius, 0px); padding:10px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:0.8rem;">
           <span style="font-weight:600; color:var(--text-muted);" data-i18n="account.sa_import_select_users">Пользователи для восстановления:</span>
           <div style="display:flex; gap:10px;">
@@ -430,8 +437,8 @@
       </div>
 
       <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
-        <button type="button" id="btnCancelSaImportModal" class="btn-secondary" style="padding:7px 16px; border-radius: 0px; cursor:pointer; font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
-        <button type="button" id="btnConfirmSaImportModal" class="btn-primary" style="padding:7px 18px; border-radius: 0px; cursor:pointer; font-size:0.9em; font-weight:600;" data-i18n="account.sa_import_apply_btn">Восстановить</button>
+        <button type="button" id="btnCancelSaImportModal" class="btn-secondary" style="padding:7px 16px; border-radius: var(--app-border-radius, 0px); cursor:pointer; font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
+        <button type="button" id="btnConfirmSaImportModal" class="btn-primary" style="padding:7px 18px; border-radius: var(--app-border-radius, 0px); cursor:pointer; font-size:0.9em; font-weight:600;" data-i18n="account.sa_import_apply_btn">Восстановить</button>
       </div>
     </div>
   </div>
@@ -473,7 +480,7 @@
     </div>
 
     <div class="radios-grid" id="radiosGrid">
-      <div class="radio-container active-hotspot" id="radioContainer" data-hotspot-id="default">
+      <div class="radio-container active-hotspot card-net-bm" id="radioContainer" data-hotspot-id="default" data-network-type="bm">
         <!-- Top Header -->
         <header class="radio-header">
           <!-- Line 1: Stylish Logo, Version, Station Clocks (LOC / UTC) -->
@@ -547,7 +554,7 @@
         <!-- BM Server Info Banner: Flag + Short Name + SVG Ping Sparkline + Ping Value -->
         <div id="bmInfoBanner" class="bm-info-banner" title="Сервер BM и график пинга" data-i18n-title="bm.banner_title">
           <div class="bm-server-label-wrap" title="Нажмите, чтобы сменить сервер BM" data-i18n-title="bm.switch_server_title">
-            <span class="bm-server-flag" id="bmServerFlag_main"></span>
+            <span class="bm-server-flag" id="bmServerFlag_main" style="display: none !important;"></span>
             <span class="bm-server-name" id="bmServerName_main">BM</span>
             <span class="bm-server-dropdown-arrow">▾</span>
             <select id="bmServerSelect_main" class="bm-server-select form-input" title="Сервер BM (выбор по странам)" data-i18n-title="bm.select_country_title"></select>
@@ -577,7 +584,7 @@
               <circle class="sparkline-dot" cx="-10" cy="-10" r="2.2" fill="#2ecc71"></circle>
             </svg>
             <span class="bm-ping-scale-badge" title="Масштаб (двойной тап для смены)" data-i18n-title="ping.scale_badge_title">1h</span>
-            <span class="bm-ping-mode-badge mode-bm" title="Режим пинга">BM</span>
+            <span class="bm-ping-mode-badge mode-bm" title="Режим пинга" data-i18n-title="vfo.ping_mode_title">BM</span>
             <div class="bm-ping-tooltip"></div>
           </div>
           <span id="bmBannerPing" class="bm-banner-ping" title="Пинг и потери пакетов" data-i18n-title="ping.banner_title"><span class="ping-val-row"><span class="ping-ms">-- ms</span></span><span class="loss-val-row"><span class="loss-pct">0.0%</span></span></span>
@@ -591,8 +598,14 @@
             <div class="screen-clock-bar" title="Время станции (LOC = Местное, UTC = По Гринвичу)" data-i18n-title="clocks.title">
               <div class="screen-clock-item screen-clock-loc" title="Местное время (LOC)" data-i18n-title="clocks.loc_title"><span class="clock-label">LOC:</span> <span id="locTimeDisplay" class="clock-val loc-time-display">--:--</span></div>
               <div class="screen-clock-vu" title="Индикаторы уровня TS1 / TS2" data-i18n-title="clocks.vu_title">
-                <canvas class="clock-vu-canvas track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title"></canvas>
-                <canvas class="clock-vu-canvas track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title"></canvas>
+                <div class="clock-vu-track track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title">
+                  <div id="vuFill_default_ts1" class="clock-vu-fill vu-fill-ts1"></div>
+                  <div id="vuPeak_default_ts1" class="clock-vu-peak vu-peak-ts1"></div>
+                </div>
+                <div class="clock-vu-track track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title">
+                  <div id="vuFill_default_ts2" class="clock-vu-fill vu-fill-ts2"></div>
+                  <div id="vuPeak_default_ts2" class="clock-vu-peak vu-peak-ts2"></div>
+                </div>
               </div>
               <div class="screen-clock-item screen-clock-utc" title="Время по Гринвичу (UTC)" data-i18n-title="clocks.utc_title"><span class="clock-label">UTC:</span> <span id="utcTimeDisplay" class="clock-val utc-time-display">--:--</span></div>
             </div>
@@ -603,7 +616,7 @@
 
               <span id="callsignDisplay" class="callsign-display">{{ callsign }}</span>
               <span id="dmrIdDisplay" class="dmr-id-display">ID: {{ dmr_id }}</span>
-              <span id="rttDisplay" class="rtt-display" title="Сквозная задержка E2E (Клиент ↔ ProxDMR + ProxDMR ↔ Сеть)">E2E: --ms</span>
+              <span id="rttDisplay" class="rtt-display" title="Сквозная задержка E2E (Клиент ↔ ProxDMR + ProxDMR ↔ Сеть)" data-i18n-title="vfo.rtt_title">E2E: --ms</span>
             </div>
 
             <!-- VFO A: Slot 1 (TS1) -->
@@ -656,7 +669,7 @@
                 </div>
               </div>
               <div id="vfoTs1CaptionBox" class="vfo-caption-box" title="AI Расшифровка речи" data-i18n-title="vfo.caption_box_title">
-                <div id="vfoTs1CaptionStream" class="vfo-caption-stream"></div>
+                <div id="vfoTs1CaptionStream" class="vfo-caption-stream" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Ожидание речи..."></div>
               </div>
             </div>
 
@@ -710,7 +723,7 @@
                 </div>
               </div>
               <div id="vfoTs2CaptionBox" class="vfo-caption-box" title="AI Расшифровка речи" data-i18n-title="vfo.caption_box_title">
-                <div id="vfoTs2CaptionStream" class="vfo-caption-stream"></div>
+                <div id="vfoTs2CaptionStream" class="vfo-caption-stream" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Ожидание речи..."></div>
               </div>
             </div>
 
@@ -847,6 +860,9 @@
                 <span class="srch-split-seg srch-seg-manage" data-action="manage"><span class="srch-txt-manage">Manage</span></span>
                 <span class="srch-seg-sep">--</span>
                 <span class="srch-split-seg srch-seg-id" data-action="id" data-tab="id"><span class="srch-txt-id">ID</span></span>
+              </button>
+              <button type="button" class="btn-ptt-side-half btn-asl-nodes-dir" style="display: none;" title="Справочник узлов AllStarLink" data-i18n-title="buttons.asl_directory_title">
+                <strong data-i18n="buttons.asl_directory">Справочник</strong>
               </button>
               <div class="quick-tg-box" title="Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)" data-i18n-title="ptt.quick_tg_box_title">
                 <input type="text" class="quick-tg-input" placeholder="TG #" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
@@ -1050,7 +1066,7 @@
                   <path class="player-btn-icon" d="M691.206,363.037L691.206,363.037c-3.945,0-7.143-3.198-7.143-7.143v-55.163 c0-3.945,3.198-7.143,7.143-7.143l0,0c3.945,0,7.143,3.198,7.143,7.143v55.163C698.35,359.839,695.151,363.037,691.206,363.037z"/>
                 </svg>
               </button>
-              <div id="recSpeedMenu" class="rec-speed-menu" style="display:none; position:absolute; bottom:110%; left:50%; transform:translateX(-50%); background:#238142; border:1px solid rgba(255,255,255,0.25); border-radius: 0px; padding:6px; z-index:100; flex-direction:column; gap:4px; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
+              <div id="recSpeedMenu" class="rec-speed-menu" style="display:none; position:absolute; bottom:110%; left:50%; transform:translateX(-50%); background:#238142; border:1px solid rgba(255,255,255,0.25); border-radius: var(--app-border-radius, 0px); padding:6px; z-index:100; flex-direction:column; gap:4px; box-shadow:0 4px 14px rgba(0,0,0,0.5);">
                 <button type="button" class="rec-speed-menu-btn active" data-speed="1.0">1x</button>
                 <button type="button" class="rec-speed-menu-btn" data-speed="1.25">1.25x</button>
                 <button type="button" class="rec-speed-menu-btn" data-speed="1.5">1.5x</button>
@@ -1188,7 +1204,7 @@
         <!-- Rows populated dynamically -->
       </div>
       <div class="log-tx-summary-hint" data-i18n="log_sel.hint_close_summary">
-        💡 Закрыть: повторное нажатие 📖 или долгое удержание пальцем / мышкой
+        <span data-i18n="vfo.notch_close_hint">💡 Закрыть: повторное нажатие 📖 или долгое удержание пальцем / мышкой</span>
       </div>
     </div>
   </section>
@@ -1196,7 +1212,7 @@
 
   <!-- Template for Dynamic Virtual Hotspot Cards -->
   <template id="radioCardTemplate">
-    <div class="radio-container collapsed" data-hotspot-id="">
+    <div class="radio-container collapsed card-net-bm" data-hotspot-id="" data-network-type="bm">
       <header class="radio-header">
         <div class="header-brand-row">
           <!-- Hotspot Collapse / Expand Toggle Button (extreme left) -->
@@ -1250,7 +1266,7 @@
       <!-- BM Server Info Banner: Flag + Short Name + SVG Ping Sparkline + Ping Value -->
       <div class="bm-info-banner" title="Сервер BM и график пинга" data-i18n-title="bm.server_ping_graph_title">
         <div class="bm-server-label-wrap" title="Нажмите, чтобы сменить сервер BM" data-i18n-title="bm.switch_server_title">
-          <span class="bm-server-flag"></span>
+          <span class="bm-server-flag" style="display: none !important;"></span>
           <span class="bm-server-name">BM</span>
           <span class="bm-server-dropdown-arrow">▾</span>
           <select class="bm-server-select form-input" title="Сервер BM (выбор по странам)" data-i18n-title="bm.country_select_title"></select>
@@ -1280,7 +1296,7 @@
             <circle class="sparkline-dot" cx="-10" cy="-10" r="2.2" fill="#2ecc71"></circle>
           </svg>
           <span class="bm-ping-scale-badge" title="Масштаб (двойной тап для смены)" data-i18n-title="ping.scale_badge_title">1h</span>
-          <span class="bm-ping-mode-badge mode-bm" title="Режим пинга">BM</span>
+          <span class="bm-ping-mode-badge mode-bm" title="Режим пинга" data-i18n-title="vfo.ping_mode_title">BM</span>
           <div class="bm-ping-tooltip"></div>
         </div>
         <span class="bm-banner-ping" title="Пинг и потери пакетов" data-i18n-title="ping.banner_title"><span class="ping-val-row"><span class="ping-ms">-- ms</span></span><span class="loss-val-row"><span class="loss-pct">0.0%</span></span></span>
@@ -1292,8 +1308,14 @@
           <div class="screen-clock-bar" title="Время станции (LOC = Местное, UTC = По Гринвичу)" data-i18n-title="clocks.title">
             <div class="screen-clock-item screen-clock-loc" title="Местное время (LOC)" data-i18n-title="clocks.loc_title"><span class="clock-label">LOC:</span> <span class="clock-val loc-time-display">--:--</span></div>
             <div class="screen-clock-vu" title="Индикаторы уровня TS1 / TS2" data-i18n-title="clocks.vu_title">
-              <canvas class="clock-vu-canvas track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title"></canvas>
-              <canvas class="clock-vu-canvas track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title"></canvas>
+              <div class="clock-vu-track track-ts1" title="Уровень звука TS1" data-i18n-title="vfo.vu_bar_title">
+                <div class="clock-vu-fill vu-fill-ts1"></div>
+                <div class="clock-vu-peak vu-peak-ts1"></div>
+              </div>
+              <div class="clock-vu-track track-ts2" title="Уровень звука TS2" data-i18n-title="vfo.vu_bar_ts2_title">
+                <div class="clock-vu-fill vu-fill-ts2"></div>
+                <div class="clock-vu-peak vu-peak-ts2"></div>
+              </div>
             </div>
             <div class="screen-clock-item screen-clock-utc" title="Время по Гринвичу (UTC)" data-i18n-title="clocks.utc_title"><span class="clock-label">UTC:</span> <span class="clock-val utc-time-display">--:--</span></div>
           </div>
@@ -1302,7 +1324,7 @@
             <span class="mode-badge mode-standby">STANDBY</span>
             <span class="callsign-display">N0CALL</span>
             <span class="dmr-id-display">ID: 0</span>
-            <span class="rtt-display" title="Сквозная задержка E2E (Клиент ↔ ProxDMR + ProxDMR ↔ Сеть)">E2E: --ms</span>
+            <span class="rtt-display" title="Сквозная задержка E2E (Клиент ↔ ProxDMR + ProxDMR ↔ Сеть)" data-i18n-title="vfo.rtt_title">E2E: --ms</span>
           </div>
 
           <div class="vfo-row vfo-ts1-row" data-slot="1">
@@ -1354,7 +1376,7 @@
               </div>
             </div>
             <div class="vfo-caption-box vfo-hs-caption-ts1" title="AI Расшифровка речи" data-i18n-title="vfo.caption_box_title">
-              <div class="vfo-caption-stream"></div>
+              <div class="vfo-caption-stream" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Ожидание речи..."></div>
             </div>
           </div>
 
@@ -1407,7 +1429,7 @@
               </div>
             </div>
             <div class="vfo-caption-box vfo-hs-caption-ts2" title="AI Расшифровка речи" data-i18n-title="vfo.caption_box_title">
-              <div class="vfo-caption-stream"></div>
+              <div class="vfo-caption-stream" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Ожидание речи..."></div>
             </div>
           </div>
 
@@ -1543,6 +1565,9 @@
               <span class="srch-seg-sep">--</span>
               <span class="srch-split-seg srch-seg-id" data-action="id" data-tab="id"><span class="srch-txt-id">ID</span></span>
             </button>
+            <button type="button" class="btn-ptt-side-half btn-asl-nodes-dir" style="display: none;" title="Справочник узлов AllStarLink" data-i18n-title="buttons.asl_directory_title">
+                <strong data-i18n="buttons.asl_directory">Справочник</strong>
+            </button>
             <div class="quick-tg-box" title="Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)" data-i18n-title="ptt.quick_tg_box_title">
               <input type="text" class="quick-tg-input" placeholder="TG #" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
               <button type="button" class="btn-quick-tg-apply" title="Установить TalkGroup для передачи" data-i18n-title="ptt.quick_tg_apply_title">TX ⏎</button>
@@ -1645,7 +1670,7 @@
         <!-- Subtab 1: Profile (Мой аккаунт) -->
         <div id="account-subtab-profile" class="account-subtab-content active">
           <!-- Account Info Card -->
-          <div class="settings-action-block" style="padding: 14px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 0px; margin-bottom: 16px;">
+          <div class="settings-action-block" style="padding: 14px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: var(--app-border-radius, 0px); margin-bottom: 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 1.8rem; line-height: 1;">👤</span>
@@ -1658,7 +1683,7 @@
                   </div>
                 </div>
               </div>
-              <button type="button" id="btnLogout" class="btn-secondary" style="padding: 6px 12px; border-radius: 0px; cursor: pointer; font-size: 0.82rem; color: #f85149; border-color: rgba(248, 81, 73, 0.35); background: rgba(248, 81, 73, 0.08); white-space: nowrap;">
+              <button type="button" id="btnLogout" class="btn-secondary" style="padding: 6px 12px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem; color: #f85149; border-color: rgba(248, 81, 73, 0.35); background: rgba(248, 81, 73, 0.08); white-space: nowrap;">
                 <span data-i18n="account.logout_btn">🚪 Выйти</span>
               </button>
             </div>
@@ -1673,15 +1698,15 @@
               Смена пароля вашей текущей учетной записи.
             </small>
             <div>
-              <button type="button" id="btnOpenChangePassword" class="btn-secondary" style="width: 100%; padding: 9px 12px; border-radius: 0px; cursor: pointer; font-size: 0.85em; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <button type="button" id="btnOpenChangePassword" class="btn-secondary" style="width: 100%; padding: 9px 12px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.85em; display: flex; align-items: center; justify-content: center; gap: 8px;">
                 <span>🔑</span> <span data-i18n="account.change_pwd_btn">Сменить пароль</span>
               </button>
             </div>
 
             <!-- Inline Change Password Panel -->
-            <div id="changePasswordPanel" style="display: none; margin-top: 12px; padding: 14px; background: rgba(88, 166, 255, 0.05); border: 1px solid rgba(88, 166, 255, 0.25); border-radius: 0px;">
+            <div id="changePasswordPanel" style="display: none; margin-top: 12px; padding: 14px; background: rgba(88, 166, 255, 0.05); border: 1px solid rgba(88, 166, 255, 0.25); border-radius: var(--app-border-radius, 0px);">
               <!-- Superadmin Prominent Red Warning -->
-              <div id="superadminPasswordWarning" style="display: none; background: rgba(248, 81, 73, 0.16); border: 2px solid #f85149; border-radius: 0px; padding: 14px; margin-bottom: 14px; text-align: center; box-shadow: 0 0 16px rgba(248, 81, 73, 0.25);">
+              <div id="superadminPasswordWarning" style="display: none; background: rgba(248, 81, 73, 0.16); border: 2px solid #f85149; border-radius: var(--app-border-radius, 0px); padding: 14px; margin-bottom: 14px; text-align: center; box-shadow: 0 0 16px rgba(248, 81, 73, 0.25);">
                 <div style="color: #ff3b30; font-size: 1.1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 8px;">
                   <span style="font-size: 1.25rem;">⚠️</span> <span data-i18n="account.superadmin_warn_title">ВНИМАНИЕ: СУПЕРАДМИНИСТРАТОР!</span>
                 </div>
@@ -1695,22 +1720,22 @@
                 <div>
                   <label for="changePwdCurrentInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.current_pwd_label">Текущий пароль:</label>
                   <input type="password" id="changePwdCurrentInput" class="form-input" placeholder="Введите текущий пароль" data-i18n-placeholder="account.current_pwd_placeholder" autocomplete="current-password"
-                    style="width: 100%; padding: 8px 10px; border-radius: 0px; box-sizing: border-box;">
+                    style="width: 100%; padding: 8px 10px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
                 </div>
                 <div>
                   <label for="changePwdNewInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.new_pwd_label">Новый пароль:</label>
                   <input type="password" id="changePwdNewInput" class="form-input" placeholder="Новый пароль (мин. 6 символов)" data-i18n-placeholder="account.new_pwd_placeholder" autocomplete="new-password"
-                    style="width: 100%; padding: 8px 10px; border-radius: 0px; box-sizing: border-box;">
+                    style="width: 100%; padding: 8px 10px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
                 </div>
                 <div>
                   <label for="changePwdConfirmInput" style="font-size: 0.8rem; font-weight: 600; color: #8b949e; display: block; margin-bottom: 4px;" data-i18n="account.confirm_pwd_label">Повторите новый пароль:</label>
                   <input type="password" id="changePwdConfirmInput" class="form-input" placeholder="Повторите новый пароль" data-i18n-placeholder="account.confirm_pwd_placeholder" autocomplete="new-password"
-                    style="width: 100%; padding: 8px 10px; border-radius: 0px; box-sizing: border-box;">
+                    style="width: 100%; padding: 8px 10px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
                 </div>
                 <div id="changePwdError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em;"></div>
                 <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
-                  <button type="button" id="changePwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
-                  <button type="button" id="changePwdSubmitBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="account.save_pwd_btn">Сохранить пароль</button>
+                  <button type="button" id="changePwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
+                  <button type="button" id="changePwdSubmitBtn" class="btn-primary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem;" data-i18n="account.save_pwd_btn">Сохранить пароль</button>
                 </div>
               </div>
             </div>
@@ -1725,10 +1750,10 @@
               Экспорт и импорт настроек трансивера и хотспотов в архив .7z. Пароль архива равен паролю вашего аккаунта.
             </small>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button type="button" id="btnExportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius: 0px;cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button type="button" id="btnExportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius: var(--app-border-radius, 0px);cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
                 <span data-i18n="account.export_btn">📦 Экспорт настроек (.7z)</span>
               </button>
-              <button type="button" id="btnImportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius: 0px;cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button type="button" id="btnImportSettings" class="btn-secondary" style="flex:1;min-width:140px;padding:9px 12px;border-radius: var(--app-border-radius, 0px);cursor:pointer;font-size:0.85em;display:flex;align-items:center;justify-content:center;gap:6px;">
                 <span data-i18n="account.import_btn">📥 Импорт настроек (.7z)</span>
               </button>
             </div>
@@ -1742,7 +1767,7 @@
             <p style="font-size: 0.78rem; color: #8b949e; margin: 0 0 10px 0; line-height: 1.4;" data-i18n="account.delete_hint">
               Безвозвратно удалит ваш профиль, все виртуальные хотспоты, ключи и историю вызовов с сервера.
             </p>
-            <button type="button" id="btnDeleteAccount" class="btn-secondary" style="width: 100%; padding: 10px; background: rgba(248, 81, 73, 0.12); border: 1px solid rgba(248, 81, 73, 0.4); color: #f85149; border-radius: 0px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button type="button" id="btnDeleteAccount" class="btn-secondary" style="width: 100%; padding: 10px; background: rgba(248, 81, 73, 0.12); border: 1px solid rgba(248, 81, 73, 0.4); color: #f85149; border-radius: var(--app-border-radius, 0px); font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -1751,7 +1776,7 @@
               </svg>
               <span data-i18n="account.delete_btn">🗑️ Удалить аккаунт</span>
             </button>
-            <div id="superadminDeleteDisabledHint" style="display: none; margin-top: 8px; padding: 6px 10px; background: rgba(255, 204, 0, 0.08); border: 1px solid rgba(255, 204, 0, 0.25); border-radius: 0px; font-size: 0.8rem; color: #ffcc00; text-align: center; font-weight: 600;" data-i18n="account.superadmin_delete_disabled">
+            <div id="superadminDeleteDisabledHint" style="display: none; margin-top: 8px; padding: 6px 10px; background: rgba(255, 204, 0, 0.08); border: 1px solid rgba(255, 204, 0, 0.25); border-radius: var(--app-border-radius, 0px); font-size: 0.8rem; color: #ffcc00; text-align: center; font-weight: 600;" data-i18n="account.superadmin_delete_disabled">
               🛡️ Аккаунт суперадминистратора защищен от удаления
             </div>
           </div>
@@ -1775,22 +1800,22 @@
               <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;" data-i18n="admin.title">
                 🛡️ Управление пользователями
               </div>
-              <button type="button" id="adminAddUserBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem; display: flex; align-items: center; gap: 4px;" data-i18n="admin.add_user">
+              <button type="button" id="adminAddUserBtn" class="btn-primary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem; display: flex; align-items: center; gap: 4px;" data-i18n="admin.add_user">
                 ＋ Добавить
               </button>
             </div>
 
             <!-- Add User Form (hidden by default) -->
-            <div id="adminAddUserForm" style="display:none; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 0px; padding: 12px; margin-bottom: 14px;">
+            <div id="adminAddUserForm" style="display:none; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: var(--app-border-radius, 0px); padding: 12px; margin-bottom: 14px;">
               <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; color: #58a6ff;" data-i18n="admin.new_user_title">Новый пользователь</div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                 <input type="text" id="adminNewLogin" placeholder="Логин" autocomplete="off" data-i18n-placeholder="admin.login_placeholder"
-                  style="padding: 7px 10px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
+                  style="padding: 7px 10px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
                 <input type="password" id="adminNewPassword" placeholder="Пароль (мин. 6 символов)" autocomplete="new-password" data-i18n-placeholder="admin.password_placeholder"
-                  style="padding: 7px 10px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
+                  style="padding: 7px 10px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box;">
               </div>
               <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
-                <select id="adminNewRole" style="padding: 7px 10px; border-radius: 0px; border: 1px solid #555; font-size: 0.9em; cursor: pointer;">
+                <select id="adminNewRole" style="padding: 7px 10px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; font-size: 0.9em; cursor: pointer;">
                   <option value="user" data-i18n="admin.role_user">👤 Пользователь</option>
                   <option value="admin" data-i18n="admin.role_admin">🛡️ Администратор</option>
                 </select>
@@ -1801,8 +1826,8 @@
               </div>
               <div id="adminAddError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em; margin-bottom: 6px;"></div>
               <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                <button type="button" id="adminCancelAddBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
-                <button type="button" id="adminConfirmAddBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="admin.btn_create">Создать</button>
+                <button type="button" id="adminCancelAddBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
+                <button type="button" id="adminConfirmAddBtn" class="btn-primary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem;" data-i18n="admin.btn_create">Создать</button>
               </div>
             </div>
 
@@ -1827,26 +1852,26 @@
           </div>
 
           <!-- Reset Password Modal (inline) -->
-          <div id="adminResetPwdPanel" style="display:none; background: rgba(255, 200, 0, 0.06); border: 1px solid rgba(255, 200, 0, 0.25); border-radius: 0px; padding: 12px; margin-top: 10px;">
+          <div id="adminResetPwdPanel" style="display:none; background: rgba(255, 200, 0, 0.06); border: 1px solid rgba(255, 200, 0, 0.25); border-radius: var(--app-border-radius, 0px); padding: 12px; margin-top: 10px;">
             <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; color: #ffcc00;"><span data-i18n="admin.reset_pwd_title">🔑 Сброс пароля:</span> <span id="adminResetPwdUsername" style="color: #58a6ff;"></span></div>
             <input type="hidden" id="adminResetPwdUserId">
             <input type="password" id="adminResetPwdInput" placeholder="Новый пароль (мин. 6 символов)" autocomplete="new-password" data-i18n-placeholder="admin.new_pwd_placeholder"
-              style="width: 100%; padding: 7px 10px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box; margin-bottom: 8px;">
+              style="width: 100%; padding: 7px 10px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.9em; box-sizing: border-box; margin-bottom: 8px;">
             <div id="adminResetPwdError" style="color: #ff5555; font-size: 0.82em; min-height: 1.2em; margin-bottom: 6px;"></div>
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
-              <button type="button" id="adminResetPwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
-              <button type="button" id="adminResetPwdConfirmBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; cursor: pointer; font-size: 0.82rem;" data-i18n="admin.action_reset_pwd">Сбросить пароль</button>
+              <button type="button" id="adminResetPwdCancelBtn" class="btn-secondary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem;" data-i18n="buttons.cancel">Отмена</button>
+              <button type="button" id="adminResetPwdConfirmBtn" class="btn-primary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); cursor: pointer; font-size: 0.82rem;" data-i18n="admin.action_reset_pwd">Сбросить пароль</button>
             </div>
           </div>
 
           <!-- Demo Mode Admin Settings -->
-          <div id="adminDemoSettingsBlock" class="settings-action-block" style="margin-top: 18px; padding: 14px; background: rgba(234, 179, 8, 0.05); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: 0px;">
+          <div id="adminDemoSettingsBlock" class="settings-action-block" style="margin-top: 18px; padding: 14px; background: rgba(234, 179, 8, 0.05); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: var(--app-border-radius, 0px);">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
               <div style="font-size: 0.95rem; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 6px;">
                 <span>🎧</span>
                 <span data-i18n="demo.admin_title">Демо-режим (публичная витрина)</span>
               </div>
-              <span id="adminDemoActiveBadge" style="font-size: 0.82rem; background: rgba(234, 179, 8, 0.15); color: #fbbf24; padding: 3px 8px; border-radius: 0px; font-weight: 600;">
+              <span id="adminDemoActiveBadge" style="font-size: 0.82rem; background: rgba(234, 179, 8, 0.15); color: #fbbf24; padding: 3px 8px; border-radius: var(--app-border-radius, 0px); font-weight: 600;">
                 <span data-i18n="demo.active_count">Сейчас в демо:</span> <span id="adminDemoActiveCount">0</span> / <span id="adminDemoMaxBadge">10</span>
               </span>
             </div>
@@ -1864,25 +1889,25 @@
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px;">
               <div>
                 <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.max_sessions">Макс. одновременных сессий:</label>
-                <input type="number" id="adminDemoMaxSessions" min="1" max="50" value="10" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+                <input type="number" id="adminDemoMaxSessions" min="1" max="50" value="10" style="width: 100%; padding: 6px 8px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
               </div>
               <div>
                 <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.session_minutes">Длительность сессии (мин):</label>
-                <input type="number" id="adminDemoSessionMinutes" min="1" max="120" value="10" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+                <input type="number" id="adminDemoSessionMinutes" min="1" max="120" value="10" style="width: 100%; padding: 6px 8px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
               </div>
               <div>
                 <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.cooldown_seconds">Пауза перед повторным входом (сек):</label>
-                <input type="number" id="adminDemoCooldownSeconds" min="0" max="3600" value="60" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+                <input type="number" id="adminDemoCooldownSeconds" min="0" max="3600" value="60" style="width: 100%; padding: 6px 8px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
               </div>
               <div>
                 <label style="display: block; font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;" data-i18n="demo.password_label">Пароль демо:</label>
-                <input type="text" id="adminDemoPassword" value="demo" style="width: 100%; padding: 6px 8px; border-radius: 0px; border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+                <input type="text" id="adminDemoPassword" value="demo" style="width: 100%; padding: 6px 8px; border-radius: var(--app-border-radius, 0px); border: 1px solid #555; background: #2a2a2e; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
               </div>
             </div>
 
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
               <span id="adminDemoStatusMsg" style="font-size: 0.82rem; min-height: 1.2em;"></span>
-              <button type="button" id="adminDemoSaveBtn" class="btn-primary" style="padding: 6px 14px; border-radius: 0px; font-size: 0.85rem; cursor: pointer; background: #d97706; border-color: #b45309;" data-i18n="demo.save_btn">
+              <button type="button" id="adminDemoSaveBtn" class="btn-primary" style="padding: 6px 14px; border-radius: var(--app-border-radius, 0px); font-size: 0.85rem; cursor: pointer; background: #d97706; border-color: #b45309;" data-i18n="demo.save_btn">
                 Сохранить параметры демо
               </button>
             </div>
@@ -1895,6 +1920,21 @@
           <label for="editHsSelect" style="font-size: 0.95rem; font-weight: bold; color: #ffffff; margin: 0; display: block;" data-i18n="hs_edit.hotspot_label">Хотспот:</label>
           <!-- Hotspots Management Toolbar -->
           <div class="hs-manager-toolbar" style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px; display: flex; align-items: center; gap: 6px;">
+              <div id="editHsCustomDropdown" class="hs-custom-dropdown" style="flex: 1; min-width: 130px; position: relative;">
+                <select id="editHsSelect" class="form-input" style="display: none;">
+                  <!-- Populated dynamically -->
+                </select>
+                <div id="editHsCustomTrigger" class="hs-custom-dropdown-trigger" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="hs-custom-dropdown-label" id="editHsCustomLabel">...</span>
+                  <span class="hs-custom-dropdown-arrow" aria-hidden="true">▾</span>
+                </div>
+                <div id="editHsCustomMenu" class="hs-custom-dropdown-menu" role="listbox" style="display: none;">
+                  <!-- Populated dynamically -->
+                </div>
+              </div>
+              <button type="button" id="btnOpenHsOrderModal" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 11px; cursor: pointer; border-radius: var(--app-border-radius, 0px); white-space: nowrap; flex-shrink: 0;" title="Менеджер последовательности хотспотов" data-i18n-title="hotspots.order_manager_title" data-i18n="hotspots.order_btn">⇅ Порядок</button>
+            </div>
             <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
               <button type="button" id="btnAddNewHotspot" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 12px; color: #4884FF; border-color: rgba(72, 132, 255, 0.4); background: rgba(72, 132, 255, 0.1); font-weight: 600; cursor: pointer; transition: all 0.2s;" title="Добавить новый хотспот" data-i18n-title="hotspots.btn_add_title" data-i18n="buttons.add">
                 Добавить
@@ -1905,16 +1945,6 @@
               <button type="button" id="btnToggleHsConnection" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 14px; font-weight: 600; white-space: nowrap; cursor: pointer; color: #f85149; border-color: rgba(248, 81, 73, 0.4); background: rgba(248, 81, 73, 0.08); transition: all 0.2s;" title="Подключить к BrandMeister" data-i18n-title="hotspots.connect_bm_title">
                 Connect
               </button>
-            </div>
-            <div style="flex: 1; min-width: 220px; display: flex; align-items: center; gap: 6px;">
-              <select id="editHsSelect" class="form-input" style="flex: 1; min-width: 130px; box-sizing: border-box; font-size: 0.73rem; padding: 6px 8px; cursor: pointer; font-weight: 600;">
-                <!-- Populated dynamically -->
-              </select>
-              <div class="hs-order-quick-btns" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;">
-                <button type="button" id="btnMoveHsUp" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 0px;" title="Переместить выбранный хотспот выше" data-i18n-title="hotspots.move_up_title">▲</button>
-                <button type="button" id="btnMoveHsDown" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 10px; cursor: pointer; font-weight: bold; border-radius: 0px;" title="Переместить выбранный хотспот ниже" data-i18n-title="hotspots.move_down_title">▼</button>
-                <button type="button" id="btnOpenHsOrderModal" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 11px; cursor: pointer; border-radius: 0px; white-space: nowrap;" title="Менеджер последовательности хотспотов" data-i18n-title="hotspots.order_manager_title" data-i18n="hotspots.order_btn">⇅ Порядок</button>
-              </div>
             </div>
           </div>
         </div>
@@ -1932,11 +1962,13 @@
               <option value="freedmr" data-i18n="hs_edit.net_freedmr">🟢 FreeDMR / ADN Systems — открытая сеть (RPTO)</option>
               <option value="dmrplus" data-i18n="hs_edit.net_dmrplus">🟣 DMR+ / IPSC2 — рефлекторы и региональные TG (RPTO)</option>
               <option value="xlx" data-i18n="hs_edit.net_xlx">🟡 XLX Reflector — мультипротокольные модули A–Z</option>
+              <option value="allstar" data-i18n="hs_edit.net_allstar">🔵 AllStarLink (ASL / IAX2) — аналоговые репитеры и хабы</option>
               <option value="custom" data-i18n="hs_edit.net_custom">⚙️ Другой сервер HomeBrew / HBlink3 (Custom MMDVM)</option>
             </select>
           </div>
           <div class="hs-existing-net-header" id="editHsExistingNetHeader">
             <div class="hs-existing-net-left">
+              <input type="checkbox" id="editHsAliveToggle" class="hs-alive-toggle" title="Состояние хотспота: ☑️- в работе / ☐ - в архиве" data-i18n-title="hs_edit.exclude_alive_hint" checked>
               <span id="editHsExistingNetPill" class="hotspot-network-badge net-type-bm" data-network-type="bm"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
               <span id="editHsExistingNetTitle" class="hs-existing-net-title">BrandMeister DMR</span>
             </div>
@@ -1947,7 +1979,7 @@
               <label for="editHsName" data-i18n="hs_edit.name">Название профиля</label>
               <input type="text" id="editHsName" class="form-input" required value="{{ cfg.name if cfg else 'Основной' }}" placeholder="Например: Hotspot 1" data-i18n-placeholder="hs_edit.name_placeholder">
             </div>
-            <div class="form-group" style="flex: 1;">
+            <div class="form-group" id="editHsTalkerAliasGroup" style="flex: 1;">
               <label for="editHsSendTalkerAlias" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                 <input type="checkbox" id="editHsSendTalkerAlias" style="cursor: pointer; width: 14px; height: 14px; accent-color: #58a6ff; margin: 0;" {% if not cfg or cfg.send_talker_alias is not defined or cfg.send_talker_alias %}checked{% endif %}>
                 <span data-i18n="hs_edit.talker_alias">Передавать Talker Alias</span>
@@ -1955,16 +1987,16 @@
               <input type="text" id="editHsTalkerAlias" class="form-input" maxlength="27" value="{{ cfg.talker_alias if cfg else '' }}" placeholder="например: CALLSIGN Name" data-i18n-placeholder="hs_edit.talker_alias_placeholder">
             </div>
           </div>
-          <div class="form-group-row">
-            <div class="form-group" style="flex: 2;">
+          <div class="form-group-row" id="editHsDmrIdentifiersRow">
+            <div class="form-group" id="editHsCallsignGroup" style="flex: 2;">
               <label for="editHsCallsign" data-i18n="hs_edit.callsign">Позывной</label>
               <input type="text" id="editHsCallsign" class="form-input" required value="{{ cfg.callsign if cfg else '' }}" placeholder="CALLSIGN" data-i18n-placeholder="hs_edit.callsign_placeholder">
             </div>
-            <div class="form-group" style="flex: 2;">
+            <div class="form-group" id="editHsDmrIdGroup" style="flex: 2;">
               <label for="editHsDmrId" data-i18n="hs_edit.dmr_id">DMR ID (7 цифр)</label>
               <input type="number" id="editHsDmrId" class="form-input" required value="{{ cfg.dmr_id if cfg else '' }}" placeholder="1234567" data-i18n-placeholder="hs_edit.dmr_id_placeholder">
             </div>
-            <div class="form-group" style="flex: 1;">
+            <div class="form-group" id="editHsSsidGroup" style="flex: 1;">
               <label for="editHsSsid" id="editHsSsidLabel" data-i18n="hs_edit.ssid">SSID</label>
               <input type="number" id="editHsSsid" class="form-input" min="1" max="99" value="{{ cfg.bm_ssid if (cfg and cfg.bm_ssid >= 1) else 1 }}" placeholder="01" title="Добавляется к 7-значному ID (получается 9-значный, от 1 до 99)" data-i18n-title="hs_edit.ssid_title">
             </div>
@@ -2054,7 +2086,7 @@
               <button type="button" id="btnSendRptoNow" class="btn-secondary" style="padding: 7px 11px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; cursor: pointer; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(16, 185, 129, 0.1);" title="Отправить RPTO пакет мастер-серверу без переподключения" data-i18n-title="hs_edit.btn_send_rpto_title" data-i18n="hs_edit.btn_send_rpto">⚡ Применить RPTO</button>
             </div>
             <small class="form-hint" id="editHsRptoHint" data-i18n="hs_edit.rpto_hint">Передаётся в пакете RPTO сразу после подключения (например FreeDMR: TS1=2501;TS2=250;DIAL=0; или DMR+: StartRef=4370;RelinkTime=60;)</small>
-            <div id="freedmrHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #10b981; border-radius: 0px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+            <div id="freedmrHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #10b981; border-radius: var(--app-border-radius, 0px); font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
                 <div style="font-weight:700; color:#34d399; margin-bottom:4px;" data-i18n="freedmr_help_title">Настройка хотспота в сети FreeDMR:</div>
                 <ul style="margin:0; padding-left:16px;">
                     <li data-i18n="freedmr_help_step1"><b>Пароль хотспота:</b> по умолчанию большинство серверов используют <code>passw0rd</code>, либо ваш персональный пароль из портала <a href="https://www.freedmr.uk/" target="_blank" rel="noopener noreferrer" style="color:#34d399; text-decoration:underline;">FreeDMR Portal</a>.</li>
@@ -2099,7 +2131,7 @@
               <option value="Z">Module Z (TG 4026 на TS2)</option>
             </select>
             <small class="form-hint" data-i18n="hs_edit.xlx_module_hint">На рефлекторах XLX голосовая работа ведётся в TS2: выбранный модуль A–Z автоматически привязывается к TG 4001–4026 (пароль стандартный: passw0rd)</small>
-            <div id="xlxHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #f59e0b; border-radius: 0px; font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+            <div id="xlxHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #f59e0b; border-radius: var(--app-border-radius, 0px); font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
                 <div style="font-weight:700; color:#fbbf24; margin-bottom:4px;" data-i18n="xlx_help_title">Как работает связь с рефлектором XLX:</div>
                 <ul style="margin:0; padding-left:16px;">
                     <li data-i18n="xlx_help_step1"><b>Порт и пароль:</b> стандартный порт MMDVM для XLX — <code>62030</code>, пароль — <code>passw0rd</code>.</li>
@@ -2107,6 +2139,19 @@
                     <li data-i18n="xlx_help_step3"><b>Модули A–Z (TG 4001–4026):</b> модуль <b>A = TG 4001</b>, <b>B = TG 4002</b>, ..., <b>Z = TG 4026</b>. Отключение от модуля — <b>TG 4000</b>.</li>
                     <li data-i18n="xlx_help_step4"><b>Голосовой вызов (TG 9):</b> после привязки к модулю весь голосовой обмен в рефлекторе идёт в группе <b>TG 9</b> на TS2. Переключать модули на лету можно через кнопку <b>«⚡ Управление модулями XLX»</b> на карточке хотспота.</li>
                 </ul>
+            </div>
+          </div>
+          <div class="form-group" id="editHsAllStarGroup" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="editHsAllStarNode" data-i18n="hs_edit.allstar_node_label" style="margin-bottom: 0;">Номер ноды AllStarLink (Node Number)</label>
+            </div>
+            <input type="text" id="editHsAllStarNode" class="form-input" maxlength="10" value="1999" placeholder="например: 41522 или 1999 (Echo)" data-i18n-placeholder="hs_edit.allstar_node_placeholder">
+            <small class="form-hint" data-i18n="hs_edit.allstar_node_hint">Номер узла AllStarLink для подключения через протокол IAX2 (порт по умолчанию 4569 UDP)</small>
+            <div class="form-group-checkbox" id="editHsAllStarAlwaysOnlineGroup" style="margin-top: 10px;">
+              <label style="cursor: pointer; color: var(--text-primary); font-size: 0.85rem; font-weight: normal; display: inline-flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="editHsAllStarAlwaysOnline" checked>
+                <span data-i18n="hs_edit.allstar_always_online">Ядро ASL3 всегда Online (Keep-Alive)</span>
+              </label>
             </div>
           </div>
           <div class="form-group" id="editHsMasterSelectGroup">
@@ -2141,18 +2186,13 @@
               </button>
             </div>
           </div>
-          <div class="form-group-checkbox">
-            <label>
-              <input type="checkbox" id="editHsAutoconnect" {% if not cfg or cfg.autoconnect %}checked{% endif %}> <span data-i18n="hs_edit.autoconnect">Автоподключение при старте</span>
-            </label>
-          </div>
           <div class="form-group-checkbox" id="editHsAutoTgBmGroup">
             <label>
               <input type="checkbox" id="editHsAutoTgBm" {% if not cfg or cfg.auto_tg_bm %}checked{% endif %}> <span id="editHsAutoTgBmText" data-i18n="hs_edit.auto_tg_bm">Автонастройка TG BM</span>
             </label>
           </div>
-          <div class="modal-footer" style="padding-top: 10px;">
-            <button type="submit" class="btn-primary" data-i18n="hs_edit.btn_save">Сохранить хотспот</button>
+          <div class="modal-footer" id="editHsSubmitFooter" style="padding-top: 10px; display: none;">
+            <button type="submit" id="btnSaveHotspotSubmit" class="btn-primary" data-i18n="hs_edit.btn_save">Сохранить хотспот</button>
           </div>
         </form>
       </div>
@@ -2160,12 +2200,12 @@
         <!-- Tab 5: Telegram Alerts & Watchdog -->
         <div id="tab-alerts" class="tab-content">
           <!-- Watchdog Status Card -->
-          <div class="settings-action-block" style="padding: 14px; background: rgba(56, 139, 253, 0.08); border: 1px solid rgba(56, 139, 253, 0.25); border-radius: 0px; margin-bottom: 16px;">
+          <div class="settings-action-block" style="padding: 14px; background: rgba(56, 139, 253, 0.08); border: 1px solid rgba(56, 139, 253, 0.25); border-radius: var(--app-border-radius, 0px); margin-bottom: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
               <h4 style="margin: 0; font-size: 15px; color: #58a6ff; display: flex; align-items: center; gap: 8px;">
                 <span data-i18n="alerts.watchdog_card_title">Служба Watchdog</span>
               </h4>
-              <span id="alertsWdBadge" class="badge" style="padding: 3px 8px; border-radius: 0px; font-size: 12px; font-weight: 600; background: #30363d; color: #8b949e;">...</span>
+              <span id="alertsWdBadge" class="badge" style="padding: 3px 8px; border-radius: var(--app-border-radius, 0px); font-size: 12px; font-weight: 600; background: #30363d; color: #8b949e;">...</span>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; font-size: 12px; color: #c9d1d9;">
               <div><span style="color: #8b949e;" data-i18n="alerts.version">Версия</span>: <strong id="alertsWdVersion">-</strong></div>
@@ -2192,7 +2232,7 @@
               <label for="alertsBotToken" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.bot_token">Токен бота (Bot Token)</label>
               <div style="display: flex; gap: 8px;">
                 <input type="password" id="alertsBotToken" class="input-field" placeholder="123456789:ABCdefGhIjkLmNoPqrStUvWxYz" style="flex: 1; font-family: monospace; font-size: 13px;" readonly>
-                <button type="button" id="btnToggleAlertsToken" class="btn btn-secondary" style="padding: 0 10px;" title="Показать/скрыть">👁️</button>
+                <button type="button" id="btnToggleAlertsToken" class="btn btn-secondary" style="padding: 0 10px;" title="Показать/скрыть" data-i18n-title="alerts.token_toggle_title">👁️</button>
                 <button type="button" id="btnEditAlertsToken" class="btn btn-secondary" style="padding: 0 12px; font-size: 12px;" data-i18n="alerts.change_token">Изменить</button>
               </div>
               <div style="font-size: 11px; color: #8b949e; margin-top: 4px;" data-i18n="alerts.bot_token_hint">Получите у @BotFather в Telegram</div>
@@ -2222,6 +2262,7 @@
                   <option value="es">Español (es)</option>
                   <option value="fr">Français (fr)</option>
                   <option value="it">Italiano (it)</option>
+                  <option value="nl">Nederlands (nl)</option>
                 </select>
               </div>
               <div class="setting-item">
@@ -2235,16 +2276,16 @@
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <input type="text" id="alertsServerIcon" class="input-field" value="🟦" maxlength="8" style="width: 58px; text-align: center; font-size: 16px; padding: 4px 6px;">
                 <div id="alertsIconPalette" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟦" title="Синий (Основной)" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟦</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟧" title="Оранжевый (Демо)" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟧</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟩" title="Зелёный" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟩</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟥" title="Красный" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟥</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟪" title="Фиолетовый" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟪</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟨" title="Жёлтый" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟨</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="📡" title="Антенна" style="padding: 4px 8px; font-size: 15px; line-height: 1;">📡</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🎭" title="Витрина / Демо" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🎭</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🛡️" title="Щит" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🛡️</button>
-                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="⚡" title="Молния" style="padding: 4px 8px; font-size: 15px; line-height: 1;">⚡</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟦" title="Синий (Основной)" data-i18n-title="alerts.icon_blue" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟦</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟧" title="Оранжевый (Демо)" data-i18n-title="alerts.icon_orange" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟧</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟩" title="Зелёный" data-i18n-title="alerts.icon_green" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟩</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟥" title="Красный" data-i18n-title="alerts.icon_red" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟥</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟪" title="Фиолетовый" data-i18n-title="alerts.icon_purple" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟪</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🟨" title="Жёлтый" data-i18n-title="alerts.icon_yellow" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🟨</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="📡" title="Антенна" data-i18n-title="alerts.icon_antenna" style="padding: 4px 8px; font-size: 15px; line-height: 1;">📡</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🎭" title="Витрина / Демо" data-i18n-title="alerts.icon_demo" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🎭</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="🛡️" title="Щит" data-i18n-title="alerts.icon_shield" style="padding: 4px 8px; font-size: 15px; line-height: 1;">🛡️</button>
+                  <button type="button" class="btn btn-secondary alerts-icon-preset" data-icon="⚡" title="Молния" data-i18n-title="alerts.icon_lightning" style="padding: 4px 8px; font-size: 15px; line-height: 1;">⚡</button>
                 </div>
               </div>
               <div style="font-size: 11px; color: #8b949e; margin-top: 4px;" data-i18n="alerts.server_icon_hint">Позволяет с первого взгляда отличать уведомления разных серверов (например: 🟦 для основного и 🟧 для демо)</div>
@@ -2363,12 +2404,12 @@
           </div>
 
           <!-- Bottom Action Buttons & Feedback -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #30363d; flex-wrap: wrap; gap: 10px;">
-            <div style="display: flex; gap: 10px; align-items: center;">
-              <button type="button" id="btnSaveAlerts" class="btn btn-primary" style="padding: 8px 18px; font-weight: 600;" data-i18n="alerts.btn_save">💾 Сохранить</button>
-              <button type="button" id="btnTestAlert" class="btn btn-secondary" style="padding: 8px 16px;" data-i18n="alerts.btn_test">🧪 Тестовое сообщение</button>
-            </div>
-            <div id="alertsFeedback" style="font-size: 12px; font-weight: 500;"></div>
+          <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid #30363d; display: flex; flex-direction: column; gap: 10px;">
+            <button type="button" id="btnSaveAlerts" style="display: none;"></button>
+            <button type="button" id="btnTestAlert" class="btn btn-secondary" style="width: 100%; padding: 10px 18px; font-size: 0.9rem; font-weight: 600; justify-content: center; display: flex; align-items: center; gap: 8px;" data-i18n="alerts.btn_test">
+              🧪 Тестовое сообщение
+            </button>
+            <div id="alertsFeedback" style="font-size: 12px; font-weight: 500; text-align: center;"></div>
           </div>
         </div>
 
@@ -2388,6 +2429,7 @@
             <option value="fr">🇫🇷 Français</option>
             <option value="de">🇩🇪 Deutsch</option>
             <option value="it">🇮🇹 Italiano</option>
+            <option value="nl">🇳🇱 Nederlands</option>
             <option value="ru">🇷🇺 Русский</option>
           </select>
           <small class="form-hint" style="margin-top: 2px;" data-i18n="general.language_hint">
@@ -2451,7 +2493,7 @@
             </div>
 
             <!-- Scan button & hint -->
-            <div style="font-size: 0.76rem; color: var(--text-secondary); background: rgba(0, 168, 255, 0.08); border: 1px solid rgba(0, 168, 255, 0.2); border-radius: 0px; padding: 6px 10px; margin-bottom: 8px; line-height: 1.35;" data-i18n-html="ble.hint_hold">
+            <div style="font-size: 0.76rem; color: var(--text-secondary); background: rgba(0, 168, 255, 0.08); border: 1px solid rgba(0, 168, 255, 0.2); border-radius: var(--app-border-radius, 0px); padding: 6px 10px; margin-bottom: 8px; line-height: 1.35;" data-i18n-html="ble.hint_hold">
               💡 <strong>Для режима удержания (Hold-to-Talk):</strong> удалите кнопку из настроек Bluetooth телефона (<em>«Забыть устройство»</em>) и подключайте её напрямую здесь.
             </div>
             <button type="button" id="blePttScanBtn" class="btn-secondary" style="width: 100%; margin-bottom: 8px; font-size: 0.85rem;" data-i18n="ble.scan_btn">
@@ -2517,7 +2559,7 @@
                   <span style="color: var(--text-secondary, #8b949e);" data-i18n="android.haptic_duration">Длительность / сила вибры:</span>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <span id="hapticDurationVal" style="font-weight: 700; color: #58a6ff; font-family: monospace;">{{ haptic_duration | default(45) }} мс</span>
-                    <button type="button" id="btnTestHaptic" title="Проверить виброотклик" data-i18n-title="android.haptic_test_title" style="padding: 2px 8px; font-size: 0.78rem; border-radius: 0px; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
+                    <button type="button" id="btnTestHaptic" title="Проверить виброотклик" data-i18n-title="android.haptic_test_title" style="padding: 2px 8px; font-size: 0.78rem; border-radius: var(--app-border-radius, 0px); border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
                   </div>
                 </div>
                 <div>
@@ -2560,7 +2602,7 @@
             <!-- Change Server Settings button (APK only) -->
             <div style="padding-top: 10px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
               <button type="button" id="btnAndroidServerSettings" class="btn-secondary"
-                      style="width: 100%; padding: 8px 10px; background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.4); color: #58a6ff; border-radius: 0px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                      style="width: 100%; padding: 8px 10px; background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.4); color: #58a6ff; border-radius: var(--app-border-radius, 0px); font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
                 <span>⚙️</span>
                 <span data-i18n="auth.server_settings_btn">Настройки сервера</span>
               </button>
@@ -2568,7 +2610,7 @@
             <!-- Full exit button -->
             <div class="settings-action-block settings-exit-block" style="padding-top: 10px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
               <button type="button" id="btnExitApp" class="btn-app-exit"
-                      style="width: 100%; padding: 9px; background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.4); color: #f85149; border-radius: 0px; font-weight: 700; cursor: pointer;">
+                      style="width: 100%; padding: 9px; background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.4); color: #f85149; border-radius: var(--app-border-radius, 0px); font-weight: 700; cursor: pointer;">
                 <span data-i18n="app.quit_title">⏻ Полный выход из приложения</span>
               </button>
               <small class="form-hint" style="display: block; margin-top: 4px; text-align: center;">
@@ -2589,7 +2631,7 @@
           <p style="font-size: 0.78rem; color: #8b949e; margin: 0 0 6px 0; line-height: 1.3;" data-i18n="apk.settings_desc">
             Для стабильного приема радиосигнала в фоновом режиме, автоподключения VPN и использования боковых кнопок как PTT установите APK.
           </p>
-          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkSettings" class="btn-primary" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-decoration: none; padding: 10px; box-sizing: border-box; font-weight: 600; border-radius: 0px;">
+          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkSettings" class="btn-primary" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-decoration: none; padding: 10px; box-sizing: border-box; font-weight: 600; border-radius: var(--app-border-radius, 0px);">
             <span data-i18n="apk.btn_download_apk">📥 Скачать {{ apk_filename | default('ProxDMR-1.11.apk') }}</span>
           </a>
         </div>
@@ -2666,6 +2708,33 @@
           </div>
         </div>
 
+        <!-- App Border Radius Control -->
+        <div class="apikeys-frame" style="margin-bottom: 8px;">
+          <div class="apikeys-frame-header" style="cursor: default;">
+            <span class="apikeys-frame-title">
+              <span>📐</span> <span data-i18n="general.border_radius_title">Скругление углов элементов</span>
+            </span>
+            <span class="apikeys-frame-actions">
+              <span id="borderRadiusValueLabel" style="font-family: var(--font-mono, monospace); font-size: 0.84rem; font-weight: 700; color: #58a6ff;">5 px</span>
+            </span>
+          </div>
+          <div class="apikeys-frame-body" style="padding: 10px 12px 10px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <input type="range" id="sliderBorderRadius" min="0" max="20" step="1" value="5" class="form-slider" style="flex: 1; cursor: pointer;">
+            </div>
+            <div style="display: flex; justify-content: space-between; font-family: var(--font-mono, monospace); font-size: 0.68rem; color: var(--text-muted); margin-top: 4px; padding: 0 2px;">
+              <span>0 (прямые)</span>
+              <span>5</span>
+              <span>10</span>
+              <span>15</span>
+              <span>20 (макс)</span>
+            </div>
+            <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="general.border_radius_hint">
+              Степень закругления углов всех прямоугольных элементов программы (кнопки, плашки, карточки, поля ввода)
+            </small>
+          </div>
+        </div>
+
         <!-- HAM Web Portals Integration Section (Collapsible Frame) -->
         <div class="apikeys-frame collapsed" id="hamQthSettingsFrame" style="margin-bottom: 8px;">
           <div class="apikeys-frame-header" id="hamQthSettingsToggle">
@@ -2682,7 +2751,7 @@
             </div>
 
             <!-- Sub-card 1: QRZ.com -->
-            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; padding: 10px; margin-bottom: 8px;">
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--app-border-radius, 0px); padding: 10px; margin-bottom: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">1. QRZ.com</span>
                 <a href="https://www.qrz.com/register" target="_blank" rel="noopener" class="apikeys-get-key-link" style="font-size: 0.75rem;" data-i18n="hamqth.reg_qrz_com">Регистрация ↗</a>
@@ -2709,7 +2778,7 @@
             </div>
 
             <!-- Sub-card 2: HamQTH.com -->
-            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; padding: 10px; margin-bottom: 8px;">
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--app-border-radius, 0px); padding: 10px; margin-bottom: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">2. HamQTH.com</span>
                 <a href="https://www.hamqth.com/register.php" target="_blank" rel="noopener" class="apikeys-get-key-link" style="font-size: 0.75rem;" data-i18n="hamqth.reg_link">Регистрация ↗</a>
@@ -2745,7 +2814,7 @@
           <div class="apikeys-frame-header" id="updateSettingsToggle" style="cursor: pointer;">
             <span class="apikeys-frame-title">
               <span>🔄</span> <span data-i18n="updates.title">Обновление ProxDMR</span>
-              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: 0px; margin-left: 6px;">NEW</span>
+              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: var(--app-border-radius, 0px); margin-left: 6px;">NEW</span>
             </span>
             <span class="apikeys-frame-actions">
               <span class="apikeys-chevron" id="updateSettingsChevron">▼</span>
@@ -2768,20 +2837,20 @@
             </div>
 
             <!-- Version Status Card -->
-            <div id="systemUpdateStatusCard" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 0px; padding: 10px; margin-bottom: 10px;">
+            <div id="systemUpdateStatusCard" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--app-border-radius, 0px); padding: 10px; margin-bottom: 10px;">
               <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                 <div style="font-size: 0.82rem; color: #8b949e;">
                   <span data-i18n="updates.current_ver_label">Текущая версия:</span>
                   <strong style="color: var(--text-primary);" id="systemCurrentVerLabel">v{{ app_version | default('1.41') }}</strong>
                   <span style="font-size: 0.74rem; color: #6e7681;" id="systemCurrentDateLabel">({{ app_version_date | default('') }})</span>
                 </div>
-                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 0px; background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
+                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: var(--app-border-radius, 0px); background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
                   <span data-i18n="updates.up_to_date">✓ Актуальна</span>
                 </div>
               </div>
 
               <!-- Available update details block (hidden when up to date) -->
-              <div id="systemUpdateAvailableBlock" style="display: none; background: rgba(231, 76, 60, 0.08); border: 1px solid rgba(231, 76, 60, 0.25); border-radius: 0px; padding: 8px 10px; margin-top: 8px;">
+              <div id="systemUpdateAvailableBlock" style="display: none; background: rgba(231, 76, 60, 0.08); border: 1px solid rgba(231, 76, 60, 0.25); border-radius: var(--app-border-radius, 0px); padding: 8px 10px; margin-top: 8px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                   <div style="font-size: 0.84rem; font-weight: 700; color: #ff7675;">
                     <span id="systemNewVerLabel">Доступно: v1.42</span>
@@ -2810,7 +2879,7 @@
         </div>
 
         <!-- Save General Settings Footer Button -->
-        <div class="modal-footer" style="padding-top: 12px; margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: flex-end; align-items: center; gap: 10px;">
+        <div class="modal-footer" id="generalSettingsFooter" style="display: none; padding-top: 12px; margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); justify-content: flex-end; align-items: center; gap: 10px;">
           <button type="button" id="btnSaveGeneralSettings" class="btn-primary" data-i18n="buttons.save_settings">
             Сохранить настройки
           </button>
@@ -2822,7 +2891,7 @@
             🖥️ Сервер ProxDMR
           </div>
           <button type="button" id="btnRestartServer" class="btn-server-restart"
-                  style="width: 100%; padding: 9px; background: rgba(227, 179, 65, 0.15); border: 1px solid rgba(227, 179, 65, 0.4); color: #e3b341; border-radius: 0px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  style="width: 100%; padding: 9px; background: rgba(227, 179, 65, 0.15); border: 1px solid rgba(227, 179, 65, 0.4); color: #e3b341; border-radius: var(--app-border-radius, 0px); font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
             </svg>
@@ -2865,7 +2934,7 @@
                   🔑 Ключ Gemini API:
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <button type="button" id="btnManageRecApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 0px;">
+                  <button type="button" id="btnManageRecApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: var(--app-border-radius, 0px);">
                     <span id="btnManageRecApiKeysIcon">🔑</span>
                     <span id="btnManageRecApiKeysText">Gemini API (0)</span>
                   </button>
@@ -2879,7 +2948,7 @@
               </div>
 
               <!-- Item 3: Gemini Recognition Sub-block (Models query & selection) -->
-              <div id="subBlockGeminiRec" style="margin-bottom: 12px; background: rgba(66, 133, 244, 0.05); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: 0px; padding: 10px;">
+              <div id="subBlockGeminiRec" style="margin-bottom: 12px; background: rgba(66, 133, 244, 0.05); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: var(--app-border-radius, 0px); padding: 10px;">
                 <label for="optTranscriberModel" data-i18n="transcriber.gemini_model_rec_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
                   🤖 Модель Gemini для транскрибации речи:
                 </label>
@@ -2912,7 +2981,7 @@
                   🔑 Ключи Gemini API (для перевода):
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <button type="button" id="btnManageTransApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: 0px;">
+                  <button type="button" id="btnManageTransApiKeys" class="btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border-radius: var(--app-border-radius, 0px);">
                     <span id="btnManageTransApiKeysIcon">🔑</span>
                     <span id="btnManageTransApiKeysText">Gemini API (0)</span>
                   </button>
@@ -3082,7 +3151,7 @@
             </div>
           </div>
 
-          <div class="modal-footer" style="padding-top: 10px; display: flex; justify-content: flex-end; gap: 10px;">
+          <div class="modal-footer" id="transcriberSettingsFooter" style="display: none; padding-top: 10px; justify-content: flex-end; gap: 10px;">
             <button type="submit" class="btn-primary" data-i18n="buttons.save_settings">Сохранить настройки</button>
           </div>
         </form>
@@ -3613,31 +3682,52 @@
         <div class="modal-title-with-badge">
           <h3 data-i18n="contacts.title">Контакты</h3>
           <span id="contactsCountBadge" class="badge-contacts-count">0</span>
+          <button type="button" id="btnSyncAslNodes" class="btn-asl-sync btn-asl-sync-header" title="Обновить базу узлов с allmondb.allstarlink.org" data-i18n-title="contacts.asl_sync_db_title" style="display:none;">
+            <span id="aslSyncIcon">🔄</span>
+            <img id="aslSyncDots" src="/static/img/loading-dots.webp" class="asl-sync-dots" alt="..." style="display:none;" />
+            <span id="aslSyncText" data-i18n="contacts.asl_btn_sync">Обновить базу</span>
+          </button>
         </div>
         <button type="button" id="closeMyContactsModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
       </div>
 
       <!-- Search & Action Toolbar -->
       <div class="modal-body contacts-modal-body">
-        <div class="contacts-toolbar-row">
-          <div class="search-bar-row contacts-search-bar-row">
-            <span class="search-bar-icon">🔍</span>
-            <input type="text" id="contactsSearchInput" class="search-main-input" placeholder="Поиск в контактах: имя, позывной, TG, DMR ID, город..." data-i18n-placeholder="contacts.search_placeholder" autocomplete="off">
-            <button type="button" id="clearContactsSearchBtn" class="btn-clear-search hidden">&times;</button>
+        <div id="dmrContactsView" class="contacts-subview active">
+          <div class="contacts-toolbar-row">
+            <div class="search-bar-row contacts-search-bar-row">
+              <span class="search-bar-icon">🔍</span>
+              <input type="text" id="contactsSearchInput" class="search-main-input" placeholder="Поиск в контактах: имя, позывной, TG, DMR ID, город..." data-i18n-placeholder="contacts.search_placeholder" autocomplete="off">
+              <button type="button" id="clearContactsSearchBtn" class="btn-clear-search hidden">&times;</button>
+            </div>
+            <div class="contacts-top-right">
+              <button type="button" id="btnAddFolderBtn" class="btn-secondary btn-sm btn-contact-action btn-new-folder" title="Создать папку (до 2 уровней вложенности)" data-i18n-title="contacts.btn_new_folder_title">
+                <span data-i18n="contacts.btn_new_folder">📁 Новая папка</span>
+              </button>
+              <button type="button" id="btnAddContactBtn" class="btn-primary btn-sm btn-contact-action btn-new-contact" title="Добавить контакт (TG, Человек, Репитер)" data-i18n-title="contacts.btn_new_contact_title">
+                <span data-i18n="contacts.btn_new_contact">Новый контакт</span>
+              </button>
+            </div>
           </div>
-          <div class="contacts-top-right">
-            <button type="button" id="btnAddFolderBtn" class="btn-secondary btn-sm btn-contact-action btn-new-folder" title="Создать папку (до 2 уровней вложенности)" data-i18n-title="contacts.btn_new_folder_title">
-              <span data-i18n="contacts.btn_new_folder">📁 Новая папка</span>
-            </button>
-            <button type="button" id="btnAddContactBtn" class="btn-primary btn-sm btn-contact-action btn-new-contact" title="Добавить контакт (TG, Человек, Репитер)" data-i18n-title="contacts.btn_new_contact_title">
-              <span data-i18n="contacts.btn_new_contact">Новый контакт</span>
-            </button>
+
+          <!-- Tree View Container -->
+          <div id="contactsTreeContainer" class="contacts-tree-container">
+            <!-- Dynamically populated contacts tree -->
           </div>
         </div>
 
-        <!-- Tree View Container -->
-        <div id="contactsTreeContainer" class="contacts-tree-container">
-          <!-- Dynamically populated contacts tree -->
+        <div id="allstarNodesView" class="contacts-subview" style="display:none;">
+          <div class="allstar-nodes-toolbar">
+            <div class="search-bar-row contacts-search-bar-row" style="flex:1;">
+              <span class="search-bar-icon">🔍</span>
+              <input type="text" id="aslNodeSearchInput" class="search-main-input" placeholder="Поиск узла: номер (1999, 41522), название, хаб, страна..." data-i18n-placeholder="contacts.asl_search_placeholder" autocomplete="off">
+              <button type="button" id="clearAslNodeSearchBtn" class="btn-clear-search hidden">&times;</button>
+            </div>
+          </div>
+
+          <div id="aslNodesListContainer" class="allstar-nodes-list-container">
+            <!-- Dynamically populated ASL nodes -->
+          </div>
         </div>
       </div>
 
@@ -3668,17 +3758,24 @@
       <!-- Modal Footer -->
       <div class="modal-footer contacts-modal-footer">
         <div class="contacts-footer-left">
-          <button type="button" id="btnContactsGatewayToggle" class="btn-contacts-gw-toggle" title="Стандартный шлюз соединения для вызовов TG" data-i18n-title="contacts.gw_toggle_title">
-            <span class="gw-icon">🌐</span>
-            <span id="contactsGwSummary" class="gw-summary"><span data-i18n="contacts.gw_default_channel">Канал по умолчанию:</span> <span class="gw-channel-name">Хотспот 1 (TS2)</span></span>
-            <span class="gw-chevron">▾</span>
-          </button>
-          <button type="button" id="btnExportContacts" class="btn-icon-square" title="Экспорт контактов в JSON" data-i18n-title="contacts.btn_export_title">
-            <span>📥</span>
-          </button>
-          <button type="button" id="btnImportContacts" class="btn-icon-square" title="Импорт контактов из JSON" data-i18n-title="contacts.btn_import_title">
-            <span>📤</span>
-          </button>
+          <div id="dmrFooterControls" style="display:inline-flex; align-items:center; gap:8px;">
+            <button type="button" id="btnContactsGatewayToggle" class="btn-contacts-gw-toggle" title="Стандартный шлюз соединения для вызовов TG" data-i18n-title="contacts.gw_toggle_title">
+              <span class="gw-icon">🌐</span>
+              <span id="contactsGwSummary" class="gw-summary"><span data-i18n="contacts.gw_default_channel">Канал по умолчанию:</span> <span class="gw-channel-name">Хотспот 1 (TS2)</span></span>
+              <span class="gw-chevron">▾</span>
+            </button>
+            <button type="button" id="btnExportContacts" class="btn-icon-square" title="Экспорт контактов в JSON" data-i18n-title="contacts.btn_export_title">
+              <span>📥</span>
+            </button>
+            <button type="button" id="btnImportContacts" class="btn-icon-square" title="Импорт контактов из JSON" data-i18n-title="contacts.btn_import_title">
+              <span>📤</span>
+            </button>
+          </div>
+          <div id="allstarFooterControls" class="allstar-footer-controls" style="display:none;">
+            <span id="aslNodesDbStatus" style="font-size:0.78rem; color:#94a3b8; display:inline-flex; align-items:center;">
+              <span id="aslNodesTotalCount">40 995</span>&nbsp;<span data-i18n="contacts.asl_nodes_suffix">узлов (AllStarLink.org)</span>
+            </span>
+          </div>
           <input type="file" id="importContactsFileInput" accept=".json,application/json" style="display:none;">
         </div>
         <div class="contacts-footer-right">
@@ -3718,6 +3815,10 @@
                 <input type="radio" name="contactNodeType" value="repeater">
                 <span class="type-opt-box" data-i18n="contacts.type_repeater">📡 Репитер</span>
               </label>
+              <label class="type-opt" id="contactTypeOptAllStar">
+                <input type="radio" name="contactNodeType" value="allstar_node">
+                <span class="type-opt-box" data-i18n="contacts.type_allstar_node">📻 Нода ASL</span>
+              </label>
             </div>
           </div>
 
@@ -3730,6 +3831,7 @@
               <option value="tgif">TGIF Network</option>
               <option value="xlx">XLX Reflector</option>
               <option value="dmrplus">DMR+ (IPSC2)</option>
+              <option value="allstar" data-i18n="contacts.net_allstar">🔵 AllStarLink (ASL / IAX2)</option>
               <option value="custom" data-i18n="contacts.net_universal">Универсальный / Любая сеть</option>
             </select>
           </div>
@@ -3758,6 +3860,22 @@
             <label for="contactEditTg" class="form-label"><span data-i18n="contacts.tg_label">Номер TalkGroup (TG)</span> <span class="req-star">*</span>:</label>
             <input type="number" id="contactEditTg" class="form-input" placeholder="Например: 2501, 9990, 91" data-i18n-placeholder="contacts.tg_placeholder" min="1" max="99999999" autocomplete="off">
             <small id="contactEditTgHint" class="form-hint" style="display:none;color:#58a6ff;"></small>
+          </div>
+
+          <!-- Field: AllStarLink Node Number (for allstar_node) -->
+          <div class="form-group" id="contactEditAllStarNodeGroup" style="display:none;">
+            <label for="contactEditAllStarNode" class="form-label"><span data-i18n="contacts.allstar_node_label">Номер ноды AllStarLink</span> <span class="req-star">*</span>:</label>
+            <input type="text" id="contactEditAllStarNode" class="form-input" placeholder="например: 41522 или 1999" data-i18n-placeholder="contacts.allstar_node_placeholder" maxlength="10" autocomplete="off">
+            <small id="contactEditAllStarNodeHint" class="form-hint" style="color:#58a6ff;" data-i18n="contacts.allstar_node_hint">Узел сети AllStarLink / EchoLink</small>
+          </div>
+
+          <!-- Field: AllStarLink Connection Mode -->
+          <div class="form-group" id="contactEditAllStarModeGroup" style="display:none;">
+            <label for="contactEditAllStarMode" class="form-label" data-i18n="contacts.allstar_mode_label">Режим подключения:</label>
+            <select id="contactEditAllStarMode" class="form-select">
+              <option value="*3" data-i18n="contacts.allstar_mode_transceive">*3 — Приём + Передача (Transceive)</option>
+              <option value="*1" data-i18n="contacts.allstar_mode_monitor">*1 — Только приём / Мониторинг (Monitor)</option>
+            </select>
           </div>
 
           <!-- Field: XLX Module Select (for XLX TG) -->
@@ -4358,7 +4476,7 @@
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">-20 dB</span>
-            <input type="range" id="optPreGain" class="form-slider" min="-20" max="12" step="1" value="0" style="flex: 1; cursor: pointer;">
+            <input type="range" id="optPreGain" class="form-slider" min="-20" max="12" step="1" value="7" style="flex: 1; cursor: pointer;">
             <span class="slider-limit-label">+12 dB</span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="audio.hint_preamp">
@@ -4380,7 +4498,7 @@
           </div>
           <div class="agc-profiles-bar agc-profiles-grid" style="margin-top: 10px;">
             <button type="button" class="btn-agc-profile" data-profile="soft" data-i18n="audio.agc_soft">Мягкая (±8 dB)</button>
-            <button type="button" class="btn-agc-profile active" data-profile="standard" data-i18n="audio.agc_standard">Стандартная (±12 dB)</button>
+            <button type="button" class="btn-agc-profile" data-profile="standard" data-i18n="audio.agc_standard">Стандартная (±12 dB)</button>
             <button type="button" class="btn-agc-profile" data-profile="deep" data-i18n="audio.agc_deep">Глубокая ⭐</button>
             <button type="button" class="btn-agc-profile" data-profile="max" data-i18n="audio.agc_max">Максимальная</button>
           </div>
@@ -4388,23 +4506,23 @@
             <div class="form-group audio-field">
               <div class="audio-field-header">
                 <label for="sliderAgcBoost" class="audio-label" data-i18n="audio.agc_max_boost">Макс. подъем тихих (Boost)</label>
-                <span id="valAgcBoost" class="audio-val-badge">+12 dB</span>
+                <span id="valAgcBoost" class="audio-val-badge">+24 dB</span>
               </div>
-              <input type="range" id="sliderAgcBoost" class="form-slider" min="0" max="24" step="1" value="12">
+              <input type="range" id="sliderAgcBoost" class="form-slider" min="0" max="24" step="1" value="24">
             </div>
             <div class="form-group audio-field">
               <div class="audio-field-header">
                 <label for="sliderAgcAtten" class="audio-label" data-i18n="audio.agc_max_atten">Макс. приглушение громких (Atten)</label>
-                <span id="valAgcAtten" class="audio-val-badge">-12 dB</span>
+                <span id="valAgcAtten" class="audio-val-badge">-24 dB</span>
               </div>
-              <input type="range" id="sliderAgcAtten" class="form-slider" min="0" max="24" step="1" value="12">
+              <input type="range" id="sliderAgcAtten" class="form-slider" min="0" max="24" step="1" value="24">
             </div>
             <div class="form-group audio-field">
               <div class="audio-field-header">
                 <label for="sliderAgcHang" class="audio-label" data-i18n="audio.agc_hang_time">Время удержания (Hang Time)</label>
-                <span id="valAgcHang" class="audio-val-badge">350 ms</span>
+                <span id="valAgcHang" class="audio-val-badge">450 ms</span>
               </div>
-              <input type="range" id="sliderAgcHang" class="form-slider" min="100" max="1000" step="50" value="350">
+              <input type="range" id="sliderAgcHang" class="form-slider" min="100" max="1000" step="50" value="450">
             </div>
           </div>
         </div>
@@ -4419,23 +4537,23 @@
             <div class="form-group audio-field eq-col">
               <div class="audio-field-header eq-col-header">
                 <label for="sliderEqLow" class="audio-label eq-band-title" data-i18n="audio.eq_low">НЧ (300 Гц)</label>
-                <span id="valEqLow" class="audio-val-badge eq-val-badge">0 dB</span>
+                <span id="valEqLow" class="audio-val-badge eq-val-badge">-12 dB</span>
               </div>
-              <input type="range" id="sliderEqLow" class="form-slider eq-slider" min="-12" max="12" step="1" value="0">
+              <input type="range" id="sliderEqLow" class="form-slider eq-slider" min="-12" max="12" step="1" value="-12">
             </div>
             <div class="form-group audio-field eq-col">
               <div class="audio-field-header eq-col-header">
                 <label for="sliderEqMid" class="audio-label eq-band-title" data-i18n="audio.eq_mid">СЧ (1 кГц)</label>
-                <span id="valEqMid" class="audio-val-badge eq-val-badge">0 dB</span>
+                <span id="valEqMid" class="audio-val-badge eq-val-badge">+2 dB</span>
               </div>
-              <input type="range" id="sliderEqMid" class="form-slider eq-slider" min="-12" max="12" step="1" value="0">
+              <input type="range" id="sliderEqMid" class="form-slider eq-slider" min="-12" max="12" step="1" value="2">
             </div>
             <div class="form-group audio-field eq-col">
               <div class="audio-field-header eq-col-header">
                 <label for="sliderEqHigh" class="audio-label eq-band-title" data-i18n="audio.eq_high">ВЧ (3 кГц)</label>
-                <span id="valEqHigh" class="audio-val-badge eq-val-badge">0 dB</span>
+                <span id="valEqHigh" class="audio-val-badge eq-val-badge">+10 dB</span>
               </div>
-              <input type="range" id="sliderEqHigh" class="form-slider eq-slider" min="-12" max="12" step="1" value="0">
+              <input type="range" id="sliderEqHigh" class="form-slider eq-slider" min="-12" max="12" step="1" value="10">
             </div>
           </div>
           <div class="form-group-checkbox audio-field-check" style="margin-top: 12px;">
@@ -4453,7 +4571,7 @@
         <div class="audio-section" style="margin-top: 14px;">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.sec_jitter">4. Буфер приёма (Jitter Buffer)</span>
-            <span id="valJitterBuffer" class="audio-val-badge">120 ms</span>
+            <span id="valJitterBuffer" class="audio-val-badge">1000 ms</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">40 ms</span>
@@ -4462,7 +4580,7 @@
           </div>
           <div class="bg-scale-presets" style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
             <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="60" data-i18n="audio.jitter_min">60 ms (Мин)</button>
-            <button type="button" class="btn-scale-preset btn-jitter-preset active" data-jitter="120" data-i18n="audio.jitter_opt">120 ms (Оптимум)</button>
+            <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="120" data-i18n="audio.jitter_opt">120 ms (Оптимум)</button>
             <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="180" data-i18n="audio.jitter_reliable">180 ms (Надёжный)</button>
             <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="240" data-i18n="audio.jitter_max">240 ms (Макс)</button>
           </div>
@@ -4513,11 +4631,11 @@
         <div class="audio-section">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.tx_sec_mic_gain">1. Чувствительность микрофона (TX Mic Gain)</span>
-            <span id="valTxMicGain" class="audio-val-badge">0 dB</span>
+            <span id="valTxMicGain" class="audio-val-badge">-11 dB</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">-15 dB</span>
-            <input type="range" id="sliderTxMicGain" class="form-slider" min="-15" max="15" step="1" value="0" style="flex: 1; cursor: pointer;">
+            <input type="range" id="sliderTxMicGain" class="form-slider" min="-15" max="15" step="1" value="-11" style="flex: 1; cursor: pointer;">
             <span class="slider-limit-label">+15 dB</span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="audio.tx_hint_mic_gain">
@@ -4533,7 +4651,7 @@
           <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
             <div>
               <label class="audio-checkbox-label">
-                <input type="checkbox" id="chkTxNoiseSuppression" checked>
+                <input type="checkbox" id="chkTxNoiseSuppression">
                 <strong data-i18n="audio.tx_filter_ns">Шумоподавление (Noise Suppression)</strong>
               </label>
               <small class="form-hint" style="margin-left: 26px; display: block;" data-i18n="audio.tx_hint_ns">
@@ -4551,7 +4669,7 @@
             </div>
             <div>
               <label class="audio-checkbox-label">
-                <input type="checkbox" id="chkTxDspAgc">
+                <input type="checkbox" id="chkTxDspAgc" checked>
                 <strong data-i18n="audio.tx_filter_dsp_agc">DSP-компрессор (TX DSP AGC)</strong>
               </label>
               <small class="form-hint" style="margin-left: 26px; display: block;" data-i18n="audio.tx_hint_dsp_agc">
@@ -4560,7 +4678,7 @@
             </div>
             <div>
               <label class="audio-checkbox-label">
-                <input type="checkbox" id="chkTxEchoCancellation" checked>
+                <input type="checkbox" id="chkTxEchoCancellation">
                 <strong data-i18n="audio.tx_filter_ec">Эхоподавление (Echo Cancellation)</strong>
               </label>
               <small class="form-hint" style="margin-left: 26px; display: block;" data-i18n="audio.tx_hint_ec">
@@ -4578,7 +4696,7 @@
           </div>
           <div class="form-group-checkbox audio-field-check" style="margin-top: 8px; margin-bottom: 8px;">
             <label class="audio-checkbox-label">
-              <input type="checkbox" id="chkTxGate" checked>
+              <input type="checkbox" id="chkTxGate">
               <strong data-i18n="audio.tx_gate_enable">Включить Noise Gate в паузах речи</strong>
             </label>
           </div>
@@ -4944,7 +5062,7 @@
               <input type="checkbox" id="recOptSeamBeep" class="rec-toggle-checkbox">
               <span data-i18n="recordings.seam_beep">Звуковой маркер склейки</span>
             </label>
-            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 175px; text-align: right; padding: 4px 8px; border-radius: 0px; font-family: monospace;">
+            <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="width: 175px; text-align: right; padding: 4px 8px; border-radius: var(--app-border-radius, 0px); font-family: monospace;">
           </div>
           <div style="font-size: 0.75rem; color: var(--text-muted, #8b949e); line-height: 1.3;" data-i18n="recordings.seam_beep_hint">
             До 7 пар частота, длительность (Гц, мс) через запятую (напр. 600,80 или 1750,100, 1200,80)
@@ -4961,7 +5079,7 @@
         <div class="rec-setting-row" style="display: flex; align-items: center; justify-content: space-between;">
           <label for="recMinDurationInput" style="font-size: 0.95rem; font-weight: 500;" data-i18n="recordings.min_duration">Мин. длительность записи:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="recMinDurationInput" class="rec-number-input" min="0.1" max="60" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: 0px; box-sizing: border-box;">
+            <input type="number" id="recMinDurationInput" class="rec-number-input" min="0.1" max="60" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
             <span style="font-size: 0.85rem; color: var(--text-muted, #8b949e);" data-i18n="recordings.sec_unit">сек</span>
           </div>
         </div>
@@ -4970,7 +5088,7 @@
         <div class="rec-setting-row" style="display: flex; align-items: center; justify-content: space-between;">
           <label for="recQuotaGbInput" style="font-size: 0.95rem; font-weight: 500; white-space: nowrap;" data-i18n="recordings.quota_storage">Квота хранилища:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="recQuotaGbInput" class="rec-number-input" min="0.1" max="1000" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: 0px; box-sizing: border-box;">
+            <input type="number" id="recQuotaGbInput" class="rec-number-input" min="0.1" max="1000" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
             <span style="font-size: 0.85rem; color: var(--text-muted, #8b949e);" data-i18n="recordings.gb_unit">Гб</span>
             <button type="button" id="recClearAllBtn" class="rec-clear-btn" title="Удалить все сохраненные аудиозаписи" aria-label="Очистить все записи" data-i18n-title="recordings.clear_all_title" data-i18n-aria-label="recordings.clear_all_title" style="margin-left: 18px; height: 28px;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
@@ -5001,7 +5119,7 @@
       <div class="modal-body" style="padding: 16px; font-size: 0.86rem; display: flex; flex-direction: column; gap: 14px;">
         <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
           <label for="selOfflineTranscribeHotspot" style="font-size: 0.82rem; color: var(--text-muted, #718096); font-weight: 600;" data-i18n="quick_assign.hotspot_label">Хотспот:</label>
-          <select id="selOfflineTranscribeHotspot" class="form-select" style="width: 100%; padding: 6px 10px; font-size: 0.88rem; border-radius: 0px;"></select>
+          <select id="selOfflineTranscribeHotspot" class="form-select" style="width: 100%; padding: 6px 10px; font-size: 0.88rem; border-radius: var(--app-border-radius, 0px);"></select>
         </div>
         <div id="offlineTranscribeInfoText" style="color: var(--text-secondary, #a0aec0); line-height: 1.45;" data-i18n="recordings.offline_transcribe_prompt">
           Запустить транскрибацию накопленных аудиозаписей через Google AI?
@@ -5087,6 +5205,7 @@
         <button type="button" class="changelog-lang-pill" data-lang="es">🇪🇸 Español</button>
         <button type="button" class="changelog-lang-pill" data-lang="fr">🇫🇷 Français</button>
         <button type="button" class="changelog-lang-pill" data-lang="it">🇮🇹 Italiano</button>
+        <button type="button" class="changelog-lang-pill" data-lang="nl">🇳🇱 Nederlands</button>
       </div>
 
       <!-- Modal Body (Scrollable, formatted notes) -->
@@ -5117,7 +5236,7 @@
       max-width: calc(100vw - 32px);
       background: var(--bg-card, #1c2128);
       border: 1px solid var(--border-color, #30363d);
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
       z-index: 9999;
       padding: 14px 16px;
@@ -5158,7 +5277,7 @@
       line-height: 1;
       cursor: pointer;
       padding: 0 2px;
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
     }
     .system-update-banner-close:hover {
       color: var(--text-primary, #fff);
@@ -5199,7 +5318,7 @@
       max-height: 88vh;
       background: var(--bg-card, #161b22);
       border: 1px solid var(--border-color, #30363d);
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       box-shadow: 0 24px 48px rgba(0, 0, 0, 0.7);
       display: flex;
       flex-direction: column;
@@ -5227,7 +5346,7 @@
     }
     .changelog-lang-pill {
       padding: 4px 12px;
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       border: 1px solid var(--border-color, #30363d);
       background: #21262d;
       color: #c9d1d9;
@@ -5274,7 +5393,7 @@
         height: 100dvh !important;
         max-width: 100vw !important;
         max-height: 100dvh !important;
-        border-radius: 0px !important;
+        border-radius: var(--app-border-radius, 0px) !important;
         border: none !important;
         margin: 0 !important;
       }
@@ -5292,9 +5411,9 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.382"></script>
-  <script src="/static/js/audio-player.js?v=2.9.367"></script>
-  <script src="/static/js/dialog.js?v=2.9.375"></script>
+  <script src="/static/js/i18n.js?v=2.9.528"></script>
+  <script src="/static/js/audio-player.js?v=2.9.526"></script>
+  <script src="/static/js/dialog.js?v=2.9.489"></script>
   <script src="/static/js/auth.js?v=2.9.386"></script>
   <style>
     /* Demo Mode Styles */
@@ -5314,7 +5433,7 @@
       background: rgba(234, 179, 8, 0.15);
       border: 1px solid rgba(234, 179, 8, 0.35);
       color: #fbbf24;
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       padding: 6px 10px;
       font-size: 0.82rem;
       font-weight: 600;
@@ -5324,7 +5443,7 @@
       width: 100%;
       padding: 9px 12px;
       font-size: 0.92rem;
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -5355,7 +5474,7 @@
       min-height: 27px;
       padding: 2px 10px;
       margin: 0 0 6px 0;
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       background: var(--bg-card, #11161d);
       border: 2px solid rgba(234, 179, 8, 0.7);
       box-shadow: 0 0 14px rgba(234, 179, 8, 0.18), 0 6px 18px rgba(0, 0, 0, 0.45);
@@ -5409,7 +5528,7 @@
     .demo-header-logout {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(234, 179, 8, 0.35);
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       color: inherit;
       cursor: pointer;
       font-size: 0.82rem;
@@ -5462,7 +5581,7 @@
       border: 1px solid rgba(234, 179, 8, 0.35);
       color: #fbbf24;
       padding: 8px 12px;
-      border-radius: 0px;
+      border-radius: var(--app-border-radius, 0px);
       margin: 8px 0 12px 0;
       font-size: 0.85rem;
       font-weight: 500;
@@ -5477,7 +5596,7 @@
       filter: grayscale(0.5) !important;
       pointer-events: none !important;
     }
-    .admin-act-btn{background:none;border:none;cursor:pointer;font-size:1em;padding:2px 4px;border-radius: 0px;opacity:0.8;transition:opacity 0.15s;}
+    .admin-act-btn{background:none;border:none;cursor:pointer;font-size:1em;padding:2px 4px;border-radius: var(--app-border-radius, 0px);opacity:0.8;transition:opacity 0.15s;}
     .admin-act-btn:hover{opacity:1;background:rgba(255,255,255,0.08);}
   
     /* AI Setup Guide Badge & Button */
@@ -5552,7 +5671,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.388"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.539"></script>
 </body>
 </html>
 

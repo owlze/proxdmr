@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import json
 import logging
 import random
@@ -102,7 +103,8 @@ class SlotState:
 class HotspotRuntime:
     config: HotspotConfig
     user_id: int = 1
-    client: Optional[HomeBrewClient] = None
+    client: Optional[Any] = None
+    allstar_client: Optional[Any] = None
     status: BMState = BMState.DISCONNECTED
     detail: str = "Отключен"
     ts1: SlotState = field(default_factory=SlotState)
@@ -117,6 +119,12 @@ class HotspotRuntime:
     dynamic_tgs: Dict[int, Dict[int, float]] = field(default_factory=lambda: {1: {}, 2: {}})
     dropped_dynamic_ts: Dict[int, float] = field(default_factory=lambda: {1: 0.0, 2: 0.0})
     _recent_burst_keys: Dict[tuple, float] = field(default_factory=dict)
+    asl_rx_pcm_accum: bytearray = field(default_factory=bytearray)
+    backend_buffer_ms: int = 0
+    _rx_pacer_queues: Dict[int, collections.deque] = field(default_factory=lambda: {1: collections.deque(maxlen=100), 2: collections.deque(maxlen=100)})
+    _rx_pacer_tasks: Dict[int, Optional[asyncio.Task]] = field(default_factory=lambda: {1: None, 2: None})
+    _rx_pacer_draining: Dict[int, bool] = field(default_factory=lambda: {1: False, 2: False})
+    _rx_pacer_EndCallbacks: Dict[int, list] = field(default_factory=lambda: {1: [], 2: []})
 
     def to_dict(self) -> dict:
         return {
@@ -134,6 +142,9 @@ class HotspotRuntime:
             "rpto_options": getattr(self.config, "rpto_options", "") or "",
             "xlx_module": getattr(self.config, "xlx_module", "D") or "D",
             "dmrplus_reflector": getattr(self.config, "dmrplus_reflector", "4530") or "4530",
+            "allstar_node": getattr(self.config, "allstar_node", "1999") or "1999",
+            "allstar_always_online": bool(getattr(self.config, "allstar_always_online", True)),
+            "backend_buffer_ms": getattr(self, "backend_buffer_ms", 0),
             "duplex": self.config.duplex,
             "default_tg_ts1": self.config.default_tg_ts1,
             "default_tg_ts2": self.config.default_tg_ts2,
@@ -145,6 +156,7 @@ class HotspotRuntime:
             "detail": self.detail,
             "failed_cycles": getattr(self.client, "failed_cycles", 0) if self.client else 0,
             "collapsed": getattr(self.config, "collapsed", False),
+            "hidden": getattr(self.config, "hidden", False),
             "auto_tg_bm": getattr(self.config, "auto_tg_bm", True),
             "auto_record": getattr(self.config, "auto_record", False),
             "ts1": self.ts1.to_dict(),
@@ -188,6 +200,8 @@ class CallLogEntry:
     transcription: str = ""
     transcription_lang: str = ""
     user_id: int = 1
+    network_type: str = ""
+    source_type: str = ""
 
     def format_caller(self) -> str:
         return format_caller_display(
@@ -220,6 +234,8 @@ class CallLogEntry:
             "transcription": self.transcription,
             "transcription_lang": self.transcription_lang,
             "user_id": self.user_id,
+            "network_type": self.network_type,
+            "source_type": self.source_type,
         }
 
 class HotspotManager:
@@ -471,7 +487,9 @@ class HotspotManager:
                         active=False,
                         is_tx=bool(item.get("is_tx", False)),
                         transcription=item.get("transcription", ""),
-                        transcription_lang=item.get("transcription_lang", "")
+                        transcription_lang=item.get("transcription_lang", ""),
+                        network_type=item.get("network_type", ""),
+                        source_type=item.get("source_type", "")
                     )
                     loaded.append(entry)
             loaded.sort(key=lambda x: x.timestamp, reverse=True)
@@ -583,9 +601,21 @@ class HotspotManager:
                 rt = user_map[hs_cfg.id]
                 rt.config = hs_cfg
                 rt.config.auto_record = getattr(hs_cfg, "auto_record", False)
+                if getattr(hs_cfg, "hidden", False) and rt.client:
+                    asyncio.create_task(rt.client.disconnect(is_retry=False))
+                if (getattr(hs_cfg, "network_type", "") or "").lower() == "allstar" and bool(getattr(hs_cfg, "allstar_always_online", True)):
+                    try:
+                        from asl_container_manager import asl_container_mgr
+                        callsign = getattr(hs_cfg, "callsign", "N0CALL")
+                        password = getattr(hs_cfg, "bm_password", "")
+                        node_str = str(getattr(hs_cfg, "allstar_node", "1999") or "1999").strip()
+                        loop = asyncio.get_running_loop()
+                        loop.run_in_executor(None, asl_container_mgr.start_instance, str(user_id), node_str, password, callsign)
+                    except Exception as e:
+                        logger.warning(f"[MANAGER] Error ensuring ASL container started for user {user_id}: {e}")
             else:
                 rt = self._init_runtime(hs_cfg, user_id=user_id)
-                if rt.config.autoconnect and not getattr(rt.config, "collapsed", False) and rt.config.dmr_id > 0 and rt.config.bm_password:
+                if not getattr(rt.config, "collapsed", False) and not getattr(rt.config, "hidden", False) and (getattr(rt.config, "network_type", "bm") == "allstar" or (rt.config.dmr_id > 0 and rt.config.bm_password)):
                     asyncio.create_task(self.connect_hotspot(hs_cfg.id, user_id=user_id))
 
         for hid in list(user_map.keys()):
@@ -596,6 +626,16 @@ class HotspotManager:
                         await old_rt.client.disconnect()
                     except Exception:
                         pass
+
+        # Rebuild user_map in the exact order of new_settings.hotspots
+        new_map = {}
+        for hs_cfg in new_settings.hotspots:
+            if hs_cfg.id in user_map:
+                new_map[hs_cfg.id] = user_map[hs_cfg.id]
+        for hid, rt in user_map.items():
+            if hid not in new_map:
+                new_map[hid] = rt
+        self.user_runtimes[user_id] = new_map
 
         self.apply_client_settings_to_runtimes(getattr(new_settings, "client_settings", {}) or {}, user_id=user_id)
         rec_s = getattr(new_settings, "recordings_settings", {}) or {}
@@ -617,6 +657,8 @@ class HotspotManager:
         ]
         arx = client_settings.get("audio_rx", {})
         if arx and isinstance(arx, dict):
+            if "backend_buffer_ms" in arx:
+                self.set_backend_buffer_ms(int(arx["backend_buffer_ms"]), user_id=user_id)
             if "agc_enabled" in arx:
                 self.set_agc_enabled(bool(arx["agc_enabled"]), user_id=user_id)
             if "agc_profile" in arx and arx["agc_profile"]:
@@ -742,6 +784,29 @@ class HotspotManager:
                 target_call.transcription = clean_text
             if lang and lang != "---":
                 target_call.transcription_lang = lang
+
+            # Extract spoken personal callsign for AllStarLink calls (e.g. from repeater WW7PSR, operator says <call>K7ABC</call>)
+            if target_call.network_type == "allstar" and clean_text:
+                import re
+                m_call = re.search(r'<call>([A-Za-z0-9/]{3,10})</call>', clean_text)
+                if m_call:
+                    spoken_cs = m_call.group(1).upper()
+                    src_cs = (target_call.src_callsign or "").upper()
+                    if spoken_cs != src_cs:
+                        old_alias = target_call.talker_alias or ""
+                        if f"🎙️ {spoken_cs}" not in old_alias:
+                            target_call.talker_alias = f"🎙️ {spoken_cs} · {src_cs}" if src_cs else f"🎙️ {spoken_cs}"
+                            flag = getattr(target_call, "flag", "🌐") or "🌐"
+                            self._notify_async({
+                                "type": "caller_resolved",
+                                "call_id": target_call.id,
+                                "src_id": target_call.src_id,
+                                "src_callsign": target_call.src_callsign,
+                                "talker_alias": target_call.talker_alias,
+                                "caller_display": f"{flag} {spoken_cs} · {src_cs}" if src_cs else f"{flag} {spoken_cs}",
+                                "user_id": uid,
+                            }, user_id=uid)
+
             self._save_calls_history(uid)
             logger.info(
                 f"[MANAGER] Saved transcription to CallLog [{target_call.id}] "
@@ -799,34 +864,61 @@ class HotspotManager:
                     pass
         runtime = HotspotRuntime(config=cfg, user_id=user_id)
 
-        def make_status_cb(hid: str, uid: int):
-            def _status_cb(state: BMState, detail: str):
-                self._on_client_status(hid, state, detail, user_id=uid)
-            return _status_cb
+        net_type = (getattr(cfg, "network_type", "bm") or "bm").lower()
+        if net_type == "allstar":
+            from allstar_engine import AllStarClient, AllStarClientAdapter
+            node_num = str(getattr(cfg, "allstar_node", "1999") or "1999").strip()
+            # Автоматически строим hostname локального ASL-контейнера по формуле
+            # asl_{user_id}_{node} — идентично asl_container_manager._container_name().
+            # Поля bm_master_host/bm_master_port из UI игнорируются для AllStar:
+            # пользователю достаточно ввести только номер ноды и пароль.
+            _uid_clean = "".join(c for c in str(user_id) if c.isalnum() or c in ("-", "_"))
+            _node_clean = "".join(c for c in node_num if c.isdigit())
+            host = f"asl_{_uid_clean}_{_node_clean}"
+            port = 4569
+            password = cfg.bm_password or ""
+            callsign = cfg.callsign or "N0CALL"
+            asl_client = AllStarClient(
+                host=host,
+                port=port,
+                node=node_num,
+                username="proxdmr",
+                password="proxdmr_secret_iax",
+                callsign=callsign,
+                context="iaxrpt",
+                asl_password=password
+            )
+            runtime.allstar_client = asl_client
+            runtime.client = AllStarClientAdapter(asl_client, cfg.id, user_id, self)
+        else:
+            def make_status_cb(hid: str, uid: int):
+                def _status_cb(state: BMState, detail: str):
+                    self._on_client_status(hid, state, detail, user_id=uid)
+                return _status_cb
 
-        def make_frame_cb(hid: str, uid: int):
-            def _frame_cb(frame: DMRFrame):
-                self._on_dmr_frame(hid, frame, user_id=uid)
-            return _frame_cb
+            def make_frame_cb(hid: str, uid: int):
+                def _frame_cb(frame: DMRFrame):
+                    self._on_dmr_frame(hid, frame, user_id=uid)
+                return _frame_cb
 
-        client = HomeBrewClient(
-            repeater_id=cfg.dmr_id,
-            callsign=cfg.callsign,
-            password=cfg.bm_password,
-            master_host=cfg.bm_master_host,
-            master_port=cfg.bm_master_port,
-            ssid=cfg.bm_ssid,
-            duplex=cfg.duplex,
-            rx_freq=cfg.rx_freq,
-            tx_freq=cfg.tx_freq,
-            color_code=cfg.color_code,
-            network_type=getattr(cfg, "network_type", "bm") or "bm",
-            rpto_options=getattr(cfg, "rpto_options", "") or "",
-            xlx_module=getattr(cfg, "xlx_module", "D") or "D",
-            on_status_change=make_status_cb(cfg.id, user_id),
-            on_dmr_frame=make_frame_cb(cfg.id, user_id),
-        )
-        runtime.client = client
+            client = HomeBrewClient(
+                repeater_id=cfg.dmr_id,
+                callsign=cfg.callsign,
+                password=cfg.bm_password,
+                master_host=cfg.bm_master_host,
+                master_port=cfg.bm_master_port,
+                ssid=cfg.bm_ssid,
+                duplex=cfg.duplex,
+                rx_freq=cfg.rx_freq,
+                tx_freq=cfg.tx_freq,
+                color_code=cfg.color_code,
+                network_type=net_type,
+                rpto_options=getattr(cfg, "rpto_options", "") or "",
+                xlx_module=getattr(cfg, "xlx_module", "D") or "D",
+                on_status_change=make_status_cb(cfg.id, user_id),
+                on_dmr_frame=make_frame_cb(cfg.id, user_id),
+            )
+            runtime.client = client
 
         # Apply current AGC and vocoder settings from user_settings or self.settings.client_settings
         user_sett = self.user_settings.get(user_id, self.settings)
@@ -880,10 +972,24 @@ class HotspotManager:
         logger.info(f"[MANAGER] Starting HotspotManager with {total_instances} instances across {len(self.user_runtimes)} users...")
         self.timeout_watcher_task = asyncio.create_task(self._slot_timeout_loop())
 
-        # Autoconnect configured instances (only if not collapsed) across all user runtimes
+        # Ensure ASL core containers are started for allstar_always_online=True hotspots
         for uid, hs_dict in self.user_runtimes.items():
             for hid, rt in hs_dict.items():
-                if rt.config.autoconnect and not getattr(rt.config, "collapsed", False) and rt.config.dmr_id > 0 and rt.config.bm_password:
+                if (getattr(rt.config, "network_type", "") or "").lower() == "allstar" and bool(getattr(rt.config, "allstar_always_online", True)):
+                    try:
+                        from asl_container_manager import asl_container_mgr
+                        callsign = getattr(rt.config, "callsign", "N0CALL")
+                        password = getattr(rt.config, "bm_password", "")
+                        node_str = str(getattr(rt.config, "allstar_node", "1999") or "1999").strip()
+                        loop = asyncio.get_running_loop()
+                        loop.run_in_executor(None, asl_container_mgr.start_instance, str(uid), node_str, password, callsign)
+                    except Exception as e:
+                        logger.warning(f"[MANAGER] Error ensuring ASL container started on startup: {e}")
+
+        # Autoconnect configured instances (only if not collapsed and not hidden) across all user runtimes
+        for uid, hs_dict in self.user_runtimes.items():
+            for hid, rt in hs_dict.items():
+                if not getattr(rt.config, "collapsed", False) and not getattr(rt.config, "hidden", False) and (getattr(rt.config, "network_type", "bm") == "allstar" or (rt.config.dmr_id > 0 and rt.config.bm_password)):
                     logger.info(f"[MANAGER] Autoconnecting hotspot '{rt.config.name}' (ID {hid}, user {uid})...")
                     asyncio.create_task(rt.client.connect())
                     await asyncio.sleep(0.5)
@@ -903,7 +1009,13 @@ class HotspotManager:
             self._save_calls_history(uid)
             for hid, rt in self.user_runtimes[uid].items():
                 if rt.client:
-                    await rt.client.disconnect()
+                    try:
+                        if hasattr(rt.client, "disconnect"):
+                            await rt.client.disconnect(force_stop_container=True)
+                        else:
+                            await rt.client.disconnect()
+                    except TypeError:
+                        await rt.client.disconnect()
                 # Explicitly release C-allocated vocoder memory
                 if hasattr(rt, "vocoder") and hasattr(rt.vocoder, "close"):
                     try:
@@ -1052,7 +1164,7 @@ class HotspotManager:
                 await rt.client.disconnect()
         else:
             logger.info(f"[MANAGER] Hotspot '{rt.config.name}' (ID {hotspot_id}, user {uid}) expanded -> connecting BM...")
-            if rt.client and rt.config.autoconnect and not rt.client.is_connected:
+            if rt.client and not rt.client.is_connected:
                 asyncio.create_task(rt.client.connect())
         return True
 
@@ -1236,6 +1348,31 @@ class HotspotManager:
 
         old_rt = hs_map[cfg.id]
         was_connected = (old_rt.status in (BMState.ONLINE, BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING))
+
+        old_net = (getattr(old_rt.config, "network_type", "") or "").lower()
+        new_net = (getattr(cfg, "network_type", "") or "").lower()
+        old_node = str(getattr(old_rt.config, "allstar_node", "1999") or "1999").strip()
+        new_node = str(getattr(cfg, "allstar_node", "1999") or "1999").strip()
+        old_always_online = bool(getattr(old_rt.config, "allstar_always_online", True))
+        new_always_online = bool(getattr(cfg, "allstar_always_online", True))
+
+        if old_net == "allstar" and old_node != new_node:
+            try:
+                from asl_container_manager import asl_container_mgr
+                asl_container_mgr.delete_instance(user_id=str(uid), node_number=old_node)
+            except Exception as e:
+                logger.warning(f"[MANAGER] Error deleting old ASL container for {old_node}: {e}")
+
+        is_hidden = getattr(cfg, "hidden", False)
+        is_collapsed = getattr(cfg, "collapsed", False)
+        should_connect = False if (is_hidden or is_collapsed) else (auto_connect if auto_connect is not None else was_connected)
+        if old_net == "allstar" and old_always_online and not new_always_online and not should_connect:
+            try:
+                from asl_container_manager import asl_container_mgr
+                asl_container_mgr.stop_instance(user_id=str(uid), node_number=new_node)
+            except Exception as e:
+                logger.warning(f"[MANAGER] Error stopping ASL container after always_online turned off: {e}")
+
         if old_rt.client:
             try:
                 await old_rt.client.disconnect(is_retry=False)
@@ -1262,9 +1399,22 @@ class HotspotManager:
             rt.client._is_manual_disconnect = False
         self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
 
+        if new_net == "allstar" and new_always_online:
+            try:
+                from asl_container_manager import asl_container_mgr
+                callsign = getattr(cfg, "callsign", "N0CALL")
+                password = getattr(cfg, "bm_password", "")
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, asl_container_mgr.start_instance, str(uid), new_node, password, callsign)
+            except Exception as e:
+                logger.warning(f"[MANAGER] Error ensuring ASL container started on update: {e}")
+
         # Connect if auto_connect is True, or if previously active, or if autoconnect is configured
-        should_connect = auto_connect if auto_connect is not None else (was_connected or cfg.autoconnect)
-        if should_connect and rt.client and cfg.dmr_id > 0 and cfg.bm_password:
+        # But NEVER connect if hotspot is hidden!
+        is_hidden = getattr(cfg, "hidden", False)
+        is_collapsed = getattr(cfg, "collapsed", False)
+        should_connect = False if (is_hidden or is_collapsed) else (auto_connect if auto_connect is not None else was_connected)
+        if should_connect and rt.client and (getattr(cfg, "network_type", "bm") == "allstar" or (cfg.dmr_id > 0 and cfg.bm_password)):
             logger.info(f"[MANAGER] Reconnecting hotspot '{cfg.name}' (ID {cfg.id}, user {uid}) to {cfg.bm_master_host}...")
             async def _delayed_connect(target_rt, wait_sec: float):
                 if wait_sec > 0:
@@ -1293,6 +1443,15 @@ class HotspotManager:
         rt = hs_map[hotspot_id]
         if rt.client:
             await rt.client.disconnect()
+
+        # If AllStarLink node, purge container instance and allocated ports
+        if (getattr(rt.config, "network_type", "") or "").lower() == "allstar":
+            try:
+                from asl_container_manager import asl_container_mgr
+                node_to_purge = str(getattr(rt.config, "allstar_node", "") or "1999").strip()
+                asl_container_mgr.delete_instance(user_id=str(uid), node_number=node_to_purge)
+            except Exception as e:
+                logger.warning(f"[MANAGER] Error deleting ASL container for {hotspot_id}: {e}")
 
         del hs_map[hotspot_id]
         settings = self.user_settings.get(uid, self.settings)
@@ -1619,7 +1778,7 @@ class HotspotManager:
                     rt.equalizer.reset_slot(frame.slot)
                 if hid == user_sett.active_hotspot_id:
                     self.ta_decoder.reset_slot(frame.slot)
-                self._notify_async({
+                self._notify_call_ended(uid, rt, frame.slot, {
                     "type": "dmr_activity",
                     "hotspot_id": hid,
                     "slot": frame.slot,
@@ -1628,7 +1787,7 @@ class HotspotManager:
                     "duration": round(duration, 1),
                     "discard": (duration < 0.5),
                     "user_id": uid,
-                }, user_id=uid)
+                })
             return
 
         was_active = slot_state.active
@@ -1797,7 +1956,7 @@ class HotspotManager:
 
                 hid_bytes = hid.encode("utf-8")
                 tagged_audio = bytes([frame.slot, len(hid_bytes)]) + hid_bytes + pcm_bytes
-                self._broadcast_audio_async(tagged_audio, user_id=uid)
+                self._enqueue_or_send_rx_audio(uid, rt, frame.slot, tagged_audio)
 
                 # FreeDMR beacon / dial-a-tg filter (Step 6.5): ignore All Call 16777215 and TG 5000 from auto-record/AI
                 is_freedmr_beacon = (
@@ -1894,6 +2053,11 @@ class HotspotManager:
                     user_sett = self.user_settings.get(uid, self.settings)
 
                     for hid, rt in hs_dict.items():
+                        net_type = (getattr(rt.config, "network_type", "bm") or "bm").lower()
+                        if net_type == "allstar":
+                            # AllStarLink manages carrier lifecycle via its own IAX2 watchdog & _on_asl_carrier_change.
+                            # Do NOT let the 2.5s DMR burst timeout kill active AllStar calls!
+                            continue
                         if rt._active_rx_slot and (now - rt._last_rx_burst_time > 1.0):
                             rt._active_rx_slot = None
                         for slot_num, st in [(1, rt.ts1), (2, rt.ts2)]:
@@ -1926,7 +2090,7 @@ class HotspotManager:
                                     rt.equalizer.reset_slot(slot_num)
                                 if hid == user_sett.active_hotspot_id:
                                     self.ta_decoder.reset_slot(slot_num)
-                                self._notify_async({
+                                self._notify_call_ended(uid, rt, slot_num, {
                                     "type": "dmr_activity",
                                     "hotspot_id": hid,
                                     "slot": slot_num,
@@ -1935,16 +2099,130 @@ class HotspotManager:
                                     "duration": round(duration, 1),
                                     "discard": (duration < 0.5),
                                     "user_id": uid,
-                                }, user_id=uid)
+                                })
             except Exception as e:
                 logger.error(f"[MANAGER] Unexpected exception in slot timeout loop: {e}", exc_info=True)
+
+
+    def set_backend_buffer_ms(self, buffer_ms: int, user_id: Optional[int] = None) -> int:
+        val = max(0, min(2000, int(buffer_ms) if buffer_ms is not None else 0))
+        target_runtimes = list(self.get_user_runtimes(user_id).values()) if user_id is not None else [
+            rt for hs_map in self.user_runtimes.values() for rt in hs_map.values()
+        ]
+        for rt in target_runtimes:
+            rt.backend_buffer_ms = val
+        return val
+
+    def _enqueue_or_send_rx_audio(self, user_id: int, rt: HotspotRuntime, slot: int, tagged_audio: bytes):
+        if getattr(rt, "backend_buffer_ms", 0) <= 0:
+            self._broadcast_audio_async(tagged_audio, user_id=user_id)
+            return
+
+        if not hasattr(rt, "_rx_pacer_queues"):
+            rt._rx_pacer_queues = {1: collections.deque(maxlen=100), 2: collections.deque(maxlen=100)}
+            rt._rx_pacer_tasks = {1: None, 2: None}
+            rt._rx_pacer_draining = {1: False, 2: False}
+            rt._rx_pacer_EndCallbacks = {1: [], 2: []}
+
+        q = rt._rx_pacer_queues.get(slot)
+        if q is None:
+            q = collections.deque(maxlen=100)
+            rt._rx_pacer_queues[slot] = q
+
+        q.append(tagged_audio)
+        pacer_task = rt._rx_pacer_tasks.get(slot)
+        if pacer_task is None or pacer_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+                rt._rx_pacer_tasks[slot] = loop.create_task(
+                    self._run_slot_rx_pacer(user_id, rt, slot)
+                )
+            except RuntimeError:
+                self._broadcast_audio_async(tagged_audio, user_id=user_id)
+
+    async def _run_slot_rx_pacer(self, user_id: int, rt: HotspotRuntime, slot: int):
+        q = rt._rx_pacer_queues[slot]
+        target_ms = getattr(rt, "backend_buffer_ms", 0)
+        wait_start = time.monotonic()
+        while len(q) * 60 < target_ms and not rt._rx_pacer_draining.get(slot, False):
+            if time.monotonic() - wait_start > 0.350:
+                break
+            await asyncio.sleep(0.015)
+
+        next_tick = time.monotonic()
+        last_pkt_time = time.monotonic()
+        try:
+            while True:
+                if not q:
+                    if rt._rx_pacer_draining.get(slot, False) or (time.monotonic() - last_pkt_time > 0.400):
+                        break
+                    await asyncio.sleep(0.010)
+                    # Keep next_tick anchored to monotonic clock when queue was dry
+                    # so incoming packets are paced at 60ms instead of bursting at 0ms
+                    now_m = time.monotonic()
+                    if next_tick < now_m:
+                        next_tick = now_m
+                    continue
+
+                chunk = q.popleft()
+                now_m = time.monotonic()
+                last_pkt_time = now_m
+                self._broadcast_audio_async(chunk, user_id=user_id)
+                if next_tick < now_m - 0.030:
+                    next_tick = now_m + 0.060
+                else:
+                    next_tick += 0.060
+                sleep_sec = next_tick - time.monotonic()
+                if sleep_sec > 0.002:
+                    await asyncio.sleep(sleep_sec)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[PACER] Error in slot {slot} pacer: {e}")
+        finally:
+            callbacks = list(rt._rx_pacer_EndCallbacks.get(slot, []))
+            rt._rx_pacer_EndCallbacks[slot].clear()
+            rt._rx_pacer_draining[slot] = False
+            for cb in callbacks:
+                try:
+                    cb()
+                except Exception as e:
+                    logger.debug(f"[PACER] Callback error: {e}")
+
+    def _notify_call_ended(self, uid: int, rt: HotspotRuntime, slot: int, payload: dict, extra_cb: Optional[Callable] = None):
+        if (
+            getattr(rt, "backend_buffer_ms", 0) > 0
+            and hasattr(rt, "_rx_pacer_queues")
+            and rt._rx_pacer_queues.get(slot)
+            and len(rt._rx_pacer_queues[slot]) > 0
+        ):
+            rt._rx_pacer_draining[slot] = True
+            def _drain_and_fire():
+                self._notify_async(payload, user_id=uid)
+                if extra_cb:
+                    try:
+                        extra_cb()
+                    except Exception as e:
+                        logger.debug(f"[PACER] extra_cb error: {e}")
+            rt._rx_pacer_EndCallbacks[slot].append(_drain_and_fire)
+        else:
+            self._notify_async(payload, user_id=uid)
+            if extra_cb:
+                try:
+                    extra_cb()
+                except Exception as e:
+                    logger.debug(f"[PACER] extra_cb error: {e}")
 
     def _broadcast_audio_async(self, pcm_bytes: bytes, user_id: Optional[int] = None):
         if self.audio_broadcast_fn:
             try:
-                self._spawn_task(self.audio_broadcast_fn(pcm_bytes, user_id=user_id))
+                res = self.audio_broadcast_fn(pcm_bytes, user_id=user_id)
+                if asyncio.iscoroutine(res):
+                    self._spawn_task(res)
             except TypeError:
-                self._spawn_task(self.audio_broadcast_fn(pcm_bytes))
+                res = self.audio_broadcast_fn(pcm_bytes)
+                if asyncio.iscoroutine(res):
+                    self._spawn_task(res)
 
     def _notify_async(self, data: dict, user_id: Optional[int] = None):
         if user_id is not None and "user_id" not in data:
@@ -2039,6 +2317,13 @@ class HotspotManager:
             elif dst_id == 0:
                 dst_id = 9
 
+        # AllStarLink: signal start of PTT transmission via AllStarClientAdapter
+        if rt and getattr(rt.config, "network_type", "bm") == "allstar":
+            if rt.client and hasattr(rt.client, "start_ptt"):
+                rt.client.start_ptt()
+            elif hasattr(rt, "allstar_client") and rt.allstar_client:
+                rt.allstar_client.start_ptt()
+
         tx_st.active = True
         tx_st.is_releasing = False
         tx_st.hotspot_id = effective_hid
@@ -2111,6 +2396,7 @@ class HotspotManager:
                 user_id=uid,
                 auto_record=auto_rec,
             )
+        is_allstar = rt and getattr(rt.config, "network_type", "bm") == "allstar"
         tx_call = CallLogEntry(
             id=tx_call_id,
             timestamp=tx_st.start_time,
@@ -2121,9 +2407,12 @@ class HotspotManager:
             src_name=src_name,
             talker_alias=talker_alias,
             dst_id=dst_id,
+            dst_name=f"Node {dst_id}" if is_allstar else f"TG {dst_id}",
             call_type=tx_st.call_type,
             active=True,
             is_tx=True,
+            network_type="allstar" if is_allstar else getattr(rt.config, "network_type", "bm"),
+            source_type="VoIP" if is_allstar else "RF",
         )
         active_calls[f"tx_{effective_hid}_{slot}"] = tx_call
         call_history.insert(0, tx_call)
@@ -2144,6 +2433,8 @@ class HotspotManager:
             "active": True,
             "is_tx": True,
             "call_entry": tx_call.to_dict(),
+            "network_type": "allstar" if is_allstar else getattr(rt.config, "network_type", "bm"),
+            "source_type": "VoIP" if is_allstar else "RF",
             "user_id": uid,
         }, user_id=uid)
 
@@ -2196,6 +2487,19 @@ class HotspotManager:
             return
 
         tx_st.audio_buffer.extend(pcm_bytes)
+
+        if rt and getattr(rt.config, "network_type", "bm") == "allstar":
+            # AllStarLink uses 20ms chunks (320 bytes PCM16 @ 8000Hz)
+            while len(tx_st.audio_buffer) >= 320:
+                chunk = bytes(tx_st.audio_buffer[:320])
+                del tx_st.audio_buffer[:320]
+                if hasattr(rt, "tx_dsp") and rt.tx_dsp:
+                    chunk = rt.tx_dsp.process_burst(chunk)
+                if rt.client and hasattr(rt.client, "send_tx_audio_chunk"):
+                    rt.client.send_tx_audio_chunk(chunk)
+                elif hasattr(rt, "allstar_client") and rt.allstar_client:
+                    rt.allstar_client.send_tx_audio_chunk(chunk)
+            return
 
         # 960 bytes PCM = 480 samples @ 8000 Hz = 60 ms
         while len(tx_st.audio_buffer) >= 960:
@@ -2258,7 +2562,21 @@ class HotspotManager:
         rt = self.get_runtime(uid, hid) if hid else None
         slot = tx_st.slot
 
-        if rt and rt.client and rt.status == BMState.ONLINE:
+        # AllStarLink: flush remaining 20ms chunks and stop PTT via AllStarClientAdapter
+        if rt and getattr(rt.config, "network_type", "bm") == "allstar":
+            asl_target = rt.client if (rt.client and hasattr(rt.client, "stop_ptt")) else getattr(rt, "allstar_client", None)
+            if asl_target:
+                while len(tx_st.audio_buffer) >= 320:
+                    chunk = bytes(tx_st.audio_buffer[:320])
+                    del tx_st.audio_buffer[:320]
+                    if hasattr(rt, "tx_dsp") and rt.tx_dsp:
+                        chunk = rt.tx_dsp.process_burst(chunk)
+                    if hasattr(asl_target, "send_tx_audio_chunk"):
+                        asl_target.send_tx_audio_chunk(chunk)
+                asl_target.stop_ptt()
+            tx_st.audio_buffer.clear()
+
+        if rt and rt.client and rt.status == BMState.ONLINE and getattr(rt.config, "network_type", "bm") != "allstar":
             try:
                 src_id = rt.config.dmr_id
                 if getattr(rt.config, "network_type", "bm") == "xlx":
@@ -2412,6 +2730,7 @@ class HotspotManager:
         if hasattr(self, "recorder") and self.recorder:
             self.recorder.stop_tx(call_id=tx_call_finish_id)
 
+        is_allstar_tx = rt and getattr(rt.config, "network_type", "bm") == "allstar"
         self._notify_async({
             "type": "dmr_activity",
             "hotspot_id": hid,
@@ -2420,6 +2739,8 @@ class HotspotManager:
             "is_tx": True,
             "call_id": tx_call_finish_id,
             "duration": round(duration, 1),
+            "network_type": "allstar" if is_allstar_tx else getattr(rt.config, "network_type", "bm"),
+            "source_type": "VoIP" if is_allstar_tx else "RF",
             "user_id": uid,
         }, user_id=uid)
         tx_st.call_id = None
