@@ -48,15 +48,15 @@ import { showToast } from '../core/toast.js';
       document.documentElement.classList.remove("theme-light");
     }
 
-    const btn = document.getElementById("themeToggleBtn");
-    if (btn) {
+    const btns = document.querySelectorAll("#themeToggleBtn, .theme-toggle-btn");
+    btns.forEach(btn => {
       const moon = btn.querySelector(".icon-moon");
       const sun = btn.querySelector(".icon-sun");
       if (moon && sun) {
         moon.style.display = (theme === "light") ? "none" : "block";
         sun.style.display = (theme === "light") ? "block" : "none";
       }
-    }
+    });
   }
 
   function setTheme(theme, showNotification = false) {
@@ -105,30 +105,59 @@ import { showToast } from '../core/toast.js';
     setTheme(nextTheme, true);
   }
 
+  function wireThemeToggleButton(btn) {
+    if (!btn || btn._themeToggleWired) return;
+    btn._themeToggleWired = true;
+
+    btn.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+    });
+    btn.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+    });
+    btn.addEventListener("click", (e) => {
+      if (e._themeToggleHandled) return;
+      e._themeToggleHandled = true;
+      e.preventDefault();
+      e.stopPropagation();
+      if (navigator.vibrate) {
+        try { navigator.vibrate(35); } catch (err) {}
+      }
+      toggleTheme();
+    });
+  }
+
   function initTheme() {
     // Synchronize UI with saved theme immediately
     applyThemeUI(currentTheme);
 
     const themeBtns = document.querySelectorAll(".theme-toggle-btn, #themeToggleBtn");
-    themeBtns.forEach(btn => {
-      // Prevent collapse/expand or other bubbling to parent hotspot card
-      btn.addEventListener("pointerdown", (e) => {
-        e.stopPropagation();
-      });
-      btn.addEventListener("mousedown", (e) => {
-        e.stopPropagation();
-      });
+    themeBtns.forEach(btn => wireThemeToggleButton(btn));
 
-      // Handle short tap/click to toggle Day / Night theme
-      btn.addEventListener("click", (e) => {
+    if (!window._themeDelegationWired) {
+      window._themeDelegationWired = true;
+      document.addEventListener("pointerdown", (e) => {
+        if (e.target && e.target.closest && e.target.closest("#themeToggleBtn, .theme-toggle-btn")) {
+          e.stopPropagation();
+        }
+      });
+      document.addEventListener("mousedown", (e) => {
+        if (e.target && e.target.closest && e.target.closest("#themeToggleBtn, .theme-toggle-btn")) {
+          e.stopPropagation();
+        }
+      });
+      document.addEventListener("click", (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest("#themeToggleBtn, .theme-toggle-btn") : null;
+        if (!btn || e._themeToggleHandled) return;
+        e._themeToggleHandled = true;
         e.preventDefault();
         e.stopPropagation();
         if (navigator.vibrate) {
-          try { navigator.vibrate(35); } catch(err) {}
+          try { navigator.vibrate(35); } catch (err) {}
         }
         toggleTheme();
       });
-    });
+    }
   }
 
   // --- Background Wallpaper / Color Customization Subsystem ---
@@ -619,6 +648,8 @@ import { showToast } from '../core/toast.js';
   window.setTheme = setTheme;
   window.toggleTheme = toggleTheme;
   window.initTheme = initTheme;
+  window.applyThemeUI = applyThemeUI;
+  window.wireThemeToggleButton = wireThemeToggleButton;
   window.applyBackground = applyBackground;
   window.initBackgroundSettings = initBackgroundSettings;
   window.initBorderRadiusSettings = initBorderRadiusSettings;

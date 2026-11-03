@@ -1,5 +1,5 @@
 <!-- lang:en -->
-# ProxDMR v2.10 — Release Notes
+# ProxDMR v2.11 — Release Notes
 
 * AllStarLink (ASL3) — Added support for amateur radio repeater and node networks. Secure connection/switching to hubs and nodes. Node scanner.
 * Redesigned audio reception path and DSP.
@@ -8,7 +8,7 @@
 * Android APK updated to v1.33
 
 <!-- lang:ru -->
-# ProxDMR v2.10 — Список изменений
+# ProxDMR v2.11 — Список изменений
 
 * AllStarLink (ASL3) — добавлена поддержка радиолюбительских сетей репитеров и узлов. Защищенное подключение/переключение к хабам и нодам. Сканер нод.
 * Переработан тракт приема аудио и DSP.
@@ -17,7 +17,7 @@
 * Android APK обновлен до v1.33
 
 <!-- lang:uk -->
-# ProxDMR v2.10 — Список змін
+# ProxDMR v2.11 — Список змін
 
 * AllStarLink (ASL3) — додано підтримку радіоаматорських мереж репітерів та вузлів. Безпечне підключення/перемикання до хабів і нод. Сканер нод.
 * Перероблено тракт прийому аудіо та DSP.
@@ -26,7 +26,7 @@
 * Android APK оновлено до v1.33
 
 <!-- lang:de -->
-# ProxDMR v2.10 — Änderungsprotokoll
+# ProxDMR v2.11 — Änderungsprotokoll
 
 * AllStarLink (ASL3) — Unterstützung für Amateurfunk-Repeater- und Node-Netzwerke hinzugefügt. Sichere Verbindung/Umschaltung zu Hubs und Nodes. Node-Scanner.
 * Überarbeiteter Audioempfangspfad und DSP.
@@ -35,7 +35,7 @@
 * Android APK auf v1.33 aktualisiert
 
 <!-- lang:es -->
-# ProxDMR v2.10 — Registro de cambios
+# ProxDMR v2.11 — Registro de cambios
 
 * AllStarLink (ASL3) — Compatibilidad añadida para redes de repetidores y nodos de radioaficionados. Conexión/conmutación segura a hubs y nodos. Escáner de nodos.
 * Ruta de recepción de audio y DSP rediseñados.
@@ -44,7 +44,7 @@
 * Android APK actualizado a v1.33
 
 <!-- lang:fr -->
-# ProxDMR v2.10 — Notes de version
+# ProxDMR v2.11 — Notes de version
 
 * AllStarLink (ASL3) — Prise en charge ajoutée des réseaux de répéteurs et de nœuds radioamateurs. Connexion/basculement sécurisé vers les hubs et nœuds. Scanner de nœuds.
 * Voie de réception audio et DSP repensés.
@@ -53,7 +53,7 @@
 * Android APK mis à jour vers v1.33
 
 <!-- lang:it -->
-# ProxDMR v2.10 — Registro delle modifiche
+# ProxDMR v2.11 — Registro delle modifiche
 
 * AllStarLink (ASL3) — Aggiunto supporto per reti di ripetitori e nodi radioamatoriali. Connessione/commutazione sicura a hub e nodi. Scanner dei nodi.
 * Percorso di ricezione audio e DSP riprogettati.
@@ -62,7 +62,7 @@
 * Android APK aggiornato alla v1.33
 
 <!-- lang:nl -->
-# ProxDMR v2.10 — Wijzigingslogboek
+# ProxDMR v2.11 — Wijzigingslogboek
 
 * AllStarLink (ASL3) — Ondersteuning toegevoegd voor zendamateur repeater- en node-netwerken. Veilige verbinding/omschakeling naar hubs en nodes. Node-scanner.
 * Herontworpen audio-ontvangstpad en DSP.

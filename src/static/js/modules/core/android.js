@@ -7,6 +7,67 @@ import { initHapticSettingsUI } from './haptic.js';
  * and Android-specific header button modifications.
  */
 
+export function isProxDmrApkMode() {
+  return Boolean(
+    (typeof window !== "undefined" && window.AndroidBridge && (
+      typeof window.AndroidBridge.exitApp === "function" ||
+      typeof window.AndroidBridge.exitAppWithTexts === "function"
+    )) ||
+    (typeof document !== "undefined" && (
+      (document.body && document.body.classList.contains("is-apk-mode")) ||
+      (document.documentElement && document.documentElement.classList.contains("is-apk-mode"))
+    ))
+  );
+}
+
+export function requestAndroidExit() {
+  try {
+    if (typeof disableAllTranscribe === "function") {
+      disableAllTranscribe(true);
+    }
+    try {
+      navigator.sendBeacon("/api/transcriber/disable_all");
+    } catch (_) {
+      fetch("/api/transcriber/disable_all", { method: "POST", keepalive: true }).catch(() => {});
+    }
+    if (window.AndroidBridge && typeof window.AndroidBridge.vibrate === "function") {
+      window.AndroidBridge.vibrate(40);
+    }
+    if (window.AndroidBridge) {
+      if (typeof window.AndroidBridge.exitAppWithTexts === "function") {
+        const title = typeof window.t === "function" ? window.t("apk.exit_dialog_title", {}, "Выход из ProxDMR") : "Выход из ProxDMR";
+        const msg = typeof window.t === "function" ? window.t("apk.exit_dialog_msg", {}, "Вы уверены, что хотите полностью закрыть программу?") : "Вы уверены, что хотите полностью закрыть программу?";
+        const tsMsg = typeof window.t === "function" ? window.t("apk.exit_dialog_ts_msg", {}, "Tailscale VPN будет отключен.") : "Tailscale VPN будет отключен.";
+        const btnExit = typeof window.t === "function" ? window.t("apk.exit_dialog_btn_exit", {}, "Выйти") : "Выйти";
+        const btnCancel = typeof window.t === "function" ? window.t("apk.exit_dialog_btn_cancel", {}, "Отмена") : "Отмена";
+        window.AndroidBridge.exitAppWithTexts(title, msg, tsMsg, btnExit, btnCancel);
+      } else if (typeof window.AndroidBridge.exitApp === "function") {
+        window.AndroidBridge.exitApp();
+      }
+    }
+  } catch (err) {
+    console.error("[EXIT] Error calling exitApp:", err);
+  }
+}
+
+export function wireAndroidExitButton(btn) {
+  if (!btn || btn._androidExitWired) return;
+  btn._androidExitWired = true;
+  btn.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+  });
+  btn.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+  });
+  btn.addEventListener("click", (e) => {
+    if (e._androidExitHandled) return;
+    e._androidExitHandled = true;
+    e.preventDefault();
+    e.stopPropagation();
+    requestAndroidExit();
+  });
+}
+
 export function initAndroidBridge() {
   initHapticSettingsUI();
   const frame = document.getElementById("androidSettingsBlock");
@@ -18,10 +79,7 @@ export function initAndroidBridge() {
     });
   }
 
-  const isApk = Boolean(
-    (window.AndroidBridge && typeof window.AndroidBridge.exitApp === "function") ||
-    (typeof document !== "undefined" && document.body && document.body.classList.contains("is-apk-mode"))
-  );
+  const isApk = isProxDmrApkMode();
 
   if (isApk) {
     if (frame) frame.style.display = "block";
@@ -67,35 +125,7 @@ export function initAndroidBridge() {
       console.warn("Failed to load Tailscale settings:", e);
     }
 
-    function requestAndroidExit() {
-      try {
-        if (typeof disableAllTranscribe === "function") {
-          disableAllTranscribe(true);
-        }
-        try {
-          navigator.sendBeacon("/api/transcriber/disable_all");
-        } catch (_) {
-          fetch("/api/transcriber/disable_all", { method: "POST", keepalive: true }).catch(() => {});
-        }
-        if (window.AndroidBridge && typeof window.AndroidBridge.vibrate === "function") {
-          window.AndroidBridge.vibrate(40);
-        }
-        if (window.AndroidBridge) {
-          if (typeof window.AndroidBridge.exitAppWithTexts === "function") {
-            const title = typeof window.t === "function" ? window.t("apk.exit_dialog_title", {}, "Выход из ProxDMR") : "Выход из ProxDMR";
-            const msg = typeof window.t === "function" ? window.t("apk.exit_dialog_msg", {}, "Вы уверены, что хотите полностью закрыть программу?") : "Вы уверены, что хотите полностью закрыть программу?";
-            const tsMsg = typeof window.t === "function" ? window.t("apk.exit_dialog_ts_msg", {}, "Tailscale VPN будет отключен.") : "Tailscale VPN будет отключен.";
-            const btnExit = typeof window.t === "function" ? window.t("apk.exit_dialog_btn_exit", {}, "Выйти") : "Выйти";
-            const btnCancel = typeof window.t === "function" ? window.t("apk.exit_dialog_btn_cancel", {}, "Отмена") : "Отмена";
-            window.AndroidBridge.exitAppWithTexts(title, msg, tsMsg, btnExit, btnCancel);
-          } else if (typeof window.AndroidBridge.exitApp === "function") {
-            window.AndroidBridge.exitApp();
-          }
-        }
-      } catch (err) {
-        console.error("[EXIT] Error calling exitApp:", err);
-      }
-    }
+
 
     // Full exit button in settings
     const authServerSettingsRow = document.getElementById("authServerSettingsRow");
@@ -125,6 +155,9 @@ export function initAndroidBridge() {
     }
 
     document.body.classList.add("is-apk-mode");
+    if (document.documentElement) {
+      document.documentElement.classList.add("is-apk-mode");
+    }
 
     try {
       if (window.AndroidBridge && typeof window.AndroidBridge.setAppLanguage === "function") {
@@ -167,7 +200,25 @@ export function initAndroidBridge() {
       // Remove old fullscreen click handler by cloning
       const newBtn = mainExitBtn.cloneNode(true);
       mainExitBtn.parentNode.replaceChild(newBtn, mainExitBtn);
-      newBtn.addEventListener("click", (e) => {
+      wireAndroidExitButton(newBtn);
+    }
+
+    if (!window._androidExitDelegationWired) {
+      window._androidExitDelegationWired = true;
+      document.addEventListener("pointerdown", (e) => {
+        if (e.target && e.target.closest && e.target.closest(".android-exit-btn")) {
+          e.stopPropagation();
+        }
+      });
+      document.addEventListener("mousedown", (e) => {
+        if (e.target && e.target.closest && e.target.closest(".android-exit-btn")) {
+          e.stopPropagation();
+        }
+      });
+      document.addEventListener("click", (e) => {
+        const exitBtn = e.target && e.target.closest ? e.target.closest(".android-exit-btn") : null;
+        if (!exitBtn || e._androidExitHandled) return;
+        e._androidExitHandled = true;
         e.preventDefault();
         e.stopPropagation();
         requestAndroidExit();
@@ -202,6 +253,10 @@ export function initAndroidBridge() {
 // Window & __proxdmr bridge for backward compatibility
 if (typeof window !== "undefined") {
   window.initAndroidBridge = initAndroidBridge;
+  window.isProxDmrApkMode = isProxDmrApkMode;
+  window.requestAndroidExit = requestAndroidExit;
+  window.wireAndroidExitButton = wireAndroidExitButton;
   window.__proxdmr = window.__proxdmr || {};
   window.__proxdmr.initAndroidBridge = initAndroidBridge;
+  window.__proxdmr.requestAndroidExit = requestAndroidExit;
 }

@@ -82,6 +82,18 @@ document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 document.addEventListener("mozfullscreenchange", handleFullscreenChange);
 document.addEventListener("MSFullscreenChange", handleFullscreenChange);
 
+document.addEventListener("pointerdown", (e) => {
+  if (e.target && e.target.closest && e.target.closest(".fullscreen-toggle-btn")) {
+    e.stopPropagation();
+  }
+});
+
+document.addEventListener("mousedown", (e) => {
+  if (e.target && e.target.closest && e.target.closest(".fullscreen-toggle-btn")) {
+    e.stopPropagation();
+  }
+});
+
 document.addEventListener("click", (e) => {
   const btn = e.target.closest(".fullscreen-toggle-btn");
   if (btn) {

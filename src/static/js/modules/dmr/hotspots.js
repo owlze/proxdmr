@@ -152,12 +152,14 @@ try {
 
   // --- Hotspots Management ---
   var _firstHotspotsLoad = true;
+  var _hotspotsLoadedOnce = false;
 export async function loadHotspots() {
     try {
       const res = await fetch("/api/hotspots");
       const data = await res.json();
       const rawHotspots = data.hotspots || [];
       setCurrentHotspots(rawHotspots);
+      _hotspotsLoadedOnce = true;
       const curHs = currentHotspots;
       const targetActive = data.active_hotspot_id || (curHs[0] && curHs[0].id) || "default";
       setActiveHotspotId(targetActive);
@@ -4476,6 +4478,148 @@ export function updateCardAllStarPanel(card, hs) {
 }
 
 
+export function ensurePrimaryHotspotHeaderButtons(card, isPrimary) {
+    if (!card) return;
+    const headerBrandRow = card.querySelector(".header-brand-row");
+    if (!headerBrandRow) return;
+
+    const isApk = (typeof window.isProxDmrApkMode === "function")
+      ? window.isProxDmrApkMode()
+      : Boolean(
+          (window.AndroidBridge && (
+            typeof window.AndroidBridge.exitApp === "function" ||
+            typeof window.AndroidBridge.exitAppWithTexts === "function"
+          )) ||
+          (document.body && document.body.classList.contains("is-apk-mode")) ||
+          (document.documentElement && document.documentElement.classList.contains("is-apk-mode"))
+        );
+
+    if (!isPrimary) {
+      if (card.id === "radioContainer") {
+        card.removeAttribute("id");
+      }
+      headerBrandRow.querySelectorAll("#themeToggleBtn, .theme-toggle-btn, .fullscreen-toggle-btn, .android-exit-btn").forEach(el => el.remove());
+      return;
+    }
+
+    // 1st hotspot is permanently riveted as #radioContainer & never deletable
+    card.id = "radioContainer";
+    headerBrandRow.querySelectorAll(".hotspot-delete-btn").forEach(el => el.remove());
+
+    // Rivet #1: Color Theme Toggle Button (#themeToggleBtn)
+    const allThemeBtns = Array.from(headerBrandRow.querySelectorAll("#themeToggleBtn, .theme-toggle-btn"));
+    let themeBtn = allThemeBtns[0] || null;
+    if (allThemeBtns.length > 1) {
+      allThemeBtns.slice(1).forEach(el => el.remove());
+    }
+    if (!themeBtn) {
+      themeBtn = document.createElement("button");
+      themeBtn.type = "button";
+      themeBtn.id = "themeToggleBtn";
+      themeBtn.className = "theme-toggle-btn";
+      themeBtn.setAttribute("data-i18n-title", "theme.toggle_title");
+      themeBtn.setAttribute("data-i18n-aria-label", "theme.toggle_title");
+      themeBtn.innerHTML = `
+        <svg class="theme-icon icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+        <svg class="theme-icon icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+      `;
+      const brandTitle = headerBrandRow.querySelector(".brand-title");
+      if (brandTitle && brandTitle.nextSibling) {
+        headerBrandRow.insertBefore(themeBtn, brandTitle.nextSibling);
+      } else {
+        headerBrandRow.appendChild(themeBtn);
+      }
+    }
+    themeBtn.id = "themeToggleBtn";
+    themeBtn.classList.add("theme-toggle-btn");
+    themeBtn.style.removeProperty("display");
+    const themeTitle = (typeof window.t === "function")
+      ? window.t("theme.toggle_title", {}, "Смена темы: День / Ночь (нажмите для переключения)")
+      : "Смена темы: День / Ночь (нажмите для переключения)";
+    themeBtn.title = themeTitle;
+    themeBtn.setAttribute("aria-label", themeTitle);
+    if (typeof window.wireThemeToggleButton === "function") {
+      window.wireThemeToggleButton(themeBtn);
+    }
+    if (typeof window.applyThemeUI === "function") {
+      const activeTheme = (typeof window.getTheme === "function") ? window.getTheme() : (document.documentElement.getAttribute("data-theme") || "dark");
+      window.applyThemeUI(activeTheme);
+    }
+
+    // Rivet #2: Rightmost Close Button (APK) or Fullscreen Toggle Button (Web)
+    if (isApk) {
+      if (document.body) document.body.classList.add("is-apk-mode");
+      if (document.documentElement) document.documentElement.classList.add("is-apk-mode");
+      headerBrandRow.querySelectorAll(".fullscreen-toggle-btn:not(.android-exit-btn)").forEach(el => el.remove());
+
+      const allExitBtns = Array.from(headerBrandRow.querySelectorAll(".android-exit-btn"));
+      let exitBtn = allExitBtns[0] || null;
+      if (allExitBtns.length > 1) {
+        allExitBtns.slice(1).forEach(el => el.remove());
+      }
+      if (!exitBtn) {
+        exitBtn = document.createElement("button");
+        exitBtn.type = "button";
+        exitBtn.className = "fullscreen-toggle-btn android-exit-btn";
+        exitBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+        headerBrandRow.appendChild(exitBtn);
+      } else if (headerBrandRow.lastElementChild !== exitBtn) {
+        headerBrandRow.appendChild(exitBtn);
+      }
+      exitBtn.classList.add("fullscreen-toggle-btn", "android-exit-btn");
+      exitBtn.style.removeProperty("display");
+      const exitTitle = (typeof window.t === "function")
+        ? window.t("app.quit_title", {}, "Полный выход из приложения")
+        : "Полный выход из приложения";
+      exitBtn.title = exitTitle;
+      exitBtn.setAttribute("aria-label", exitTitle);
+      if (typeof window.wireAndroidExitButton === "function") {
+        window.wireAndroidExitButton(exitBtn);
+      }
+    } else {
+      headerBrandRow.querySelectorAll(".android-exit-btn").forEach(el => el.remove());
+      const allFsBtns = Array.from(headerBrandRow.querySelectorAll(".fullscreen-toggle-btn:not(.android-exit-btn)"));
+      let fsBtn = allFsBtns[0] || null;
+      if (allFsBtns.length > 1) {
+        allFsBtns.slice(1).forEach(el => el.remove());
+      }
+      if (!fsBtn) {
+        fsBtn = document.createElement("button");
+        fsBtn.type = "button";
+        fsBtn.className = "fullscreen-toggle-btn";
+        fsBtn.setAttribute("data-i18n-title", "vfo.fullscreen_enter_title");
+        fsBtn.setAttribute("data-i18n-aria-label", "vfo.fullscreen_enter_title");
+        fsBtn.innerHTML = `
+          <svg class="fullscreen-icon enter" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+          <svg class="fullscreen-icon exit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+            <path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M10 4v6m0 0H4m6 0L3 3m10 7h6m-6 0V4m0 6l7-7"/>
+          </svg>
+        `;
+        headerBrandRow.appendChild(fsBtn);
+      } else if (headerBrandRow.lastElementChild !== fsBtn) {
+        headerBrandRow.appendChild(fsBtn);
+      }
+      fsBtn.style.removeProperty("display");
+      if (typeof window.updateFullscreenButtonsUI === "function") {
+        window.updateFullscreenButtonsUI();
+      }
+    }
+}
+
 export function renderRadiosGrid() {
     const radiosGrid = document.getElementById("radiosGrid");
     if (!radiosGrid) return;
@@ -4492,17 +4636,28 @@ export function renderRadiosGrid() {
       : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
     const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
     if (!displayHotspots.length) {
-      radiosGrid.querySelectorAll(".radio-container").forEach(c => c.remove());
+      // Never wipe static #radioContainer before /api/hotspots has actually loaded!
+      if (_hotspotsLoadedOnce) {
+        radiosGrid.querySelectorAll(".radio-container:not(#radioContainer)").forEach(c => c.remove());
+      }
+      const staticPrimary = document.getElementById("radioContainer") || radiosGrid.querySelector(".radio-container");
+      if (staticPrimary) {
+        ensurePrimaryHotspotHeaderButtons(staticPrimary, true);
+      }
       return;
     }
 
     const template = document.getElementById("radioCardTemplate");
     const existingCards = Array.from(radiosGrid.querySelectorAll(".radio-container"));
     const allowedIds = new Set(displayHotspots.map(h => h.id));
+    const primaryTargetId = displayHotspots[0] ? displayHotspots[0].id : null;
 
-    // Remove hidden or obsolete cards immediately
+    // Remove hidden or obsolete secondary cards, preserving #radioContainer for idx === 0
     existingCards.forEach((c) => {
       const cid = c.dataset.hotspotId;
+      if (c.id === "radioContainer" && primaryTargetId) {
+        return;
+      }
       if (cid && !allowedIds.has(cid)) {
         c.remove();
       }
@@ -4511,8 +4666,9 @@ export function renderRadiosGrid() {
     displayHotspots.forEach((hs, idx) => {
       let card = radiosGrid.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`);
       if (!card) {
-        if (idx === 0 && existingCards[0] && (!existingCards[0].dataset.hotspotId || existingCards[0].dataset.hotspotId === "default")) {
-          card = existingCards[0];
+        const primaryFallback = (idx === 0) ? (document.getElementById("radioContainer") || existingCards[0]) : null;
+        if (idx === 0 && primaryFallback && !allowedIds.has(primaryFallback.dataset.hotspotId)) {
+          card = primaryFallback;
           card.dataset.hotspotId = hs.id;
           card.dataset.networkType = (hs.network_type || "bm").toLowerCase();
         } else if (template) {
@@ -4549,15 +4705,12 @@ export function renderRadiosGrid() {
         }
       }
 
-      // In Android APK mode: remove fullscreen button from all hotspot cards
-      if (window.AndroidBridge) {
-        card.querySelectorAll(".fullscreen-toggle-btn:not(.android-exit-btn)").forEach(b => b.remove());
-      }
-
-      // Active state highlight
-            // Drag-and-drop reorder markers: 1st hotspot is fixed, 2..7 are draggable
+      // Drag-and-drop reorder markers: 1st hotspot is fixed, 2..7 are draggable
       card.classList.toggle("is-primary-fixed", idx === 0);
       card.classList.toggle("is-draggable-hotspot", idx > 0);
+
+      // Rivet theme & close/fullscreen buttons exclusively onto 1st hotspot (idx === 0)
+      ensurePrimaryHotspotHeaderButtons(card, idx === 0);
 
       card.classList.toggle("active-hotspot", hs.id === activeHotspotId);
 
@@ -4696,10 +4849,10 @@ export function renderRadiosGrid() {
         window.recordingsManager.updateCardTranscribeUI(hs.id);
       }
 
-      // Delete button for secondary hotspots
+      // Delete button strictly for secondary hotspots (idx > 0)
       const delBtn = card.querySelector(".hotspot-delete-btn");
       if (delBtn) {
-        if (displayHotspots.length > 1) {
+        if (idx > 0 && displayHotspots.length > 1) {
           delBtn.style.display = "inline-block";
           delBtn.onclick = async (e) => {
             e.stopPropagation();
@@ -8821,6 +8974,7 @@ window.__proxdmr.openHotspotOrderModal = openHotspotOrderModal;
 window.__proxdmr.closeHotspotOrderModal = closeHotspotOrderModal;
 window.__proxdmr.toggleCustomHsDropdown = toggleCustomHsDropdown;
 window.__proxdmr.closeCustomHsDropdown = closeCustomHsDropdown;
+window.ensurePrimaryHotspotHeaderButtons = ensurePrimaryHotspotHeaderButtons;
 
 window.addEventListener("languageChanged", () => {
   const editHsNetworkType = document.getElementById("editHsNetworkType");
@@ -8839,7 +8993,14 @@ window.addEventListener("languageChanged", () => {
     }
   }
   renderBmMastersDropdown();
-  renderRadiosGrid();
+  if (_hotspotsLoadedOnce) {
+    renderRadiosGrid();
+  } else {
+    const staticPrimary = document.getElementById("radioContainer");
+    if (staticPrimary) {
+      ensurePrimaryHotspotHeaderButtons(staticPrimary, true);
+    }
+  }
 });
 
 export function checkAndRenderFailoverBadges() {

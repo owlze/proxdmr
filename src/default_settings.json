@@ -1,4 +1,5 @@
 {
+  "_comment": "Canonical pool of initial default settings for ProxDMR releases. Edit this file to adjust release defaults.",
   "active_hotspot_id": "default",
   "loopback_mode": false,
   "mute_on_ptt": true,
@@ -17,6 +18,7 @@
   "bg_color_dark": "#050f1d",
   "bg_type_light": "pattern",
   "bg_color_light": "#f4f6f8",
+  "border_radius": 5,
   "language": "en",
   "transcriber_enabled": false,
   "transcriber_api_key": "",
@@ -24,6 +26,7 @@
   "transcriber_model": "gemini-3.1-flash-lite",
   "transcriber_engine": "groq",
   "translation_engine": "groq",
+  "transcriber_source_lang": "auto",
   "transcriber_target_lang": "ru",
   "groq_api_key": "",
   "groq_api_keys": [],
@@ -49,6 +52,7 @@
   "hamqth_username": "",
   "hamqth_password": "",
   "client_settings": {
+    "border_radius": 5,
     "audio_rx": {
       "pre_gain_db": 7,
       "agc_enabled": true,
@@ -60,10 +64,12 @@
       "eq_mid": 2,
       "eq_high": 10,
       "deemphasis": false,
+      "jitter_buffer": 1000,
+      "backend_buffer": 1200,
       "active_preset": "1",
       "presets": {
         "1": {
-          "name": "Оптимум (Кастом)",
+          "name": "Стандарт",
           "preGain": 7,
           "agcProfile": "maximum",
           "agcBoost": 24,
@@ -100,9 +106,7 @@
           "eqHigh": 2,
           "deemphasis": false
         }
-      },
-      "jitter_buffer": 1000,
-      "backend_buffer": 1200
+      }
     },
     "ambe_rx": {
       "uvquality": 4,
@@ -159,7 +163,7 @@
       "active_preset": "1",
       "presets": {
         "1": {
-          "name": "Оптимум (Кастом)",
+          "name": "Стандарт",
           "txMicGain": -11,
           "txNoiseSuppression": false,
           "txBrowserAgc": false,
@@ -202,7 +206,6 @@
       "global_mute": false,
       "active_slot": 1
     },
-    "border_radius": 5,
     "storage_dump": {
       "proxdmr_border_radius": 5,
       "proxdmr_jitter_buffer_ms": "1000",
@@ -248,7 +251,5 @@
       "auto_tg_bm": true,
       "auto_record": true
     }
-  ],
-  "border_radius": 5,
-  "transcriber_source_lang": "auto"
+  ]
 }

@@ -227,7 +227,7 @@ body {
 .radio-container.collapsed .brand-logo-wrap,
 .radio-container.collapsed .header-clocks,
 .radio-container.collapsed .hotspot-delete-btn,
-.radio-container.collapsed .fullscreen-toggle-btn:not(.android-exit-btn),
+.radio-container.collapsed:not(#radioContainer):not(.is-primary-fixed) .fullscreen-toggle-btn:not(.android-exit-btn),
 .radio-container.collapsed .header-transcribe-btn {
   display: none !important;
 }
@@ -572,10 +572,13 @@ body {
   border-color: rgba(248, 81, 73, 0.6);
 }
 
-/* Hide fullscreen buttons in APK mode across all hotspot card modes */
+/* Hide fullscreen buttons in APK mode across all hotspot card modes, and on secondary cards */
 html.is-apk-mode .fullscreen-toggle-btn:not(.android-exit-btn),
 body.is-apk-mode .fullscreen-toggle-btn:not(.android-exit-btn),
-.radio-container.collapsed .fullscreen-toggle-btn:not(.android-exit-btn) {
+.radio-container:not(#radioContainer):not(.is-primary-fixed) .fullscreen-toggle-btn,
+.radio-container:not(#radioContainer):not(.is-primary-fixed) .theme-toggle-btn,
+#radioContainer .hotspot-delete-btn,
+.radio-container.is-primary-fixed .hotspot-delete-btn {
   display: none !important;
 }
 
@@ -598,12 +601,40 @@ body.is-apk-mode #authRememberRow {
   display: inline-flex !important;
 }
 
-/* Ensure Android exit button is always visible on first hotspot in APK mode (even when collapsed) */
-body.is-apk-mode #radioContainer .android-exit-btn,
-body.is-apk-mode .radio-container:first-of-type .android-exit-btn,
-body.is-apk-mode #radioContainer.collapsed .android-exit-btn,
-body.is-apk-mode .radio-container.collapsed:first-of-type .android-exit-btn {
+/* Rivet theme button & close/fullscreen button permanently on 1st hotspot (expanded & collapsed) */
+#radioContainer #themeToggleBtn,
+#radioContainer .theme-toggle-btn,
+#radioContainer.collapsed #themeToggleBtn,
+#radioContainer.collapsed .theme-toggle-btn,
+.radio-container.is-primary-fixed #themeToggleBtn,
+.radio-container.is-primary-fixed .theme-toggle-btn,
+.radio-container.is-primary-fixed.collapsed #themeToggleBtn,
+.radio-container.is-primary-fixed.collapsed .theme-toggle-btn {
   display: inline-flex !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+}
+
+html.is-apk-mode #radioContainer .android-exit-btn,
+body.is-apk-mode #radioContainer .android-exit-btn,
+html.is-apk-mode #radioContainer.collapsed .android-exit-btn,
+body.is-apk-mode #radioContainer.collapsed .android-exit-btn,
+html.is-apk-mode .radio-container.is-primary-fixed .android-exit-btn,
+body.is-apk-mode .radio-container.is-primary-fixed .android-exit-btn,
+html.is-apk-mode .radio-container.is-primary-fixed.collapsed .android-exit-btn,
+body.is-apk-mode .radio-container.is-primary-fixed.collapsed .android-exit-btn {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+}
+
+html:not(.is-apk-mode) body:not(.is-apk-mode) #radioContainer .fullscreen-toggle-btn:not(.android-exit-btn),
+html:not(.is-apk-mode) body:not(.is-apk-mode) #radioContainer.collapsed .fullscreen-toggle-btn:not(.android-exit-btn),
+html:not(.is-apk-mode) body:not(.is-apk-mode) .radio-container.is-primary-fixed .fullscreen-toggle-btn:not(.android-exit-btn),
+html:not(.is-apk-mode) body:not(.is-apk-mode) .radio-container.is-primary-fixed.collapsed .fullscreen-toggle-btn:not(.android-exit-btn) {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
 }
 
 /* Volume Up / Down -> PTT option: visible strictly in APK version */
@@ -16002,7 +16033,7 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
 .radio-container.collapsed .brand-logo-wrap,
 .radio-container.collapsed .header-clocks,
 .radio-container.collapsed .hotspot-delete-btn,
-.radio-container.collapsed .fullscreen-toggle-btn:not(.android-exit-btn),
+.radio-container.collapsed:not(#radioContainer):not(.is-primary-fixed) .fullscreen-toggle-btn:not(.android-exit-btn),
 .radio-container.collapsed .header-transcribe-btn {
   display: none !important;
 }
@@ -16097,7 +16128,8 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   pointer-events: none !important;
 }
 
-.radio-container.collapsed .theme-toggle-btn,
+#radioContainer.collapsed .theme-toggle-btn,
+.radio-container.is-primary-fixed.collapsed .theme-toggle-btn,
 .radio-container.collapsed .header-rec-btn,
 .radio-container.collapsed .header-settings-btn {
   flex: 0 0 auto !important;
@@ -29148,6 +29180,16 @@ body.is-swl-mode .ptt-button::after,
 .log-tx-summary-btn,
 .log-tx-summary-btn img,
 .log-tx-summary-img {
+  border-radius: 0 !important;
+}
+
+/* === VFO TS1/TS2 CORNER BADGES (EXCLUDED FROM UI BORDER-RADIUS SLIDER) === */
+.vfo-corner-badge,
+.slot-badge,
+.slot-badge.vfo-corner-badge,
+.vfo-row .vfo-corner-badge,
+.vfo-ts1-row .vfo-corner-badge,
+.vfo-ts2-row .vfo-corner-badge {
   border-radius: 0 !important;
 }
 
