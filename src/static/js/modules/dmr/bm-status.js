@@ -6,7 +6,7 @@
 
 import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js";
 import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.496";
-import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.548";
+import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.556";
 
 export let currentBmStatus = "OFFLINE";
 export let isTogglingConnection = false;

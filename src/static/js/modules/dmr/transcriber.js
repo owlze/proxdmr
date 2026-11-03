@@ -1887,7 +1887,7 @@ async function checkAndPromptPiperModel(lang, onModelDownloaded, onFallbackReque
   }
 }
 
-const SILERO_SUPPORTED_LANGUAGES = ["ru", "uk", "en", "de", "es", "fr", "ba", "xal", "tt", "uz"];
+const SILERO_SUPPORTED_LANGUAGES = ["en", "ru", "uk", "de", "es", "fr", "ba", "xal", "tt", "uz"];
 
 /**
  * Checks if target language is supported by Silero TTS.
@@ -4805,7 +4805,9 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
           showToast(window.t ? window.t("transcriber.txt_saved", {}, "✓ Параметры сохранены") : "✓ Параметры сохранены", 2500);
           closeTxtQuickSettingsPopover();
         } else {
-          showToast(window.t ? window.t("transcriber.save_error", {}, "⚠️ Ошибка сохранения параметров") : "⚠️ Ошибка сохранения параметров", 3000);
+          const serverErr = (resJson && (resJson.detail || resJson.message)) ? String(resJson.detail || resJson.message) : "";
+          const fallbackErr = window.t ? window.t("transcriber.save_error", {}, "⚠️ Ошибка сохранения параметров") : "⚠️ Ошибка сохранения параметров";
+          showToast(serverErr ? `⚠️ ${serverErr.replace(/^⚠️\s*/, "")}` : fallbackErr, 4000);
           btnSave.disabled = false;
           btnSave.textContent = window.t ? window.t("transcriber.txt_btn_quick_save", {}, "✓ Сохранить") : "✓ Сохранить";
         }

@@ -11,18 +11,18 @@
   'use strict';
 
   const SUPPORTED_LANGUAGES = [
-    { code: "uk", name: "Українська", flag: "🇺🇦", flagSvg: "/static/flags/ua.svg" },
     { code: "en", name: "English",    flag: "🇬🇧", flagSvg: "/static/flags/gb.svg" },
+    { code: "ru", name: "Русский",    flag: "🇷🇺", flagSvg: "/static/flags/ru.svg" },
     { code: "de", name: "Deutsch",    flag: "🇩🇪", flagSvg: "/static/flags/de.svg" },
     { code: "es", name: "Español",    flag: "🇪🇸", flagSvg: "/static/flags/es.svg" },
     { code: "fr", name: "Français",   flag: "🇫🇷", flagSvg: "/static/flags/fr.svg" },
     { code: "it", name: "Italiano",   flag: "🇮🇹", flagSvg: "/static/flags/it.svg" },
     { code: "nl", name: "Nederlands", flag: "🇳🇱", flagSvg: "/static/flags/nl.svg" },
-    { code: "ru", name: "Русский",    flag: "🇷🇺", flagSvg: "/static/flags/ru.svg" }
+    { code: "uk", name: "Українська", flag: "🇺🇦", flagSvg: "/static/flags/ua.svg" }
   ];
 
   // Cache-busting version — bump when locales JSON changes
-  const LOCALES_VER = "2.9.544";
+  const LOCALES_VER = "2.9.555";
   const LOCALES_BASE = "/static/locales/";
   const FALLBACK_LANG = "en";
 

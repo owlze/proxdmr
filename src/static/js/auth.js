@@ -65,19 +65,12 @@
     }
     // Update PTT buttons
     document.querySelectorAll('.ptt-button').forEach(btn => {
-      const card = btn.closest('.radio-container');
       if (swl) {
         btn.classList.add('swl-disabled');
         btn.setAttribute('title', window.t ? window.t('vfo.swl_badge_title', {}, 'Режим радиоприёмника-наблюдателя (SWL): передача отключена') : 'Режим радиоприёмника-наблюдателя (SWL): передача отключена');
-        btn.setAttribute('data-i18n-title', 'vfo.swl_badge_title');
       } else {
         btn.classList.remove('swl-disabled');
-        if (card && typeof window.updateCardPttHint === 'function') {
-          window.updateCardPttHint(card);
-        } else {
-          btn.setAttribute('title', window.t ? window.t('ptt.dual_slot_ptt_title', {}, 'Нажмите слева для передачи на TS1, справа — на TS2') : 'Нажмите слева для передачи на TS1, справа — на TS2');
-          btn.setAttribute('data-i18n-title', 'ptt.dual_slot_ptt_title');
-        }
+        btn.setAttribute('title', window.t ? window.t('ptt.dual_slot_ptt_title', {}, 'Нажмите слева для передачи на TS1, справа — на TS2') : 'Нажмите слева для передачи на TS1, справа — на TS2');
       }
     });
   };
@@ -1218,15 +1211,41 @@
       .replace(/"/g, '&quot;');
   }
 
+  function isAllowedExportStorageKey(k) {
+    if (!k || typeof k !== 'string') return false;
+    if (k === 'proxdmr_auth_token' || k === 'proxdmr_demo_language') return false;
+    if (k.startsWith('proxdmr_gw_disconnected_')) return false;
+    if (k.startsWith('proxdmr_client_ping_') || k.startsWith('proxdmr_ping_hist_')) return false;
+    if (k.startsWith('proxdmr_tg_names_') || k === 'proxdmr_tgif_tg_names_cache' || k === 'proxdmr_freedmr_tg_names_cache') return false;
+    if (k.startsWith('proxdmr_user_callsigns_') || k === 'proxdmr_allstar_directory') return false;
+    if (k === 'proxdmr_transcribe_ts1' || k === 'proxdmr_transcribe_ts2' || k === 'proxdmr_tts_ts1' || k === 'proxdmr_tts_ts2') return false;
+    if (k === 'proxdmr_tts_solo_muted_slots' || k === 'proxdmr_tts_solo_muted_hs') return false;
+    if (k.startsWith('proxdmr_pre_tts_ts_mode_') || k.startsWith('proxdmr_transcribe_automuted_') || k.startsWith('proxdmr_max_transcribe_')) return false;
+    if (/^proxdmr_(?:transcribe|tts)_.*_ts[12]$/.test(k)) return false;
+
+    return (
+      k.startsWith('proxdmr_') ||
+      k.startsWith('dmr_') ||
+      k.startsWith('pinnedServers_') ||
+      k.startsWith('srvSortMode_') ||
+      k.startsWith('srvSortDir_')
+    );
+  }
+
   function getClientStorageFullSnapshot() {
     const snapshot = {};
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && (k.startsWith('proxdmr_') || k.startsWith('dmr_'))) {
-          if (k === 'proxdmr_auth_token') continue;
+        if (k && isAllowedExportStorageKey(k)) {
           snapshot[k] = localStorage.getItem(k);
         }
+      }
+      if (window.AndroidBridge && typeof window.AndroidBridge.getBlePttConfig === 'function') {
+        try {
+          const bleCfg = window.AndroidBridge.getBlePttConfig();
+          if (bleCfg) snapshot['proxdmr_ble_ptt_config'] = bleCfg;
+        } catch (_) {}
       }
     } catch (e) {
       console.warn('[STORAGE] Failed to capture full client storage snapshot:', e);
@@ -1234,16 +1253,67 @@
     return snapshot;
   }
 
-  function restoreClientStorageSnapshot(storageObj) {
+  function restoreClientStorageSnapshot(storageObj, targetUid, oldUid) {
     if (!storageObj || typeof storageObj !== 'object') return;
     try {
-      for (const [k, v] of Object.entries(storageObj)) {
-        if (!k || (!k.startsWith('proxdmr_') && !k.startsWith('dmr_'))) continue;
-        if (k === 'proxdmr_auth_token') continue;
-        if (v === null || v === undefined) {
+      const curUid = targetUid || window.currentUserId || (getUser() ? (getUser().id || getUser().user_id) : null);
+      let detectedOld = oldUid || null;
+      if (!detectedOld && curUid) {
+        const foundUids = new Set();
+        Object.keys(storageObj).forEach(k => {
+          const m = k.match(/^proxdmr_u(\d+)_/);
+          if (m) foundUids.add(parseInt(m[1], 10));
+        });
+        if (foundUids.size === 1) detectedOld = Array.from(foundUids)[0];
+      }
+
+      // Restore BLE PTT if on Android APK
+      if (storageObj.proxdmr_ble_ptt_config && window.AndroidBridge) {
+        try {
+          const cfg = JSON.parse(storageObj.proxdmr_ble_ptt_config);
+          if (cfg && cfg.address && typeof window.AndroidBridge.connectBleDeviceWithName === 'function') {
+            window.AndroidBridge.connectBleDeviceWithName(cfg.address, cfg.name || '');
+          }
+        } catch (_) {}
+      }
+
+      for (const [rawK, rawV] of Object.entries(storageObj)) {
+        if (!rawK || rawK === 'proxdmr_auth_token' || rawK === 'proxdmr_ble_ptt_config') continue;
+        if (!isAllowedExportStorageKey(rawK)) continue;
+
+        let k = rawK;
+        if (curUid) {
+          const m = rawK.match(/^proxdmr_u(\d+)_(.+)$/);
+          if (m) {
+            const keyUid = parseInt(m[1], 10);
+            const suffix = m[2];
+            if (detectedOld && keyUid === detectedOld) {
+              k = `proxdmr_u${curUid}_${suffix}`;
+            } else if (keyUid === curUid) {
+              k = rawK;
+            } else {
+              continue;
+            }
+          }
+        }
+
+        let valStr = typeof rawV === 'string' ? rawV : JSON.stringify(rawV);
+        if (curUid && typeof valStr === 'string') {
+          if (detectedOld && detectedOld !== curUid) {
+            valStr = valStr.split(`/static/img/wallpapers/bg-custom-u${detectedOld}-`).join(`/static/img/wallpapers/bg-custom-u${curUid}-`);
+          }
+          if (valStr.includes('/static/img/bg-custom-dark.jpg')) {
+            valStr = valStr.split('/static/img/bg-custom-dark.jpg').join(`/static/img/wallpapers/bg-custom-u${curUid}-dark.jpg`);
+          }
+          if (valStr.includes('/static/img/bg-custom-light.jpg')) {
+            valStr = valStr.split('/static/img/bg-custom-light.jpg').join(`/static/img/wallpapers/bg-custom-u${curUid}-light.jpg`);
+          }
+        }
+
+        if (rawV === null || rawV === undefined) {
           localStorage.removeItem(k);
         } else {
-          localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+          localStorage.setItem(k, valStr);
         }
       }
     } catch (e) {
@@ -1353,6 +1423,18 @@
         };
       }
 
+      const srvRow = document.getElementById('saImportServerConfigRow');
+      const srvBox = document.getElementById('saImportServerConfig');
+      if (srvRow && srvBox) {
+        if (meta && meta.has_server_config) {
+          srvRow.style.display = 'flex';
+          srvBox.checked = true;
+        } else {
+          srvRow.style.display = 'none';
+          srvBox.checked = false;
+        }
+      }
+
       if (confirmBtn) {
         confirmBtn.onclick = () => {
           const mode = modal.querySelector('input[name="saImportMode"]:checked')?.value || 'superadmin_only';
@@ -1362,8 +1444,9 @@
               if (c.value) selected.push(c.value);
             });
           }
+          const restoreSrv = srvBox ? srvBox.checked : false;
           cleanup();
-          resolve({ mode: mode, selected_users: selected });
+          resolve({ mode: mode, selected_users: selected, restore_server_config: restoreSrv });
         };
       }
 
@@ -1414,6 +1497,7 @@
 
       let mode = 'default';
       let selectedUsers = [];
+      let restoreServerConfig = true;
 
       // 2. Check if superadmin backup and current user is superadmin
       if (inspectMeta && inspectMeta.is_superadmin_backup && inspectMeta.current_user_role === 'superadmin') {
@@ -1423,6 +1507,7 @@
         }
         mode = dialogRes.mode;
         selectedUsers = dialogRes.selected_users;
+        restoreServerConfig = Boolean(dialogRes.restore_server_config);
       }
 
       // 3. Apply import
@@ -1430,6 +1515,7 @@
       formData.append('file', file);
       formData.append('password', password);
       formData.append('mode', mode);
+      formData.append('restore_server_config', restoreServerConfig ? 'true' : 'false');
       if (selectedUsers && selectedUsers.length > 0) {
         formData.append('selected_users', JSON.stringify(selectedUsers));
       }
@@ -1443,7 +1529,7 @@
         const data = await resp.json();
         if (resp.ok) {
           if (data.client_storage) {
-            restoreClientStorageSnapshot(data.client_storage);
+            restoreClientStorageSnapshot(data.client_storage, data.restored_user_id, data.exported_user_id);
           }
           await showAppAlert(t('account.import_success', {}, 'Настройки успешно импортированы. Страница будет перезагружена.'), { title: 'Успешно', icon: '✅' });
           location.reload();

@@ -40,7 +40,7 @@ class HotspotConfig(BaseModel):
     @classmethod
     def validate_network_type(cls, v: Any) -> str:
         val = str(v or "bm").strip().lower()
-        if val in ("bm", "tgif", "freedmr", "dmrplus", "xlx", "custom"):
+        if val in ("bm", "tgif", "freedmr", "dmrplus", "xlx", "allstar", "custom"):
             return val
         return "bm"
 

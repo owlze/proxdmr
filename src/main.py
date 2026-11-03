@@ -54,7 +54,7 @@ try:
         get_user_role, set_user_role, set_user_blocked, is_user_blocked, update_user_password,
         is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
     )
-    from settings_io import export_settings, import_settings, get_export_filename, inspect_backup_archive
+    from settings_io import export_settings, import_settings, import_settings_bundle, get_export_filename, inspect_backup_archive
     from updater import check_for_updates, apply_update
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings
@@ -1073,6 +1073,162 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
     return {"status": "ok", "user": {"id": user["id"], "login": user["login"], "role": role}, "token": token}
 
 
+def _collect_backup_wallpapers(users_list: list[dict]) -> tuple[dict[str, bytes], dict[str, dict[str, str]]]:
+    """
+    Scans custom wallpaper JPG files on disk for specified users and packages them
+    with deterministic archive names and a metadata manifest mapping (login -> {theme: arc_name}).
+    """
+    extra_files: dict[str, bytes] = {}
+    manifest: dict[str, dict[str, str]] = {}
+    wp_dir = STATIC_DIR / "img" / "wallpapers"
+
+    for idx, u in enumerate(users_list):
+        uid = u.get("id")
+        login = str(u.get("login") or "").strip().lower()
+        if not uid or not login:
+            continue
+        user_map: dict[str, str] = {}
+        for theme in ("dark", "light"):
+            cand = wp_dir / f"bg-custom-u{uid}-{theme}.jpg"
+            if not cand.exists() and uid == 1:
+                legacy_cand = STATIC_DIR / "img" / f"bg-custom-{theme}.jpg"
+                if legacy_cand.exists():
+                    cand = legacy_cand
+            if cand.exists():
+                try:
+                    data = cand.read_bytes()
+                    arc_name = f"wp_{idx}_{theme}.jpg"
+                    extra_files[arc_name] = data
+                    user_map[theme] = arc_name
+                except Exception as e:
+                    logger.warning(f"[BACKUP] Failed reading wallpaper {cand}: {e}")
+        if user_map:
+            manifest[login] = user_map
+
+    return extra_files, manifest
+
+
+def _extract_backup_wallpapers(
+    extra_files: dict[str, bytes],
+    manifest: dict,
+    restored_users_info: list[dict],
+) -> None:
+    """
+    Extracts wallpaper attachments from backup archive and saves them onto disk
+    under the new user's `bg-custom-u{new_uid}-{theme}.jpg` filenames.
+    """
+    if not extra_files or not isinstance(extra_files, dict):
+        return
+    wp_dir = STATIC_DIR / "img" / "wallpapers"
+    wp_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_map = manifest if isinstance(manifest, dict) else {}
+
+    for u_info in restored_users_info:
+        new_uid = u_info.get("user_id")
+        backup_login = str(u_info.get("backup_login") or u_info.get("login") or "").strip().lower()
+        if not new_uid or not backup_login:
+            continue
+
+        theme_map = manifest_map.get(backup_login, {})
+        for theme in ("dark", "light"):
+            arc_name = theme_map.get(theme) if isinstance(theme_map, dict) else None
+            data = extra_files.get(arc_name) if arc_name else None
+            # Fallback for single-user backups or missing manifest
+            if not data:
+                for cand_key in (f"wp_{theme}.jpg", f"bg-custom-{theme}.jpg", f"wallpaper_{theme}.jpg"):
+                    if cand_key in extra_files:
+                        data = extra_files[cand_key]
+                        break
+            if data:
+                try:
+                    out_path = wp_dir / f"bg-custom-u{new_uid}-{theme}.jpg"
+                    out_path.write_bytes(data)
+                    logger.info(f"[BACKUP] Restored {theme} wallpaper for user {backup_login} -> {out_path.name}")
+                except Exception as e:
+                    logger.warning(f"[BACKUP] Failed writing wallpaper for user {backup_login}: {e}")
+
+
+def _collect_server_config_for_backup() -> dict:
+    """Collects server-wide superadmin configuration for backup."""
+    srv: dict = {}
+    data_dir = BASE_DIR / "data"
+    try:
+        raw_alerts = alerts_config.load_alerts_config(data_dir)
+        srv["alerts_config"] = raw_alerts
+    except Exception as e:
+        logger.warning(f"[BACKUP] Error collecting alerts_config: {e}")
+
+    try:
+        raw_demo = demo_manager.get_config()
+        srv["demo_config"] = raw_demo
+    except Exception as e:
+        logger.warning(f"[BACKUP] Error collecting demo_config: {e}")
+
+    try:
+        srv["visitor_stats_enabled"] = bool(visitor_stats.is_enabled())
+    except Exception as e:
+        logger.warning(f"[BACKUP] Error collecting visitor_stats: {e}")
+
+    try:
+        def_file = PROJECT_ROOT / "config" / "default_settings.json"
+        if def_file.exists():
+            srv["default_settings_template"] = json.loads(def_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"[BACKUP] Error collecting default_settings.json: {e}")
+
+    return srv
+
+
+async def _apply_server_config_from_backup(srv_cfg: dict) -> None:
+    """Restores server-wide superadmin configuration from backup."""
+    if not isinstance(srv_cfg, dict) or not srv_cfg:
+        return
+    data_dir = BASE_DIR / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    if "alerts_config" in srv_cfg and isinstance(srv_cfg["alerts_config"], dict):
+        try:
+            alerts_config.save_alerts_config(data_dir, srv_cfg["alerts_config"])
+            logger.info("[BACKUP] Server Telegram alerts configuration restored")
+        except Exception as e:
+            logger.warning(f"[BACKUP] Error restoring alerts_config: {e}")
+
+    if "demo_config" in srv_cfg and isinstance(srv_cfg["demo_config"], dict):
+        try:
+            demo_manager.save_config(srv_cfg["demo_config"])
+            logger.info("[BACKUP] Server demo mode configuration restored")
+        except Exception as e:
+            logger.warning(f"[BACKUP] Error restoring demo_config: {e}")
+
+    if "visitor_stats_enabled" in srv_cfg:
+        try:
+            await visitor_stats.set_enabled(bool(srv_cfg["visitor_stats_enabled"]))
+            logger.info("[BACKUP] Visitor stats sharing state restored")
+        except Exception as e:
+            logger.warning(f"[BACKUP] Error restoring visitor_stats: {e}")
+
+    if "default_settings_template" in srv_cfg and isinstance(srv_cfg["default_settings_template"], dict):
+        try:
+            cfg_dir = PROJECT_ROOT / "config"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            def_path = cfg_dir / "default_settings.json"
+            def_path.write_text(json.dumps(srv_cfg["default_settings_template"], indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info("[BACKUP] Default settings template restored")
+        except Exception as e:
+            logger.warning(f"[BACKUP] Error restoring default_settings.json: {e}")
+
+
+def _collect_live_user_settings_map() -> dict[int, dict]:
+    """Collects in-memory AppSettings snapshot across active runtimes to ensure zero recent state is lost."""
+    live_map: dict[int, dict] = {}
+    if hasattr(hotspot_manager, "user_settings") and isinstance(hotspot_manager.user_settings, dict):
+        for uid_k, app_sett in hotspot_manager.user_settings.items():
+            if hasattr(app_sett, "model_dump"):
+                live_map[uid_k] = app_sett.model_dump()
+    return live_map
+
+
 @app.post("/api/auth/import-config")
 async def auth_import_config(
     request: Request,
@@ -1096,12 +1252,13 @@ async def auth_import_config(
         raise HTTPException(status_code=400, detail="Файл архива пустой")
 
     try:
-        backup_data = import_settings(archive_bytes, password)
+        backup_data, extra_files = import_settings_bundle(archive_bytes, password)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     is_v2 = isinstance(backup_data, dict) and backup_data.get("format_version") == 2
     client_storage_to_return = {}
+    restored_users_info: list[dict] = []
 
     if is_v2:
         is_sa = bool(backup_data.get("is_superadmin_backup", False))
@@ -1109,20 +1266,31 @@ async def auth_import_config(
             sa_acc = (backup_data.get("superadmin") or {}).get("account") or {}
             clean_login = login.strip() or sa_acc.get("login") or "admin"
             clean_login = re.sub(r'[^a-zA-Z0-9_.\-]', '', clean_login)
+            pw_hash = sa_acc.get("password_hash") or (await asyncio.to_thread(hash_password, password))
+
+            u1 = await get_user_by_id(1)
+            u1_sett = await load_user_settings(1) if u1 else {}
+            u1_hs = (u1_sett or {}).get("hotspots") or []
+            u1_is_empty = bool(u1 and len(u1_hs) <= 1 and int((u1_hs[0] if u1_hs else {}).get("dmr_id") or 0) == 0 and (await user_count()) == 1)
+
             existing_user = await get_user_by_login(clean_login)
             if existing_user:
-                if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
+                if existing_user["id"] == 1 and u1_is_empty:
+                    # Fresh unconfigured server install: overwrite default admin with imported superadmin
+                    import aiosqlite
+                    from database import DB_FILE
+                    async with aiosqlite.connect(str(DB_FILE)) as db:
+                        await db.execute("UPDATE users SET login = ?, password_hash = ?, role = 'superadmin' WHERE id = 1", (clean_login.lower(), pw_hash))
+                        await db.commit()
+                    user_id = 1
+                elif not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
                     raise HTTPException(
                         status_code=401,
                         detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
                     )
-                user_id = existing_user["id"]
+                else:
+                    user_id = existing_user["id"]
             else:
-                u1 = await get_user_by_id(1)
-                u1_sett = await load_user_settings(1) if u1 else {}
-                u1_hs = (u1_sett or {}).get("hotspots") or []
-                u1_is_empty = bool(u1 and len(u1_hs) <= 1 and int((u1_hs[0] if u1_hs else {}).get("dmr_id") or 0) == 0)
-                pw_hash = sa_acc.get("password_hash") or (await asyncio.to_thread(hash_password, password))
                 if u1_is_empty:
                     import aiosqlite
                     from database import DB_FILE
@@ -1136,6 +1304,9 @@ async def auth_import_config(
 
             res = await restore_backup_data(backup_data, user_id, mode="all_users")
             client_storage_to_return = res.get("client_storage", {})
+            restored_users_info = res.get("restored_users", [])
+            if res.get("server_config"):
+                await _apply_server_config_from_backup(res["server_config"])
         else:
             u_acc = (backup_data.get("user") or {}).get("account") or {}
             clean_login = login.strip() or u_acc.get("login") or "user"
@@ -1159,6 +1330,14 @@ async def auth_import_config(
 
             res = await restore_backup_data(backup_data, user_id, mode="default")
             client_storage_to_return = res.get("client_storage", {})
+            restored_users_info = res.get("restored_users", [])
+
+        # Extract wallpapers from backup bundle
+        _extract_backup_wallpapers(
+            extra_files,
+            backup_data.get("wallpapers_manifest") or {},
+            restored_users_info,
+        )
     else:
         # Legacy v1 single-user settings format
         clean_login = login.strip()
@@ -1778,9 +1957,27 @@ async def export_user_settings_post_api(request: Request, payload: ExportSetting
     db_user = await get_user_by_id(user["user_id"])
     if not db_user or not await asyncio.to_thread(verify_password, payload.password, db_user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Неверный пароль аккаунта")
+
+    is_superadmin = (db_user.get("role") == "superadmin")
+    srv_cfg = _collect_server_config_for_backup() if is_superadmin else {}
+    live_map = _collect_live_user_settings_map()
+
     try:
-        backup_data = await get_full_backup_data(user["user_id"], current_storage=payload.client_storage)
-        archive_bytes = export_settings(backup_data, payload.password)
+        backup_data = await get_full_backup_data(
+            user["user_id"],
+            current_storage=payload.client_storage,
+            server_config=srv_cfg,
+            live_settings_map=live_map,
+        )
+        users_for_wp = [{"id": user["user_id"], "login": db_user["login"]}]
+        if is_superadmin:
+            all_u = await list_users()
+            users_for_wp = [{"id": u["id"], "login": u["login"]} for u in all_u]
+
+        extra_wp_files, wp_manifest = _collect_backup_wallpapers(users_for_wp)
+        backup_data["wallpapers_manifest"] = wp_manifest
+
+        archive_bytes = export_settings(backup_data, payload.password, extra_files=extra_wp_files)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     filename = get_export_filename()
@@ -1801,9 +1998,27 @@ async def export_user_settings_api(request: Request, password: str = ""):
     db_user = await get_user_by_id(user["user_id"])
     if not db_user or not await asyncio.to_thread(verify_password, password, db_user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Неверный пароль аккаунта")
+
+    is_superadmin = (db_user.get("role") == "superadmin")
+    srv_cfg = _collect_server_config_for_backup() if is_superadmin else {}
+    live_map = _collect_live_user_settings_map()
+
     try:
-        backup_data = await get_full_backup_data(user["user_id"], current_storage=None)
-        archive_bytes = export_settings(backup_data, password)
+        backup_data = await get_full_backup_data(
+            user["user_id"],
+            current_storage=None,
+            server_config=srv_cfg,
+            live_settings_map=live_map,
+        )
+        users_for_wp = [{"id": user["user_id"], "login": db_user["login"]}]
+        if is_superadmin:
+            all_u = await list_users()
+            users_for_wp = [{"id": u["id"], "login": u["login"]} for u in all_u]
+
+        extra_wp_files, wp_manifest = _collect_backup_wallpapers(users_for_wp)
+        backup_data["wallpapers_manifest"] = wp_manifest
+
+        archive_bytes = export_settings(backup_data, password, extra_files=extra_wp_files)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     filename = get_export_filename()
@@ -1843,13 +2058,14 @@ async def import_user_settings_api(
     password: str = Form(""),
     mode: str = Form("default"),
     selected_users: str = Form(""),
+    restore_server_config: bool = Form(True),
 ):
     user = _get_user_from_request(request)
     if not user:
         raise HTTPException(status_code=401)
     archive_bytes = await file.read()
     try:
-        backup_data = import_settings(archive_bytes, password)
+        backup_data, extra_files = import_settings_bundle(archive_bytes, password)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1868,12 +2084,35 @@ async def import_user_settings_api(
         mode=mode,
         selected_logins=selected_logins_list
     )
-    await ensure_active_user(user["user_id"], user.get("login", ""), force_reload=True)
+
+    is_superadmin = (await get_user_role(user["user_id"])) == "superadmin"
+    if is_superadmin and restore_server_config and result.get("server_config"):
+        await _apply_server_config_from_backup(result["server_config"])
+
+    restored_users_info = result.get("restored_users", [])
+    _extract_backup_wallpapers(
+        extra_files,
+        backup_data.get("wallpapers_manifest") or {},
+        restored_users_info,
+    )
+
+    # Reload active runtimes for all affected users
+    for ru in restored_users_info:
+        r_uid = ru.get("user_id")
+        r_login = ru.get("login", "")
+        if r_uid:
+            try:
+                await ensure_active_user(r_uid, r_login, force_reload=True)
+            except Exception as e:
+                logger.warning(f"[IMPORT] Error reloading runtime for user {r_uid} ({r_login}): {e}")
+
     return {
         "status": "ok",
         "message": "Настройки импортированы",
         "client_storage": result.get("client_storage", {}),
         "restored_users_count": result.get("restored_users_count", 1),
+        "restored_user_id": result.get("restored_user_id", user["user_id"]),
+        "exported_user_id": result.get("exported_user_id"),
         "mode": mode
     }
 
@@ -4339,6 +4578,18 @@ async def get_allstar_nodes_stats():
     """Returns AllStarLink node database stats."""
     from allstar_directory import allstar_dir_mgr
     return {"status": "ok", "stats": allstar_dir_mgr.get_stats()}
+
+@app.get("/api/allstar/keyed")
+async def get_allstar_keyed_nodes(force: bool = False):
+    """Returns currently transmitting (keyed) public AllStarLink nodes from stats.allstarlink.org/stats/keyed."""
+    from allstar_directory import allstar_dir_mgr
+    nodes = await allstar_dir_mgr.fetch_keyed_nodes(force=force)
+    return {
+        "status": "ok",
+        "count": len(nodes),
+        "cached_at": int(getattr(allstar_dir_mgr, "_keyed_cache_ts", 0) or 0),
+        "nodes": nodes
+    }
 
 class AllStarCTCSSUpdate(BaseModel):
     hotspot_id: str = "default"

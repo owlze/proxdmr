@@ -3176,7 +3176,7 @@ export function updateCardAllStarPanel(card, hs) {
     // Задача 2: Верхняя статусная строка VFO (между STANDBY и E2E)
     const callsignEl = card.querySelector(".callsign-display");
     if (callsignEl) {
-      const myCall = String((targetHs && targetHs.callsign) || "RV6LRJ").trim();
+      const myCall = String((targetHs && targetHs.callsign) || "N0CALL").trim();
       const countStr = (targetHs && targetHs.asl_online_count !== undefined && targetHs.asl_online_count > 0) ? ` (${targetHs.asl_online_count})` : "";
       if (isLinked) {
         callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">Link <strong class="asl-vfo-target-node">${safeEscapeHtml(connNode)}</strong>${countStr}</span>`;

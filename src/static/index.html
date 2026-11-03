@@ -2720,12 +2720,12 @@
               <span>📐</span> <span data-i18n="general.border_radius_title">Скругление углов элементов</span>
             </span>
             <span class="apikeys-frame-actions">
-              <span id="borderRadiusValueLabel" style="font-family: var(--font-mono, monospace); font-size: 0.84rem; font-weight: 700; color: #58a6ff;">0 px</span>
+              <span id="borderRadiusValueLabel" style="font-family: var(--font-mono, monospace); font-size: 0.84rem; font-weight: 700; color: #58a6ff;">5 px</span>
             </span>
           </div>
           <div class="apikeys-frame-body" style="padding: 10px 12px 10px;">
             <div style="display: flex; align-items: center; gap: 12px;">
-              <input type="range" id="sliderBorderRadius" min="0" max="20" step="1" value="0" class="form-slider" style="flex: 1; cursor: pointer;">
+              <input type="range" id="sliderBorderRadius" min="0" max="20" step="1" value="5" class="form-slider" style="flex: 1; cursor: pointer;">
             </div>
             <div style="display: flex; justify-content: space-between; font-family: var(--font-mono, monospace); font-size: 0.68rem; color: var(--text-muted); margin-top: 4px; padding: 0 2px;">
               <span>0 (прямые)</span>
@@ -4500,7 +4500,7 @@
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">-20 dB</span>
-            <input type="range" id="optPreGain" class="form-slider" min="-20" max="12" step="1" value="0" style="flex: 1; cursor: pointer;">
+            <input type="range" id="optPreGain" class="form-slider" min="-20" max="12" step="1" value="7" style="flex: 1; cursor: pointer;">
             <span class="slider-limit-label">+12 dB</span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="audio.hint_preamp">
@@ -4522,7 +4522,7 @@
           </div>
           <div class="agc-profiles-bar agc-profiles-grid" style="margin-top: 10px;">
             <button type="button" class="btn-agc-profile" data-profile="soft" data-i18n="audio.agc_soft">Мягкая (±8 dB)</button>
-            <button type="button" class="btn-agc-profile active" data-profile="standard" data-i18n="audio.agc_standard">Стандартная (±12 dB)</button>
+            <button type="button" class="btn-agc-profile" data-profile="standard" data-i18n="audio.agc_standard">Стандартная (±12 dB)</button>
             <button type="button" class="btn-agc-profile" data-profile="deep" data-i18n="audio.agc_deep">Глубокая ⭐</button>
             <button type="button" class="btn-agc-profile" data-profile="max" data-i18n="audio.agc_max">Максимальная</button>
           </div>
@@ -4530,23 +4530,23 @@
             <div class="form-group audio-field">
               <div class="audio-field-header">
                 <label for="sliderAgcBoost" class="audio-label" data-i18n="audio.agc_max_boost">Макс. подъем тихих (Boost)</label>
-                <span id="valAgcBoost" class="audio-val-badge">+12 dB</span>
+                <span id="valAgcBoost" class="audio-val-badge">+24 dB</span>
               </div>
-              <input type="range" id="sliderAgcBoost" class="form-slider" min="0" max="24" step="1" value="12">
+              <input type="range" id="sliderAgcBoost" class="form-slider" min="0" max="24" step="1" value="24">
             </div>
             <div class="form-group audio-field">
               <div class="audio-field-header">
                 <label for="sliderAgcAtten" class="audio-label" data-i18n="audio.agc_max_atten">Макс. приглушение громких (Atten)</label>
-                <span id="valAgcAtten" class="audio-val-badge">-12 dB</span>
+                <span id="valAgcAtten" class="audio-val-badge">-24 dB</span>
               </div>
-              <input type="range" id="sliderAgcAtten" class="form-slider" min="0" max="24" step="1" value="12">
+              <input type="range" id="sliderAgcAtten" class="form-slider" min="0" max="24" step="1" value="24">
             </div>
             <div class="form-group audio-field">
               <div class="audio-field-header">
                 <label for="sliderAgcHang" class="audio-label" data-i18n="audio.agc_hang_time">Время удержания (Hang Time)</label>
-                <span id="valAgcHang" class="audio-val-badge">350 ms</span>
+                <span id="valAgcHang" class="audio-val-badge">450 ms</span>
               </div>
-              <input type="range" id="sliderAgcHang" class="form-slider" min="100" max="1000" step="50" value="350">
+              <input type="range" id="sliderAgcHang" class="form-slider" min="100" max="1000" step="50" value="450">
             </div>
           </div>
         </div>
@@ -4561,23 +4561,23 @@
             <div class="form-group audio-field eq-col">
               <div class="audio-field-header eq-col-header">
                 <label for="sliderEqLow" class="audio-label eq-band-title" data-i18n="audio.eq_low">НЧ (300 Гц)</label>
-                <span id="valEqLow" class="audio-val-badge eq-val-badge">0 dB</span>
+                <span id="valEqLow" class="audio-val-badge eq-val-badge">-12 dB</span>
               </div>
-              <input type="range" id="sliderEqLow" class="form-slider eq-slider" min="-12" max="12" step="1" value="0">
+              <input type="range" id="sliderEqLow" class="form-slider eq-slider" min="-12" max="12" step="1" value="-12">
             </div>
             <div class="form-group audio-field eq-col">
               <div class="audio-field-header eq-col-header">
                 <label for="sliderEqMid" class="audio-label eq-band-title" data-i18n="audio.eq_mid">СЧ (1 кГц)</label>
-                <span id="valEqMid" class="audio-val-badge eq-val-badge">0 dB</span>
+                <span id="valEqMid" class="audio-val-badge eq-val-badge">+2 dB</span>
               </div>
-              <input type="range" id="sliderEqMid" class="form-slider eq-slider" min="-12" max="12" step="1" value="0">
+              <input type="range" id="sliderEqMid" class="form-slider eq-slider" min="-12" max="12" step="1" value="2">
             </div>
             <div class="form-group audio-field eq-col">
               <div class="audio-field-header eq-col-header">
                 <label for="sliderEqHigh" class="audio-label eq-band-title" data-i18n="audio.eq_high">ВЧ (3 кГц)</label>
-                <span id="valEqHigh" class="audio-val-badge eq-val-badge">0 dB</span>
+                <span id="valEqHigh" class="audio-val-badge eq-val-badge">+10 dB</span>
               </div>
-              <input type="range" id="sliderEqHigh" class="form-slider eq-slider" min="-12" max="12" step="1" value="0">
+              <input type="range" id="sliderEqHigh" class="form-slider eq-slider" min="-12" max="12" step="1" value="10">
             </div>
           </div>
           <div class="form-group-checkbox audio-field-check" style="margin-top: 12px;">
@@ -4595,7 +4595,7 @@
         <div class="audio-section" style="margin-top: 14px;">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.sec_jitter">4. Буфер приёма (Jitter Buffer)</span>
-            <span id="valJitterBuffer" class="audio-val-badge">120 ms</span>
+            <span id="valJitterBuffer" class="audio-val-badge">1000 ms</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">40 ms</span>
@@ -4604,7 +4604,7 @@
           </div>
           <div class="bg-scale-presets" style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
             <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="60" data-i18n="audio.jitter_min">60 ms (Мин)</button>
-            <button type="button" class="btn-scale-preset btn-jitter-preset active" data-jitter="120" data-i18n="audio.jitter_opt">120 ms (Оптимум)</button>
+            <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="120" data-i18n="audio.jitter_opt">120 ms (Оптимум)</button>
             <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="180" data-i18n="audio.jitter_reliable">180 ms (Надёжный)</button>
             <button type="button" class="btn-scale-preset btn-jitter-preset" data-jitter="240" data-i18n="audio.jitter_max">240 ms (Макс)</button>
           </div>
@@ -4655,11 +4655,11 @@
         <div class="audio-section">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.tx_sec_mic_gain">1. Чувствительность микрофона (TX Mic Gain)</span>
-            <span id="valTxMicGain" class="audio-val-badge">0 dB</span>
+            <span id="valTxMicGain" class="audio-val-badge">-11 dB</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">-15 dB</span>
-            <input type="range" id="sliderTxMicGain" class="form-slider" min="-15" max="15" step="1" value="0" style="flex: 1; cursor: pointer;">
+            <input type="range" id="sliderTxMicGain" class="form-slider" min="-15" max="15" step="1" value="-11" style="flex: 1; cursor: pointer;">
             <span class="slider-limit-label">+15 dB</span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="audio.tx_hint_mic_gain">
@@ -4675,7 +4675,7 @@
           <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
             <div>
               <label class="audio-checkbox-label">
-                <input type="checkbox" id="chkTxNoiseSuppression" checked>
+                <input type="checkbox" id="chkTxNoiseSuppression">
                 <strong data-i18n="audio.tx_filter_ns">Шумоподавление (Noise Suppression)</strong>
               </label>
               <small class="form-hint" style="margin-left: 26px; display: block;" data-i18n="audio.tx_hint_ns">
@@ -4693,7 +4693,7 @@
             </div>
             <div>
               <label class="audio-checkbox-label">
-                <input type="checkbox" id="chkTxDspAgc">
+                <input type="checkbox" id="chkTxDspAgc" checked>
                 <strong data-i18n="audio.tx_filter_dsp_agc">DSP-компрессор (TX DSP AGC)</strong>
               </label>
               <small class="form-hint" style="margin-left: 26px; display: block;" data-i18n="audio.tx_hint_dsp_agc">
@@ -4702,7 +4702,7 @@
             </div>
             <div>
               <label class="audio-checkbox-label">
-                <input type="checkbox" id="chkTxEchoCancellation" checked>
+                <input type="checkbox" id="chkTxEchoCancellation">
                 <strong data-i18n="audio.tx_filter_ec">Эхоподавление (Echo Cancellation)</strong>
               </label>
               <small class="form-hint" style="margin-left: 26px; display: block;" data-i18n="audio.tx_hint_ec">
@@ -4720,7 +4720,7 @@
           </div>
           <div class="form-group-checkbox audio-field-check" style="margin-top: 8px; margin-bottom: 8px;">
             <label class="audio-checkbox-label">
-              <input type="checkbox" id="chkTxGate" checked>
+              <input type="checkbox" id="chkTxGate">
               <strong data-i18n="audio.tx_gate_enable">Включить Noise Gate в паузах речи</strong>
             </label>
           </div>

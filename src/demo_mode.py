@@ -119,8 +119,15 @@ class DemoModeManager:
             self._cfg["cooldown_seconds"] = new_cd
             if new_cd == 0:
                 self.cooldowns.clear()
+        if "login" in patch and str(patch["login"]).strip():
+            self._cfg["login"] = str(patch["login"]).strip()
         if "password" in patch and str(patch["password"]).strip():
             self._cfg["password"] = str(patch["password"]).strip()
+        if "showcase_user_id" in patch:
+            try:
+                self._cfg["showcase_user_id"] = max(1, int(patch["showcase_user_id"]))
+            except (ValueError, TypeError):
+                pass
         try:
             cfg_path = self._get_config_path()
             cfg_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.380';
-import { RecordingsManager } from './modules/audio/player.js?v=2.9.542';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.556';
 import './modules/ui/theme.js?v=2.9.541';
 import './modules/dmr/bm-monitor.js?v=2.9.547';
 import './modules/dmr/log-selection.js';
@@ -27,13 +27,13 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.547';
+} from './modules/dmr/transcriber.js?v=2.9.552';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
-import { initAndroidBridge } from './modules/core/android.js?v=2.9.547';
+import { initAndroidBridge } from './modules/core/android.js?v=2.9.552';
 import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.367';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
-import { initLanguageManager } from './modules/settings/language.js?v=2.9.548';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.555';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
 import { initGeneralSettings } from './modules/settings/general.js?v=2.9.509';
 import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.509';
@@ -77,7 +77,7 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.548';
+} from './modules/dmr/hotspots.js?v=2.9.556';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
@@ -189,7 +189,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.548';
+} from './modules/audio/volume-mute.js?v=2.9.555';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -207,7 +207,7 @@ import {
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js?v=2.9.548';
+} from './modules/dmr/bm-status.js?v=2.9.555';
 import {
   connectWebSocket,
   handleServerMessage,
@@ -216,7 +216,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.547';
+} from './modules/network/ws.js?v=2.9.556';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application
@@ -225,12 +225,25 @@ import {
 
 function _generateClientInstanceId() {
   try {
-    if (window.crypto && typeof window.crypto.randomUUID === "function") {
-      return window.crypto.randomUUID();
+    let stored = "";
+    try {
+      stored = sessionStorage.getItem("proxdmr_client_instance_id") || "";
+    } catch (_) {}
+    if (stored && stored.length >= 16) {
+      return stored;
     }
-    const arr = new Uint8Array(16);
-    window.crypto.getRandomValues(arr);
-    return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+    let newId = "";
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      newId = window.crypto.randomUUID();
+    } else {
+      const arr = new Uint8Array(16);
+      window.crypto.getRandomValues(arr);
+      newId = Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+    }
+    try {
+      sessionStorage.setItem("proxdmr_client_instance_id", newId);
+    } catch (_) {}
+    return newId;
   } catch (_) {
     return "cid_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 11);
   }
@@ -252,7 +265,7 @@ if (typeof window !== "undefined") {
           init = init ? Object.assign({}, init) : {};
           const hdrs = new Headers(init.headers || (typeof input !== "string" && input && input.headers ? input.headers : undefined));
           if (!hdrs.has("X-ProxDMR-Client-Id")) {
-            hdrs.set("X-ProxDMR-Client-Id", window.PROxDMR_CLIENT_ID);
+            hdrs.set("X-ProxDMR-Client-Id", window.PROXDMR_CLIENT_ID);
           }
           init.headers = hdrs;
         }
@@ -261,6 +274,17 @@ if (typeof window !== "undefined") {
       if (!isLocalApi) return pending;
       return pending.then(async (resp) => {
         try {
+          if (resp.status === 409) {
+            try {
+              const data409 = await resp.clone().json();
+              if (data409 && data409.code === "SESSION_PAUSED") {
+                if (typeof window.enterSessionPausedState === "function") {
+                  window.enterSessionPausedState();
+                }
+              }
+            } catch (_) {}
+            return resp;
+          }
           if (resp.status !== 403 || typeof window.t !== "function") return resp;
           const data = await resp.clone().json();
           if (!data || data.code !== "DEMO_READ_ONLY") return resp;

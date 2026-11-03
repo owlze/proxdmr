@@ -9,7 +9,7 @@ import { showToast } from "../core/toast.js";
 let _latestUpdateInfo = null;
 let _selectedLang = "ru";
 
-const SUPPORTED_LANGS = ["ru", "en", "uk", "de", "es", "fr", "it", "nl"];
+const SUPPORTED_LANGS = ["en", "ru", "de", "es", "fr", "it", "nl", "uk"];
 
 const LANG_NAMES = {
   ru: "🇷🇺 Русский",

@@ -223,21 +223,124 @@
     };
   }
 
+  function findAslDirectoryNode(nodeStr) {
+    if (!nodeStr || typeof window === "undefined") return null;
+    const n = String(nodeStr).trim();
+    if (!n) return null;
+    if (window._aslNodeInfoMap && window._aslNodeInfoMap[n]) {
+      return window._aslNodeInfoMap[n];
+    }
+    try {
+      const rawDir = localStorage.getItem("proxdmr_allstar_directory");
+      if (rawDir) {
+        const list = JSON.parse(rawDir);
+        if (Array.isArray(list)) {
+          const found = list.find(it => it && String(it.node).trim() === n);
+          if (found) {
+            if (!window._aslNodeInfoMap) window._aslNodeInfoMap = {};
+            window._aslNodeInfoMap[n] = found;
+            return found;
+          }
+        }
+      }
+    } catch (_) {}
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("proxdmr_asl_quick_nodes_")) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const found = list.find(it => it && String(it.node).trim() === n);
+              if (found && found.flag && found.flag !== "➕") {
+                if (!window._aslNodeInfoMap) window._aslNodeInfoMap = {};
+                window._aslNodeInfoMap[n] = found;
+                return found;
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    const POPULAR_ASL = [
+      { node: "1999", flag: "🦜", country: "LOCAL" },
+      { node: "41522", flag: "🇬🇧", country: "GB" },
+      { node: "27339", flag: "🇺🇸", country: "US" },
+      { node: "2143", flag: "🇺🇸", country: "US" },
+      { node: "9999", flag: "🦜", country: "GLOBAL" },
+      { node: "51010", flag: "🌐", country: "GLOBAL" },
+      { node: "28554", flag: "🇷🇺", country: "RU" },
+      { node: "52495", flag: "🇩🇪", country: "DE" },
+      { node: "2000", flag: "🇺🇸", country: "US" },
+      { node: "43393", flag: "🇦🇺", country: "AU" }
+    ];
+    const popFound = POPULAR_ASL.find(it => it.node === n);
+    if (popFound) {
+      if (!window._aslNodeInfoMap) window._aslNodeInfoMap = {};
+      window._aslNodeInfoMap[n] = popFound;
+      return popFound;
+    }
+    return null;
+  }
+
   export function getCallCountryInfo(call, legacyCountryHint = "") {
     if (!call) return GLOBAL_COUNTRY_INFO;
     const callIdStr = String(call.id || call.call_id || "");
-    const isAslCall = call.network_type === "allstar" || callIdStr.startsWith("asl_");
+    const isAslCall = call.network_type === "allstar" || callIdStr.startsWith("asl_")
+      || (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function" && window.getHotspotNetworkType(call.hotspot_id) === "allstar");
     if (!isAslCall) {
       return getCountryInfo(call.src_id, call.src_callsign, legacyCountryHint);
     }
-    // 1) Оператор назвал позывной в эфире: talker_alias = "🎙️ WB8FWB · EASTC"
+    // 1) Если оператор назвал реальный радиолюбительский позывной в эфире (через микрофон):
     const alias = String(call.talker_alias || "");
     const spoken = alias.match(/^\s*\u{1F399}\uFE0F?\s*([A-Za-z0-9\/]{3,12})/u);
     if (spoken) {
-      return lookupCountryByHamCallsign(spoken[1]) || GLOBAL_COUNTRY_INFO;
+      const hamCountry = lookupCountryByHamCallsign(spoken[1]);
+      if (hamCountry) return hamCountry;
     }
-    // 2) Реальная страна узла/хаба из справочника AllStarLink (поле country: "US", "RU"; "INT" = неизвестно)
-    return getAslIsoCountryInfo(call.country) || GLOBAL_COUNTRY_INFO;
+    const opMatch = alias.match(/^([A-Za-z0-9\/]{3,10})\s*[·•-]/);
+    if (opMatch) {
+      const hamCountry = lookupCountryByHamCallsign(opMatch[1]);
+      if (hamCountry) return hamCountry;
+    }
+    // 2) Если у вызова уже передан флаг/страна из БД нод (allstar_directory):
+    if (call.flag && call.flag !== "🌐" && call.flag !== "➕") {
+      const iso = emojiToIso(call.flag) || (call.country && call.country !== "INT" ? call.country : null);
+      if (iso) {
+        const isoInfo = getAslIsoCountryInfo(iso);
+        if (isoInfo) return isoInfo;
+      }
+      return {
+        name: call.country || "AllStarLink",
+        name_en: call.country || "AllStarLink",
+        flag: call.flag
+      };
+    }
+    if (call.country && call.country !== "INT" && call.country !== "LOCAL") {
+      const isoInfo = getAslIsoCountryInfo(call.country);
+      if (isoInfo) return isoInfo;
+    }
+    // 3) Поиск узла в локальном справочнике нод ASL (contacts / DEFAULT_ASL_DIRECTORY / quick_nodes):
+    const nodeNum = String(call.src_id || call.node || (callIdStr.startsWith("asl_") ? callIdStr.split("_").pop() : "") || "").trim();
+    if (nodeNum && nodeNum !== "0") {
+      const dirNode = findAslDirectoryNode(nodeNum);
+      if (dirNode && dirNode.flag && dirNode.flag !== "🌐") {
+        const iso = dirNode.country || emojiToIso(dirNode.flag);
+        if (iso) {
+          const isoInfo = getAslIsoCountryInfo(iso);
+          if (isoInfo) return isoInfo;
+        }
+        return {
+          name: dirNode.country || dirNode.name || "AllStarLink",
+          name_en: dirNode.country || dirNode.name || "AllStarLink",
+          flag: dirNode.flag
+        };
+      }
+    }
+    // Для узлов AllStarLink КАТЕГОРИЧЕСКИ НЕ вызываем CALLSIGN_PREFIX_MAP по имени хаба (например EASTC),
+    // так как имя узла — это не радиолюбительский позывной, а идентификатор из БД нод.
+    return GLOBAL_COUNTRY_INFO;
   }
 
   export function emojiToIso(flagEmoji) {

@@ -675,10 +675,29 @@ class ServerAudioRecorder:
     async def _finalize_and_persist(self, buf: "CallAudioBuffer", kind: str, where: str) -> None:
         try:
             loop = asyncio.get_running_loop()
-            is_asl = str(getattr(buf, "call_id", "")).startswith("asl_")
+            call_id_str = str(getattr(buf, "call_id", ""))
+            is_asl = call_id_str.startswith("asl_") or ("allstar" in str(getattr(buf, "hotspot_id", "")).lower())
             effective_min_dur = self.min_duration_sec
             rec_data = await loop.run_in_executor(_RECORDER_IO_EXECUTOR, buf.finalize, effective_min_dur)
             if rec_data:
+                if is_asl:
+                    rec_data["network_type"] = "allstar"
+                    node_str = str(rec_data.get("src_id") or "").strip()
+                    if not node_str or node_str == "0":
+                        parts = call_id_str.split("_")
+                        if len(parts) >= 3 and parts[-1].isdigit():
+                            node_str = parts[-1]
+                    if node_str and node_str != "0":
+                        try:
+                            from allstar_directory import allstar_dir_mgr
+                            info = allstar_dir_mgr.get_node_info(node_str)
+                            if info:
+                                rec_data["country"] = info.get("country") or "INT"
+                                rec_data["flag"] = info.get("flag") or "🌐"
+                                if not rec_data.get("src_name") and info.get("name"):
+                                    rec_data["src_name"] = info.get("name")
+                        except Exception:
+                            pass
                 await self._persist_and_broadcast(rec_data)
             else:
                 logger.info(

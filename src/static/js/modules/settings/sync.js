@@ -5,7 +5,7 @@
  */
 
 import { resolveHotspotId } from "../network/ping-sparklines.js";
-import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.547";
+import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.552";
 
 let clientSettingsSyncTimer = null;
 
@@ -100,9 +100,6 @@ export function getClientSettingsSnapshot() {
 
 function isTransientTranscribeOrTtsKey(k) {
   if (!k) return false;
-  if (k === "proxdmr_tts_model" || k === "proxdmr_tts_model_opts") {
-    return false;
-  }
   return (
     k.startsWith("proxdmr_pre_tts_ts_mode_") ||
     k === "proxdmr_transcribe_ts1" ||
@@ -113,8 +110,26 @@ function isTransientTranscribeOrTtsKey(k) {
     k === "proxdmr_tts_ts1" ||
     k === "proxdmr_tts_ts2" ||
     k === "proxdmr_tts_solo_muted_slots" ||
-    /^proxdmr_tts_.*_ts[12]$/.test(k) ||
-    k.startsWith("proxdmr_tts_")
+    k === "proxdmr_tts_solo_muted_hs" ||
+    /^proxdmr_tts_.*_ts[12]$/.test(k)
+  );
+}
+
+function isPersistentUserStorageKey(k) {
+  if (!k || typeof k !== "string") return false;
+  if (k === "proxdmr_auth_token" || k === "proxdmr_demo_language") return false;
+  if (k.startsWith("proxdmr_gw_disconnected_")) return false;
+  if (k.startsWith("proxdmr_client_ping_") || k.startsWith("proxdmr_ping_hist_")) return false;
+  if (k.startsWith("proxdmr_tg_names_") || k === "proxdmr_tgif_tg_names_cache" || k === "proxdmr_freedmr_tg_names_cache") return false;
+  if (k.startsWith("proxdmr_user_callsigns_") || k === "proxdmr_allstar_directory") return false;
+  if (isTransientTranscribeOrTtsKey(k)) return false;
+
+  return (
+    k.startsWith("proxdmr_") ||
+    k.startsWith("dmr_") ||
+    k.startsWith("pinnedServers_") ||
+    k.startsWith("srvSortMode_") ||
+    k.startsWith("srvSortDir_")
   );
 }
 
@@ -122,13 +137,7 @@ function isTransientTranscribeOrTtsKey(k) {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith("proxdmr_") &&
-          !k.startsWith("proxdmr_client_ping_") &&
-          !k.startsWith("proxdmr_tg_names_") &&
-          !k.startsWith("proxdmr_user_callsigns_") &&
-          !k.startsWith("proxdmr_gw_disconnected_") &&
-          !isTransientTranscribeOrTtsKey(k) &&
-          k !== "proxdmr_demo_language") {
+      if (k && isPersistentUserStorageKey(k)) {
         storageDump[k] = localStorage.getItem(k);
       }
     }

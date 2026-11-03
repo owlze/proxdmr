@@ -7,6 +7,7 @@ Provides fast O(1) exact matching and sub-millisecond prefix/substring search.
 """
 
 import asyncio
+import html
 import json
 import logging
 import re
@@ -27,7 +28,9 @@ logger = logging.getLogger("proxdmr.allstar_dir")
 DATA_DIR = Path(__file__).resolve().parent / "data"
 ASL_CACHE_FILE = DATA_DIR / "allstar_nodes_cache.json"
 ASL_ALLMON_URL = "http://allmondb.allstarlink.org/"
+ASL_KEYED_URL = "https://stats.allstarlink.org/stats/keyed"
 ASL_CACHE_TTL_SEC = 12 * 3600  # 12 hours (twice daily)
+KEYED_CACHE_TTL_SEC = 10.0     # 10 seconds cache for live keyed nodes table
 PROBE_CACHE_TTL_SEC = 300.0    # 5 minutes (node telemetry cache)
 CIRCUIT_BREAKER_COOLDOWN_SEC = 900.0  # 15 minutes
 USER_AGENT = "ProxDMR/1.0"
@@ -96,7 +99,53 @@ def detect_country_flag(callsign: str, location: str, node: str) -> Tuple[str, s
         return ("AR", "🇦🇷")
     if any(c.startswith(p) for p in ("PY", "PP", "PR", "PS", "PT", "PU", "PV", "PW", "PX")) or "BRAZIL" in loc:
         return ("BR", "🇧🇷")
-    if any(c.startswith(p) for p in ("W", "K", "N", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "AJ", "AK", "AL")) or ", US" in loc or "USA" in loc:
+    if any(c.startswith(p) for p in ("XE", "XA", "XB", "XC", "4A", "6D")) or "MEXICO" in loc:
+        return ("MX", "🇲🇽")
+    if any(c.startswith(p) for p in ("ON", "OO", "OP", "OQ", "OR", "OS", "OT")) or "BELGIUM" in loc:
+        return ("BE", "🇧🇪")
+    if any(c.startswith(p) for p in ("HS", "E2")) or "THAILAND" in loc:
+        return ("TH", "🇹🇭")
+    if any(c.startswith(p) for p in ("KP4", "WP4", "NP4")) or "PUERTO RICO" in loc:
+        return ("PR", "🇵🇷")
+    if c.startswith("VU") or "INDIA" in loc:
+        return ("IN", "🇮🇳")
+    if any(c.startswith(p) for p in ("DU", "DV", "DW", "DX", "DZ", "4F")) or "PHILIPPINES" in loc:
+        return ("PH", "🇵🇭")
+    if any(c.startswith(p) for p in ("YB", "YC", "YD", "YE", "YF", "YG", "YH")) or "INDONESIA" in loc:
+        return ("ID", "🇮🇩")
+    if any(c.startswith(p) for p in ("9M", "9W")) or "MALAYSIA" in loc:
+        return ("MY", "🇲🇾")
+    if any(c.startswith(p) for p in ("CE", "XQ", "3G")) or "CHILE" in loc:
+        return ("CL", "🇨🇱")
+    if any(c.startswith(p) for p in ("HK", "HJ", "5J", "5K")) or "COLOMBIA" in loc:
+        return ("CO", "🇨🇴")
+    if any(c.startswith(p) for p in ("SV", "SX", "SZ", "J4")) or "GREECE" in loc:
+        return ("GR", "🇬🇷")
+    if any(c.startswith(p) for p in ("OK", "OL")) or "CZECH" in loc:
+        return ("CZ", "🇨🇿")
+    if any(c.startswith(p) for p in ("YO", "YP", "YQ", "YR")) or "ROMANIA" in loc:
+        return ("RO", "🇷🇴")
+    if any(c.startswith(p) for p in ("LZ",)) or "BULGARIA" in loc:
+        return ("BG", "🇧🇬")
+    if any(c.startswith(p) for p in ("HA", "HG")) or "HUNGARY" in loc:
+        return ("HU", "🇭🇺")
+    if any(c.startswith(p) for p in ("OZ", "OU", "OV", "OW", "5P", "5Q")) or "DENMARK" in loc:
+        return ("DK", "🇩🇰")
+    if any(c.startswith(p) for p in ("CT", "CQ", "CR", "CS")) or "PORTUGAL" in loc:
+        return ("PT", "🇵🇹")
+    if any(c.startswith(p) for p in ("EI", "EJ")) or "IRELAND" in loc:
+        return ("IE", "🇮🇪")
+    if any(c.startswith(p) for p in ("4X", "4Z")) or "ISRAEL" in loc:
+        return ("IL", "🇮🇱")
+    if any(c.startswith(p) for p in ("TA", "TB", "TC", "YM")) or "TURKEY" in loc or "TURKIYE" in loc:
+        return ("TR", "🇹🇷")
+    if any(c.startswith(p) for p in ("BV", "BM", "BN", "BO", "BP", "BQ", "BU", "BW", "BX")) or "TAIWAN" in loc:
+        return ("TW", "🇹🇼")
+    if any(c.startswith(p) for p in ("BA", "BD", "BG", "BH", "BI", "BJ", "BL", "BR", "BT", "BY", "BZ")) or "CHINA" in loc:
+        return ("CN", "🇨🇳")
+    if any(c.startswith(p) for p in ("HL", "DS", "6K", "6L", "6M", "6N", "D7", "D8", "D9")) or "KOREA" in loc:
+        return ("KR", "🇰🇷")
+    if any(c.startswith(p) for p in ("W", "K", "N", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "AJ", "AK", "AL")) or ", US" in loc or "USA" in loc or "UNITED STATES" in loc:
         return ("US", "🇺🇸")
     return ("INT", "🌐")
 
@@ -112,6 +161,8 @@ class AllStarDirectoryManager:
         self._probe_sem: Optional[asyncio.Semaphore] = None
         self._stats_circuit_broken: bool = False
         self._stats_circuit_broken_ts: float = 0.0
+        self._keyed_cache: List[Dict[str, Any]] = []
+        self._keyed_cache_ts: float = 0.0
 
     def get_stats(self) -> Dict[str, Any]:
         return {
@@ -236,19 +287,25 @@ class AllStarDirectoryManager:
 
         return self._nodes
 
-    def get_node_info(self, node: str, fallback_callsign: str = "") -> Dict[str, Any]:
+    def get_node_info(self, node: str, fallback_callsign: str = "", fallback_location: str = "") -> Dict[str, Any]:
         """Returns normalized node information with flag, callsign, and extracted city name."""
         if not self._node_index:
             self._load_cache()
         n_str = str(node or "").strip()
+        fb_call = (fallback_callsign or "").strip()
+        fb_loc = (fallback_location or "").strip()
         info = self._node_index.get(n_str)
         if info:
-            loc = (info.get("location") or info.get("name") or "").strip()
+            loc = (info.get("location") or fb_loc or info.get("name") or "").strip()
             # Clean city: take first segment before comma or slash
             city = loc.split(",")[0].split("/")[0].strip() if loc else ""
-            call = info.get("callsign") or f"Node {n_str}"
+            call = info.get("callsign") or fb_call or f"Node {n_str}"
             flag = info.get("flag") or "🌐"
             country = info.get("country") or "INT"
+            if flag == "🌐" and (call or loc):
+                det_country, det_flag = detect_country_flag(call, loc, n_str)
+                if det_flag != "🌐":
+                    country, flag = det_country, det_flag
             return {
                 "node": n_str,
                 "callsign": call,
@@ -258,16 +315,16 @@ class AllStarDirectoryManager:
                 "country": country,
                 "flag": flag,
             }
-        
+
         # Fallback if node not in global directory
-        fb_call = (fallback_callsign or "").strip()
-        country, flag = detect_country_flag(fb_call, "", n_str) if fb_call else ("INT", "🌐")
+        country, flag = detect_country_flag(fb_call, fb_loc, n_str) if (fb_call or fb_loc) else ("INT", "🌐")
+        fb_city = fb_loc.split(",")[0].split("/")[0].strip() if fb_loc else ""
         return {
             "node": n_str,
             "callsign": fb_call or f"Node {n_str}",
-            "name": f"Node {n_str}",
-            "location": "",
-            "city": "",
+            "name": fb_loc or fb_call or f"Node {n_str}",
+            "location": fb_loc,
+            "city": fb_city,
             "country": country,
             "flag": flag,
         }
@@ -343,6 +400,137 @@ class AllStarDirectoryManager:
             "nodes": results
         }
 
+    @staticmethod
+    def is_valid_public_asl_node(node_str: str) -> bool:
+        """Checks that node ID is a routable public AllStarLink node (excludes <2000 private & 3xxxxxx EchoLink)."""
+        s = str(node_str or "").strip()
+        if not s.isdigit():
+            return False
+        n = int(s)
+        if n < 2000 or n in (9998, 9999):
+            return False
+        if len(s) >= 7 and s.startswith("3"):
+            return False
+        return n <= 2999999
+
+    @classmethod
+    def parse_keyed_html(cls, raw_html: str) -> List[Dict[str, Any]]:
+        """Parses server-rendered HTML table from https://stats.allstarlink.org/stats/keyed."""
+        if not raw_html:
+            return []
+        tbody_m = re.search(r"<tbody[^>]*>(.*?)</tbody>", raw_html, re.S | re.I)
+        body_html = tbody_m.group(1) if tbody_m else raw_html
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", body_html, re.S | re.I)
+
+        def _clean(fragment: str) -> str:
+            txt = html.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))
+            return re.sub(r"\s+", " ", txt).strip()
+
+        results: List[Dict[str, Any]] = []
+        seen = set()
+        for row in rows:
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S | re.I)
+            if len(tds) < 6:
+                continue
+            node_m = re.search(r"/stats/(\d+)", tds[0])
+            node_str = node_m.group(1) if node_m else _clean(tds[0])
+            if not cls.is_valid_public_asl_node(node_str) or node_str in seen:
+                continue
+            seen.add(node_str)
+
+            raw_call = _clean(tds[2])
+            freq = _clean(tds[3])
+            ctcss = _clean(tds[4])
+            page_loc = _clean(tds[5])
+            conn_html = tds[6] if len(tds) >= 7 else ""
+
+            linked_asl: List[str] = []
+            for cn in re.findall(r"/stats/(\d+)", conn_html):
+                if cn != node_str and cls.is_valid_public_asl_node(cn) and cn not in linked_asl:
+                    linked_asl.append(cn)
+            all_links = re.findall(r'/stats/([^"\'>\s/]+)', conn_html)
+
+            results.append({
+                "node": node_str,
+                "raw_callsign": raw_call,
+                "frequency": freq,
+                "ctcss": ctcss,
+                "page_location": page_loc,
+                "linked_nodes": linked_asl,
+                "public_links_count": len(linked_asl),
+                "total_links_count": len(all_links),
+            })
+        return results
+
+    def _fetch_keyed_sync(self) -> List[Dict[str, Any]]:
+        import ssl
+        req = urllib.request.Request(
+            ASL_KEYED_URL,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=6.0, context=ctx) as resp:
+            raw_html = resp.read().decode("utf-8", errors="replace")
+
+        parsed_rows = self.parse_keyed_html(raw_html)
+        enriched: List[Dict[str, Any]] = []
+        for item in parsed_rows:
+            node_str = item["node"]
+            raw_call = item["raw_callsign"]
+            page_loc = item["page_location"]
+            short_call = raw_call.split()[0].strip() if raw_call else ""
+            info = self.get_node_info(node_str, fallback_callsign=short_call or raw_call, fallback_location=page_loc)
+
+            call_clean = (short_call or info.get("callsign") or "").strip()
+            if call_clean.startswith("Node "):
+                call_clean = ""
+            city_clean = (info.get("city") or "").strip()
+            if city_clean.isdigit():
+                city_clean = ""
+
+            if call_clean and city_clean and city_clean.lower() != call_clean.lower():
+                label = f"{call_clean} · {city_clean}"
+            elif call_clean:
+                label = call_clean
+            elif city_clean:
+                label = city_clean
+            else:
+                label = info.get("name") or f"Node {node_str}"
+
+            enriched.append({
+                "node": node_str,
+                "callsign": call_clean or info.get("callsign") or f"Node {node_str}",
+                "label": label,
+                "location": page_loc or info.get("location") or "",
+                "city": city_clean,
+                "country": info.get("country") or "INT",
+                "flag": info.get("flag") or "🌐",
+                "frequency": item["frequency"],
+                "public_links_count": item["public_links_count"],
+                "total_links_count": item["total_links_count"],
+                "linked_nodes": item["linked_nodes"][:12],
+            })
+        return enriched
+
+    async def fetch_keyed_nodes(self, force: bool = False) -> List[Dict[str, Any]]:
+        """Returns enriched list of currently keyed public AllStarLink nodes (cached for 10s)."""
+        now = time.time()
+        if not force and self._keyed_cache and (now - self._keyed_cache_ts) < KEYED_CACHE_TTL_SEC:
+            return self._keyed_cache
+        try:
+            items = await asyncio.to_thread(self._fetch_keyed_sync)
+            if items:
+                self._keyed_cache = items
+                self._keyed_cache_ts = time.time()
+            return items
+        except Exception as e:
+            logger.warning(f"[ASL-DIR] Failed to fetch live keyed nodes from {ASL_KEYED_URL}: {e}")
+            if self._keyed_cache and (now - self._keyed_cache_ts) < 60.0:
+                return self._keyed_cache
+            return []
 
     @staticmethod
     def _query_dns_txt(node_str: str) -> Tuple[bool, str, int]:

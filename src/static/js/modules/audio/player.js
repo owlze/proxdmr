@@ -1,4 +1,4 @@
-import { getCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime } from '../core/formatters.js?v=2.9.367';
+import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime } from '../core/formatters.js?v=2.9.547';
 import { showToast } from '../core/toast.js';
 import {
   DEFAULT_ROGER_BEEP_PATTERN,
@@ -1839,7 +1839,8 @@ export   class RecordingsManager {
       if (this.stationNameEl) this.stationNameEl.textContent = rec.src_name || (rec.talker_alias ? rec.talker_alias : "");
 
       if (this.stationFlagEl) {
-        const country = getCountryInfo(rec.src_id, rec.src_callsign);
+        const liveCall = (window.lastHeardList || []).find(c => c && (c.id === rec.call_id || c.call_id === rec.call_id || c.id === rec.id));
+        const country = getCallCountryInfo(liveCall ? { ...rec, ...liveCall } : rec);
         this.stationFlagEl.innerHTML = (rec.call_type === "TX") 
           ? `<span class="tx-mic-icon" title="${window.t ? window.t("live.tx_tooltip", {}, "Моя передача (TX)") : "Моя передача (TX)"}">\u{1F399}\u{FE0F}</span>` 
           : getFlagBadgeHtml(country, false, country.flag);

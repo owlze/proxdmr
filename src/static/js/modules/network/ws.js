@@ -28,7 +28,7 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.547';
+} from '../dmr/transcriber.js?v=2.9.552';
 import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.547';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.367';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
@@ -1812,10 +1812,11 @@ export function handleServerMessage(msg) {
       const targetHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
       const wasDynamicMode = Boolean(targetHs && targetHs._aslDynamicMatrixMode);
       if (targetHs) {
-        if (!msg.node) {
-          targetHs._aslDynamicMatrixMode = false;
-          targetHs.asl_unlisted_links = [];
+        if (targetHs._aslDisconnectingNodes && msg.node) {
+          targetHs._aslDisconnectingNodes.delete(String(msg.node).trim());
         }
+        targetHs._aslDynamicMatrixMode = false;
+        targetHs.asl_unlisted_links = [];
         targetHs.connected_node = "";
         targetHs.is_asl_linked = false;
         targetHs.asl_links = [];
@@ -1870,6 +1871,11 @@ export function handleServerMessage(msg) {
               else targetHs._aslDisconnectingNodes.clear();
             }
             if (msg.state === "done") {
+              if (targetHs._aslDisconnectingNodes) {
+                targetHs._aslDisconnectingNodes.clear();
+              }
+              targetHs.asl_unlisted_links = [];
+              targetHs._aslDynamicMatrixMode = false;
               targetHs.connected_node = "";
               targetHs.is_asl_linked = false;
               targetHs.asl_links = [];
@@ -1887,8 +1893,15 @@ export function handleServerMessage(msg) {
               });
             }
           } else if (msg.state === "done") {
-            if (targetHs._aslConnectingNodes && nodeStr) {
-              targetHs._aslConnectingNodes.delete(nodeStr);
+            if (targetHs) {
+              if (targetHs._aslConnectingNodes && nodeStr) {
+                targetHs._aslConnectingNodes.delete(nodeStr);
+              }
+              if (targetHs._aslDisconnectingNodes) {
+                targetHs._aslDisconnectingNodes.clear();
+              }
+              targetHs.asl_unlisted_links = [];
+              targetHs._aslDynamicMatrixMode = false;
             }
             if (nodeStr) {
               const finalMode = (msg.mode === "*3" || msg.mode === "3") ? "*3" : "*2";
@@ -1905,13 +1918,20 @@ export function handleServerMessage(msg) {
               }
             }
           } else if (msg.state === "failed") {
-            if (targetHs._aslConnectingNodes && nodeStr) {
-              targetHs._aslConnectingNodes.delete(nodeStr);
+            if (targetHs) {
+              if (targetHs._aslConnectingNodes && nodeStr) {
+                targetHs._aslConnectingNodes.delete(nodeStr);
+              }
+              if (targetHs._aslDisconnectingNodes) {
+                targetHs._aslDisconnectingNodes.clear();
+              }
+              targetHs.asl_unlisted_links = [];
+              targetHs._aslDynamicMatrixMode = false;
+              targetHs.connected_node = "";
+              targetHs.is_asl_linked = false;
+              targetHs.asl_links = [];
+              targetHs.asl_online_count = 0;
             }
-            targetHs.connected_node = "";
-            targetHs.is_asl_linked = false;
-            targetHs.asl_links = [];
-            targetHs.asl_online_count = 0;
           }
         }
 
