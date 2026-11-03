@@ -3176,7 +3176,7 @@ export function updateCardAllStarPanel(card, hs) {
     // Задача 2: Верхняя статусная строка VFO (между STANDBY и E2E)
     const callsignEl = card.querySelector(".callsign-display");
     if (callsignEl) {
-      const myCall = String((targetHs && targetHs.callsign) || "N0CALL").trim();
+      const myCall = String((targetHs && targetHs.callsign) || "RV6LRJ").trim();
       const countStr = (targetHs && targetHs.asl_online_count !== undefined && targetHs.asl_online_count > 0) ? ` (${targetHs.asl_online_count})` : "";
       if (isLinked) {
         callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">Link <strong class="asl-vfo-target-node">${safeEscapeHtml(connNode)}</strong>${countStr}</span>`;
@@ -4858,10 +4858,10 @@ export function renderRadiosGrid() {
           delBtn.onclick = async (e) => {
             e.stopPropagation();
             const ok = await (window.showAppConfirm ? window.showAppConfirm({
-              title: "Удаление хотспота",
+              title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Удаление хотспота") : "Удаление хотспота",
               icon: "🗑️",
-              message: `Удалить виртуальный хотспот "${hs.name}"?`,
-              confirmText: "Удалить",
+              message: window.t ? window.t("hotspots.delete_virtual_confirm_msg", { name: hs.name }, `Удалить виртуальный хотспот "${hs.name}"?`) : `Удалить виртуальный хотспот "${hs.name}"?`,
+              confirmText: window.t ? window.t("buttons.delete", {}, "Удалить") : "Удалить",
               confirmStyle: "danger"
             }) : Promise.resolve(confirm(`Удалить виртуальный хотспот "${hs.name}"?`)));
             if (ok) {
@@ -6548,10 +6548,10 @@ export function renderHotspotsList() {
       if (delBtn) {
         delBtn.onclick = async () => {
           const ok = await (window.showAppConfirm ? window.showAppConfirm({
-            title: "Удаление хотспота",
+            title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Удаление хотспота") : "Удаление хотспота",
             icon: "🗑️",
-            message: `Удалить хотспот "${hs.name}"?`,
-            confirmText: "Удалить",
+            message: window.t ? window.t("hotspots.delete_confirm_msg", { name: hs.name }, `Удалить хотспот "${hs.name}"?`) : `Удалить хотспот "${hs.name}"?`,
+            confirmText: window.t ? window.t("buttons.delete", {}, "Удалить") : "Удалить",
             confirmStyle: "danger"
           }) : Promise.resolve(confirm(`Удалить хотспот "${hs.name}"?`)));
           if (ok) {
@@ -8201,7 +8201,7 @@ export function initHotspotsManager() {
           showToast(window.t ? window.t("hotspots.rpto_saved_offline", {}, "✅ Опции RPTO сохранены (будут отправлены при подключении)") : "✅ Опции RPTO сохранены (будут отправлены при подключении)", 2800);
         }
       } catch (err) {
-        showToast("❌ Ошибка отправки RPTO: " + (err && err.message ? err.message : err), 3000);
+        showToast(window.t ? window.t("hotspots.rpto_send_error", { err: (err && err.message ? err.message : err) }, "❌ Ошибка отправки RPTO: " + (err && err.message ? err.message : err)) : "❌ Ошибка отправки RPTO: " + (err && err.message ? err.message : err), 3000);
       } finally {
         btnSendRptoNow.disabled = false;
       }
@@ -8437,10 +8437,10 @@ export function initHotspotsManager() {
       const targetHs = currentHotspots.find(h => h.id === id);
       const name = targetHs ? targetHs.name : "выбранный хотспот";
       const ok = await (window.showAppConfirm ? window.showAppConfirm({
-        title: "Удаление хотспота",
+        title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Удаление хотспота") : "Удаление хотспота",
         icon: "🗑️",
-        message: `Удалить хотспот "${name}"?`,
-        confirmText: "Удалить",
+        message: window.t ? window.t("hotspots.delete_confirm_msg", { name }, `Удалить хотспот "${name}"?`) : `Удалить хотспот "${name}"?`,
+        confirmText: window.t ? window.t("buttons.delete", {}, "Удалить") : "Удалить",
         confirmStyle: "danger"
       }) : Promise.resolve(confirm(`Удалить хотспот "${name}"?`)));
       if (!ok) return;
@@ -8463,7 +8463,7 @@ export function initHotspotsManager() {
       } catch (err) {
         const errMsg = "Ошибка при удалении: " + (err && err.message ? err.message : err);
         if (window.showAppAlert) {
-          await window.showAppAlert(errMsg, { title: "Ошибка", icon: "⚠️" });
+          await window.showAppAlert(errMsg, { title: window.t ? window.t("common.error", {}, "Ошибка") : "Ошибка", icon: "⚠️" });
         } else {
           alert(errMsg);
         }
@@ -8688,9 +8688,9 @@ export function initHotspotsManager() {
         }
         const mContent = hotspotEditForm.closest('.modal-content');
         if (mContent) mContent.classList.remove('modal-save-pulse');
-        const errMsg = "Ошибка при сохранении: " + (err && err.message ? err.message : err);
+        const errMsg = window.t ? window.t("hotspots.save_error", { err: (err && err.message ? err.message : err) }, "Ошибка при сохранении: " + (err && err.message ? err.message : err)) : "Ошибка при сохранении: " + (err && err.message ? err.message : err);
         if (window.showAppAlert) {
-          await window.showAppAlert(errMsg, { title: "Ошибка", icon: "⚠️" });
+          await window.showAppAlert(errMsg, { title: window.t ? window.t("common.error", {}, "Ошибка") : "Ошибка", icon: "⚠️" });
         } else {
           alert(errMsg);
         }

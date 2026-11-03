@@ -33,7 +33,7 @@ import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
 import { initAndroidBridge } from './modules/core/android.js?v=2.9.547';
 import { setupDsdfmeModal } from './modules/settings/vocoder.js?v=2.9.367';
 import { initAuth, initAccountManager } from './modules/settings/account.js';
-import { initLanguageManager } from './modules/settings/language.js?v=2.9.367';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.548';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
 import { initGeneralSettings } from './modules/settings/general.js?v=2.9.509';
 import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.509';
@@ -77,7 +77,7 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.547';
+} from './modules/dmr/hotspots.js?v=2.9.548';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
@@ -189,7 +189,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.387';
+} from './modules/audio/volume-mute.js?v=2.9.548';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -207,7 +207,7 @@ import {
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js?v=2.9.367';
+} from './modules/dmr/bm-status.js?v=2.9.548';
 import {
   connectWebSocket,
   handleServerMessage,
@@ -244,19 +244,40 @@ if (typeof window !== "undefined") {
     window._proxdmrCidFetchPatched = true;
     const _origFetch = window.fetch.bind(window);
     window.fetch = function(input, init) {
+      let isLocalApi = false;
       try {
         const urlStr = typeof input === "string" ? input : (input && input.url ? input.url : "");
-        const isLocalApi = urlStr.startsWith("/api/") || urlStr.includes(window.location.origin + "/api/");
+        isLocalApi = urlStr.startsWith("/api/") || urlStr.includes(window.location.origin + "/api/");
         if (isLocalApi && window.PROXDMR_CLIENT_ID) {
           init = init ? Object.assign({}, init) : {};
           const hdrs = new Headers(init.headers || (typeof input !== "string" && input && input.headers ? input.headers : undefined));
           if (!hdrs.has("X-ProxDMR-Client-Id")) {
-            hdrs.set("X-ProxDMR-Client-Id", window.PROXDMR_CLIENT_ID);
+            hdrs.set("X-ProxDMR-Client-Id", window.PROxDMR_CLIENT_ID);
           }
           init.headers = hdrs;
         }
       } catch (_) {}
-      return _origFetch(input, init);
+      const pending = _origFetch(input, init);
+      if (!isLocalApi) return pending;
+      return pending.then(async (resp) => {
+        try {
+          if (resp.status !== 403 || typeof window.t !== "function") return resp;
+          const data = await resp.clone().json();
+          if (!data || data.code !== "DEMO_READ_ONLY") return resp;
+          const raw = String(data.detail || data.message || "");
+          const localized = raw.includes("экспорт")
+            ? window.t("demo.export_locked", {}, raw)
+            : window.t("demo.settings_locked", {}, raw);
+          const patched = Object.assign({}, data, { detail: localized, message: localized });
+          return new Response(JSON.stringify(patched), {
+            status: resp.status,
+            statusText: resp.statusText,
+            headers: new Headers({ "Content-Type": "application/json" })
+          });
+        } catch (_) {
+          return resp;
+        }
+      });
     };
   }
 }

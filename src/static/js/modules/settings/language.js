@@ -1,6 +1,6 @@
 import { refreshAllCardsBmBanner } from '../dmr/bm-banner.js?v=2.9.496';
 import { currentBmStatus, updateBmStatus } from '../dmr/bm-status.js';
-import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.534';
+import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.548';
 
 /**
  * Language Selector & i18n Localization Engine Module
