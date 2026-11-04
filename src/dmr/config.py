@@ -72,7 +72,7 @@ class AppSettings(BaseModel):
     sync_system_volume: bool = True
     haptic_feedback: bool = True
     haptic_duration: int = 45
-    simultaneous_slots: bool = True
+    simultaneous_slots: bool = False
     check_mic_on_tx: bool = True
     theme: str = "dark"
     bg_type: str = "pattern"

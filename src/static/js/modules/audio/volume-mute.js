@@ -7,7 +7,7 @@
 import { showCenterHudToast, showToast } from "../core/toast.js";
 import { scheduleSyncClientSettings } from "../settings/sync.js";
 import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.556";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.560";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;
@@ -104,17 +104,29 @@ export function isSimultaneousSlotsEnabled() {
   if (typeof window !== "undefined" && typeof window.getHotspotTsAudioMode === "function") {
     return window.getHotspotTsAudioMode("default") !== "solo";
   }
-  return localStorage.getItem("proxdmr_simultaneous_slots") !== "false";
+  return localStorage.getItem("proxdmr_simultaneous_slots") === "true";
 }
 
 export function setSimultaneousSlotsEnabled(enabled, syncServer = true) {
   const boolVal = Boolean(enabled);
   localStorage.setItem("proxdmr_simultaneous_slots", boolVal ? "true" : "false");
   if (typeof window !== "undefined" && typeof window.setHotspotTsAudioMode === "function") {
-    window.setHotspotTsAudioMode("default", boolVal ? "auto" : "solo");
+    window.setHotspotTsAudioMode("default", boolVal ? "auto" : "solo", { skipServerSync: !syncServer });
   }
-  if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
-    window.scheduleSyncClientSettings();
+  if (syncServer) {
+    const ws = (typeof getWs === "function" ? getWs() : (typeof window !== "undefined" ? window.ws : null));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_simultaneous_slots", enabled: boolVal }));
+      } catch (_) {}
+    }
+    try {
+      fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simultaneous_slots: boolVal })
+      }).catch(() => {});
+    } catch (_) {}
   }
 }
 
@@ -775,15 +787,16 @@ export async function collapseHotspot(hid, options = {}) {
   scheduleSyncClientSettings();
 }
 
-export async function expandHotspot(hid) {
+export async function expandHotspot(hid, options = {}) {
   const currentHotspots = getCurrentHotspots();
   const cid = resolveHotspotId(hid);
   const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`)
     || (cid === resolveHotspotId("default") ? document.getElementById("radioContainer") : null);
   if (!card) return;
 
-  const lastAction = (typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || window._lastHotspotCollapseActionTimes["default"])) || 0;
-  if (Date.now() - lastAction < 600) {
+  const force = Boolean(options && options.force);
+  const lastAction = (!force && typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || window._lastHotspotCollapseActionTimes["default"])) || 0;
+  if (!force && (Date.now() - lastAction < 600)) {
     console.warn(`[COLLAPSE] Prevented rapid auto-expand for ${cid} (${Date.now() - lastAction}ms since last action)`);
     return;
   }

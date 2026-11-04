@@ -194,6 +194,7 @@ export function setHotspotMute(hid, slot, muted, isTemporary = false) {
 
   if (!isTemporary) {
     _scheduleSyncClientSettings(1000);
+  
   }
 }
 
@@ -308,7 +309,7 @@ export function getHotspotTsAudioMode(hid) {
   return "solo";
 }
 
-export function setHotspotTsAudioMode(hid, mode) {
+export function setHotspotTsAudioMode(hid, mode, options = {}) {
   const cid = _resolveHotspotId(hid);
   if (isXlxHotspot(cid)) {
     enforceSoloTsMute(cid);
@@ -322,7 +323,43 @@ export function setHotspotTsAudioMode(hid, mode) {
   const isPrimary = (hsList && hsList[0] && String(hsList[0].id) === cid) || (cid === "default");
   if (isPrimary) {
     localStorage.setItem("proxdmr_ts_mode_default", safeMode);
-    localStorage.setItem("proxdmr_simultaneous_slots", "false");
+    localStorage.setItem("proxdmr_simultaneous_slots", safeMode === "auto" ? "true" : "false");
+  }
+
+  // If user changed mode directly (not internal TTS enforcer), clear pre-TTS restore state
+  if (!options.fromTtsInternal) {
+    if (typeof window !== "undefined" && window._preTtsAudioModes) {
+      delete window._preTtsAudioModes[cid];
+      if (isPrimary) {
+        delete window._preTtsAudioModes["default"];
+        if (hsList && hsList[0]) delete window._preTtsAudioModes[String(hsList[0].id)];
+      }
+    }
+    try {
+      localStorage.removeItem(`proxdmr_pre_tts_ts_mode_${cid}`);
+      if (isPrimary) {
+        localStorage.removeItem("proxdmr_pre_tts_ts_mode_default");
+        if (hsList && hsList[0]) localStorage.removeItem(`proxdmr_pre_tts_ts_mode_${hsList[0].id}`);
+      }
+    } catch (_) {}
+  }
+
+  // Sync simultaneous_slots to server for primary/default hotspot
+  if (isPrimary && !options.skipServerSync) {
+    const isSimul = (safeMode === "auto");
+    const ws = (typeof getWs === "function" ? getWs() : (typeof window !== "undefined" ? window.ws : null));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_simultaneous_slots", enabled: isSimul }));
+      } catch (_) {}
+    }
+    try {
+      fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simultaneous_slots: isSimul })
+      }).catch(() => {});
+    } catch (_) {}
   }
 
   if (safeMode === "solo") {
@@ -332,7 +369,7 @@ export function setHotspotTsAudioMode(hid, mode) {
   }
 
   updateHotspotTsAudioModeUI(cid);
-  _scheduleSyncClientSettings(1000);
+
 }
 
 export function cycleHotspotTsAudioMode(hid) {
@@ -1168,6 +1205,7 @@ export function setHotspotPan(hid, slot, mode) {
 
   updateHotspotCardPanUI(cid);
   _scheduleSyncClientSettings(1000);
+
 }
 
 export function cycleHotspotPan(hid, slot) {

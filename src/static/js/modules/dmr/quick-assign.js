@@ -1022,7 +1022,61 @@ function openDirectCallModal(target) {
     initialHid = resolveHotspotId(hsList[0].id);
   }
 
+  function validateDirectCallHotspot(hsId) {
+    const allHs = Array.isArray(window.currentHotspots) ? window.currentHotspots : [];
+    const hs = allHs.find(h => h.id === hsId || resolveHotspotId(h.id) === resolveHotspotId(hsId));
+    const errorBanner = document.getElementById("directCallErrorBanner");
+    const errorTitle = document.getElementById("directCallErrorTitle");
+    const errorDesc = document.getElementById("directCallErrorDesc");
+    const hsSelect = document.getElementById("directCallHsSelect");
+    const btnApply = document.getElementById("btnApplyDirectCall");
+
+    if (!hs) return { ok: false, reason: "NOT_FOUND" };
+
+    const netType = (hs.network_type || "bm").toLowerCase();
+    const hasKey = Boolean(hs.bm_api_key && hs.bm_api_key.trim().length > 8);
+    const isBmOrCompatible = (netType === "bm" || netType === "tgif");
+
+    let isOk = true;
+    let reasonTitle = "";
+    let reasonDesc = "";
+
+    if (!isBmOrCompatible) {
+      isOk = false;
+      reasonTitle = (window.t ? window.t("direct_call.error_not_bm_title") : "Сеть не поддерживает API BrandMeister");
+      reasonDesc = (window.t ? window.t("direct_call.error_not_bm_desc") : `Хотспот работает в сети ${netType.toUpperCase()}. Создание чистого TS через API BM невозможно.`);
+    } else if (!hasKey) {
+      isOk = false;
+      reasonTitle = (window.t ? window.t("direct_call.error_no_bm_api_title") : "Не настроен API BrandMeister");
+      reasonDesc = (window.t ? window.t("direct_call.error_no_bm_api_desc") : "У выбранного хотспота не указан API-ключ в настройках. Очистка таймслота невозможна, переход отменён.");
+    } else if (hs._apiStatus && hs._apiStatus !== "ONLINE" && hs._apiStatus !== "CHECKING") {
+      isOk = false;
+      reasonTitle = (window.t ? window.t("direct_call.error_bm_api_offline_title") : "API BrandMeister недоступен");
+      reasonDesc = (window.t ? window.t("direct_call.error_bm_api_offline_desc") : `Статус API: ${hs._apiStatus} (${hs._apiDetail || "Нет связи"}). Очистка таймслота невозможна.`);
+    }
+
+    if (errorBanner) {
+      if (!isOk) {
+        errorBanner.style.display = "flex";
+        if (errorTitle) errorTitle.textContent = reasonTitle;
+        if (errorDesc) errorDesc.textContent = reasonDesc;
+        if (hsSelect) hsSelect.classList.add("has-error");
+        if (btnApply) btnApply.classList.add("btn-disabled");
+      } else {
+        errorBanner.style.display = "none";
+        if (hsSelect) hsSelect.classList.remove("has-error");
+        if (btnApply) btnApply.classList.remove("btn-disabled");
+      }
+    }
+
+    return { ok: isOk, reason: reasonDesc };
+  }
+
   if (directCallHsSelect) {
+    directCallHsSelect.onchange = () => {
+      validateDirectCallHotspot(directCallHsSelect.value);
+    };
+
     directCallHsSelect.innerHTML = hsList.map(hs => {
       const hsName = getHotspotDisplayName(hs.id);
       const isOnline = hs.status === "ONLINE";
@@ -1031,6 +1085,9 @@ function openDirectCallModal(target) {
       return `<option value="${hs.id}" ${isSel ? 'selected' : ''}>${isOnline ? '🟢 ' : '⚪ '}${hsName}${sub ? ' (' + sub + ')' : ''}</option>`;
     }).join("");
   }
+
+  // Первичная валидация при открытии окна
+  validateDirectCallHotspot(initialHid);
 
   const origCard = document.querySelector(`.radio-container[data-hotspot-id="${initialHid}"]`);
   directCallSelectedSlot = target.slot || (origCard && (origCard._activeSlot === 1 || origCard._activeSlot === 2) ? origCard._activeSlot : (getHotspotSlot(initialHid) || 1));
@@ -1053,6 +1110,17 @@ function openDirectCallModal(target) {
     btnApplyDirectCall.onclick = (e) => {
       e.preventDefault();
       const chosenHid = directCallHsSelect ? directCallHsSelect.value : initialHid;
+      const validation = validateDirectCallHotspot(chosenHid);
+      if (!validation.ok) {
+        // Прервать процедуру! Окно НЕ закрывать, никаких alert(), подсветка анимацией CSS
+        const errorBanner = document.getElementById("directCallErrorBanner");
+        if (errorBanner) {
+          errorBanner.classList.remove("shake-anim");
+          void errorBanner.offsetWidth;
+          errorBanner.classList.add("shake-anim");
+        }
+        return;
+      }
       const targetSlot = directCallSelectedSlot || 1;
       const hsObj = hsList.find(h => h.id === chosenHid || resolveHotspotId(h.id) === resolveHotspotId(chosenHid));
       const hsTitle = hsObj ? (hsObj.name || hsObj.id) : chosenHid;
@@ -3400,6 +3468,14 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
   if (typeof closeCallIdModal === "function") closeCallIdModal();
   if (typeof closeBmInfoModal === "function") closeBmInfoModal();
 
+  // Защита: если целевой хотспот сети BM не имеет ключа API, прервать ДО закрытия других хотспотов!
+  const targetHsCheck = (Array.isArray(window.currentHotspots) && window.currentHotspots.find(h => resolveHotspotId(h.id) === resolvedTargetHid)) || null;
+  const targetNetType = (targetHsCheck?.network_type || "bm").toLowerCase();
+  if ((targetNetType === "bm" || targetNetType === "tgif") && (!targetHsCheck?.bm_api_key || targetHsCheck.bm_api_key.trim().length <= 8)) {
+    console.warn(`[QUICK_ASSIGN] Aborted direct transfer to ${resolvedTargetHid}: missing BM API key`);
+    return;
+  }
+
   // 1. Manage other hotspots according to Solo mode or Active Session scheme
   const allCards = document.querySelectorAll(".radio-container");
   const processedHids = new Set();
@@ -3466,9 +3542,20 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
   }
 
   // 2. Expand target hotspot, unmute its audio, and set it active
-  await expandHotspot(resolvedTargetHid);
+  await expandHotspot(resolvedTargetHid, { force: true });
   setHotspotAudioMute(resolvedTargetHid, false);
   switchActiveHotspot(resolvedTargetHid);
+  if (typeof window.syncCollapsedHotspotStacks === "function") {
+    window.syncCollapsedHotspotStacks();
+  }
+  const expandedCardEl = document.querySelector(`.radio-container[data-hotspot-id="${resolvedTargetHid}"]`)
+    || (resolvedTargetHid === resolveHotspotId("default") ? document.getElementById("radioContainer") : null);
+  if (expandedCardEl) {
+    expandedCardEl.classList.remove("collapsed", "live-collapsed");
+    try {
+      expandedCardEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (_) {}
+  }
 
   // For XLX reflector, protocol operates exclusively on TS2
   const targetHsObj = (Array.isArray(window.currentHotspots) && window.currentHotspots.find(h => resolveHotspotId(h.id) === resolvedTargetHid)) || null;

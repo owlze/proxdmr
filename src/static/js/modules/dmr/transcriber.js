@@ -1176,7 +1176,7 @@ function syncTtsSoloMode() {
       } catch (_) {}
       if (prevMode === "doubl") prevMode = "auto";
       if (prevMode && ["solo", "auto"].includes(prevMode) && typeof setHotspotTsAudioMode === "function") {
-        setHotspotTsAudioMode(h, prevMode);
+        setHotspotTsAudioMode(h, prevMode, { fromTtsInternal: true });
       }
     }
   });
@@ -1214,7 +1214,7 @@ function syncTtsSoloMode() {
         }
       } catch (_) {}
       if (curMode !== "solo") {
-        setHotspotTsAudioMode(hid, "solo");
+        setHotspotTsAudioMode(hid, "solo", { fromTtsInternal: true });
       }
     }
 
@@ -3100,7 +3100,7 @@ function toggleSlotTts(row, slot) {
         window._preTtsAudioModes[hid] = curMode;
       }
       if (curMode !== "solo") {
-        setHotspotTsAudioMode(hid, "solo");
+        setHotspotTsAudioMode(hid, "solo", { fromTtsInternal: true });
       }
     }
     const otherSlot = slot === 1 ? 2 : 1;
@@ -3109,12 +3109,20 @@ function toggleSlotTts(row, slot) {
   } else {
     // TURNING TTS OFF:
     // Restore pre-TTS audio mode for this hotspot if saved
+    let prevMode = null;
     if (window._preTtsAudioModes && window._preTtsAudioModes[hid]) {
-      const prevMode = window._preTtsAudioModes[hid];
+      prevMode = window._preTtsAudioModes[hid];
       delete window._preTtsAudioModes[hid];
-      if (typeof setHotspotTsAudioMode === "function") {
-        setHotspotTsAudioMode(hid, prevMode);
+    }
+    try {
+      const stored = localStorage.getItem("proxdmr_pre_tts_ts_mode_" + hid);
+      if (stored) {
+        if (!prevMode) prevMode = stored;
+        localStorage.removeItem("proxdmr_pre_tts_ts_mode_" + hid);
       }
+    } catch (_) {}
+    if (prevMode && typeof setHotspotTsAudioMode === "function") {
+      setHotspotTsAudioMode(hid, prevMode, { fromTtsInternal: true });
     }
   }
 
@@ -5884,8 +5892,9 @@ function disableAllTts(silent = true, notifyWs = true) {
     try {
       Object.keys(window._preTtsAudioModes).forEach(h => {
         const m = window._preTtsAudioModes[h];
+        try { localStorage.removeItem("proxdmr_pre_tts_ts_mode_" + h); } catch (_) {}
         if (m && typeof setHotspotTsAudioMode === "function") {
-          setHotspotTsAudioMode(h, m);
+          setHotspotTsAudioMode(h, m, { fromTtsInternal: true });
         }
       });
     } catch (_) {}

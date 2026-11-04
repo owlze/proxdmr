@@ -420,12 +420,14 @@ def get_hotspots_for_ping():
                 d["_active_asl_node"] = getattr(rt, "_active_asl_node", None)
                 d["_last_asl_node"] = getattr(rt, "_last_asl_node", None)
                 d["user_id"] = getattr(rt, "user_id", 1)
+                d["allstar_node"] = getattr(getattr(rt, "config", rt), "allstar_node", "1999")
             else:
                 d = {
                     "id": cfg.id,
                     "name": cfg.name,
                     "bm_master_host": cfg.bm_master_host,
                     "network_type": getattr(cfg, "network_type", "bm") or "bm",
+                    "allstar_node": getattr(cfg, "allstar_node", "1999"),
                     "status": "OFFLINE",
                 }
             d["is_primary"] = (i == 0)
@@ -715,6 +717,7 @@ async def auth_middleware(request: Request, call_next):
                         and req_cid != cur_active_cid
                         and request.method not in ("GET", "HEAD", "OPTIONS")
                         and not path.startswith("/api/auth/")
+                        and not path.startswith("/api/system/")
                     ):
                         return JSONResponse(
                             {
@@ -1021,7 +1024,7 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
                 "custom_wallpaper_dark": c_dark,
                 "custom_wallpaper_light": c_light,
                 "active_hotspot_id": (admin_rts[0].config.id if admin_rts and all(rt.config.id != (getattr(s_admin, "active_hotspot_id", "default") or "default") for rt in admin_rts) else (getattr(s_admin, "active_hotspot_id", "default") or "default")),
-                "simultaneous_slots": getattr(s_admin, "simultaneous_slots", True),
+                "simultaneous_slots": getattr(s_admin, "simultaneous_slots", False),
             },
             "client_settings": getattr(s_admin, "client_settings", None) or getattr(hotspot_manager.settings, "client_settings", {}) or {},
             "hotspots_collapsed": hs_collapsed_map,
@@ -2262,7 +2265,7 @@ async def get_index(request: Request):
         bg_type_light = "color" if getattr(s, "bg_type_light", "pattern") == "color" else "pattern"
         bg_color_light = getattr(s, "bg_color_light", "#f4f6f8") or "#f4f6f8"
         language = s.language
-        simultaneous_slots = getattr(s, "simultaneous_slots", True)
+        simultaneous_slots = getattr(s, "simultaneous_slots", False)
         check_mic_on_tx = getattr(s, "check_mic_on_tx", True)
         qrz_com_username = getattr(s, "qrz_com_username", "") or ""
         qrz_com_password = getattr(s, "qrz_com_password", "") or ""
@@ -2335,7 +2338,7 @@ async def get_index(request: Request):
         bg_type_light = "pattern"
         bg_color_light = "#f4f6f8"
         language = "ru"
-        simultaneous_slots = True
+        simultaneous_slots = False
         check_mic_on_tx = True
         qrz_com_username = ""
         qrz_com_password = ""

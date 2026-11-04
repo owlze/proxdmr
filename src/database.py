@@ -184,7 +184,7 @@ def get_default_settings(login: str = "") -> dict:
         "sync_system_volume": True,
         "haptic_feedback": True,
         "haptic_duration": 45,
-        "simultaneous_slots": True,
+        "simultaneous_slots": False,
         "check_mic_on_tx": False,
         "theme": "dark",
         "bg_type": "pattern",
@@ -630,6 +630,33 @@ async def create_recording(rec: dict) -> dict:
     return rec
 
 
+def _enrich_asl_recording(rec: Optional[dict]) -> Optional[dict]:
+    if not rec or not isinstance(rec, dict):
+        return rec
+    call_id = str(rec.get("call_id") or "")
+    hotspot_id = str(rec.get("hotspot_id") or "")
+    is_asl = call_id.startswith("asl_") or ("allstar" in hotspot_id.lower())
+    if is_asl:
+        rec["network_type"] = "allstar"
+        node_str = str(rec.get("src_id") or "").strip()
+        if not node_str or node_str == "0":
+            parts = call_id.split("_")
+            if len(parts) >= 3 and parts[-1].isdigit():
+                node_str = parts[-1]
+        if node_str and node_str != "0":
+            try:
+                from allstar_directory import allstar_dir_mgr
+                info = allstar_dir_mgr.get_node_info(node_str)
+                if info:
+                    rec["country"] = info.get("country") or rec.get("country") or "INT"
+                    rec["flag"] = info.get("flag") or rec.get("flag") or "🌐"
+                    if not rec.get("src_name") and info.get("name"):
+                        rec["src_name"] = info.get("name")
+            except Exception:
+                pass
+    return rec
+
+
 async def get_recordings(
     user_id: Optional[int] = None,
     search: str = "",
@@ -672,7 +699,7 @@ async def get_recordings(
         page_params = params + [limit, offset]
         cursor = await db.execute(query, page_params)
         rows = await cursor.fetchall()
-        recordings = [dict(r) for r in rows]
+        recordings = [_enrich_asl_recording(dict(r)) for r in rows]
         for r in recordings:
             r["time_str"] = time.strftime("%H:%M:%S", time.localtime(r.get("created_at", 0)))
             r["date_str"] = time.strftime("%d.%m.%Y", time.localtime(r.get("created_at", 0)))
@@ -689,7 +716,7 @@ async def get_recording_by_id(rec_id: str) -> Optional[dict]:
         row = await cursor.fetchone()
         if not row:
             return None
-        res = dict(row)
+        res = _enrich_asl_recording(dict(row))
         res["time_str"] = time.strftime("%H:%M:%S", time.localtime(res.get("created_at", 0)))
         res["date_str"] = time.strftime("%d.%m.%Y", time.localtime(res.get("created_at", 0)))
         return res
@@ -705,7 +732,7 @@ async def get_recording_by_call_id(call_id: str) -> Optional[dict]:
         row = await cursor.fetchone()
         if not row:
             return None
-        res = dict(row)
+        res = _enrich_asl_recording(dict(row))
         res["time_str"] = time.strftime("%H:%M:%S", time.localtime(res.get("created_at", 0)))
         res["date_str"] = time.strftime("%d.%m.%Y", time.localtime(res.get("created_at", 0)))
         return res
@@ -834,10 +861,81 @@ async def get_untranscribed_recordings(user_id: Optional[int] = None, limit: int
         return [dict(r) for r in rows]
 
 
-async def get_full_backup_data(user_id: int, current_storage: Optional[dict] = None) -> dict:
+def _remap_user_scoped_storage(
+    storage: Optional[dict],
+    old_uid: Optional[int],
+    new_uid: Optional[int],
+) -> dict:
+    """
+    Remap user-scoped localStorage keys (`proxdmr_u{old_uid}_*` -> `proxdmr_u{new_uid}_*`)
+    and custom wallpaper URLs (`bg-custom-u{old_uid}-` -> `bg-custom-u{new_uid}-`) when
+    an account is restored onto a server where its numeric `user_id` differs.
+    """
+    if not isinstance(storage, dict):
+        return {}
+
+    import re as _re
+
+    detected_old = old_uid
+    if detected_old is None and new_uid is not None:
+        found_uids = set()
+        for k in storage.keys():
+            if isinstance(k, str):
+                m = _re.match(r"^proxdmr_u(\d+)_", k)
+                if m:
+                    found_uids.add(int(m.group(1)))
+        if len(found_uids) == 1:
+            detected_old = next(iter(found_uids))
+
+    remapped: dict = {}
+    for k, v in storage.items():
+        if not isinstance(k, str) or not k:
+            continue
+        new_key = k
+        if new_uid is not None:
+            m = _re.match(r"^proxdmr_u(\d+)_(.+)$", k)
+            if m:
+                key_uid = int(m.group(1))
+                suffix = m.group(2)
+                if detected_old is not None and key_uid == int(detected_old):
+                    new_key = f"proxdmr_u{int(new_uid)}_{suffix}"
+                elif key_uid == int(new_uid):
+                    new_key = k
+                else:
+                    # Drop stale foreign user-scoped keys from another user on shared browser
+                    continue
+
+        new_val = v
+        if isinstance(v, str) and new_uid is not None:
+            if detected_old is not None and int(detected_old) != int(new_uid):
+                new_val = v.replace(
+                    f"/static/img/wallpapers/bg-custom-u{int(detected_old)}-",
+                    f"/static/img/wallpapers/bg-custom-u{int(new_uid)}-",
+                )
+            if "/static/img/bg-custom-dark.jpg" in new_val:
+                new_val = new_val.replace(
+                    "/static/img/bg-custom-dark.jpg",
+                    f"/static/img/wallpapers/bg-custom-u{int(new_uid)}-dark.jpg",
+                )
+            if "/static/img/bg-custom-light.jpg" in new_val:
+                new_val = new_val.replace(
+                    "/static/img/bg-custom-light.jpg",
+                    f"/static/img/wallpapers/bg-custom-u{int(new_uid)}-light.jpg",
+                )
+        remapped[new_key] = new_val
+
+    return remapped
+
+
+async def get_full_backup_data(
+    user_id: int,
+    current_storage: Optional[dict] = None,
+    server_config: Optional[dict] = None,
+    live_settings_map: Optional[dict] = None,
+) -> dict:
     """
     Generate full backup data structure for export.
-    If user_id is superadmin, exports all users, accounts, settings, and client storage.
+    If user_id is superadmin, exports server_config, all users, accounts, settings, and client storage.
     If regular user, exports only their own account, settings, and client storage.
     """
     if not aiosqlite:
@@ -849,6 +947,31 @@ async def get_full_backup_data(user_id: int, current_storage: Optional[dict] = N
 
     user_role = db_user.get("role", "user")
     is_superadmin = (user_role == "superadmin")
+    live_map = live_settings_map if isinstance(live_settings_map, dict) else {}
+
+    def _merge_user_sett(uid_val: int, db_sett: dict, browser_storage: Optional[dict] = None) -> tuple[dict, dict]:
+        merged = dict(db_sett) if isinstance(db_sett, dict) else {}
+        live_override = live_map.get(uid_val)
+        if isinstance(live_override, dict):
+            # Preserve any extra keys in DB while applying freshest in-memory runtime values
+            merged_cs = dict(merged.get("client_settings") or {}) if isinstance(merged.get("client_settings"), dict) else {}
+            live_cs = live_override.get("client_settings")
+            if isinstance(live_cs, dict):
+                merged_cs.update(live_cs)
+            merged.update(live_override)
+            if merged_cs:
+                merged["client_settings"] = merged_cs
+        cs_obj = merged.get("client_settings")
+        if not isinstance(cs_obj, dict):
+            cs_obj = {}
+            merged["client_settings"] = cs_obj
+        if browser_storage is not None and isinstance(browser_storage, dict):
+            u_storage = dict(browser_storage)
+            cs_obj["storage_dump"] = u_storage
+        else:
+            sd = cs_obj.get("storage_dump")
+            u_storage = dict(sd) if isinstance(sd, dict) else {}
+        return merged, u_storage
 
     if is_superadmin:
         async with aiosqlite.connect(str(DB_FILE)) as db:
@@ -864,12 +987,13 @@ async def get_full_backup_data(user_id: int, current_storage: Optional[dict] = N
 
         for u in all_users:
             u_id = u["id"]
-            u_sett = await load_user_settings(u_id)
+            raw_sett = await load_user_settings(u_id)
             if u_id == user_id:
-                # Fresh client storage passed from browser during export
-                u_storage = current_storage if (current_storage is not None) else (u_sett.get("client_settings", {}).get("storage_dump", {}))
+                u_sett, u_storage = _merge_user_sett(u_id, raw_sett, browser_storage=current_storage)
                 superadmin_data = {
+                    "exported_user_id": u_id,
                     "account": {
+                        "id": u_id,
                         "login": u["login"],
                         "password_hash": u["password_hash"],
                         "role": u["role"],
@@ -881,9 +1005,11 @@ async def get_full_backup_data(user_id: int, current_storage: Optional[dict] = N
                     "client_storage": u_storage
                 }
             else:
-                u_storage = u_sett.get("client_settings", {}).get("storage_dump", {})
+                u_sett, u_storage = _merge_user_sett(u_id, raw_sett, browser_storage=None)
                 users_list.append({
+                    "exported_user_id": u_id,
                     "account": {
+                        "id": u_id,
                         "login": u["login"],
                         "password_hash": u["password_hash"],
                         "role": u["role"],
@@ -899,20 +1025,25 @@ async def get_full_backup_data(user_id: int, current_storage: Optional[dict] = N
             "format_version": 2,
             "is_superadmin_backup": True,
             "exported_by": db_user["login"],
+            "exported_user_id": user_id,
             "timestamp": time.time(),
+            "server_config": server_config if isinstance(server_config, dict) else {},
             "superadmin": superadmin_data,
             "users": users_list
         }
     else:
-        u_sett = await load_user_settings(user_id)
-        u_storage = current_storage if (current_storage is not None) else (u_sett.get("client_settings", {}).get("storage_dump", {}))
+        raw_sett = await load_user_settings(user_id)
+        u_sett, u_storage = _merge_user_sett(user_id, raw_sett, browser_storage=current_storage)
         return {
             "format_version": 2,
             "is_superadmin_backup": False,
             "exported_by": db_user["login"],
+            "exported_user_id": user_id,
             "timestamp": time.time(),
             "user": {
+                "exported_user_id": user_id,
                 "account": {
+                    "id": user_id,
                     "login": db_user["login"],
                     "password_hash": db_user["password_hash"],
                     "role": user_role,
@@ -943,24 +1074,50 @@ async def restore_backup_data(
     is_v2 = isinstance(backup_data, dict) and backup_data.get("format_version") == 2
     client_storage_to_return = {}
     restored_users_count = 0
+    restored_users: list[dict] = []
+    exported_uid_for_caller: Optional[int] = None
+    server_config_to_return: dict = {}
+
+    curr_db_user = await get_user_by_id(current_user_id)
+    curr_login_actual = (curr_db_user.get("login") or "").lower() if curr_db_user else ""
 
     if is_v2:
         is_sa_backup = bool(backup_data.get("is_superadmin_backup", False))
         curr_role = await get_user_role(current_user_id)
 
         if is_sa_backup and curr_role == "superadmin":
+            if isinstance(backup_data.get("server_config"), dict):
+                server_config_to_return = dict(backup_data["server_config"])
+
             # 1. Restore superadmin
             sa_data = backup_data.get("superadmin") or {}
-            sa_sett = sa_data.get("settings") or {}
-            sa_storage = sa_data.get("client_storage") or {}
+            sa_acc = sa_data.get("account") or {}
+            raw_sa_old_uid = sa_data.get("exported_user_id", sa_acc.get("id", backup_data.get("exported_user_id")))
+            sa_old_uid = int(raw_sa_old_uid) if isinstance(raw_sa_old_uid, int) or (isinstance(raw_sa_old_uid, str) and raw_sa_old_uid.isdigit()) else None
+            exported_uid_for_caller = sa_old_uid
+
+            sa_sett = dict(sa_data.get("settings") or {})
+            raw_sa_storage = sa_data.get("client_storage") or (sa_sett.get("client_settings", {}) or {}).get("storage_dump", {})
+            sa_storage = _remap_user_scoped_storage(raw_sa_storage, sa_old_uid, current_user_id)
             client_storage_to_return = sa_storage
 
-            if sa_sett:
+            if "is_swl" in sa_acc:
+                await set_user_swl(current_user_id, bool(sa_acc.get("is_swl", False)))
+
+            if sa_sett or sa_storage:
                 if "client_settings" not in sa_sett or not isinstance(sa_sett["client_settings"], dict):
                     sa_sett["client_settings"] = {}
+                else:
+                    sa_sett["client_settings"] = dict(sa_sett["client_settings"])
                 sa_sett["client_settings"]["storage_dump"] = sa_storage
                 await save_user_settings(current_user_id, sa_sett)
                 restored_users_count += 1
+                restored_users.append({
+                    "user_id": current_user_id,
+                    "login": curr_login_actual or (sa_acc.get("login") or "").strip().lower(),
+                    "backup_login": (sa_acc.get("login") or "").strip().lower(),
+                    "exported_user_id": sa_old_uid,
+                })
 
             # 2. Process other users based on mode
             users_in_backup = backup_data.get("users", [])
@@ -976,23 +1133,28 @@ async def restore_backup_data(
                 login = (acc.get("login") or "").strip().lower()
                 if not login:
                     continue
+                raw_u_old_uid = u_item.get("exported_user_id", acc.get("id"))
+                u_old_uid = int(raw_u_old_uid) if isinstance(raw_u_old_uid, int) or (isinstance(raw_u_old_uid, str) and raw_u_old_uid.isdigit()) else None
                 pw_hash = acc.get("password_hash") or ""
                 role = acc.get("role", "user")
                 if role == "superadmin":
                     role = "admin"  # Keep only primary superadmin
                 is_swl = 1 if acc.get("is_swl") else 0
                 is_blocked = 1 if acc.get("is_blocked") else 0
-                u_sett = u_item.get("settings") or {}
-                u_storage = u_item.get("client_storage") or {}
-                if "client_settings" not in u_sett or not isinstance(u_sett["client_settings"], dict):
-                    u_sett["client_settings"] = {}
-                u_sett["client_settings"]["storage_dump"] = u_storage
+                u_sett = dict(u_item.get("settings") or {})
+                raw_u_storage = u_item.get("client_storage") or (u_sett.get("client_settings", {}) or {}).get("storage_dump", {})
 
                 # Check existing user
                 existing = await get_user_by_login(login)
                 if existing:
                     target_uid = existing["id"]
                     if target_uid != current_user_id:
+                        u_storage = _remap_user_scoped_storage(raw_u_storage, u_old_uid, target_uid)
+                        if "client_settings" not in u_sett or not isinstance(u_sett["client_settings"], dict):
+                            u_sett["client_settings"] = {}
+                        else:
+                            u_sett["client_settings"] = dict(u_sett["client_settings"])
+                        u_sett["client_settings"]["storage_dump"] = u_storage
                         async with aiosqlite.connect(str(DB_FILE)) as db:
                             if pw_hash:
                                 await db.execute(
@@ -1007,11 +1169,23 @@ async def restore_backup_data(
                             await db.commit()
                         await save_user_settings(target_uid, u_sett)
                         restored_users_count += 1
+                        restored_users.append({
+                            "user_id": target_uid,
+                            "login": login,
+                            "backup_login": login,
+                            "exported_user_id": u_old_uid,
+                        })
                 else:
                     if not pw_hash:
                         from auth import hash_password
                         pw_hash = hash_password("proxdmr123")
                     created_uid = await create_user(login, pw_hash)
+                    u_storage = _remap_user_scoped_storage(raw_u_storage, u_old_uid, created_uid)
+                    if "client_settings" not in u_sett or not isinstance(u_sett["client_settings"], dict):
+                        u_sett["client_settings"] = {}
+                    else:
+                        u_sett["client_settings"] = dict(u_sett["client_settings"])
+                    u_sett["client_settings"]["storage_dump"] = u_storage
                     async with aiosqlite.connect(str(DB_FILE)) as db:
                         await db.execute(
                             "UPDATE users SET role = ?, is_blocked = ?, is_swl = ? WHERE id = ?",
@@ -1020,37 +1194,71 @@ async def restore_backup_data(
                         await db.commit()
                     await save_user_settings(created_uid, u_sett)
                     restored_users_count += 1
+                    restored_users.append({
+                        "user_id": created_uid,
+                        "login": login,
+                        "backup_login": login,
+                        "exported_user_id": u_old_uid,
+                    })
 
         else:
             # Single-user backup or non-superadmin restoring
             user_data = backup_data.get("user")
             if not user_data and is_sa_backup:
-                curr_user = await get_user_by_id(current_user_id)
-                curr_login = (curr_user.get("login") or "").lower() if curr_user else ""
-                matching = [u for u in backup_data.get("users", []) if (u.get("account", {}).get("login") or "").lower() == curr_login]
+                matching = [u for u in backup_data.get("users", []) if (u.get("account", {}).get("login") or "").lower() == curr_login_actual]
                 if matching:
                     user_data = matching[0]
                 else:
                     user_data = backup_data.get("superadmin")
 
             if user_data:
-                u_sett = user_data.get("settings") or {}
-                u_storage = user_data.get("client_storage") or {}
+                u_acc = user_data.get("account") or {}
+                raw_u_old_uid = user_data.get("exported_user_id", u_acc.get("id", backup_data.get("exported_user_id")))
+                u_old_uid = int(raw_u_old_uid) if isinstance(raw_u_old_uid, int) or (isinstance(raw_u_old_uid, str) and raw_u_old_uid.isdigit()) else None
+                exported_uid_for_caller = u_old_uid
+
+                u_sett = dict(user_data.get("settings") or {})
+                raw_u_storage = user_data.get("client_storage") or (u_sett.get("client_settings", {}) or {}).get("storage_dump", {})
+                u_storage = _remap_user_scoped_storage(raw_u_storage, u_old_uid, current_user_id)
                 client_storage_to_return = u_storage
                 if "client_settings" not in u_sett or not isinstance(u_sett["client_settings"], dict):
                     u_sett["client_settings"] = {}
+                else:
+                    u_sett["client_settings"] = dict(u_sett["client_settings"])
                 u_sett["client_settings"]["storage_dump"] = u_storage
                 await save_user_settings(current_user_id, u_sett)
                 restored_users_count = 1
+                restored_users.append({
+                    "user_id": current_user_id,
+                    "login": curr_login_actual,
+                    "backup_login": (u_acc.get("login") or backup_data.get("exported_by") or curr_login_actual).strip().lower(),
+                    "exported_user_id": u_old_uid,
+                })
     else:
         # Legacy v1 format (plain settings dict)
-        client_storage_to_return = backup_data.get("client_settings", {}).get("storage_dump", {})
-        await save_user_settings(current_user_id, backup_data)
+        legacy_copy = dict(backup_data) if isinstance(backup_data, dict) else {}
+        raw_legacy_storage = (legacy_copy.get("client_settings") or {}).get("storage_dump", {}) if isinstance(legacy_copy.get("client_settings"), dict) else {}
+        remapped_legacy = _remap_user_scoped_storage(raw_legacy_storage, None, current_user_id)
+        if isinstance(legacy_copy.get("client_settings"), dict):
+            legacy_copy["client_settings"] = dict(legacy_copy["client_settings"])
+            legacy_copy["client_settings"]["storage_dump"] = remapped_legacy
+        client_storage_to_return = remapped_legacy
+        await save_user_settings(current_user_id, legacy_copy)
         restored_users_count = 1
+        restored_users.append({
+            "user_id": current_user_id,
+            "login": curr_login_actual,
+            "backup_login": curr_login_actual,
+            "exported_user_id": None,
+        })
 
     return {
         "client_storage": client_storage_to_return,
         "restored_users_count": restored_users_count,
+        "restored_user_id": current_user_id,
+        "exported_user_id": exported_uid_for_caller,
+        "restored_users": restored_users,
+        "server_config": server_config_to_return,
         "mode": mode
     }
 

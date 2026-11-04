@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.545">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.563">
   <script>
     window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
@@ -435,6 +435,15 @@
           <!-- Dynamically populated -->
         </div>
       </div>
+
+      <!-- Server config checkbox option (Telegram alerts, demo mode, visitor stats) -->
+      <label id="saImportServerConfigRow" style="display:none; align-items:flex-start; gap:8px; cursor:pointer; font-size:0.84rem; background:rgba(255,255,255,0.03); padding:8px 10px; border-radius: var(--app-border-radius, 0px); border:1px solid var(--border-color, #30363d); margin-bottom:12px;">
+        <input type="checkbox" id="saImportServerConfig" checked style="margin-top:2px;">
+        <div>
+          <strong style="color:var(--text-primary);" data-i18n="account.sa_import_server_config_title">Восстановить конфигурацию сервера</strong>
+          <div style="font-size:0.77rem; color:var(--text-muted); margin-top:1px;" data-i18n="account.sa_import_server_config_desc">Включает Telegram-оповещения, параметры Демо-режима и серверные счетчики.</div>
+        </div>
+      </label>
 
       <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
         <button type="button" id="btnCancelSaImportModal" class="btn-secondary" style="padding:7px 16px; border-radius: var(--app-border-radius, 0px); cursor:pointer; font-size:0.9em;" data-i18n="buttons.cancel">Отмена</button>
@@ -2260,14 +2269,14 @@
               <div class="setting-item">
                 <label for="alertsLanguage" style="display: block; font-size: 12px; margin-bottom: 4px; font-weight: 500;" data-i18n="alerts.language">Язык сообщений</label>
                 <select id="alertsLanguage" class="input-field" style="width: 100%;">
-                  <option value="ru">Русский (ru)</option>
                   <option value="en">English (en)</option>
-                  <option value="uk">Українська (uk)</option>
+                  <option value="ru">Русский (ru)</option>
                   <option value="de">Deutsch (de)</option>
                   <option value="es">Español (es)</option>
                   <option value="fr">Français (fr)</option>
                   <option value="it">Italiano (it)</option>
                   <option value="nl">Nederlands (nl)</option>
+                  <option value="uk">Українська (uk)</option>
                 </select>
               </div>
               <div class="setting-item">
@@ -2428,14 +2437,14 @@
             🌐 Язык интерфейса / Language:
           </label>
           <select id="optLanguage" class="form-input" style="cursor: pointer; width: 100%;">
-            <option value="uk">🇺🇦 Українська</option>
             <option value="en">🇬🇧 English</option>
+            <option value="ru">🇷🇺 Русский</option>
+            <option value="de">🇩🇪 Deutsch</option>
             <option value="es">🇪🇸 Español</option>
             <option value="fr">🇫🇷 Français</option>
-            <option value="de">🇩🇪 Deutsch</option>
             <option value="it">🇮🇹 Italiano</option>
             <option value="nl">🇳🇱 Nederlands</option>
-            <option value="ru">🇷🇺 Русский</option>
+            <option value="uk">🇺🇦 Українська</option>
           </select>
           <small class="form-hint" style="margin-top: 2px;" data-i18n="general.language_hint">
             Выбор языка системы
@@ -4176,6 +4185,13 @@
             </div>
           </div>
         </div>
+        <div id="directCallErrorBanner" class="direct-call-error-banner" style="display: none;" role="alert">
+          <span class="direct-call-error-icon">⚠️</span>
+          <div class="direct-call-error-content">
+            <span class="direct-call-error-title" id="directCallErrorTitle" data-i18n="direct_call.error_no_bm_api_title">Ошибка API BrandMeister</span>
+            <span class="direct-call-error-desc" id="directCallErrorDesc" data-i18n="direct_call.error_no_bm_api_desc">У выбранного хотспота не настроено подключение к API BrandMeister (отсутствует токен). Очистка таймслота невозможна.</span>
+          </div>
+        </div>
         <label class="direct-call-solo-row" for="directCallSoloCheckbox">
           <input type="checkbox" id="directCallSoloCheckbox" class="direct-call-solo-checkbox" />
           <div class="direct-call-solo-text-wrap">
@@ -5458,10 +5474,10 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.544"></script>
+  <script src="/static/js/i18n.js?v=2.9.557"></script>
   <script src="/static/js/audio-player.js?v=2.9.526"></script>
   <script src="/static/js/dialog.js?v=2.9.489"></script>
-  <script src="/static/js/auth.js?v=2.9.386"></script>
+  <script src="/static/js/auth.js?v=2.9.550"></script>
   <style>
     /* Demo Mode Styles */
     .auth-demo-box {
@@ -5718,7 +5734,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.548"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.564"></script>
 </body>
 </html>
 

@@ -305,14 +305,35 @@ class BMPingService:
         host_to_hids: Dict[str, List[str]] = {}
         for i, hs in enumerate(hotspots):
             hid = hs.get("id") if isinstance(hs, dict) else getattr(hs, "id", None)
-            host = hs.get("bm_master_host") if isinstance(hs, dict) else getattr(getattr(hs, "config", hs), "bm_master_host", None)
             status = hs.get("status") if isinstance(hs, dict) else getattr(hs, "status", None)
             is_primary = hs.get("is_primary", False) if isinstance(hs, dict) else (i == 0)
-
-            if not host:
-                host = "2322.master.brandmeister.network"
             if not hid:
                 hid = "default"
+
+            net_type = str(hs.get("network_type") if isinstance(hs, dict) else getattr(getattr(hs, "config", hs), "network_type", "bm") or "bm").strip().lower()
+            if net_type == "allstar":
+                # Для AllStarLink: пингуем текущий соединенный ХН, либо www.allstarlink.org в простое
+                target_node = hs.get("connected_node") or hs.get("_active_asl_node") or hs.get("_last_asl_node")
+                if not target_node and isinstance(hs.get("asl_links"), list) and hs.get("asl_links"):
+                    target_node = hs.get("asl_links")[0].get("node")
+
+                asl_host = None
+                if target_node and str(target_node).strip() not in ("0", "1999", "9998", "9999"):
+                    try:
+                        from asl_container_manager import asl_container_mgr
+                        uid = str(hs.get("user_id") or 1)
+                        own_n = str(hs.get("allstar_node") or "1999")
+                        asl_host = asl_container_mgr.lookup_node_ip(uid, own_n, str(target_node).strip())
+                    except Exception:
+                        pass
+
+                if not asl_host:
+                    asl_host = "www.allstarlink.org"
+                host = asl_host
+            else:
+                host = hs.get("bm_master_host") if isinstance(hs, dict) else getattr(getattr(hs, "config", hs), "bm_master_host", None)
+                if not host:
+                    host = "2322.master.brandmeister.network"
 
             # Primary (first) hotspot is pinged 24/7 continuously even when OFFLINE / disconnected
             if is_primary or i == 0:

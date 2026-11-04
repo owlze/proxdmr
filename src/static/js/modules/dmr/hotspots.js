@@ -34,7 +34,7 @@ import {
   disableHotspotTranscribe,
   ensureCaptionFontControls,
   setupCaptionBoxPinchZoom
-} from './transcriber.js?v=2.9.547';
+} from './transcriber.js?v=2.9.564';
 import {
   startTransmission,
   stopTransmission,
@@ -1630,7 +1630,10 @@ export async function processDirectStatsQueue(nodesList, card, targetHs) {
 
 export async function probeAslMatrixNodes(card, targetHs, force = false) {
   if (!card || !targetHs) return;
-  const buttons = card.querySelectorAll(".btn-allstar-node");
+  // Бэкенд опрашивает максимум 35 узлов, а HTTP-статистику — только при ≤ 20: опрашиваем ТОЛЬКО текущий экран памяти
+  const probePage = getAslMatrixPage(targetHs.id || card.dataset.hotspotId || "default", targetHs);
+  let buttons = card.querySelectorAll(`.asl-page[data-page="${probePage}"] .btn-allstar-node`);
+  if (!buttons.length) buttons = card.querySelectorAll(".btn-allstar-node");
   if (!buttons.length) return;
 
   const nodes = [];
@@ -1720,14 +1723,14 @@ export function formatAslProcMessage(data) {
   const key = "asl_proc." + code;
   
   let text = "";
-  if (typeof window.t === "function") {
+  if (code && typeof window.t === "function") {
     text = window.t(key, { node, mode, ip });
   }
   if (!text || text === key) {
-    text = ASL_PROC_FALLBACK_TEXTS[code] || "";
+    text = ASL_PROC_FALLBACK_TEXTS[code] || data.text || "";
     text = text.replace(/\{node\}/g, node).replace(/\{mode\}/g, mode).replace(/\{ip\}/g, ip);
   }
-  return text || code;
+  return text || data.text || code;
 }
 
 export function setAslProcBannerState(card, {
@@ -2103,8 +2106,22 @@ export function syncAslMatrixButtonsState(card, targetHs) {
     }
   });
 
+  // Индикатор экранов: точка подсвечивается (has-link), если на этом экране есть подключённый узел
+  const pageSegs = card.querySelectorAll(".asl-notch-seg");
+  if (pageSegs.length) {
+    const linkedPages = new Set();
+    buttons.forEach(b => {
+      if (b.dataset.linkMode === "*2" || b.dataset.linkMode === "*3") {
+        const pgEl = b.closest(".asl-page");
+        if (pgEl) linkedPages.add(String(pgEl.dataset.page));
+      }
+    });
+    pageSegs.forEach(seg => seg.classList.toggle("has-link", linkedPages.has(String(seg.dataset.page))));
+  }
+
   const unlistedLinks = rawLinks.filter(lk => lk && lk.node && !matrixNodeSet.has(String(lk.node).trim()));
   targetHs.asl_unlisted_links = unlistedLinks;
+  updateAslVfoHeader(card, targetHs);
 }
 
 
@@ -2146,6 +2163,61 @@ export function saveAslUserNodes(cid, userNodes) {
   } catch (e) {
     console.warn("Failed to save ASL quick nodes:", e);
   }
+}
+
+// ── Память узлов ASL: 3 экрана по 20 ячеек (5 рядов × 4 колонки) ──────────────
+export const ASL_PAGE_SIZE = 20;
+export const ASL_PAGE_COUNT = 3;
+export const ASL_MEMORY_SIZE = ASL_PAGE_SIZE * ASL_PAGE_COUNT;
+const ASL_PAGE_LS_PREFIX = "proxdmr_asl_matrix_page_";
+
+export function makeEmptyAslCell() {
+  return { node: "", label: "", flag: "➕", scan: false };
+}
+
+// Дополняет/обрезает массив ячеек ровно до ASL_MEMORY_SIZE (60) пустыми ячейками
+export function padAslNodes(list) {
+  const out = Array.isArray(list) ? list.slice(0, ASL_MEMORY_SIZE) : [];
+  while (out.length < ASL_MEMORY_SIZE) out.push(makeEmptyAslCell());
+  return out;
+}
+
+// Текущий экран памяти (0..2): сначала в памяти хотспота, затем localStorage
+export function getAslMatrixPage(cid, hs) {
+  let p = (hs && Number.isInteger(hs._aslMatrixPage)) ? hs._aslMatrixPage : null;
+  if (p === null) {
+    try {
+      p = parseInt(localStorage.getItem(ASL_PAGE_LS_PREFIX + cid) || "0", 10);
+    } catch (_) {
+      p = 0;
+    }
+  }
+  if (!Number.isInteger(p) || p < 0 || p >= ASL_PAGE_COUNT) p = 0;
+  if (hs) hs._aslMatrixPage = p;
+  return p;
+}
+
+// Устанавливает экран (любое целое число приводится по кругу к 0..2) и запоминает его
+export function setAslMatrixPageValue(cid, hs, page) {
+  const v = ((page % ASL_PAGE_COUNT) + ASL_PAGE_COUNT) % ASL_PAGE_COUNT;
+  if (hs) hs._aslMatrixPage = v;
+  try {
+    localStorage.setItem(ASL_PAGE_LS_PREFIX + cid, String(v));
+  } catch (_) {}
+  return v;
+}
+
+// Для внешних модулей (contacts.js): переключить экран и перерисовать панель
+if (typeof window !== "undefined") {
+  window.setAslMatrixPageForCid = (cid, page) => {
+    const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
+    const hs = hsList.find(h => h.id === cid) || null;
+    setAslMatrixPageValue(cid, hs, page);
+    const cardEl = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+    if (cardEl && typeof window.updateCardAllStarPanel === "function") {
+      window.updateCardAllStarPanel(cardEl, hs || undefined);
+    }
+  };
 }
 
 
@@ -2366,8 +2438,7 @@ export function openAslCardContextMenu({
     card.querySelectorAll(".asl-node-moving-source, .asl-node-move-target").forEach(el => {
       el.classList.remove("asl-node-moving-source", "asl-node-move-target");
     });
-    const gridEl = card.querySelector(".asl-matrix-grid");
-    if (gridEl) gridEl.classList.remove("asl-matrix-move-mode");
+    card.querySelectorAll(".asl-matrix-grid").forEach(gridEl => gridEl.classList.remove("asl-matrix-move-mode"));
   }
 
   const matrixContainer = card.querySelector(`#aslMatrixContainer_${cid}`) || card.querySelector(".asl-matrix-container");
@@ -2396,14 +2467,16 @@ export function openAslCardContextMenu({
   menu.className = "asl-card-context-menu";
   if (isDtmf) {
     const tRoleDtmf = window.t ? window.t("asl.ctx_switch_node", {}, "Сменить роль: переключить на обычный узел (ХН)") : "Сменить роль: переключить на обычный узел (ХН)";
+    const tRoleLabel = window.t ? window.t("asl.ctx_role_label", {}, "Роль") : "Роль";
+    const tRoleBadge = window.t ? window.t("asl.ctx_role_dtmf_to_node", {}, "DTMF ➔ ХН") : "DTMF ➔ ХН";
     const tEditDtmf = window.t ? window.t("asl.ctx_edit_dtmf", {}, "Редактировать код DTMF и описание") : "Редактировать код DTMF и описание";
     const tMoveCard = window.t ? window.t("asl.ctx_move", {}, "Переместить карточку в другую ячейку") : "Переместить карточку в другую ячейку";
     const tDeleteCard = window.t ? window.t("asl.ctx_delete", {}, "Удалить карточку из ячейки") : "Удалить карточку из ячейки";
     menu.innerHTML = `
       <div class="asl-card-context-header">☎️ ${safeEscapeHtml(cleanNode)}</div>
       <button type="button" class="asl-card-context-btn" data-action="toggle-role" title="${tRoleDtmf}">
-        <span class="ctx-btn-label">Роль</span>
-        <span class="ctx-btn-badge" style="background: rgba(139, 92, 246, 0.4); color: #ede9fe;">DTMF ➔ ХН</span>
+        <span class="ctx-btn-label">${tRoleLabel}</span>
+        <span class="ctx-btn-badge ctx-badge-dtmf">${tRoleBadge}</span>
       </button>
       <button type="button" class="asl-card-context-btn" data-action="edit" title="${tEditDtmf}">
         <span class="ctx-btn-label">Edit</span>
@@ -2421,6 +2494,8 @@ export function openAslCardContextMenu({
   } else {
     const tTxRx = window.t ? window.t("asl.ctx_toggle_txrx", {}, "Переключить режим Monitor (*2) / Transceive (*3)") : "Переключить режим Monitor (*2) / Transceive (*3)";
     const tRoleNode = window.t ? window.t("asl.ctx_switch_dtmf", {}, "Сменить роль: переключить на макрос DTMF") : "Сменить роль: переключить на макрос DTMF";
+    const tRoleLabel = window.t ? window.t("asl.ctx_role_label", {}, "Роль") : "Роль";
+    const tRoleBadge = window.t ? window.t("asl.ctx_role_node_to_dtmf", {}, "ХН ➔ DTMF") : "ХН ➔ DTMF";
     const tEditNode = window.t ? window.t("asl.ctx_edit_node", {}, "Редактировать номер узла, название и флаг") : "Редактировать номер узла, название и флаг";
     const tMoveCard = window.t ? window.t("asl.ctx_move", {}, "Переместить карточку в другую ячейку") : "Переместить карточку в другую ячейку";
     const tDiscon = window.t ? window.t("asl.ctx_disconnect", {}, "Отключиться от этого узла (ХН)") : "Отключиться от этого узла (ХН)";
@@ -2432,8 +2507,8 @@ export function openAslCardContextMenu({
         <span class="ctx-btn-badge">${isCurrentlyTx ? "*3" : "*2"}</span>
       </button>
       <button type="button" class="asl-card-context-btn" data-action="toggle-role" title="${tRoleNode}">
-        <span class="ctx-btn-label">Роль</span>
-        <span class="ctx-btn-badge" style="background: rgba(56, 189, 248, 0.3); color: #bae6fd;">ХН ➔ DTMF</span>
+        <span class="ctx-btn-label">${tRoleLabel}</span>
+        <span class="ctx-btn-badge ctx-badge-node">${tRoleBadge}</span>
       </button>
       <button type="button" class="asl-card-context-btn" data-action="edit" title="${tEditNode}">
         <span class="ctx-btn-label">Edit</span>
@@ -2641,7 +2716,7 @@ export function executeAslDtmfMacroAction(cid, card, btn, digits) {
     if (typeof setAslProcBannerState === "function") {
       setAslProcBannerState(card, {
         active: true,
-        text: "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)",
+        text: window.t ? window.t("asl.scan_dtmf_tx_unavailable", {}, "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)") : "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)",
         tone: "negative",
         autoHideMs: 3200
       });
@@ -2746,7 +2821,7 @@ export function stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink = true,
     if (!silent) {
       setAslProcBannerState(card, {
         active: true,
-        text: "⏹ Сканирование остановлено",
+        text: window.t ? window.t("asl.scan_stopped", {}, "⏹ Сканирование остановлено") : "⏹ Сканирование остановлено",
         tone: "neutral",
         autoHideMs: 2000
       });
@@ -2764,7 +2839,7 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
   if (scanTargets.length === 0) {
     setAslProcBannerState(card, {
       active: true,
-      text: "✕ Нет узлов для сканирования: включите Scan: ON в меню карточек",
+      text: window.t ? window.t("asl.scan_no_nodes", {}, "✕ Нет узлов для сканирования: включите Scan: ON в меню карточек") : "✕ Нет узлов для сканирования: включите Scan: ON в меню карточек",
       tone: "negative",
       autoHideMs: 3200
     });
@@ -2862,8 +2937,8 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
         setAslProcBannerState(card, {
           active: true,
           text: activeNow
-            ? `🔍 Скан #${nodeNum} [Эфир · Таймер: ${remSec}с]`
-            : `🔍 Скан #${nodeNum} [Таймер: ${remSec}с]`,
+            ? (window.t ? window.t("asl.scan_timer_air", { node: nodeNum, sec: remSec }, `🔍 Скан #${nodeNum} [Эфир · Таймер: ${remSec}с]`) : `🔍 Скан #${nodeNum} [Эфир · Таймер: ${remSec}с]`)
+            : (window.t ? window.t("asl.scan_timer_idle", { node: nodeNum, sec: remSec }, `🔍 Скан #${nodeNum} [Таймер: ${remSec}с]`) : `🔍 Скан #${nodeNum} [Таймер: ${remSec}с]`),
           tone: activeNow ? "positive" : "neutral",
           autoHideMs: 0
         });
@@ -2887,7 +2962,7 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
         const remSec = Math.ceil((dwellMs - elapsedDwell) / 1000);
         setAslProcBannerState(card, {
           active: true,
-          text: `🔍 Скан #${nodeNum}: ожидание (${remSec}с)...`,
+          text: window.t ? window.t("asl.scan_waiting", { node: nodeNum, sec: remSec }, `🔍 Скан #${nodeNum}: ожидание (${remSec}с)...`) : `🔍 Скан #${nodeNum}: ожидание (${remSec}с)...`,
           tone: "neutral",
           autoHideMs: 0
         });
@@ -2913,7 +2988,7 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
           releaseElapsedMs = 0;
           setAslProcBannerState(card, {
             active: true,
-            text: `🔍 Скан #${nodeNum} [Активность в эфире]`,
+            text: window.t ? window.t("asl.scan_air_active", { node: nodeNum }, `🔍 Скан #${nodeNum} [Активность в эфире]`) : `🔍 Скан #${nodeNum} [Активность в эфире]`,
             tone: "positive",
             autoHideMs: 0
           });
@@ -2921,7 +2996,7 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
           const remRelease = Math.ceil(Math.max(0, curReleaseTargetMs - releaseElapsedMs) / 1000);
           setAslProcBannerState(card, {
             active: true,
-            text: `🔍 Скан #${nodeNum} [Отпускание: ${remRelease}с]`,
+            text: window.t ? window.t("asl.scan_release", { node: nodeNum, sec: remRelease }, `🔍 Скан #${nodeNum} [Отпускание: ${remRelease}с]`) : `🔍 Скан #${nodeNum} [Отпускание: ${remRelease}с]`,
             tone: "neutral",
             autoHideMs: 0
           });
@@ -3043,6 +3118,362 @@ export function openAslScanSettingsPopover(cid, anchorEl, card) {
   }, 20);
 }
 
+function isValidPublicAslNodeClient(nodeStr) {
+  const s = String(nodeStr || "").trim();
+  if (!/^\d+$/.test(s)) return false;
+  const n = parseInt(s, 10);
+  if (!Number.isFinite(n) || n < 2000 || n === 9998 || n === 9999) return false;
+  if (s.length >= 7 && s.startsWith("3")) return false;
+  return n <= 2999999;
+}
+
+function parseKeyedHtmlClientFallback(rawHtml) {
+  if (!rawHtml || typeof rawHtml !== "string") return [];
+  const tbodyMatch = rawHtml.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i);
+  const bodyHtml = tbodyMatch ? tbodyMatch[1] : rawHtml;
+  const rowMatches = bodyHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  const stripTags = (frag) => {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = String(frag || "").replace(/<[^>]+>/g, " ");
+    return (tmp.textContent || "").replace(/\s+/g, " ").trim();
+  };
+
+  const results = [];
+  const seen = new Set();
+  for (const rowHtml of rowMatches) {
+    const tds = [];
+    const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    let m;
+    while ((m = tdRe.exec(rowHtml)) !== null) {
+      tds.push(m[1]);
+    }
+    if (tds.length < 6) continue;
+    const nodeMatch = tds[0].match(/\/stats\/(\d+)/);
+    const nodeStr = nodeMatch ? nodeMatch[1] : stripTags(tds[0]);
+    if (!isValidPublicAslNodeClient(nodeStr) || seen.has(nodeStr)) continue;
+    seen.add(nodeStr);
+
+    const rawCall = stripTags(tds[2]);
+    const shortCall = rawCall ? rawCall.split(/\s+/)[0].trim() : "";
+    const pageLoc = stripTags(tds[5]);
+    const connHtml = tds.length >= 7 ? tds[6] : "";
+
+    const linkedNodes = [];
+    const connRe = /\/stats\/(\d+)/g;
+    let cm;
+    while ((cm = connRe.exec(connHtml)) !== null) {
+      const cn = cm[1];
+      if (cn !== nodeStr && isValidPublicAslNodeClient(cn) && !linkedNodes.includes(cn)) {
+        linkedNodes.push(cn);
+      }
+    }
+
+    let cityClean = pageLoc ? pageLoc.split(",")[0].split("/")[0].trim() : "";
+    if (/^\d+$/.test(cityClean)) cityClean = "";
+
+    const cInfo = getCountryInfo("", shortCall, pageLoc);
+    const flag = (cInfo && cInfo.flag) ? cInfo.flag : "🌐";
+
+    let label = "";
+    if (shortCall && cityClean && cityClean.toLowerCase() !== shortCall.toLowerCase()) {
+      label = `${shortCall} · ${cityClean}`;
+    } else if (shortCall) {
+      label = shortCall;
+    } else if (cityClean) {
+      label = cityClean;
+    } else {
+      label = `Node ${nodeStr}`;
+    }
+
+    results.push({
+      node: nodeStr,
+      callsign: shortCall || `Node ${nodeStr}`,
+      label,
+      location: pageLoc,
+      city: cityClean,
+      flag,
+      public_links_count: linkedNodes.length,
+      linked_nodes: linkedNodes.slice(0, 12)
+    });
+  }
+  return results;
+}
+
+async function fetchActiveKeyedAslNodes() {
+  try {
+    const controller = new AbortController();
+    const tId = setTimeout(() => controller.abort(), 6500);
+    const res = await fetch("/api/allstar/keyed", { signal: controller.signal });
+    clearTimeout(tId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.nodes) && data.nodes.length > 0) {
+        return data.nodes;
+      }
+    }
+  } catch (_) {}
+
+  // Browser direct fallback (stats.allstarlink.org sends Access-Control-Allow-Origin: *)
+  try {
+    const controller = new AbortController();
+    const tId = setTimeout(() => controller.abort(), 6500);
+    const res = await fetch("https://stats.allstarlink.org/stats/keyed", {
+      signal: controller.signal,
+      headers: { "Accept": "text/html" }
+    });
+    clearTimeout(tId);
+    if (res.ok) {
+      const rawHtml = await res.text();
+      return parseKeyedHtmlClientFallback(rawHtml);
+    }
+  } catch (_) {}
+
+  return [];
+}
+
+async function rollRandomKeyedAslNode(cid, card, targetHs, userNodes, diceBtn) {
+  if (targetHs && targetHs._aslDiceRolling) return;
+  if (targetHs) targetHs._aslDiceRolling = true;
+  if (diceBtn) {
+    diceBtn.classList.add("dice-rolling");
+    diceBtn.disabled = true;
+  }
+
+  try {
+    if (targetHs && targetHs._aslScanActive) {
+      stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
+    }
+
+    const activeList = await fetchActiveKeyedAslNodes();
+    const ownNode = String((targetHs && targetHs.allstar_node) || "").trim();
+
+    const connectedSet = new Set();
+    if (targetHs) {
+      if (targetHs.connected_node) connectedSet.add(String(targetHs.connected_node).trim());
+      if (Array.isArray(targetHs.asl_links)) {
+        targetHs.asl_links.forEach(lk => {
+          if (lk && lk.node) connectedSet.add(String(lk.node).trim());
+        });
+      }
+    }
+
+    const baseCandidates = (activeList || []).filter(item => {
+      const n = String((item && item.node) || "").trim();
+      if (!isValidPublicAslNodeClient(n)) return false;
+      if (ownNode && n === ownNode) return false;
+      return true;
+    });
+
+    const nonConnected = baseCandidates.filter(it => !connectedSet.has(String(it.node).trim()));
+    const poolBase = nonConnected.length > 0 ? nonConnected : baseCandidates;
+
+    if (!poolBase.length) {
+      if (typeof showToast === "function") {
+        const emptyMsg = window.t
+          ? window.t("asl.dice_empty_toast", {}, "🎲 Сейчас нет доступных активных узлов на stats.allstarlink.org/stats/keyed")
+          : "🎲 Сейчас нет доступных активных узлов на stats.allstarlink.org/stats/keyed";
+        showToast(emptyMsg, "warning", 2800);
+      }
+      return;
+    }
+
+    if (!window._aslDiceRecentMap) window._aslDiceRecentMap = {};
+    const recentArr = Array.isArray(window._aslDiceRecentMap[cid]) ? window._aslDiceRecentMap[cid] : [];
+    const recentSet = new Set(recentArr);
+
+    const diceTargetIdx = getAslMatrixPage(cid, targetHs) * ASL_PAGE_SIZE + (ASL_PAGE_SIZE - 1);
+    const preset0to18 = new Set(
+      (Array.isArray(userNodes) ? userNodes.filter((_, i) => i !== diceTargetIdx) : [])
+        .map(u => String((u && u.node) || "").trim())
+        .filter(Boolean)
+    );
+
+    const tier1 = poolBase.filter(it => (Number(it.public_links_count) || 0) >= 1 && !preset0to18.has(it.node) && !recentSet.has(it.node));
+    const tier2 = poolBase.filter(it => (Number(it.public_links_count) || 0) >= 1 && !preset0to18.has(it.node));
+    const tier3 = poolBase.filter(it => !preset0to18.has(it.node) && !recentSet.has(it.node));
+    const tier4 = poolBase.filter(it => !preset0to18.has(it.node));
+    const tier5 = poolBase.filter(it => !recentSet.has(it.node));
+
+    const finalPool = tier1.length ? tier1
+      : (tier2.length ? tier2
+      : (tier3.length ? tier3
+      : (tier4.length ? tier4
+      : (tier5.length ? tier5 : poolBase))));
+
+    const chosen = finalPool[Math.floor(Math.random() * finalPool.length)];
+    const chosenNode = String(chosen.node).trim();
+    const chosenFlag = (chosen.flag && chosen.flag !== "➕" && chosen.flag !== "☎️") ? chosen.flag : "🌐";
+    const chosenLabel = String(chosen.label || chosen.callsign || `Node ${chosenNode}`).trim();
+
+    const updatedRecent = [chosenNode, ...recentArr.filter(x => x !== chosenNode)].slice(0, 10);
+    window._aslDiceRecentMap[cid] = updatedRecent;
+
+    if (targetHs) {
+      targetHs._aslDynamicMatrixMode = false;
+      targetHs._aslMovingIdx = null;
+      targetHs.asl_unlisted_links = [];
+      if (targetHs._aslDismissedUnlisted) targetHs._aslDismissedUnlisted.clear();
+      // Помечаем текущие активные линки как отключающиеся, чтобы они не детектировались как unlisted
+      if (!targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes = new Set();
+      if (targetHs.connected_node) targetHs._aslDisconnectingNodes.add(String(targetHs.connected_node).trim());
+      if (Array.isArray(targetHs.asl_links)) {
+        targetHs.asl_links.forEach(l => { if (l && l.node) targetHs._aslDisconnectingNodes.add(String(l.node).trim()); });
+      }
+    }
+
+    // Записываем выпавший узел в последнюю (нижнюю правую) ячейку ТЕКУЩЕГО экрана памяти,
+    // если его ещё нет в других ячейках пользователя
+    if (Array.isArray(userNodes) && userNodes.length > diceTargetIdx && !preset0to18.has(chosenNode)) {
+      userNodes[diceTargetIdx] = {
+        node: chosenNode,
+        label: chosenLabel,
+        flag: chosenFlag,
+        role: "node",
+        scan: false
+      };
+      saveAslUserNodes(cid, userNodes);
+    }
+
+    updateCardAllStarPanel(card, targetHs);
+
+    // Строго режим Монитора (*2) с принудительным отключением старых линков на бэкенде
+    aslConnectNodeProcedure(cid, chosenNode, "*2", {
+      showStatusBanner: true,
+      showCardEffects: true
+    });
+
+    if (typeof showToast === "function") {
+      const toastMsg = window.t
+        ? window.t(
+            "asl.dice_rolled_toast",
+            { node: chosenNode, flag: chosenFlag, label: chosenLabel },
+            `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`
+          )
+        : `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`;
+      showToast(toastMsg, "info", 2800);
+    }
+  } finally {
+    if (targetHs) targetHs._aslDiceRolling = false;
+    const liveDiceBtn = card ? card.querySelector(".btn-allstar-dice") : diceBtn;
+    if (liveDiceBtn) {
+      liveDiceBtn.classList.remove("dice-rolling");
+      liveDiceBtn.disabled = false;
+    }
+  }
+}
+
+export function getAslNodeShortInfo(nodeStr, targetHs = null, cid = "default") {
+  const cleanN = String(nodeStr || "").trim();
+  if (!cleanN || cleanN === "0") {
+    return { label: "", flag: "" };
+  }
+
+  let label = "";
+  let flag = "";
+
+  // 1. Поиск в пользовательской матрице ячеек памяти
+  try {
+    const raw = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const found = parsed.find(u => u && String(u.node).trim() === cleanN);
+        if (found) {
+          const rawLbl = String(found.label || "").trim();
+          if (rawLbl && rawLbl !== "[настроить]" && rawLbl !== "[setup]" && rawLbl !== "Свободно" && rawLbl !== "Empty") {
+            label = rawLbl;
+          }
+          if (found.flag && found.flag !== "➕") {
+            flag = String(found.flag).trim();
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 2. Поиск в активных линках хотспота (обогащённых бэкендом из allstar_dir_mgr)
+  if (!label && targetHs && Array.isArray(targetHs.asl_links)) {
+    const lk = targetHs.asl_links.find(l => l && String(l.node).trim() === cleanN);
+    if (lk) {
+      const rawName = String(lk.name || lk.callsign || lk.city || "").trim();
+      if (rawName && !rawName.startsWith(`Node ${cleanN}`)) {
+        label = rawName;
+      }
+      if (lk.flag && lk.flag !== "➕") {
+        flag = String(lk.flag).trim();
+      }
+    }
+  }
+
+  // 3. Поиск в глобальном справочнике узлов AllStarLink
+  if (!label) {
+    let dirItem = null;
+    if (typeof window !== "undefined" && typeof window.findAslDirectoryNode === "function") {
+      dirItem = window.findAslDirectoryNode(cleanN);
+    } else if (typeof window !== "undefined" && typeof window.getAllStarNodesDirectory === "function") {
+      const dir = window.getAllStarNodesDirectory();
+      if (Array.isArray(dir)) {
+        dirItem = dir.find(d => d && String(d.node).trim() === cleanN);
+      }
+    }
+    if (dirItem) {
+      const dName = String(dirItem.name || dirItem.hub || dirItem.callsign || "").trim();
+      if (dName && !dName.startsWith(`Node ${cleanN}`)) {
+        label = dName;
+      }
+      if (dirItem.flag && dirItem.flag !== "➕") {
+        flag = String(dirItem.flag).trim();
+      }
+    }
+  }
+
+  // 4. Локальное эхо Parrot
+  if (!label && cleanN === "1999") {
+    label = "Parrot Echo";
+    if (!flag) flag = "🦜";
+  }
+
+  return { label, flag };
+}
+
+export function updateAslVfoHeader(card, hs = null) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const callsignEl = card.querySelector(".callsign-display");
+  if (!callsignEl) return;
+
+  const myCall = String((targetHs && targetHs.callsign) || "N0CALL").trim();
+  const connNode = String((targetHs && (targetHs.connected_node || targetHs.target_node)) || "").trim();
+  const isLinked = Boolean(connNode && connNode !== "0");
+  const cid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+
+  const aslHeaderBadge = card.querySelector(".asl-header-status-badge");
+  if (aslHeaderBadge) {
+    aslHeaderBadge.className = `asl-header-status-badge ${isLinked ? "asl-badge-linked" : "asl-badge-idle"}`;
+    aslHeaderBadge.title = isLinked 
+      ? (window.t ? window.t("asl.header_badge_linked", {}, "Подключен к сети ASL3 (активен линк)") : "Подключен к сети ASL3 (активен линк)")
+      : (window.t ? window.t("asl.header_badge_standby", {}, "Узел ASL3 в режиме ожидания (нет активных линков)") : "Узел ASL3 в режиме ожидания (нет активных линков)");
+  }
+
+  if (!isLinked) {
+    const idleText = window.t ? window.t("asl.vfo_idle", {}, "Ожидание") : "Ожидание";
+    callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">${safeEscapeHtml(idleText)}</span>`;
+    callsignEl.removeAttribute("title");
+    return;
+  }
+
+  const { label, flag } = getAslNodeShortInfo(connNode, targetHs, cid);
+  const fallbackConnected = window.t ? window.t("asl.vfo_connected", {}, "Подключено") : "Подключено";
+  const displayLabel = label || fallbackConnected;
+  const flagHtml = flag ? `<span class="asl-vfo-hub-flag">${safeEscapeHtml(flag)}</span> ` : "";
+  const countStr = (targetHs && targetHs.asl_online_count !== undefined && targetHs.asl_online_count > 1) ? ` (${targetHs.asl_online_count})` : "";
+
+  callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">${flagHtml}<strong class="asl-vfo-target-node">${safeEscapeHtml(displayLabel)}</strong>${countStr}</span>`;
+  callsignEl.title = window.t
+    ? window.t("asl.vfo_tooltip_node", { node: connNode, label: displayLabel }, `Узел #${connNode}: ${displayLabel}`)
+    : `Узел #${connNode}: ${displayLabel}`;
+}
+
 export function updateCardAllStarPanel(card, hs) {
   if (!card) return;
   const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
@@ -3095,6 +3526,7 @@ export function updateCardAllStarPanel(card, hs) {
               targetHs.connected_node = establishedFirst;
               targetHs.is_asl_linked = Boolean(establishedFirst);
             }
+            updateAslVfoHeader(card, targetHs);
             if (Array.isArray(links)) {
               links.forEach(lk => {
                 if (lk && lk.node) {
@@ -3168,22 +3600,15 @@ export function updateCardAllStarPanel(card, hs) {
     }
     if (aslHeaderBadge) {
       aslHeaderBadge.style.removeProperty("display");
-      aslHeaderBadge.textContent = `Node ${ownNode} · ASL3 Local`;
+      aslHeaderBadge.textContent = `Node ${ownNode}`;
       aslHeaderBadge.className = `asl-header-status-badge ${isLinked ? "asl-badge-linked" : "asl-badge-idle"}`;
-      aslHeaderBadge.title = isLinked ? `Подключен к сети ASL3 (активен линк)` : `Узел ASL3 в режиме ожидания (нет активных линков)`;
+      aslHeaderBadge.title = isLinked 
+        ? (window.t ? window.t("asl.header_badge_linked", {}, "Подключен к сети ASL3 (активен линк)") : "Подключен к сети ASL3 (активен линк)")
+        : (window.t ? window.t("asl.header_badge_standby", {}, "Узел ASL3 в режиме ожидания (нет активных линков)") : "Узел ASL3 в режиме ожидания (нет активных линков)");
     }
 
     // Задача 2: Верхняя статусная строка VFO (между STANDBY и E2E)
-    const callsignEl = card.querySelector(".callsign-display");
-    if (callsignEl) {
-      const myCall = String((targetHs && targetHs.callsign) || "N0CALL").trim();
-      const countStr = (targetHs && targetHs.asl_online_count !== undefined && targetHs.asl_online_count > 0) ? ` (${targetHs.asl_online_count})` : "";
-      if (isLinked) {
-        callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">Link <strong class="asl-vfo-target-node">${safeEscapeHtml(connNode)}</strong>${countStr}</span>`;
-      } else {
-        callsignEl.innerHTML = `<span class="asl-vfo-callsign">${safeEscapeHtml(myCall)}</span><span class="asl-vfo-sep">·</span><span class="asl-vfo-linktext">Ожидание</span>`;
-      }
-    }
+    updateAslVfoHeader(card, targetHs);
 
     // Configurable quick nodes (stored in localStorage) - 5x4 матрица памяти (20 узлов)
     const DEFAULT_NODES = [
@@ -3219,10 +3644,10 @@ export function updateCardAllStarPanel(card, hs) {
         const customDef = localStorage.getItem(`proxdmr_asl_default_nodes_${targetCid}`) || localStorage.getItem("proxdmr_asl_default_nodes_global");
         if (customDef) {
           const parsed = JSON.parse(customDef);
-          if (Array.isArray(parsed) && parsed.length === 20) return parsed;
+          if (Array.isArray(parsed) && (parsed.length === 20 || parsed.length === ASL_MEMORY_SIZE)) return padAslNodes(parsed);
         }
       } catch (_) {}
-      return [...DEFAULT_NODES];
+      return padAslNodes([...DEFAULT_NODES]);
     };
 
     const activeDefaults = getDefaultNodes(cid);
@@ -3292,46 +3717,61 @@ export function updateCardAllStarPanel(card, hs) {
       if (cn) presetNodeMap.set(cn, u);
     });
 
-    const unlistedLinks = rawLinks.filter(lk => lk && lk.node && !presetNodeMap.has(String(lk.node).trim()));
+    const disconnectingSet = (targetHs && targetHs._aslDisconnectingNodes instanceof Set)
+      ? targetHs._aslDisconnectingNodes
+      : null;
+
+    const unlistedLinks = rawLinks.filter(lk => {
+      if (!lk || !lk.node) return false;
+      const cn = String(lk.node).trim();
+      if (disconnectingSet && disconnectingSet.has(cn)) return false;
+      return !presetNodeMap.has(cn);
+    });
+
     if (targetHs) {
       targetHs.asl_unlisted_links = unlistedLinks;
       if (unlistedLinks.length > 0) {
         const hasNewUnlisted = unlistedLinks.some(l => !targetHs._aslDismissedUnlisted || !targetHs._aslDismissedUnlisted.has(String(l.node).trim()));
-        if (hasNewUnlisted) {
-          targetHs._aslDynamicMatrixMode = true;
+        targetHs._aslDynamicMatrixMode = Boolean(hasNewUnlisted);
+      } else {
+        targetHs._aslDynamicMatrixMode = false;
+      }
+    }
+
+    // Сохраняем все 20 пользовательских пресетов на их фиксированных позициях (0..19).
+    // Если поступают внешние незаписанные линки (unlistedLinks), они занимают только свободные ячейки (!node),
+    // никогда не скрывая и не сдвигая настроенные ячейки пользователя!
+    const displayNodes = userNodes.map(u => ({ ...u }));
+    if (unlistedLinks.length > 0) {
+      let unlistedIdx = 0;
+      for (let i = 0; i < displayNodes.length && unlistedIdx < unlistedLinks.length; i++) {
+        if (!displayNodes[i].node) {
+          const lk = unlistedLinks[unlistedIdx++];
+          const cleanN = String(lk.node).trim();
+          displayNodes[i] = {
+            node: cleanN,
+            label: lk.callsign || lk.name || lk.city || (lk.direction === "IN" ? "Входящий" : "Внешний"),
+            flag: lk.flag || "🌐",
+            isExternal: true
+          };
         }
       }
     }
 
-    let displayNodes = userNodes;
-    if (targetHs && targetHs._aslDynamicMatrixMode === true) {
-      // Dynamic Matrix Mode: active connected preset nodes + external incoming nodes, then empty dynamic slots up to 20
-      const connectedPresetNodes = userNodes.filter(u => u.node && linkedModesMap.has(String(u.node).trim()));
-      const externalNodes = unlistedLinks.map(lk => {
-        const cleanN = String(lk.node).trim();
-        return {
-          node: cleanN,
-          label: lk.callsign || lk.name || lk.city || (lk.direction === "IN" ? "Входящий" : "Внешний"),
-          flag: lk.flag || "🌐",
-          isExternal: true
-        };
-      });
-      const activeConnected = [...connectedPresetNodes, ...externalNodes];
-      const emptySlotsNeeded = Math.max(0, 20 - activeConnected.length);
-      const dynamicEmptySlots = Array.from({ length: emptySlotsNeeded }, () => ({
-        node: "",
-        label: "",
-        flag: "➕",
-        isDynamicEmpty: true
-      }));
-      displayNodes = [...activeConnected, ...dynamicEmptySlots].slice(0, 20);
-    }
-
     const prevSliderContainer = vfoAllStar.querySelector(".asl-slider-container");
     const wasTextView = prevSliderContainer ? prevSliderContainer.classList.contains("is-text-view") : false;
+    const prevStreamEl = vfoAllStar.querySelector(".asl-caption-stream");
+    const prevStreamNodes = prevStreamEl ? Array.from(prevStreamEl.childNodes) : [];
 
     closeAslCardContextMenu(card, targetHs);
     clearAslMoveCancelListener();
+
+    const diceBtnTitle = window.t
+      ? window.t("asl.dice_btn_title", {}, "Случайный активный узел (stats.allstarlink.org/stats/keyed) → последняя ячейка текущего экрана (Монитор *2)")
+      : "Случайный активный узел (stats.allstarlink.org/stats/keyed) → последняя ячейка текущего экрана (Монитор *2)";
+
+    const aslCurPage = getAslMatrixPage(cid, targetHs);
+    const aslMoveClass = (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined) ? "asl-matrix-move-mode" : "";
 
     vfoAllStar.innerHTML = `
       <div class="allstar-top-section">
@@ -3340,8 +3780,18 @@ export function updateCardAllStarPanel(card, hs) {
             <span class="asl-scan-dot"></span>
             <span class="asl-action-text">Scan</span>
           </button>
-          <button type="button" class="btn-allstar-unlink" title="${window.t ? window.t("asl.unlink_all_title", {}, "Разорвать все линки (*73)") : "Разорвать все линки (*73)"}" data-i18n-title="asl.unlink_all_title">
+          <button type="button" class="btn-allstar-unlink" title="${window.t ? window.t("asl.unlink_all_title", {}, "Разорвать все линки (*73). Удержание — меню памяти узлов") : "Разорвать все линки (*73). Удержание — меню памяти узлов"}" data-i18n-title="asl.unlink_all_title">
             <span class="asl-action-text">*73</span>
+          </button>
+          <button type="button" class="btn-allstar-dice${targetHs && targetHs._aslDiceRolling ? " dice-rolling" : ""}" title="${safeEscapeHtml(diceBtnTitle)}" aria-label="${safeEscapeHtml(diceBtnTitle)}" data-i18n-title="asl.dice_btn_title" data-i18n-aria-label="asl.dice_btn_title">
+            <svg class="asl-dice-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="3.5" fill="currentColor" fill-opacity="0.14"/>
+              <circle cx="8" cy="8" r="1.45" fill="currentColor" stroke="none"/>
+              <circle cx="16" cy="8" r="1.45" fill="currentColor" stroke="none"/>
+              <circle cx="12" cy="12" r="1.45" fill="currentColor" stroke="none"/>
+              <circle cx="8" cy="16" r="1.45" fill="currentColor" stroke="none"/>
+              <circle cx="16" cy="16" r="1.45" fill="currentColor" stroke="none"/>
+            </svg>
           </button>
         </div>
         <div class="vfo-pipeline-stage asl-pipeline-stage">
@@ -3393,13 +3843,17 @@ export function updateCardAllStarPanel(card, hs) {
 
         <!-- Разделитель-шторка (Notch Handle) -->
         <div class="asl-dock-notch" id="aslDockNotch_${cid}" title="${window.t ? window.t("asl.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации"}" role="button" tabindex="0" aria-label="${window.t ? window.t("asl.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации"}" data-i18n-title="asl.notch_title" data-i18n-aria-label="asl.notch_title">
-          <span class="asl-notch-pill"></span>
+          <span class="asl-notch-pages" aria-hidden="true">${[0, 1, 2].map(pg => `<i class="asl-notch-seg${pg === aslCurPage ? " is-active" : ""}" data-page="${pg}" title="${window.t ? window.t("asl.page_indicator_title", { page: pg + 1, total: ASL_PAGE_COUNT }, `Экран ${pg + 1} из ${ASL_PAGE_COUNT}`) : `Экран ${pg + 1} из ${ASL_PAGE_COUNT}`}"></i>`).join("")}</span>
         </div>
 
-        <!-- Нижняя секция: Матрица 5х4 кнопок быстрого вызова нод (по умолчанию открыта) -->
+        <!-- Нижняя секция: Память узлов — 3 экрана по 5х4 кнопок быстрого вызова (по умолчанию открыта) -->
         <div class="asl-matrix-container" id="aslMatrixContainer_${cid}">
-          <div class="asl-matrix-grid ${targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined ? "asl-matrix-move-mode" : ""}">
-            ${displayNodes.map((pn, idx) => {
+          <div class="asl-pages-viewport" id="aslPagesViewport_${cid}">
+          ${[0, 1, 2].map(pg => {
+            const pgPos = ((pg - aslCurPage + 4) % 3) - 1;
+            return `<div class="asl-matrix-grid asl-page ${aslMoveClass}" data-page="${pg}" style="--asl-pos:${pgPos};"${pgPos !== 0 ? ' inert aria-hidden="true"' : ''}>
+            ${displayNodes.slice(pg * ASL_PAGE_SIZE, (pg + 1) * ASL_PAGE_SIZE).map((pn, li) => {
+              const idx = pg * ASL_PAGE_SIZE + li;
               const isEmpty = !pn.node;
               const isExternal = Boolean(pn.isExternal);
               const isDynamicEmpty = Boolean(pn.isDynamicEmpty);
@@ -3458,6 +3912,8 @@ export function updateCardAllStarPanel(card, hs) {
                 </button>
               `;
             }).join("")}
+            </div>`;
+          }).join("")}
           </div>
         </div>
       </div>
@@ -3471,6 +3927,14 @@ export function updateCardAllStarPanel(card, hs) {
     vfoAllStar.classList.toggle("has-transcribe", aslTs1TranscribeActive);
     updateSlotLangBadge(vfoAllStar, 1, aslTs1TranscribeActive);
     updateSlotTtsBadge(vfoAllStar, 1, aslTs1TtsActive);
+
+    // Восстанавливаем накопленные сообщения живой транскрибации при обновлении матрицы
+    if (prevStreamNodes.length > 0) {
+      const nextStreamEl = vfoAllStar.querySelector(".asl-caption-stream");
+      if (nextStreamEl) {
+        prevStreamNodes.forEach(node => nextStreamEl.appendChild(node));
+      }
+    }
 
     // Управление шрифтом в окне транскрибации ASL (правый нижний угол)
     const aslCaptionBox = vfoAllStar.querySelector(".asl-live-caption-box");
@@ -3562,6 +4026,52 @@ export function updateCardAllStarPanel(card, hs) {
       }, { passive: true });
     }
 
+    // --- Экраны памяти узлов: 3 × (5×4), горизонтальный свайп по кругу ---
+    const pagesViewport = vfoAllStar.querySelector(".asl-pages-viewport");
+    const pageEls = pagesViewport ? Array.from(pagesViewport.querySelectorAll(".asl-page")) : [];
+    const notchSegs = Array.from(vfoAllStar.querySelectorAll(".asl-notch-seg"));
+    let aslPage = getAslMatrixPage(cid, targetHs);
+
+    // Расставляет страницы по позициям -1 / 0 / +1 (по кругу). Страница, «перепрыгивающая» с -1 на +1 (или наоборот),
+    // переставляется БЕЗ анимации, чтобы не пролетать через центр.
+    const layoutAslPages = (page, animate) => {
+      pageEls.forEach((el, pg) => {
+        const oldPos = parseInt(el.style.getPropertyValue("--asl-pos") || "0", 10);
+        const newPos = ((pg - page + 4) % 3) - 1;
+        const noAnim = !animate || Math.abs(newPos - oldPos) === 2;
+        if (noAnim) el.classList.add("no-anim");
+        el.style.setProperty("--asl-pos", String(newPos));
+        el.toggleAttribute("inert", newPos !== 0);
+        el.setAttribute("aria-hidden", newPos !== 0 ? "true" : "false");
+        if (noAnim) {
+          void el.offsetWidth; // зафиксировать позицию без transition
+          el.classList.remove("no-anim");
+        }
+      });
+      notchSegs.forEach((seg, pg) => seg.classList.toggle("is-active", pg === page));
+    };
+
+    const resetAslPagesDrag = () => {
+      if (!pagesViewport) return;
+      pagesViewport.classList.remove("is-dragging");
+      pagesViewport.style.setProperty("--asl-drag", "0px");
+    };
+
+    // delta = +1 (следующий экран, свайп влево) или -1 (предыдущий, свайп вправо)
+    const goAslPage = (delta) => {
+      if (!pagesViewport) return;
+      aslPage = setAslMatrixPageValue(cid, targetHs, aslPage + delta);
+      closeAslCardContextMenu(card, targetHs);
+      document.querySelectorAll(".asl-card-edit-popover").forEach(el => el.remove());
+      resetAslPagesDrag();
+      layoutAslPages(aslPage, true);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate(12); } catch (_) {}
+      }
+      // Опрос статуса — только по узлам нового текущего экрана (бэкенд: > 20 узлов = без HTTP-статистики)
+      probeAslMatrixNodes(card, targetHs, false);
+    };
+
     // Глобальный флаг свайпа, чтобы клик по кнопке не срабатывал после жеста свайпа
     let wasSwipeGesture = false;
     let activePressTimer = null;
@@ -3573,31 +4083,53 @@ export function updateCardAllStarPanel(card, hs) {
       }
     };
 
-    // --- Обработка жестов для Матрицы (Свайп ВНИЗ -> открытие текста) ---
+    // --- Обработка жестов для Матрицы ---
+    // Ось жеста фиксируется после 12 px: горизонтальная (x) — листание экранов памяти по кругу,
+    // вертикальная (y) — свайп ВНИЗ открывает окно текста (как раньше).
     let matrixStartY = 0;
     let matrixStartX = 0;
     let isMatrixTracking = false;
     let isMatrixCaptured = false;
+    let matrixAxis = null; // "x" | "y" | null
+    let matrixLastDx = 0;
+    let matrixStartTs = 0;
 
     const startMatrixDrag = (clientY, clientX) => {
       isMatrixTracking = true;
       isMatrixCaptured = false;
+      matrixAxis = null;
+      matrixLastDx = 0;
+      matrixStartTs = Date.now();
       matrixStartY = clientY;
       matrixStartX = clientX;
     };
 
     const moveMatrixDrag = (clientY, clientX, pointerId, targetEl) => {
       if (!isMatrixTracking) return;
+      const rawDx = clientX - matrixStartX;
       const dy = clientY - matrixStartY; // > 0 при движении вниз
-      const dx = Math.abs(clientX - matrixStartX);
-      if (Math.abs(dy) > 10) {
+      const dx = Math.abs(rawDx);
+
+      if (!matrixAxis && Math.max(dx, Math.abs(dy)) > 12) {
+        matrixAxis = dx > Math.abs(dy) ? "x" : "y";
         cancelActivePress();
         if (!isMatrixCaptured && targetEl && pointerId !== undefined) {
           isMatrixCaptured = true;
           try { targetEl.setPointerCapture(pointerId); } catch (_) {}
         }
+        if (matrixAxis === "x" && pagesViewport) {
+          pagesViewport.classList.add("is-dragging");
+        }
       }
-      if (dy > 25 && dy > dx * 0.9) {
+
+      if (matrixAxis === "x" && pagesViewport) {
+        const w = pagesViewport.clientWidth || 1;
+        matrixLastDx = Math.max(-w, Math.min(w, rawDx));
+        pagesViewport.style.setProperty("--asl-drag", matrixLastDx + "px");
+        return;
+      }
+
+      if (matrixAxis === "y" && dy > 25 && dy > dx * 0.9) {
         isMatrixTracking = false;
         cancelActivePress();
         wasSwipeGesture = true;
@@ -3610,35 +4142,43 @@ export function updateCardAllStarPanel(card, hs) {
     };
 
     const endMatrixDrag = (pointerId, targetEl) => {
+      const wasTracking = isMatrixTracking;
       isMatrixTracking = false;
       if (isMatrixCaptured && targetEl && pointerId !== undefined) {
         try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
       }
       isMatrixCaptured = false;
+
+      // Завершение горизонтального свайпа (защита от двойного вызова pointerup + touchend: только при wasTracking)
+      if (wasTracking && matrixAxis === "x" && pagesViewport) {
+        const w = pagesViewport.clientWidth || 1;
+        const dt = Math.max(1, Date.now() - matrixStartTs);
+        const absDx = Math.abs(matrixLastDx);
+        const velocity = absDx / dt; // px/мс
+        const passed = absDx > w * 0.22 || (velocity > 0.45 && absDx > 24);
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        if (passed) {
+          goAslPage(matrixLastDx < 0 ? 1 : -1);
+        } else {
+          resetAslPagesDrag();
+        }
+      }
+      matrixAxis = null;
     };
 
     if (matrixContainer) {
       matrixContainer.addEventListener("pointerdown", (e) => {
-        // Проверка комбо на уровне контейнера (страховка для мыши на ПК)
-        if (armedCornerIdx !== null) {
-          const btn = e.target.closest(".btn-allstar-node");
-          if (btn) {
-            const cIdx = parseInt(btn.dataset.idx, 10);
-            const targetOpposite = (armedCornerIdx === 3) ? 16 : 3;
-            if (cIdx === targetOpposite) {
-              e.preventDefault();
-              e.stopPropagation();
-              disarmCornerCombo();
-              openAslMatrixManageModal(cid, card, targetHs, userNodes);
-              return;
-            }
-          }
-        }
         if (e.button !== undefined && e.button !== 0) return;
         startMatrixDrag(e.clientY, e.clientX);
         // Не вызываем setPointerCapture на pointerdown, чтобы не ломать клики мыши
       });
       matrixContainer.addEventListener("pointermove", (e) => {
+        // Мышь: кнопку отпустили вне контейнера — жест завершён
+        if (e.pointerType === "mouse" && e.buttons === 0 && isMatrixTracking) {
+          endMatrixDrag(e.pointerId, matrixContainer);
+          return;
+        }
         moveMatrixDrag(e.clientY, e.clientX, e.pointerId, matrixContainer);
       });
       matrixContainer.addEventListener("pointerup", (e) => {
@@ -3798,45 +4338,46 @@ export function updateCardAllStarPanel(card, hs) {
       const modal = document.createElement("div");
       modal.id = "aslMatrixManageModal";
       modal.className = "asl-matrix-modal-backdrop";
+      const tm = (key, fallback) => (window.t ? window.t(key, {}, fallback) : fallback);
       modal.innerHTML = `
         <div class="asl-matrix-modal-card" role="dialog" aria-modal="true" aria-labelledby="aslModalTitle">
           <div class="asl-modal-header">
             <div class="asl-modal-title-wrap">
               <span class="asl-modal-icon">⚙️</span>
-              <h3 id="aslModalTitle" class="asl-modal-title">Память Узлов AllStarLink</h3>
+              <h3 id="aslModalTitle" class="asl-modal-title">${tm("asl.mem_modal_title", "Память Узлов AllStarLink")}</h3>
             </div>
-            <button type="button" class="asl-modal-close" title="Закрыть (Esc)">✕</button>
+            <button type="button" class="asl-modal-close" title="${tm("asl.edit_close_esc", "Закрыть (Esc)")}">✕</button>
           </div>
-          <p class="asl-modal-subtitle">Выберите действие для матрицы из 20 ячеек быстрого вызова:</p>
+          <p class="asl-modal-subtitle">${tm("asl.mem_modal_subtitle", "Выберите действие для памяти из 60 ячеек (3 экрана по 20):")}</p>
 
           <div class="asl-modal-actions">
             <button type="button" class="asl-modal-btn asl-btn-reset-zero" data-action="zero">
               <span class="asl-btn-action-icon">🧹</span>
               <div class="asl-btn-action-text">
-                <strong>Сброс в «ноль»</strong>
-                <small>Полная очистка всех 20 ячеек (все ячейки станут [+] Свободно)</small>
+                <strong>${tm("asl.mem_zero_title", "Сброс в «ноль»")}</strong>
+                <small>${tm("asl.mem_zero_desc", "Полная очистка всех 60 ячеек (все ячейки станут [+] Свободно)")}</small>
               </div>
             </button>
 
             <button type="button" class="asl-modal-btn asl-btn-reset-default" data-action="default">
               <span class="asl-btn-action-icon">🔄</span>
               <div class="asl-btn-action-text">
-                <strong>Сброс в «по умолчанию»</strong>
-                <small>Восстановить базовый список из 20 узлов</small>
+                <strong>${tm("asl.mem_default_title", "Сброс в «по умолчанию»")}</strong>
+                <small>${tm("asl.mem_default_desc", "Восстановить сохранённый шаблон по умолчанию (или базовый список из 20 узлов)")}</small>
               </div>
             </button>
 
             <button type="button" class="asl-modal-btn asl-btn-save-default" data-action="save_default">
               <span class="asl-btn-action-icon">💾</span>
               <div class="asl-btn-action-text">
-                <strong>Сохранить текущую как «по умолчанию»</strong>
-                <small>Перезаписать текущую матрицу в качестве нового шаблона по умолчанию ⭐</small>
+                <strong>${tm("asl.mem_save_default_title", "Сохранить текущую как «по умолчанию»")}</strong>
+                <small>${tm("asl.mem_save_default_desc", "Перезаписать всю память (3 экрана) в качестве нового шаблона по умолчанию ⭐")}</small>
               </div>
             </button>
           </div>
 
           <div class="asl-modal-footer">
-            <button type="button" class="asl-modal-cancel-btn">Отмена</button>
+            <button type="button" class="asl-modal-cancel-btn">${tm("asl.mem_cancel", "Отмена")}</button>
           </div>
         </div>
       `;
@@ -3867,14 +4408,14 @@ export function updateCardAllStarPanel(card, hs) {
         btn.addEventListener("click", () => {
           const act = btn.dataset.action;
           if (act === "zero") {
-            const emptyNodes = Array.from({ length: 20 }, () => ({ node: "", label: "", flag: "➕" }));
+            const emptyNodes = Array.from({ length: ASL_MEMORY_SIZE }, () => makeEmptyAslCell());
             try {
               localStorage.setItem(`proxdmr_asl_quick_nodes_${targetCid}`, JSON.stringify(emptyNodes));
             } catch (_) {}
             closeModal();
             updateCardAllStarPanel(targetCard, hsData);
             if (typeof showToast === "function") {
-              showToast("Матрица памяти узлов очищена (все ячейки пусты)", "info", 3000);
+              showToast(tm("asl.mem_toast_zero", "Память узлов очищена (все 60 ячеек пусты)"), "info", 3000);
             }
           } else if (act === "default") {
             const defNodes = getDefaultNodes(targetCid);
@@ -3884,60 +4425,25 @@ export function updateCardAllStarPanel(card, hs) {
             closeModal();
             updateCardAllStarPanel(targetCard, hsData);
             if (typeof showToast === "function") {
-              showToast("Матрица памяти сброшена к значениям по умолчанию", "success", 3000);
+              showToast(tm("asl.mem_toast_default", "Память узлов сброшена к значениям по умолчанию"), "success", 3000);
             }
           } else if (act === "save_default") {
             try {
-              localStorage.setItem(`proxdmr_asl_default_nodes_${targetCid}`, JSON.stringify(currentNodes));
+              localStorage.setItem(`proxdmr_asl_default_nodes_${targetCid}`, JSON.stringify(padAslNodes(currentNodes)));
             } catch (_) {}
             closeModal();
             if (typeof showToast === "function") {
-              showToast("Текущая матрица сохранена как новый шаблон по умолчанию ⭐", "success", 3500);
+              showToast(tm("asl.mem_toast_saved_default", "Текущая память сохранена как новый шаблон по умолчанию ⭐"), "success", 3500);
             }
           }
         });
       });
     };
 
-    // --- Обработка комбо угловых кнопок (индексы 3 и 16) ---
-    let armedCornerIdx = null;
-    let armedTimeout = null;
-
-    const disarmCornerCombo = () => {
-      if (armedTimeout) {
-        clearTimeout(armedTimeout);
-        armedTimeout = null;
-      }
-      if (armedCornerIdx !== null) {
-        vfoAllStar.querySelectorAll(".btn-allstar-node").forEach(b => {
-          b.classList.remove("asl-combo-armed");
-        });
-        armedCornerIdx = null;
-      }
-    };
-
-    const armCornerCombo = (cornerIdx, cornerBtn) => {
-      disarmCornerCombo();
-      armedCornerIdx = cornerIdx;
-      cornerBtn.classList.add("asl-combo-armed");
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        try { navigator.vibrate([60, 50, 60]); } catch (_) {}
-      }
-      if (typeof showToast === "function") {
-        showToast("Угловая кнопка зафиксирована! Нажмите противоположный угол для меню сброса матрицы ⚙️", "info", 4500);
-      }
-      armedTimeout = setTimeout(() => {
-        disarmCornerCombo();
-      }, 4500);
-    };
-
-    // Connect node on click / edit on long-press (для всех 20 кнопок матрицы)
+    // Connect node on click / edit on long-press (для всех кнопок матрицы)
     vfoAllStar.querySelectorAll(".btn-allstar-node").forEach(btn => {
       let isLongPress = false;
       const idx = parseInt(btn.dataset.idx, 10);
-      const isCornerBtn = (idx === 3 || idx === 16);
-      let cornerHoldTimer = null;
-      let cornerArmedTriggered = false;
 
       const isNodeCurrentlyLinked = () => {
         const n = String(btn.dataset.node || "").trim();
@@ -3962,26 +4468,6 @@ export function updateCardAllStarPanel(card, hs) {
 
       const clearAllHoldTimers = () => {
         cancelActivePress();
-        if (cornerHoldTimer) {
-          clearTimeout(cornerHoldTimer);
-          cornerHoldTimer = null;
-        }
-      };
-
-      const checkAndTriggerCombo = (e) => {
-        if (armedCornerIdx !== null) {
-          const targetOpposite = (armedCornerIdx === 3) ? 16 : 3;
-          if (idx === targetOpposite) {
-            if (e) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
-            disarmCornerCombo();
-            openAslMatrixManageModal(cid, card, targetHs, userNodes);
-            return true;
-          }
-        }
-        return false;
       };
 
       const triggerConnect = () => {
@@ -4031,55 +4517,23 @@ export function updateCardAllStarPanel(card, hs) {
       };
 
       const startHold = (e) => {
-        // Если уже взведена противоположная кнопка — мгновенно открываем меню при нажатии!
-        if (checkAndTriggerCombo(e)) return;
-
         isLongPress = false;
-        cornerArmedTriggered = false;
         clearAllHoldTimers();
 
-        if (isCornerBtn) {
-          // Угловая кнопка: при удержании > 1400мс взводим комбо сброса
-          cornerHoldTimer = setTimeout(() => {
-            cornerArmedTriggered = true;
-            isLongPress = true;
-            closeAslCardContextMenu(card);
-            armCornerCombo(idx, btn);
-          }, 1400);
-
-          // Таймер 650мс
-          activePressTimer = setTimeout(() => {
-            isLongPress = true;
-            if (!btn.dataset.node) {
-              if (!targetHs || !targetHs._aslDynamicMatrixMode) {
-                triggerEdit();
-              }
-            } else {
-              openAslCardContextMenu({
-                btn, idx, cid, card, targetHs, userNodes,
-                triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
-              });
-            }
-          }, 650);
-        } else {
-          activePressTimer = setTimeout(() => {
-            isLongPress = true;
-            if (!btn.dataset.node) {
-              if (!targetHs || !targetHs._aslDynamicMatrixMode) {
-                triggerEdit();
-              }
-            } else {
-              openAslCardContextMenu({
-                btn, idx, cid, card, targetHs, userNodes,
-                triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
-              });
-            }
-          }, 650);
-        }
+        activePressTimer = setTimeout(() => {
+          isLongPress = true;
+          if (!btn.dataset.node) {
+            triggerEdit();
+          } else {
+            openAslCardContextMenu({
+              btn, idx, cid, card, targetHs, userNodes,
+              triggerConnect, triggerDisconnectNode, isNodeCurrentlyLinked
+            });
+          }
+        }, 650);
       };
 
       const endHold = (e) => {
-        if (checkAndTriggerCombo(e)) return;
         clearAllHoldTimers();
         if (isLongPress) {
           if (e) {
@@ -4103,9 +4557,7 @@ export function updateCardAllStarPanel(card, hs) {
         e.stopPropagation();
         if (isLongPress) return;
         if (!btn.dataset.node) {
-          if (!targetHs || !targetHs._aslDynamicMatrixMode) {
-            triggerEdit();
-          }
+          triggerEdit();
         } else {
           openAslCardContextMenu({
             btn, idx, cid, card, targetHs, userNodes,
@@ -4115,7 +4567,6 @@ export function updateCardAllStarPanel(card, hs) {
       });
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (checkAndTriggerCombo(e)) return;
         if (isLongPress || wasSwipeGesture) {
           e.preventDefault();
           isLongPress = false;
@@ -4131,8 +4582,8 @@ export function updateCardAllStarPanel(card, hs) {
 
           if (
             Number.isInteger(sourceIdx) &&
-            sourceIdx >= 0 && sourceIdx < 20 &&
-            targetIdx >= 0 && targetIdx < 20 &&
+            sourceIdx >= 0 && sourceIdx < ASL_MEMORY_SIZE &&
+            targetIdx >= 0 && targetIdx < ASL_MEMORY_SIZE &&
             sourceIdx !== targetIdx
           ) {
             const temp = userNodes[sourceIdx];
@@ -4145,11 +4596,9 @@ export function updateCardAllStarPanel(card, hs) {
           return;
         }
 
-        // Если ячейка пустая -> в штатном режиме открываем настройку, в динамическом игнорируем
+        // Если ячейка пустая -> открываем настройку узла
         if (!btn.dataset.node) {
-          if (!targetHs || !targetHs._aslDynamicMatrixMode) {
-            triggerEdit();
-          }
+          triggerEdit();
           return;
         }
 
@@ -4223,15 +4672,65 @@ export function updateCardAllStarPanel(card, hs) {
       };
     }
 
-    // Unlink button
+    // Unlink button: клик — *73 (разорвать все линки), долгое удержание (900 мс) — окно «Память Узлов»
     const unlinkBtn = vfoAllStar.querySelector(".btn-allstar-unlink");
     if (unlinkBtn) {
+      const UNLINK_HOLD_MS = 900;
+      let unlinkHoldTimer = null;
+      let unlinkHoldFired = false;
+
+      const clearUnlinkHold = () => {
+        if (unlinkHoldTimer) {
+          clearTimeout(unlinkHoldTimer);
+          unlinkHoldTimer = null;
+        }
+        unlinkBtn.classList.remove("is-holding");
+      };
+
+      const startUnlinkHold = (e) => {
+        if (e && e.button !== undefined && e.button !== 0) return;
+        unlinkHoldFired = false;
+        clearUnlinkHold();
+        unlinkBtn.classList.add("is-holding");
+        unlinkHoldTimer = setTimeout(() => {
+          unlinkHoldTimer = null;
+          unlinkHoldFired = true;
+          unlinkBtn.classList.remove("is-holding");
+          if (typeof navigator !== "undefined" && navigator.vibrate) {
+            try { navigator.vibrate([40, 40, 40]); } catch (_) {}
+          }
+          closeAslCardContextMenu(card, targetHs);
+          openAslMatrixManageModal(cid, card, targetHs, userNodes);
+        }, UNLINK_HOLD_MS);
+      };
+
+      unlinkBtn.addEventListener("pointerdown", startUnlinkHold);
+      ["pointerup", "pointerleave", "pointercancel"].forEach(evtName => {
+        unlinkBtn.addEventListener(evtName, clearUnlinkHold);
+      });
+      unlinkBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+
       unlinkBtn.onclick = (e) => {
         e.stopPropagation();
+        if (unlinkHoldFired) {
+          // Удержание уже открыло окно памяти — этот «хвостовой» клик НЕ должен разрывать линки
+          unlinkHoldFired = false;
+          e.preventDefault();
+          return;
+        }
         if (targetHs && targetHs._aslScanActive) {
           stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: false, silent: true });
         }
         aslDisconnectNodeProcedure(cid, "all", { showStatusBanner: true, showCardEffects: true });
+      };
+    }
+
+    // Random active node (Dice) button
+    const diceBtn = vfoAllStar.querySelector(".btn-allstar-dice");
+    if (diceBtn) {
+      diceBtn.onclick = (e) => {
+        e.stopPropagation();
+        rollRandomKeyedAslNode(cid, card, targetHs, userNodes, diceBtn);
       };
     }
 
@@ -8951,6 +9450,8 @@ window.__proxdmr.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
 window.__proxdmr.openXlxAllModulesPopover = openXlxAllModulesPopover;
 window.__proxdmr.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
 window.__proxdmr.syncAslMatrixButtonsState = syncAslMatrixButtonsState;
+window.__proxdmr.updateAslVfoHeader = updateAslVfoHeader;
+window.__proxdmr.getAslNodeShortInfo = getAslNodeShortInfo;
 window.__proxdmr.setAslProcBannerState = setAslProcBannerState;
 window.__proxdmr.formatAslProcMessage = formatAslProcMessage;
 window.__proxdmr.aslDisconnectNodeProcedure = aslDisconnectNodeProcedure;
@@ -9161,7 +9662,7 @@ if (typeof window !== "undefined" && !window._aslOnlinePollInterval) {
   }, 10000);
 }
 
-if (typeof window !== 'undefined') { window.updateCardXlxPanel = updateCardXlxPanel; window.updateCardDmrPlusPanel = updateCardDmrPlusPanel; window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector; window.updateCardAllStarPanel = updateCardAllStarPanel; window.appendAllStarLogEntry = appendAllStarLogEntry; window.appendAllStarTelemetryLog = appendAllStarTelemetryLog; window.openAllStarDtmfPopover = openAllStarDtmfPopover; }
+if (typeof window !== 'undefined') { window.updateCardXlxPanel = updateCardXlxPanel; window.updateCardDmrPlusPanel = updateCardDmrPlusPanel; window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector; window.updateCardAllStarPanel = updateCardAllStarPanel; window.updateAslVfoHeader = updateAslVfoHeader; window.getAslNodeShortInfo = getAslNodeShortInfo; window.appendAllStarLogEntry = appendAllStarLogEntry; window.appendAllStarTelemetryLog = appendAllStarTelemetryLog; window.openAllStarDtmfPopover = openAllStarDtmfPopover; }
 
 
 export function updateHsFormAliveState(isAlive) {

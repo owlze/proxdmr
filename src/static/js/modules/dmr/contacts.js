@@ -746,6 +746,328 @@ function setupAslDirectoryTelemetry(container) {
   }
 }
 
+/**
+ * Модальное окно выбора ячейки памяти узлов AllStarLink (3 экрана по 20 ячеек 4х5)
+ * при добавлении узла из справочника в быстрые кнопки.
+ */
+export function openAslCellPickerModal(targetItem, cid = "default") {
+  const existing = document.getElementById("aslCellPickerModal");
+  if (existing) existing.remove();
+
+  const tm = (key, fallback, params = {}) => {
+    if (window.t) {
+      const res = window.t(key, params, fallback);
+      if (res && res !== key) return res;
+    }
+    let res = fallback;
+    for (const [k, v] of Object.entries(params)) {
+      res = res.replaceAll(`{${k}}`, String(v));
+    }
+    return res;
+  };
+
+  const DEFAULT_ASL_20 = [
+    { node: "1999",   label: "Parrot Echo", flag: "🦜" },
+    { node: "41522",  label: "HUBNet UK",  flag: "🇬🇧" },
+    { node: "27339",  label: "East Coast", flag: "🇺🇸" },
+    { node: "2143",   label: "WAN RS",     flag: "🇺🇸" },
+    { node: "2000",   label: "Western Ref",flag: "🇺🇸" },
+    { node: "51010",  label: "World Conf", flag: "🌐" },
+    { node: "28554",  label: "RU3AID Hub", flag: "🇷🇺" },
+    { node: "2560",   label: "WIN System", flag: "🇺🇸" },
+    { node: "2462",   label: "Alaska Net", flag: "🇺🇸" },
+    { node: "52495",  label: "DL-Nordwest",flag: "🇩🇪" },
+    { node: "52319",  label: "Canada Hub", flag: "🇨🇦" },
+    { node: "27170",  label: "Florida Hub",flag: "🇺🇸" },
+    { node: "53085",  label: "PA Hub",     flag: "🇺🇸" },
+    { node: "53431",  label: "Alabama Net",flag: "🇺🇸" },
+    { node: "289890", label: "PA-Wide",    flag: "🇺🇸" },
+    { node: "41413",  label: "Santiago Pk",flag: "🇺🇸" },
+    { node: "47280",  label: "Georgia Net",flag: "🇺🇸" },
+    { node: "42821",  label: "Germany DL", flag: "🇩🇪" },
+    { node: "487571", label: "Australia",  flag: "🇦🇺" },
+    { node: "500691", label: "Texas Hub",  flag: "🇺🇸" }
+  ];
+
+  let userQuickNodes = [];
+  try {
+    const saved = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
+    if (saved) userQuickNodes = JSON.parse(saved);
+  } catch (_) {}
+
+  if (!Array.isArray(userQuickNodes) || !userQuickNodes.length) {
+    userQuickNodes = [...DEFAULT_ASL_20];
+  } else {
+    userQuickNodes = userQuickNodes.map(item => {
+      if (item && String(item.node).trim() === "2502") {
+        return { node: "28554", label: "RU3AID Hub", flag: "🇷🇺" };
+      }
+      return item;
+    });
+    if (userQuickNodes.length < 20) {
+      while (userQuickNodes.length < 20) {
+        userQuickNodes.push(DEFAULT_ASL_20[userQuickNodes.length]);
+      }
+    }
+  }
+  while (userQuickNodes.length < 60) {
+    userQuickNodes.push({ node: "", label: "", flag: "➕", scan: false });
+  }
+
+  const targetNode = String(targetItem.node || "").trim();
+  const targetLabel = (targetItem.callsign ? targetItem.callsign : (targetItem.name || `Node ${targetNode}`)).slice(0, 14);
+  const targetFlag = targetItem.flag || "🌐";
+
+  const freeIndices = [];
+  userQuickNodes.forEach((item, idx) => {
+    if (!item || !String(item.node || "").trim()) {
+      freeIndices.push(idx);
+    }
+  });
+
+  const screenNames = [
+    tm("asl.picker_screen_main", "Основной"),
+    tm("asl.picker_screen_second", "Экран 2"),
+    tm("asl.picker_screen_third", "Экран 3")
+  ];
+
+  const screensHtml = [0, 1, 2].map(pageIdx => {
+    const startIdx = pageIdx * 20;
+    const endIdx = startIdx + 20;
+    const pageNodes = userQuickNodes.slice(startIdx, endIdx);
+    const pageFreeCount = pageNodes.filter(x => !x || !String(x.node || "").trim()).length;
+
+    const cellsHtml = pageNodes.map((cellItem, subIdx) => {
+      const absIdx = startIdx + subIdx;
+      const cellNum = absIdx + 1;
+      const nodeNum = cellItem && cellItem.node ? String(cellItem.node).trim() : "";
+      const isEmpty = !nodeNum;
+      const isCurrentTarget = nodeNum === targetNode;
+
+      let cls = "asl-picker-cell";
+      if (isEmpty) cls += " is-empty";
+      else cls += " is-occupied";
+      if (isCurrentTarget) cls += " is-current";
+
+      let inner = "";
+      if (isEmpty) {
+        inner = `
+          <span class="asl-picker-cell-num">#${cellNum}</span>
+          <span class="asl-picker-cell-empty-icon">➕</span>
+          <span class="asl-picker-cell-title">${tm("asl.picker_empty_slot", "Свободно")}</span>
+        `;
+      } else {
+        inner = `
+          <div class="asl-picker-cell-top">
+            <span class="asl-picker-cell-flag">${cellItem.flag || "🌐"}</span>
+            <strong class="asl-picker-cell-node">${nodeNum}</strong>
+            <span class="asl-picker-cell-num">#${cellNum}</span>
+          </div>
+          <div class="asl-picker-cell-bottom">
+            <span class="asl-picker-cell-label">${cellItem.label || ""}</span>
+            ${isCurrentTarget ? `<span class="asl-picker-cur-badge">${tm("asl.picker_already_badge", "✓ Добавлен")}</span>` : ""}
+          </div>
+        `;
+      }
+
+      const tooltip = isEmpty
+        ? tm("asl.picker_cell_empty_tip", `Ячейка #${cellNum}: свободна. Нажмите для записи`, { cell: cellNum })
+        : (isCurrentTarget
+            ? tm("asl.picker_cell_cur_tip", `Ячейка #${cellNum}: уже содержит узел #${nodeNum}`, { cell: cellNum, node: nodeNum })
+            : tm("asl.picker_cell_occ_tip", `Ячейка #${cellNum}: занята #${nodeNum} (${cellItem.label || ""}). Нажмите для замены`, { cell: cellNum, node: nodeNum, label: cellItem.label || "" }));
+
+      return `
+        <button type="button" class="${cls}" data-index="${absIdx}" data-cell="${cellNum}" title="${tooltip}">
+          ${inner}
+        </button>
+      `;
+    }).join("");
+
+    return `
+      <div class="asl-picker-screen-block">
+        <div class="asl-picker-screen-header">
+          <div class="asl-picker-screen-title">
+            <span class="asl-picker-screen-icon">📺</span>
+            <strong>${tm("asl.picker_screen_label", `Экран ${pageIdx + 1}: ${screenNames[pageIdx]}`, { page: pageIdx + 1, name: screenNames[pageIdx] })}</strong>
+            <span class="asl-picker-screen-range">(${startIdx + 1}–${endIdx})</span>
+          </div>
+          <span class="asl-picker-screen-badge ${pageFreeCount > 0 ? "has-free" : "is-full"}">
+            ${pageFreeCount > 0
+              ? tm("asl.picker_free_count", `${pageFreeCount} из 20 свободно`, { free: pageFreeCount, total: 20 })
+              : tm("asl.picker_full", "Заполнен")}
+          </span>
+        </div>
+        <div class="asl-picker-grid">
+          ${cellsHtml}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const modal = document.createElement("div");
+  modal.id = "aslCellPickerModal";
+  modal.className = "asl-matrix-modal-backdrop asl-picker-modal-backdrop";
+  modal.innerHTML = `
+    <div class="asl-cell-picker-modal" role="dialog" aria-modal="true" aria-labelledby="aslPickerTitle">
+      <div class="asl-picker-header">
+        <div class="asl-picker-header-left">
+          <span class="asl-picker-header-icon">📌</span>
+          <div class="asl-picker-header-text">
+            <h3 id="aslPickerTitle" class="asl-picker-title">${tm("asl.picker_title", "Сохранить узел в быстрые")}</h3>
+            <div class="asl-picker-target-node">
+              <span class="asl-target-flag">${targetFlag}</span>
+              <strong class="asl-target-node">#${targetNode}</strong>
+              <span class="asl-target-label">${targetLabel}</span>
+            </div>
+          </div>
+        </div>
+        <button type="button" class="asl-modal-close asl-picker-close" title="${tm("asl.edit_close_esc", "Закрыть (Esc)")}">✕</button>
+      </div>
+
+      <p class="asl-picker-subtitle">
+        ${tm("asl.picker_subtitle", "Выберите ячейку в матрице памяти хотспота (3 экрана по 20 ячеек 4×5):")}
+      </p>
+
+      <div class="asl-picker-scroll">
+        ${screensHtml}
+      </div>
+
+      <div class="asl-picker-confirm-box hidden" id="aslPickerConfirmBox">
+        <div class="asl-picker-confirm-msg" id="aslPickerConfirmMsg"></div>
+        <div class="asl-picker-confirm-actions">
+          <button type="button" class="asl-picker-btn-confirm-yes" id="aslPickerConfirmYes">
+            ${tm("asl.picker_replace_btn", "Заменить")}
+          </button>
+          <button type="button" class="asl-picker-btn-confirm-no" id="aslPickerConfirmNo">
+            ${tm("asl.mem_cancel", "Отмена")}
+          </button>
+        </div>
+      </div>
+
+      <div class="asl-picker-footer">
+        <button type="button" class="asl-picker-footer-btn asl-picker-btn-first-free ${freeIndices.length === 0 ? "disabled" : ""}">
+          ⚡ ${tm("asl.picker_first_free_btn", "В первую свободную")}
+        </button>
+        <button type="button" class="asl-picker-footer-btn asl-picker-btn-cancel">
+          ${tm("asl.mem_cancel", "Отмена")}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  requestAnimationFrame(() => modal.classList.add("is-visible"));
+
+  const closeModal = () => {
+    modal.classList.remove("is-visible");
+    setTimeout(() => { modal.remove(); }, 180);
+  };
+
+  const commitPlacement = (placedIdx) => {
+    userQuickNodes[placedIdx] = {
+      node: targetNode,
+      label: targetLabel,
+      flag: targetFlag,
+      scan: false,
+      role: targetItem.role || (/[*#ABCDabcd]/.test(targetNode) ? "dtmf" : "node")
+    };
+    try {
+      localStorage.setItem(`proxdmr_asl_quick_nodes_${cid}`, JSON.stringify(userQuickNodes));
+    } catch (_) {}
+
+    const placedPage = Math.floor(placedIdx / 20);
+    closeModal();
+
+    if (typeof showToast === "function") {
+      const addedMsg = tm(
+        "asl.added_to_memory_toast",
+        `📌 Узел #${targetNode} (${targetLabel}) добавлен в ячейку #${placedIdx + 1} (экран ${placedPage + 1})`,
+        { node: targetNode, label: targetLabel, cell: placedIdx + 1, page: placedPage + 1 }
+      );
+      showToast(addedMsg, "info", 2600);
+    }
+
+    if (typeof window.setAslMatrixPageForCid === "function") {
+      window.setAslMatrixPageForCid(cid, placedPage);
+    } else {
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+      if (card && typeof window.updateCardAllStarPanel === "function") {
+        window.updateCardAllStarPanel(card);
+      }
+    }
+  };
+
+  modal.querySelectorAll(".asl-picker-cell").forEach(cellBtn => {
+    cellBtn.addEventListener("click", () => {
+      const idx = parseInt(cellBtn.dataset.index, 10);
+      const cellNum = idx + 1;
+      const current = userQuickNodes[idx];
+      const curNum = current && current.node ? String(current.node).trim() : "";
+
+      if (!curNum) {
+        commitPlacement(idx);
+        return;
+      }
+
+      if (curNum === targetNode) {
+        const placedPage = Math.floor(idx / 20);
+        closeModal();
+        if (typeof showToast === "function") {
+          showToast(tm("asl.picker_already_toast", `Узел #${targetNode} уже сохранён в ячейке #${cellNum} (экран ${placedPage + 1})`, { node: targetNode, cell: cellNum, page: placedPage + 1 }), "info", 2200);
+        }
+        if (typeof window.setAslMatrixPageForCid === "function") {
+          window.setAslMatrixPageForCid(cid, placedPage);
+        }
+        return;
+      }
+
+      const confirmBox = modal.querySelector("#aslPickerConfirmBox");
+      const confirmMsg = modal.querySelector("#aslPickerConfirmMsg");
+      const btnYes = modal.querySelector("#aslPickerConfirmYes");
+      const btnNo = modal.querySelector("#aslPickerConfirmNo");
+
+      if (confirmBox && confirmMsg && btnYes && btnNo) {
+        confirmMsg.innerHTML = tm(
+          "asl.picker_overwrite_confirm",
+          `⚠️ Ячейка <strong>#${cellNum}</strong> уже занята узлом <strong>${current.flag || "🌐"} #${curNum} (${current.label || ""})</strong>.<br>Заменить на <strong>${targetFlag} #${targetNode} (${targetLabel})</strong>?`,
+          { cell: cellNum, existing: `${current.flag || "🌐"} #${curNum} (${current.label || ""})`, node: targetNode, label: targetLabel }
+        );
+        confirmBox.classList.remove("hidden");
+        confirmBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+        btnYes.onclick = () => {
+          confirmBox.classList.add("hidden");
+          commitPlacement(idx);
+        };
+        btnNo.onclick = () => {
+          confirmBox.classList.add("hidden");
+        };
+      }
+    });
+  });
+
+  const btnFirstFree = modal.querySelector(".asl-picker-btn-first-free");
+  if (btnFirstFree && freeIndices.length > 0) {
+    btnFirstFree.addEventListener("click", () => {
+      commitPlacement(freeIndices[0]);
+    });
+  }
+
+  modal.querySelector(".asl-picker-close").addEventListener("click", closeModal);
+  modal.querySelector(".asl-picker-btn-cancel").addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      document.removeEventListener("keydown", onKey);
+      closeModal();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+}
+
 export async function renderAllStarNodesList(filterText = "") {
   const container = document.getElementById("aslNodesListContainer");
   if (!container) return;
@@ -822,77 +1144,10 @@ export async function renderAllStarNodesList(filterText = "") {
     btn.onclick = (e) => {
       e.stopPropagation();
       const n = btn.dataset.node;
-      const targetItem = nodes.find(x => x.node === n);
+      const targetItem = nodes.find(x => String(x.node) === String(n));
       if (!targetItem) return;
       const cid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
-      let userQuickNodes = [];
-      try {
-        const saved = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
-        if (saved) userQuickNodes = JSON.parse(saved);
-      } catch (e) {}
-      const DEFAULT_ASL_20 = [
-        { node: "1999",   label: "Local Echo", flag: "🔄" },
-        { node: "41522",  label: "HUBNet UK",  flag: "🇬🇧" },
-        { node: "27339",  label: "East Coast", flag: "🇺🇸" },
-        { node: "2143",   label: "WAN RS",     flag: "🇺🇸" },
-        { node: "9999",   label: "Parrot Echo",flag: "🦜" },
-        { node: "51010",  label: "World Conf", flag: "🌐" },
-        { node: "28554",  label: "RU3AID Hub", flag: "🇷🇺" },
-        { node: "2560",   label: "WIN System", flag: "🇺🇸" },
-        { node: "2462",   label: "Alaska Net", flag: "🇺🇸" },
-        { node: "52495",  label: "DL-Nordwest",flag: "🇩🇪" },
-        { node: "52319",  label: "Canada Hub", flag: "🇨🇦" },
-        { node: "27170",  label: "Florida Hub",flag: "🇺🇸" },
-        { node: "53085",  label: "PA Hub",     flag: "🇺🇸" },
-        { node: "53431",  label: "Alabama Net",flag: "🇺🇸" },
-        { node: "289890", label: "PA-Wide",    flag: "🇺🇸" },
-        { node: "41413",  label: "Santiago Pk",flag: "🇺🇸" },
-        { node: "47280",  label: "Georgia Net",flag: "🇺🇸" },
-        { node: "42821",  label: "Germany DL", flag: "🇩🇪" },
-        { node: "487571", label: "Australia",  flag: "🇦🇺" },
-        { node: "500691", label: "Texas Hub",  flag: "🇺🇸" }
-      ];
-      if (!Array.isArray(userQuickNodes) || !userQuickNodes.length) {
-        userQuickNodes = [...DEFAULT_ASL_20];
-      } else {
-        // Миграция 2502 на 28554 и дополнение до 20 элементов
-        userQuickNodes = userQuickNodes.map(item => {
-          if (item && String(item.node).trim() === "2502") {
-            return { node: "28554", label: "RU3AID Hub", flag: "🇷🇺" };
-          }
-          return item;
-        });
-        if (userQuickNodes.length < 20) {
-          while (userQuickNodes.length < 20) {
-            userQuickNodes.push(DEFAULT_ASL_20[userQuickNodes.length]);
-          }
-        }
-      }
-      const labelText = targetItem.callsign ? `${targetItem.callsign}` : (targetItem.name || `Node ${targetItem.node}`);
-      const existingIdx = userQuickNodes.findIndex(x => String(x.node) === String(targetItem.node));
-      if (existingIdx >= 0) {
-        userQuickNodes[existingIdx] = {
-          node: targetItem.node,
-          label: labelText.slice(0, 14),
-          flag: targetItem.flag || "🌐"
-        };
-      } else {
-        userQuickNodes[userQuickNodes.length - 1] = {
-          node: targetItem.node,
-          label: labelText.slice(0, 14),
-          flag: targetItem.flag || "🌐"
-        };
-      }
-      try {
-        localStorage.setItem(`proxdmr_asl_quick_nodes_${cid}`, JSON.stringify(userQuickNodes));
-      } catch (e) {}
-      if (typeof showToast === "function") {
-        showToast(`📌 Нода #${n} (${labelText}) добавлена в быстрые кнопки!`, "info", 2000);
-      }
-      const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
-      if (card && typeof window.updateCardAllStarPanel === "function") {
-        window.updateCardAllStarPanel(card);
-      }
+      openAslCellPickerModal(targetItem, cid);
     };
   });
 

@@ -461,7 +461,7 @@ export async function confirmAndApplyUpdate() {
       pollServerRebootAndReload();
     } else {
       hideUpdatingOverlay();
-      showToast(`✕ ${res.message || (window.t ? window.t("common.error", {}, "Ошибка") : "Ошибка")}`, 5000);
+      showToast(`✕ ${res.detail || res.message || (window.t ? window.t("common.error", {}, "Ошибка") : "Ошибка")}`, 5000);
     }
   } catch (err) {
     // If request failed because server rebooted immediately, poll for reconnection

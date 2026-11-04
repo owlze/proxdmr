@@ -28,9 +28,9 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.552';
+} from '../dmr/transcriber.js?v=2.9.564';
 import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.547';
-import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.367';
+import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.563';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js';
 
@@ -1260,18 +1260,26 @@ export function handleServerMessage(msg) {
           }
         }
         if (msg.app_settings.simultaneous_slots !== undefined) {
-          if (uid) localStorage.setItem(`proxdmr_u${uid}_simultaneous_slots`, msg.app_settings.simultaneous_slots ? "true" : "false");
-          localStorage.setItem("proxdmr_simultaneous_slots", msg.app_settings.simultaneous_slots ? "true" : "false");
-          const curMode = (typeof window.getHotspotTsAudioMode === "function") ? window.getHotspotTsAudioMode("default") : null;
-          if (msg.app_settings.simultaneous_slots) {
-            if (curMode !== "auto") {
+          const rawLocalMode = localStorage.getItem("proxdmr_ts_mode_default");
+          const rawLocalSim = localStorage.getItem("proxdmr_simultaneous_slots");
+          // If the user already has a saved local choice, prioritize it and heal/sync back to server
+          if (rawLocalMode === "solo" || rawLocalSim === "false") {
+            if (msg.app_settings.simultaneous_slots) {
+              setSimultaneousSlotsEnabled(false, true);
+            } else {
+              setSimultaneousSlotsEnabled(false, false);
+            }
+          } else if (rawLocalMode === "auto" || rawLocalSim === "true") {
+            if (!msg.app_settings.simultaneous_slots) {
+              setSimultaneousSlotsEnabled(true, true);
+            } else {
               setSimultaneousSlotsEnabled(true, false);
             }
           } else {
-            if (curMode !== "solo") {
-              setSimultaneousSlotsEnabled(false, false);
-            }
+            const srvEnabled = Boolean(msg.app_settings.simultaneous_slots);
+            setSimultaneousSlotsEnabled(srvEnabled, false);
           }
+          if (uid) localStorage.setItem(`proxdmr_u${uid}_simultaneous_slots`, localStorage.getItem("proxdmr_simultaneous_slots"));
         }
         if (msg.app_settings.check_mic_on_tx !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_check_mic_on_tx`, msg.app_settings.check_mic_on_tx ? "true" : "false");
@@ -1581,6 +1589,16 @@ export function handleServerMessage(msg) {
       setHapticEnabled(Boolean(msg.enabled), false);
     } else if (msg.type === "haptic_duration_change") {
       setHapticDuration(Number(msg.duration), false);
+    } else if (msg.type === "simultaneous_slots_change") {
+      const enabled = Boolean(msg.enabled);
+      localStorage.setItem("proxdmr_simultaneous_slots", enabled ? "true" : "false");
+      if (typeof window.setHotspotTsAudioMode === "function") {
+        const curMode = (typeof window.getHotspotTsAudioMode === "function") ? window.getHotspotTsAudioMode("default") : null;
+        const targetMode = enabled ? "auto" : "solo";
+        if (curMode !== targetMode) {
+          window.setHotspotTsAudioMode("default", targetMode, { skipServerSync: true });
+        }
+      }
     } else if (msg.type === "check_mic_on_tx_change") {
       if (typeof window.setCheckMicOnTxEnabled === "function") {
         window.setCheckMicOnTxEnabled(Boolean(msg.enabled), false);

@@ -730,7 +730,13 @@ export function updateCardBmBanner(card, hs) {
     card.classList.toggle(`card-net-${n}`, pId === n);
   });
   card.dataset.networkType = pId;
-  const hostVal = (hs && hs.bm_master_host) ? hs.bm_master_host : profile.defaultHost || "2502.master.brandmeister.network";
+  let hostVal = (hs && hs.bm_master_host) ? hs.bm_master_host : profile.defaultHost || "2502.master.brandmeister.network";
+  if (pId === "allstar") {
+    const actNode = (hs && (hs.connected_node || hs._active_asl_node || hs._last_asl_node)) || "";
+    hostVal = (actNode && String(actNode).trim() !== "1999" && String(actNode).trim() !== "0")
+      ? `asl_node_${actNode}`
+      : "www.allstarlink.org";
+  }
   const info = getBmServerInfo(hostVal, netType);
 
   // Update Flag & Short Display Name (hide separate square flag badge, show clean emoji flag + name without BM prefix)
@@ -1011,7 +1017,9 @@ export function updateCardBmBanner(card, hs) {
       updatePingElement(pingEl, isOfflineCard ? null : pingMs, lossData, "server", profile.shortLabel);
       if (profile.id === "allstar" && !isOfflineCard) {
         const targetNode = (hs && (hs.connected_node || hs._last_asl_node || hs._active_asl_node)) || "";
-        const nodeStr = targetNode ? `Node ${targetNode}` : "ASL Hub";
+        const nodeStr = (targetNode && String(targetNode).trim() !== "1999" && String(targetNode).trim() !== "0")
+          ? `Node #${targetNode}`
+          : "www.allstarlink.org";
         pingEl.title = `ASL ↔ ${nodeStr} (${pingMs !== null ? pingMs + " ms" : "--"}). Клик для смены режима`;
       }
     }

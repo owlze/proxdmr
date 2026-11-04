@@ -27,7 +27,7 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.552';
+} from './modules/dmr/transcriber.js?v=2.9.564';
 import { blePtt } from './modules/ptt/ble.js';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
 import { initAndroidBridge } from './modules/core/android.js?v=2.9.552';
@@ -37,12 +37,12 @@ import { initLanguageManager } from './modules/settings/language.js?v=2.9.555';
 import { initHamQthSettings } from './modules/settings/hamqth.js';
 import { initGeneralSettings } from './modules/settings/general.js?v=2.9.509';
 import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.509';
-import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.543';
+import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.562';
 import { initOrientationLock } from './modules/ui/orientation.js';
 import {
   initQuickAssign,
   renderQuickMemButtons
-} from './modules/dmr/quick-assign.js?v=2.9.527';
+} from './modules/dmr/quick-assign.js?v=2.9.563';
 import { initStationClocks, updateClocks } from './modules/ui/clocks.js';
 import {
   renderTranscriptionSummary
@@ -60,7 +60,7 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.528';
+} from './modules/dmr/contacts.js?v=2.9.561';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
@@ -77,13 +77,13 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.556';
+} from './modules/dmr/hotspots.js?v=2.9.560';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.372';
 import {
   initAudioRouting
-} from './modules/audio/routing.js?v=2.9.527';
+} from './modules/audio/routing.js?v=2.9.564';
 import {
   initAudioDsp
 } from './modules/audio/dsp.js?v=2.9.525';
@@ -189,7 +189,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.555';
+} from './modules/audio/volume-mute.js?v=2.9.564';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -216,7 +216,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.556';
+} from './modules/network/ws.js?v=2.9.564';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application
