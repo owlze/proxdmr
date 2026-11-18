@@ -15,9 +15,9 @@ function formatUptime(sec) {
   const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const parts = [];
-  if (d > 0) parts.push(`${d}д`);
-  if (h > 0 || d > 0) parts.push(`${h}ч`);
-  parts.push(`${m}м`);
+  if (d > 0) parts.push(`${d}${t("alerts.unit_d", "d")}`);
+  if (h > 0 || d > 0) parts.push(`${h}${t("alerts.unit_h", "h")}`);
+  parts.push(`${m}${t("alerts.unit_m", "m")}`);
   return parts.join(" ");
 }
 
@@ -400,6 +400,14 @@ export function initAlertsSettings() {
   }
 
   // Initial load if tab is visible or on demand
+  if (typeof window !== "undefined") {
+    window.refreshAlertsLocalization = () => {
+      if (btnEditToken) {
+        btnEditToken.textContent = isEditingToken ? t("alerts.keep_token", "Отмена") : t("alerts.change_token", "Изменить");
+      }
+      loadAlerts();
+    };
+  }
   loadAlerts();
 }
 

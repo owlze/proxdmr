@@ -68,9 +68,19 @@
       if (swl) {
         btn.classList.add('swl-disabled');
         btn.setAttribute('title', window.t ? window.t('vfo.swl_badge_title', {}, 'Режим радиоприёмника-наблюдателя (SWL): передача отключена') : 'Режим радиоприёмника-наблюдателя (SWL): передача отключена');
+        btn.setAttribute('data-i18n-title', 'vfo.swl_badge_title');
       } else {
         btn.classList.remove('swl-disabled');
-        btn.setAttribute('title', window.t ? window.t('ptt.dual_slot_ptt_title', {}, 'Нажмите слева для передачи на TS1, справа — на TS2') : 'Нажмите слева для передачи на TS1, справа — на TS2');
+        const card = btn.closest('.radio-container');
+        const cNet = card ? String(card.dataset.networkType || '').toLowerCase() : '';
+        const isSingle = Boolean(card && (card.classList.contains('card-net-ysf') || card.classList.contains('card-net-allstar') || cNet === 'ysf' || cNet === 'allstar'));
+        if (isSingle) {
+          btn.removeAttribute('title');
+          btn.removeAttribute('data-i18n-title');
+        } else {
+          btn.setAttribute('title', window.t ? window.t('ptt.dual_slot_ptt_title', {}, 'Нажмите слева для передачи на TS1, справа — на TS2') : 'Нажмите слева для передачи на TS1, справа — на TS2');
+          btn.setAttribute('data-i18n-title', 'ptt.dual_slot_ptt_title');
+        }
       }
     });
   };
@@ -166,9 +176,13 @@
     const updateUI = () => {
       const timeStr = _formatMinSec(rem);
       if (type === 'cooldown') {
-        if (box) box.textContent = `⏳ Demo re-entry available in ${timeStr}`;
+        if (box) box.textContent = (typeof window.t === 'function')
+          ? window.t('demo.cooldown_wait', { time: timeStr }, `⏳ Demo re-entry available in ${timeStr}`)
+          : `⏳ Demo re-entry available in ${timeStr}`;
       } else {
-        if (box) box.textContent = `⏳ All demo slots are busy (${maxSessions}/${maxSessions}). Next free slot in ${timeStr}`;
+        if (box) box.textContent = (typeof window.t === 'function')
+          ? window.t('demo.slots_full_wait', { max: maxSessions, time: timeStr }, `⏳ All demo slots are busy (${maxSessions}/${maxSessions}). Next free slot in ${timeStr}`)
+          : `⏳ All demo slots are busy (${maxSessions}/${maxSessions}). Next free slot in ${timeStr}`;
       }
     };
 
@@ -206,11 +220,15 @@
       window._lastDemoSessionMinutes = sessMin;
       const btnTxt = document.getElementById('btnAuthDemoLoginText');
       if (btnTxt) {
-        btnTxt.textContent = `Demo Login (${sessMin} min)`;
+        btnTxt.textContent = (typeof window.t === 'function')
+          ? window.t('demo.login_btn', { minutes: sessMin }, `Demo Login (${sessMin} min)`)
+          : `Demo Login (${sessMin} min)`;
       }
       const slotsInfo = document.getElementById('authDemoSlotsInfo');
       if (slotsInfo) {
-        slotsInfo.textContent = `Free slots: ${data.demo.free_slots} of ${data.demo.max_sessions}`;
+        slotsInfo.textContent = (typeof window.t === 'function')
+          ? window.t('demo.free_slots_info', { free: data.demo.free_slots, max: data.demo.max_sessions }, `Free slots: ${data.demo.free_slots} of ${data.demo.max_sessions}`)
+          : `Free slots: ${data.demo.free_slots} of ${data.demo.max_sessions}`;
       }
 
       const btn = document.getElementById('btnAuthDemoLogin');
@@ -262,7 +280,9 @@
       const m = Math.floor(rem / 60);
       const s = Math.floor(rem % 60);
       const timeStr = `${m}.${String(s).padStart(2, '0')}`;
-      timeEl.textContent = `Demo: ${timeStr}`;
+      timeEl.textContent = (typeof window.t === 'function')
+        ? window.t('demo.header_timer', { time: timeStr }, `Demo: ${timeStr}`)
+        : `Demo: ${timeStr}`;
 
       badge.classList.remove('warning', 'danger');
       if (rem <= 20) {
@@ -305,7 +325,9 @@
       window.isDemoExpiredHandled = false;
       showModal(true);
       if (loginError) {
-        loginError.textContent = '⏱️ Demo session expired. Re-entry will be available after cooldown.';
+        loginError.textContent = (typeof window.t === 'function')
+          ? window.t('demo.session_expired', {}, '⏱️ Demo session expired. Re-entry will be available after cooldown.')
+          : '⏱️ Demo session expired. Re-entry will be available after cooldown.';
       }
       startDemoCountdown('cooldown', cooldownSec);
     }, 150);
@@ -316,7 +338,6 @@
 
     const containers = [
       document.getElementById('settingsModal'),
-      document.getElementById('hotspotOrderModal'),
       document.getElementById('bmTgStaticModal'),
       document.getElementById('tab-edit-hs'),
     ].filter(Boolean);
@@ -527,9 +548,13 @@
       updateAccountUI();
       const btnTxt = document.getElementById('btnAuthDemoLoginText');
       if (btnTxt) {
-        btnTxt.textContent = `Demo Login (${window._lastDemoSessionMinutes || 10} min)`;
+        const mins = window._lastDemoSessionMinutes || 10;
+        btnTxt.textContent = (typeof window.t === 'function')
+          ? window.t('demo.login_btn', { minutes: mins }, `Demo Login (${mins} min)`)
+          : `Demo Login (${mins} min)`;
       }
     };
+    window.refreshAuthLocalization = onLangUpdate;
 
     if (window.I18N && typeof window.I18N.onLanguageChange === 'function') {
       window.I18N.onLanguageChange(onLangUpdate);
@@ -540,11 +565,11 @@
     
   window.localizeDemoText = function(val) {
     if (!val || typeof val !== "string") return val;
-    const callLabel = window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной";
-    const nameLabel = window.t ? window.t("demo.your_name", {}, "Ваше имя") : "Ваше имя";
+    const callLabel = window.t ? window.t("demo.your_callsign", {}, "Your Callsign") : "Your Callsign";
+    const nameLabel = window.t ? window.t("demo.your_name", {}, "Your Name") : "Your Name";
     if (val === "Ваш позывной" || val === "Your CALL" || val === "Your Callsign") return callLabel;
     if (val === "Your Name" || val === "Ваше имя") return nameLabel;
-    if (val === "Ваш позывной (Your Name)") return `${callLabel} (${nameLabel})`;
+    if (val === "Ваш позывной (Your Name)" || val === "Your Callsign (Your Name)") return `${callLabel} (${nameLabel})`;
     return val
       .replace(/Ваш позывной/g, callLabel)
       .replace(/Your CALL/g, callLabel)
@@ -909,7 +934,17 @@
           window.isDemoMode = false;
           document.body.classList.remove('is-demo-mode');
         }
-        window.currentUserId = currentUser ? (currentUser.id || currentUser.user_id) : null;
+        const checkedUid = currentUser ? (currentUser.id || currentUser.user_id) : null;
+        try {
+          const prevUid = localStorage.getItem('proxdmr_last_uid');
+          if (checkedUid && prevUid && String(prevUid) !== String(checkedUid)) {
+            clearLocalUserData();
+          }
+          if (checkedUid) {
+            localStorage.setItem('proxdmr_last_uid', String(checkedUid));
+          }
+        } catch (e) {}
+        window.currentUserId = checkedUid;
         isAuthenticated = true;
         const respToken = data.token || token;
         if (respToken) {
@@ -946,7 +981,11 @@
     const remember = isApkMode() ? true : (document.getElementById('authRememberMe')?.checked ?? true);
 
     if (!login || !password) {
-      if (loginError) loginError.textContent = 'Please enter login and password';
+      if (loginError) {
+        loginError.textContent = (typeof window.t === 'function')
+          ? window.t('auth.enter_login_pwd', {}, 'Please enter login and password')
+          : 'Please enter login and password';
+      }
       return;
     }
 
@@ -989,17 +1028,87 @@
         updateAccountUI();
         // Clear local storage for clean user isolation before reload
         clearLocalUserData();
+        try {
+          const loggedInUid = currentUser ? (currentUser.id || currentUser.user_id) : null;
+          if (loggedInUid) {
+            localStorage.setItem('proxdmr_last_uid', String(loggedInUid));
+          }
+        } catch (e) {}
         if (data.bootstrap_state) {
           try {
             const bs = data.bootstrap_state;
             const cs = bs.client_settings || {};
             if (cs.storage_dump && typeof cs.storage_dump === "object") {
               for (const [k, v] of Object.entries(cs.storage_dump)) {
-                if (k && k.startsWith("proxdmr_") && v !== null && v !== undefined && k !== "proxdmr_demo_language") {
+                if (k && k.startsWith("proxdmr_") && v !== null && v !== undefined &&
+                    k !== "proxdmr_pre_gain_db" &&
+                    k !== "proxdmr_demo_language" && k !== "proxdmr_last_uid" &&
+                    k !== "proxdmr_auth_token" && k !== "proxdmr_auth_login") {
                   localStorage.setItem(k, String(v));
                 }
               }
+              localStorage.removeItem("proxdmr_pre_gain_db");
             }
+            if (cs.audio_rx && typeof cs.audio_rx === "object") {
+              if (cs.audio_rx.active_preset) localStorage.setItem("proxdmr_audio_rx_active_preset", String(cs.audio_rx.active_preset));
+              if (cs.audio_rx.jitter_buffer_ms !== undefined) localStorage.setItem("proxdmr_jitter_buffer_ms", String(cs.audio_rx.jitter_buffer_ms));
+              if (cs.audio_rx.boost_pct !== undefined) localStorage.setItem("proxdmr_rx_boost_pct", String(cs.audio_rx.boost_pct));
+              if (cs.audio_rx.agc_enabled !== undefined) localStorage.setItem("proxdmr_agc", cs.audio_rx.agc_enabled !== false ? "true" : "false");
+              if (cs.audio_rx.presets && typeof cs.audio_rx.presets === "object") {
+                for (const [pid, pdata] of Object.entries(cs.audio_rx.presets)) {
+                  if (pdata && typeof pdata === "object" && ("eq10Gains" in pdata || "eq10Enable" in pdata || "limiterEnable" in pdata || "boostPct" in pdata)) {
+                    localStorage.setItem(`proxdmr_audio_rx_preset_${pid}`, JSON.stringify(pdata));
+                  }
+                }
+              }
+            }
+            if (cs.asl_audio_rx && typeof cs.asl_audio_rx === "object") {
+              if (cs.asl_audio_rx.active_preset) localStorage.setItem("proxdmr_asl_audio_rx_active_preset", String(cs.asl_audio_rx.active_preset));
+              if (cs.asl_audio_rx.jitter_buffer_ms !== undefined) localStorage.setItem("proxdmr_asl_jitter_buffer_ms", String(cs.asl_audio_rx.jitter_buffer_ms));
+              if (cs.asl_audio_rx.presets && typeof cs.asl_audio_rx.presets === "object") {
+                for (const [pid, pdata] of Object.entries(cs.asl_audio_rx.presets)) {
+                  if (pdata && typeof pdata === "object" && ("eq10Gains" in pdata || "eq10Enable" in pdata || "limiterEnable" in pdata || "boostPct" in pdata)) {
+                    localStorage.setItem(`proxdmr_asl_audio_rx_preset_${pid}`, JSON.stringify(pdata));
+                  }
+                }
+              }
+            }
+            if (cs.ambe_rx && typeof cs.ambe_rx === "object" && (cs.ambe_rx.high_band_gain_db !== undefined || cs.ambe_rx.unvoiced_gain_db !== undefined)) {
+              if (cs.ambe_rx.active_preset) localStorage.setItem("proxdmr_ambe_active_preset", String(cs.ambe_rx.active_preset));
+              if (cs.ambe_rx.presets && typeof cs.ambe_rx.presets === "object") {
+                for (const [pid, pdata] of Object.entries(cs.ambe_rx.presets)) {
+                  if (pdata && typeof pdata === "object" && pdata.high_band_gain_db !== undefined) {
+                    localStorage.setItem(`proxdmr_ambe_preset_${pid}`, JSON.stringify(pdata));
+                  }
+                }
+              }
+            }
+            const applyTxBoot = (obj, flatPfx, presetPfx) => {
+              if (!obj || typeof obj !== "object") return;
+              const isModern = ("dsp_agc" in obj) || ("eq_low" in obj) || (obj.presets && obj.presets["1"] && ("txDspAgc" in obj.presets["1"]));
+              if (!isModern) return;
+              if (obj.active_preset) localStorage.setItem(`${presetPfx}_active_preset`, String(obj.active_preset));
+              if (obj.presets && typeof obj.presets === "object") {
+                for (const [pid, pdata] of Object.entries(obj.presets)) {
+                  if (pdata && typeof pdata === "object") localStorage.setItem(`${presetPfx}_preset_${pid}`, JSON.stringify(pdata));
+                }
+              }
+              if (obj.mic_gain !== undefined) localStorage.setItem(`${flatPfx}mic_gain`, String(obj.mic_gain));
+              if (obj.noise_suppression !== undefined) localStorage.setItem(`${flatPfx}ns`, obj.noise_suppression ? "true" : "false");
+              if (obj.browser_agc !== undefined) localStorage.setItem(`${flatPfx}agc`, obj.browser_agc ? "true" : "false");
+              if (obj.dsp_agc !== undefined) localStorage.setItem(`${flatPfx}dsp_agc`, obj.dsp_agc ? "true" : "false");
+              if (obj.echo_cancellation !== undefined) localStorage.setItem(`${flatPfx}aec`, obj.echo_cancellation ? "true" : "false");
+              if (obj.gate_enabled !== undefined) localStorage.setItem(`${flatPfx}gate_enabled`, obj.gate_enabled !== false ? "true" : "false");
+              if (obj.gate_threshold !== undefined) localStorage.setItem(`${flatPfx}gate_threshold`, String(obj.gate_threshold));
+              if (obj.hpf_enabled !== undefined) localStorage.setItem(`${flatPfx}hpf`, obj.hpf_enabled !== false ? "true" : "false");
+              if (obj.presence_boost !== undefined) localStorage.setItem(`${flatPfx}presence`, String(obj.presence_boost));
+              if (obj.eq_low !== undefined) localStorage.setItem(`${flatPfx}eq_low`, String(obj.eq_low));
+              if (obj.eq_mid !== undefined) localStorage.setItem(`${flatPfx}eq_mid`, String(obj.eq_mid));
+              if (obj.eq_high !== undefined) localStorage.setItem(`${flatPfx}eq_high`, String(obj.eq_high));
+              if (obj.eq_preset) localStorage.setItem(`${flatPfx}eq_preset`, String(obj.eq_preset));
+            };
+            applyTxBoot(cs.audio_tx, "proxdmr_tx_", "proxdmr_audio_tx");
+            applyTxBoot(cs.asl_audio_tx, "proxdmr_asl_tx_", "proxdmr_asl_audio_tx");
             const as = bs.app_settings || {};
             if (as.theme) localStorage.setItem("proxdmr_theme", as.theme === "light" ? "light" : "dark");
             if (as.language) localStorage.setItem("proxdmr_language", as.language);
@@ -1036,13 +1145,21 @@
           }
         }
         if (loginError) {
-          let errText = data.detail || data.message || 'Login failed';
-          if (errText === 'Неверный логин или пароль') errText = 'Invalid login or password';
+          let errText = data.detail || data.message || ((typeof window.t === 'function') ? window.t('auth.login_failed', {}, 'Login failed') : 'Login failed');
+          if (errText === 'Неверный логин или пароль') {
+            errText = (typeof window.t === 'function')
+              ? window.t('auth.invalid_credentials', {}, 'Invalid login or password')
+              : 'Invalid login or password';
+          }
           loginError.textContent = errText;
         }
       }
     } catch (e) {
-      if (loginError) loginError.textContent = 'Server connection error';
+      if (loginError) {
+        loginError.textContent = (typeof window.t === 'function')
+          ? window.t('auth.err_server_conn', {}, 'Server connection error')
+          : 'Server connection error';
+      }
     } finally {
       if (loginBtn) loginBtn.disabled = false;
     }
@@ -1064,6 +1181,14 @@
 
   async function performLogout() {
     showLogoutModal(false);
+    try {
+      if (typeof window.flushPendingClientSettingsSync === 'function') {
+        await window.flushPendingClientSettingsSync({ keepalive: true });
+      }
+    } catch (e) {}
+    try {
+      window.__proxdmrClientSettingsHydrated = false;
+    } catch (e) {}
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
@@ -1095,35 +1220,35 @@
     if (!currentUser) return;
     const t = (k, p, d) => (window.i18n && typeof window.i18n.t === 'function') ? window.i18n.t(k, p, d) : (typeof p === 'string' ? p : d);
     if (currentUser.role === 'superadmin') {
-      const msg = t('account.superadmin_delete_disabled', {}, '🛡️ Аккаунт суперадминистратора защищен от удаления');
+      const msg = t('account.superadmin_delete_disabled', {}, '🛡️ Superadmin account is protected from deletion');
       if (window.showAppAlert) {
-        await window.showAppAlert(msg, { title: t('auth.protected_title', {}, 'Защищено'), icon: '🛡️' });
+        await window.showAppAlert(msg, { title: t('auth.protected_title', {}, 'Protected'), icon: '🛡️' });
       }
       return;
     }
     const login = currentUser.login || '';
-    const confirmMsg = t('account.delete_confirm', { login: login }, `Вы действительно хотите удалить аккаунт "${login}"?\nВсе настройки, хотспоты и журнал вызовов будут безвозвратно удалены.`);
+    const confirmMsg = t('account.delete_confirm', { login: login }, `Are you sure you want to delete account "${login}"?\nAll settings, hotspots, and call logs will be permanently deleted.`);
     const ok = await showAppConfirm({
-      title: t('auth.delete_account_title', {}, 'Удаление аккаунта'),
+      title: t('auth.delete_account_title', {}, 'Delete Account'),
       icon: '🗑️',
       message: confirmMsg,
-      confirmText: t('auth.continue_btn', {}, 'Продолжить'),
+      confirmText: t('auth.continue_btn', {}, 'Continue'),
       confirmStyle: 'danger'
     });
     if (!ok) return;
 
-    const promptMsg = t('account.delete_prompt', { login: login }, `Для подтверждения удаления введите ваш логин (${login}):`);
+    const promptMsg = t('account.delete_prompt', { login: login }, `To confirm deletion, enter your login (${login}):`);
     const typed = await showAppPrompt({
-      title: t('auth.delete_confirm_modal_title', {}, 'Подтверждение удаления'),
+      title: t('auth.delete_confirm_modal_title', {}, 'Confirm Deletion'),
       icon: '⚠️',
       message: promptMsg,
       placeholder: login,
-      confirmText: t('auth.delete_account_confirm', {}, 'Удалить аккаунт'),
+      confirmText: t('auth.delete_account_confirm', {}, 'Delete Account'),
       confirmStyle: 'danger'
     });
     if (!typed || typed.trim().toLowerCase() !== login.toLowerCase()) {
       if (typed !== null) {
-        await showAppAlert(t('account.delete_mismatch', {}, 'Введен неверный логин. Удаление аккаунта отменено.'), { title: t('auth.delete_cancelled_title', {}, 'Отмена удаления'), icon: 'ℹ️' });
+        await showAppAlert(t('account.delete_mismatch', {}, 'Incorrect login entered. Account deletion cancelled.'), { title: t('auth.delete_cancelled_title', {}, 'Deletion Cancelled'), icon: 'ℹ️' });
       }
       return;
     }
@@ -1143,15 +1268,15 @@
           localStorage.removeItem('proxdmr_auth_login');
         } catch (e) {}
         clearLocalUserData();
-        await showAppAlert(data.message || t('account.delete_success', {}, 'Аккаунт успешно удален'), { title: t('auth.deleted_title', {}, 'Удалено'), icon: '✅' });
+        await showAppAlert(data.message || t('account.delete_success', {}, 'Account successfully deleted'), { title: t('auth.deleted_title', {}, 'Deleted'), icon: '✅' });
         isAuthenticated = false;
         currentUser = null;
         location.reload();
       } else {
-        await showAppAlert(data.detail || t('auth.err_delete_title', {}, 'Ошибка при удалении аккаунта'), { title: t('common.error', {}, 'Ошибка'), icon: '⚠️' });
+        await showAppAlert(data.detail || t('auth.err_delete_title', {}, 'Error deleting account'), { title: t('common.error', {}, 'Error'), icon: '⚠️' });
       }
     } catch (e) {
-      await showAppAlert(t('auth.err_server_conn', {}, 'Ошибка подключения к серверу'), { title: t('auth.err_conn_title', {}, 'Ошибка связи'), icon: '⚠️' });
+      await showAppAlert(t('auth.err_server_conn', {}, 'Server connection error'), { title: t('auth.err_conn_title', {}, 'Connection Error'), icon: '⚠️' });
     }
   }
 
@@ -1159,13 +1284,13 @@
 
   async function exportSettings() {
     const t = (k, p, d) => (window.i18n && typeof window.i18n.t === 'function') ? window.i18n.t(k, p, d) : (typeof p === 'string' ? p : d);
-    const promptMsg = t('account.export_prompt', {}, 'Введите пароль вашего аккаунта (он же пароль для архива 7z):');
+    const promptMsg = t('account.export_prompt', {}, 'Enter your account password (also used for the 7z archive):');
     const password = await showAppPrompt({
-      title: t('auth.export_title', {}, 'Экспорт настроек'),
+      title: t('auth.export_title', {}, 'Export Settings'),
       icon: '🔑',
       message: promptMsg,
       isPassword: true,
-      confirmText: t('auth.export_btn', {}, 'Экспортировать')
+      confirmText: t('auth.export_btn', {}, 'Export')
     });
     if (!password) return;
 
@@ -1184,7 +1309,7 @@
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        await showAppAlert(data.detail || t('account.export_error', {}, 'Ошибка экспорта'), { title: t('account.export_error', {}, 'Ошибка экспорта'), icon: '⚠️' });
+        await showAppAlert(data.detail || t('account.export_error', {}, 'Export error'), { title: t('account.export_error', {}, 'Export error'), icon: '⚠️' });
         return;
       }
       const blob = await resp.blob();
@@ -1198,7 +1323,7 @@
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     } catch (e) {
-      await showAppAlert(t('account.export_conn_error', {}, 'Ошибка при экспорте настроек'), { title: t('auth.err_conn_title', {}, 'Ошибка связи'), icon: '⚠️' });
+      await showAppAlert(t('account.export_conn_error', {}, 'Error exporting settings'), { title: t('auth.err_conn_title', {}, 'Connection Error'), icon: '⚠️' });
     }
   }
 
@@ -1216,7 +1341,7 @@
     if (k === 'proxdmr_auth_token' || k === 'proxdmr_demo_language') return false;
     if (k.startsWith('proxdmr_gw_disconnected_')) return false;
     if (k.startsWith('proxdmr_client_ping_') || k.startsWith('proxdmr_ping_hist_')) return false;
-    if (k.startsWith('proxdmr_tg_names_') || k === 'proxdmr_tgif_tg_names_cache' || k === 'proxdmr_freedmr_tg_names_cache') return false;
+    if (k.startsWith('proxdmr_tg_names_') || k === 'proxdmr_tgif_tg_names_cache' || k === 'proxdmr_freedmr_tg_names_cache' || k === 'proxdmr_adn_tg_names_cache') return false;
     if (k.startsWith('proxdmr_user_callsigns_') || k === 'proxdmr_allstar_directory') return false;
     if (k === 'proxdmr_transcribe_ts1' || k === 'proxdmr_transcribe_ts2' || k === 'proxdmr_tts_ts1' || k === 'proxdmr_tts_ts2') return false;
     if (k === 'proxdmr_tts_solo_muted_slots' || k === 'proxdmr_tts_solo_muted_hs') return false;
@@ -1341,8 +1466,8 @@
       const users = (meta && Array.isArray(meta.users)) ? meta.users : [];
       if (subtitleEl && meta.superadmin_login) {
         subtitleEl.textContent = window.t
-          ? window.t('account.import_superadmin_subtitle', { login: meta.superadmin_login, count: users.length }, `Архив суперадмина (${meta.superadmin_login}), пользователей в архиве: ${users.length}`)
-          : `Архив суперадмина (${meta.superadmin_login}), пользователей в архиве: ${users.length}`;
+          ? window.t('account.import_superadmin_subtitle', { login: meta.superadmin_login, count: users.length }, `Superadmin archive (${meta.superadmin_login}), users in archive: ${users.length}`)
+          : `Superadmin archive (${meta.superadmin_login}), users in archive: ${users.length}`;
       }
 
       // Reset radio to default option 1
@@ -1355,7 +1480,7 @@
       if (usersListEl) {
         usersListEl.innerHTML = '';
         if (users.length === 0) {
-          const noUsersMsg = window.t ? window.t('account.import_no_other_users', {}, 'В архиве нет других пользователей') : 'В архиве нет других пользователей';
+          const noUsersMsg = window.t ? window.t('account.import_no_other_users', {}, 'No other users in archive') : 'No other users in archive';
           usersListEl.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:4px;">${escapeHtml(noUsersMsg)}</div>`;
         } else {
           users.forEach(u => {
@@ -1375,8 +1500,13 @@
             chk.checked = true;
 
             const text = document.createElement('span');
-            const roleStr = u.role === 'admin' ? 'админ' : (u.is_swl ? 'SWL' : 'пользователь');
-            text.innerHTML = `<strong>${escapeHtml(u.login)}</strong> <span style="color:var(--text-muted);font-size:0.78rem;">(${roleStr}${u.hotspots_count ? `, хотспотов: ${u.hotspots_count}` : ''})</span>`;
+            const roleStr = u.role === 'admin'
+              ? (window.t ? window.t('account.import_role_admin', {}, 'admin') : 'admin')
+              : (u.is_swl ? 'SWL' : (window.t ? window.t('account.import_role_user', {}, 'user') : 'user'));
+            const hsCntStr = u.hotspots_count
+              ? `, ${(window.t ? window.t('account.import_hotspots_count', { count: u.hotspots_count }, `hotspots: ${u.hotspots_count}`) : `hotspots: ${u.hotspots_count}`)}`
+              : '';
+            text.innerHTML = `<strong>${escapeHtml(u.login)}</strong> <span style="color:var(--text-muted);font-size:0.78rem;">(${escapeHtml(roleStr)}${escapeHtml(hsCntStr)})</span>`;
 
             row.appendChild(chk);
             row.appendChild(text);
@@ -1462,13 +1592,13 @@
     input.onchange = async () => {
       const file = input.files && input.files[0];
       if (!file) return;
-      const promptMsg = t('account.import_prompt', {}, 'Введите пароль от архива (пароль вашего аккаунта):');
+      const promptMsg = t('account.import_prompt', {}, 'Enter archive password (your account password):');
       const password = await showAppPrompt({
-        title: t('auth.import_title', {}, 'Импорт настроек'),
+        title: t('auth.import_title', {}, 'Import Settings'),
         icon: '🔑',
         message: promptMsg,
         isPassword: true,
-        confirmText: t('auth.import_btn', {}, 'Импортировать')
+        confirmText: t('auth.import_btn', {}, 'Import')
       });
       if (password === null || !password) return;
 
@@ -1486,12 +1616,12 @@
         });
         const inspData = await inspResp.json();
         if (!inspResp.ok) {
-          await showAppAlert(inspData.detail || t('account.import_error', {}, 'Ошибка чтения архива'), { title: 'Ошибка архива', icon: '⚠️' });
+          await showAppAlert(inspData.detail || t('account.import_error', {}, 'Archive read error'), { title: t('account.import_archive_err_title', {}, 'Archive error'), icon: '⚠️' });
           return;
         }
         inspectMeta = inspData;
       } catch (e) {
-        await showAppAlert(t('account.import_conn_error', {}, 'Ошибка при проверке архива'), { title: 'Ошибка связи', icon: '⚠️' });
+        await showAppAlert(t('account.import_conn_error', {}, 'Error checking archive'), { title: t('auth.err_conn_title', {}, 'Connection error'), icon: '⚠️' });
         return;
       }
 
@@ -1531,13 +1661,13 @@
           if (data.client_storage) {
             restoreClientStorageSnapshot(data.client_storage, data.restored_user_id, data.exported_user_id);
           }
-          await showAppAlert(t('account.import_success', {}, 'Настройки успешно импортированы. Страница будет перезагружена.'), { title: 'Успешно', icon: '✅' });
+          await showAppAlert(t('account.import_success', {}, 'Settings imported successfully. Page will reload.'), { title: t('common.success', {}, 'Success'), icon: '✅' });
           location.reload();
         } else {
-          await showAppAlert(data.detail || t('account.import_error', {}, 'Ошибка импорта'), { title: 'Ошибка импорта', icon: '⚠️' });
+          await showAppAlert(data.detail || t('account.import_error', {}, 'Import error'), { title: t('account.import_err_title', {}, 'Import error'), icon: '⚠️' });
         }
       } catch (e) {
-        await showAppAlert(t('account.import_conn_error', {}, 'Ошибка при импорте настроек'), { title: 'Ошибка связи', icon: '⚠️' });
+        await showAppAlert(t('account.import_conn_error', {}, 'Error importing settings'), { title: t('auth.err_conn_title', {}, 'Connection error'), icon: '⚠️' });
       }
     };
     input.click();
@@ -1545,6 +1675,7 @@
 
   async function doImportConfigFromLoginScreen() {
     clearErrors();
+    const t = (key, params, fallback) => (typeof window.t === 'function' ? window.t(key, params || {}, fallback || '') : (fallback || key));
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.7z';
@@ -1555,11 +1686,11 @@
       let password = document.getElementById('authPasswordInput')?.value;
       if (!password) {
         password = await showAppPrompt({
-          title: 'Import Configuration',
+          title: t('auth.import_cfg_title', {}, 'Import Configuration'),
           icon: '🔑',
-          message: 'Enter archive password (your account password):',
+          message: t('auth.import_cfg_pwd_msg', {}, 'Enter archive password (your account password):'),
           isPassword: true,
-          confirmText: 'Continue'
+          confirmText: t('auth.btn_continue', {}, 'Continue')
         });
         if (!password) return;
       }
@@ -1567,11 +1698,11 @@
       let login = document.getElementById('authLoginInput')?.value?.trim() || '';
       if (!login) {
         const enteredLogin = await showAppPrompt({
-          title: 'Account Recovery',
+          title: t('auth.recovery_title', {}, 'Account Recovery'),
           icon: '👤',
-          message: 'Enter account login to restore (leave empty to auto-detect):',
-          placeholder: 'login (optional)',
-          confirmText: 'Continue'
+          message: t('auth.recovery_login_msg', {}, 'Enter account login to restore (leave empty to auto-detect):'),
+          placeholder: t('auth.recovery_login_ph', {}, 'login (optional)'),
+          confirmText: t('auth.btn_continue', {}, 'Continue')
         });
         if (enteredLogin !== null) {
           login = enteredLogin.trim();
@@ -1611,7 +1742,7 @@
           if (data.client_storage) {
             restoreClientStorageSnapshot(data.client_storage);
           }
-          await showAppAlert('Settings imported successfully. Reloading...', { title: 'Success', icon: '✅' });
+          await showAppAlert(t('account.import_success', {}, 'Settings imported successfully. Reloading...'), { title: t('common.success', {}, 'Success'), icon: '✅' });
           if (token) {
             try {
               localStorage.setItem('proxdmr_auth_token', token);
@@ -1620,14 +1751,14 @@
           }
           location.reload();
         } else {
-          const errDetail = data.detail || 'Import error';
+          const errDetail = data.detail || t('account.import_error', {}, 'Import error');
           if (loginError) loginError.textContent = errDetail;
-          await showAppAlert(errDetail, { title: 'Import Error', icon: '⚠️' });
+          await showAppAlert(errDetail, { title: t('account.import_err_title', {}, 'Import Error'), icon: '⚠️' });
         }
       } catch (e) {
-        const connErr = 'Error importing settings';
+        const connErr = t('account.import_conn_error', {}, 'Error importing settings');
         if (loginError) loginError.textContent = connErr;
-        await showAppAlert(connErr, { title: 'Connection Error', icon: '⚠️' });
+        await showAppAlert(connErr, { title: t('auth.err_conn_title', {}, 'Connection Error'), icon: '⚠️' });
       } finally {
         if (importBtn) importBtn.disabled = false;
       }

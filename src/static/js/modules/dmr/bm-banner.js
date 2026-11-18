@@ -14,91 +14,252 @@ import {
   calculateClientPacketLoss,
   calculateCardPacketLoss,
   updatePingElement
-} from "../network/ping-sparklines.js?v=2.9.594";
-import { openBmBenchmarkModal } from "./bm-benchmark.js";
-import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.622";
-import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js?v=2.9.367";
+} from "../network/ping-sparklines.js?v=2.9.712";
+import { openBmBenchmarkModal } from "./bm-benchmark.js?v=2.9.741";
+import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.737";
+import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js?v=2.9.712";
+
+// ── Server-backed pinned-servers & sort-prefs cache ────────────────────
+let _pinnedServersCache = {};   // { netKey: [host1, host2, ...] }
+let _pinnedServersCacheLoaded = false;
+let _srvSortPrefsCache = {};    // { srvSortMode_<net>: mode, srvSortDir_<net>: dir }
+
+function _applyBannerCollections(pinnedData, sortData) {
+  if (pinnedData && typeof pinnedData === "object") {
+    _pinnedServersCache = { ...pinnedData };
+    _pinnedServersCacheLoaded = true;
+  }
+  if (sortData && typeof sortData === "object") {
+    _srvSortPrefsCache = { ...sortData };
+  }
+}
+
+async function _loadPinnedServersFromServer() {
+  try {
+    const [resPinned, resSort] = await Promise.all([
+      fetch("/api/collections/pinned_servers"),
+      fetch("/api/collections/srv_sort_prefs")
+    ]);
+    if (resPinned.ok) {
+      const json = await resPinned.json();
+      if (json && json.status === "ok" && json.data) {
+        _pinnedServersCache = json.data;
+      }
+    }
+    if (resSort.ok) {
+      const jsonSort = await resSort.json();
+      if (jsonSort && jsonSort.status === "ok" && jsonSort.data) {
+        _srvSortPrefsCache = jsonSort.data;
+      }
+    }
+  } catch (e) {
+    console.warn("[BM-BANNER] Failed to load server prefs:", e);
+  }
+  _pinnedServersCacheLoaded = true;
+}
+
+function _savePinnedServerToServer(netKey, pinned) {
+  _pinnedServersCache[netKey] = pinned;
+  if (typeof window !== "undefined" && typeof window.setServerCollectionKey === "function") {
+    window.setServerCollectionKey("pinned_servers", netKey, pinned, "pinnedServers_", true);
+    return;
+  }
+  fetch(`/api/collections/pinned_servers/${encodeURIComponent(netKey)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    keepalive: true,
+    body: JSON.stringify({ value: pinned })
+  }).catch(e => console.warn("[BM-BANNER] Failed to save pinned servers:", e));
+}
+
+function _saveSrvSortPrefsToServer(netKey, mode, dir) {
+  const modeKey = `srvSortMode_${netKey}`;
+  const dirKey = `srvSortDir_${netKey}`;
+  _srvSortPrefsCache[modeKey] = mode;
+  _srvSortPrefsCache[dirKey] = dir;
+  if (typeof window !== "undefined" && typeof window.setServerCollectionKey === "function") {
+    window.setServerCollectionKey("srv_sort_prefs", modeKey, mode, "", false);
+    window.setServerCollectionKey("srv_sort_prefs", dirKey, dir, "", false);
+  } else {
+    fetch(`/api/collections/srv_sort_prefs/${encodeURIComponent(modeKey)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({ value: mode })
+    }).catch(() => {});
+    fetch(`/api/collections/srv_sort_prefs/${encodeURIComponent(dirKey)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({ value: dir })
+    }).catch(() => {});
+  }
+  try {
+    localStorage.setItem(modeKey, mode);
+    localStorage.setItem(dirKey, dir);
+  } catch (_) {}
+}
 
 export const KNOWN_BM_MASTERS = [
-  { id: 2322, country: "AT", country_name: "Австрия", host: "2322.master.brandmeister.network", ip: "62.171.130.35" },
-  { id: 2502, country: "RU", country_name: "Россия", host: "2502.master.brandmeister.network", ip: "44.32.144.132" },
-  { id: 2503, country: "RU", country_name: "Россия", host: "2503.master.brandmeister.network", ip: "164.215.71.108" },
-  { id: 2621, country: "DE", country_name: "Германия", host: "2621.master.brandmeister.network", ip: "87.106.126.49" },
-  { id: 2622, country: "DE", country_name: "Германия", host: "2622.master.brandmeister.network", ip: "178.238.234.72" },
-  { id: 2282, country: "CH", country_name: "Швейцария", host: "2282.master.brandmeister.network", ip: "185.46.59.78" },
-  { id: 3102, country: "US", country_name: "США", host: "3102.master.brandmeister.network", ip: "74.91.114.19" },
-  { id: 3103, country: "US", country_name: "США", host: "3103.master.brandmeister.network", ip: "74.91.118.251" },
-  { id: 3104, country: "US", country_name: "США", host: "3104.master.brandmeister.network", ip: "162.248.88.117" },
-  { id: 2081, country: "FR", country_name: "Франция", host: "2081.master.brandmeister.network", ip: "217.182.129.130" },
-  { id: 2082, country: "FR", country_name: "Франция", host: "2082.master.brandmeister.network", ip: "217.182.129.131" },
-  { id: 2341, country: "GB", country_name: "Великобритания", host: "2341.master.brandmeister.network", ip: "51.68.220.36" },
-  { id: 2141, country: "ES", country_name: "Испания", host: "2141.master.brandmeister.network", ip: "84.232.5.113" },
-  { id: 2222, country: "IT", country_name: "Италия", host: "2222.master.brandmeister.network", ip: "31.14.134.183" },
-  { id: 2041, country: "NL", country_name: "Нидерланды", host: "2041.master.brandmeister.network", ip: "44.137.42.20" },
-  { id: 2602, country: "PL", country_name: "Польша", host: "2602.master.brandmeister.network", ip: "195.26.76.59" },
-  { id: 2302, country: "CZ", country_name: "Чехия", host: "2302.master.brandmeister.network", ip: "80.250.21.206" },
-  { id: 2402, country: "SE", country_name: "Швеция", host: "2402.master.brandmeister.network", ip: "44.5.24.178" },
-  { id: 2441, country: "FI", country_name: "Финляндия", host: "2441.master.brandmeister.network", ip: "85.188.1.107" },
-  { id: 2421, country: "NO", country_name: "Норвегия", host: "2421.master.brandmeister.network", ip: "80.89.46.242" },
-  { id: 2382, country: "DK", country_name: "Дания", host: "2382.master.brandmeister.network", ip: "185.51.76.16" },
-  { id: 2162, country: "HU", country_name: "Венгрия", host: "2162.master.brandmeister.network", ip: "185.187.75.192" },
-  { id: 2262, country: "RO", country_name: "Румыния", host: "2262.master.brandmeister.network", ip: "94.176.6.38" },
-  { id: 2841, country: "BG", country_name: "Болгария", host: "2841.master.brandmeister.network", ip: "44.31.90.2" },
-  { id: 2931, country: "SI", country_name: "Словения", host: "46.54.227.93", ip: "46.54.227.93" },
-  { id: 2682, country: "PT", country_name: "Португалия", host: "2682.master.brandmeister.network", ip: "193.137.237.12" },
-  { id: 2721, country: "IE", country_name: "Ирландия", host: "2721.master.brandmeister.network", ip: "44.155.254.5" },
-  { id: 2022, country: "GR", country_name: "Греция", host: "2022.master.brandmeister.network", ip: "185.4.134.95" },
-  { id: 2061, country: "BE", country_name: "Бельгия", host: "2061.master.brandmeister.network", ip: "194.146.121.130" },
-  { id: 3021, country: "CA", country_name: "Канада", host: "3021.master.brandmeister.network", ip: "158.69.203.89" },
-  { id: 4251, country: "IL", country_name: "Израиль", host: "4251.master.brandmeister.network", ip: "31.154.7.7" },
-  { id: 5051, country: "AU", country_name: "Австралия", host: "5051.master.brandmeister.network", ip: "103.230.158.71" },
-  { id: 4501, country: "KR", country_name: "Южная Корея", host: "4501.master.brandmeister.network", ip: "211.60.41.188" },
-  { id: 4602, country: "CN", country_name: "Китай", host: "4602.master.brandmeister.network", ip: "43.129.83.124" },
-  { id: 5021, country: "MY", country_name: "Малайзия", host: "5021.master.brandmeister.network", ip: "103.197.58.171" },
-  { id: 5151, country: "PH", country_name: "Филиппины", host: "5151.master.brandmeister.network", ip: "120.89.61.77" },
-  { id: 6551, country: "ZA", country_name: "ЮАР", host: "6551.master.brandmeister.network", ip: "154.66.196.131" },
-  { id: 7242, country: "BR", country_name: "Бразилия", host: "7242.master.brandmeister.network", ip: "69.62.93.116" },
-  { id: 7301, country: "CL", country_name: "Чили", host: "7301.master.brandmeister.network", ip: "170.239.84.17" },
-  { id: 3341, country: "MX", country_name: "Мексика", host: "3341.master.brandmeister.network", ip: "72.1.241.232" }
+  { id: 2322, country: "AT", country_name: "Austria", host: "2322.master.brandmeister.network", ip: "62.171.130.35" },
+  { id: 2502, country: "RU", country_name: "Russia", host: "2502.master.brandmeister.network", ip: "44.32.144.132" },
+  { id: 2503, country: "RU", country_name: "Russia", host: "2503.master.brandmeister.network", ip: "164.215.71.108" },
+  { id: 2621, country: "DE", country_name: "Germany", host: "2621.master.brandmeister.network", ip: "87.106.126.49" },
+  { id: 2622, country: "DE", country_name: "Germany", host: "2622.master.brandmeister.network", ip: "178.238.234.72" },
+  { id: 2282, country: "CH", country_name: "Switzerland", host: "2282.master.brandmeister.network", ip: "185.46.59.78" },
+  { id: 3102, country: "US", country_name: "USA", host: "3102.master.brandmeister.network", ip: "74.91.114.19" },
+  { id: 3103, country: "US", country_name: "USA", host: "3103.master.brandmeister.network", ip: "74.91.118.251" },
+  { id: 3104, country: "US", country_name: "USA", host: "3104.master.brandmeister.network", ip: "162.248.88.117" },
+  { id: 2081, country: "FR", country_name: "France", host: "2081.master.brandmeister.network", ip: "217.182.129.130" },
+  { id: 2082, country: "FR", country_name: "France", host: "2082.master.brandmeister.network", ip: "217.182.129.131" },
+  { id: 2341, country: "GB", country_name: "United Kingdom", host: "2341.master.brandmeister.network", ip: "51.68.220.36" },
+  { id: 2141, country: "ES", country_name: "Spain", host: "2141.master.brandmeister.network", ip: "84.232.5.113" },
+  { id: 2222, country: "IT", country_name: "Italy", host: "2222.master.brandmeister.network", ip: "31.14.134.183" },
+  { id: 2041, country: "NL", country_name: "Netherlands", host: "2041.master.brandmeister.network", ip: "44.137.42.20" },
+  { id: 2602, country: "PL", country_name: "Poland", host: "2602.master.brandmeister.network", ip: "195.26.76.59" },
+  { id: 2302, country: "CZ", country_name: "Czech Republic", host: "2302.master.brandmeister.network", ip: "80.250.21.206" },
+  { id: 2402, country: "SE", country_name: "Sweden", host: "2402.master.brandmeister.network", ip: "44.5.24.178" },
+  { id: 2441, country: "FI", country_name: "Finland", host: "2441.master.brandmeister.network", ip: "85.188.1.107" },
+  { id: 2421, country: "NO", country_name: "Norway", host: "2421.master.brandmeister.network", ip: "80.89.46.242" },
+  { id: 2382, country: "DK", country_name: "Denmark", host: "2382.master.brandmeister.network", ip: "185.51.76.16" },
+  { id: 2162, country: "HU", country_name: "Hungary", host: "2162.master.brandmeister.network", ip: "185.187.75.192" },
+  { id: 2262, country: "RO", country_name: "Romania", host: "2262.master.brandmeister.network", ip: "94.176.6.38" },
+  { id: 2841, country: "BG", country_name: "Bulgaria", host: "2841.master.brandmeister.network", ip: "44.31.90.2" },
+  { id: 2931, country: "SI", country_name: "Slovenia", host: "46.54.227.93", ip: "46.54.227.93" },
+  { id: 2682, country: "PT", country_name: "Portugal", host: "2682.master.brandmeister.network", ip: "193.137.237.12" },
+  { id: 2721, country: "IE", country_name: "Ireland", host: "2721.master.brandmeister.network", ip: "44.155.254.5" },
+  { id: 2022, country: "GR", country_name: "Greece", host: "2022.master.brandmeister.network", ip: "185.4.134.95" },
+  { id: 2061, country: "BE", country_name: "Belgium", host: "2061.master.brandmeister.network", ip: "194.146.121.130" },
+  { id: 3021, country: "CA", country_name: "Canada", host: "3021.master.brandmeister.network", ip: "158.69.203.89" },
+  { id: 4251, country: "IL", country_name: "Israel", host: "4251.master.brandmeister.network", ip: "31.154.7.7" },
+  { id: 5051, country: "AU", country_name: "Australia", host: "5051.master.brandmeister.network", ip: "103.230.158.71" },
+  { id: 4501, country: "KR", country_name: "South Korea", host: "4501.master.brandmeister.network", ip: "211.60.41.188" },
+  { id: 4602, country: "CN", country_name: "China", host: "4602.master.brandmeister.network", ip: "43.129.83.124" },
+  { id: 5021, country: "MY", country_name: "Malaysia", host: "5021.master.brandmeister.network", ip: "103.197.58.171" },
+  { id: 5151, country: "PH", country_name: "Philippines", host: "5151.master.brandmeister.network", ip: "120.89.61.77" },
+  { id: 6551, country: "ZA", country_name: "South Africa", host: "6551.master.brandmeister.network", ip: "154.66.196.131" },
+  { id: 7242, country: "BR", country_name: "Brazil", host: "7242.master.brandmeister.network", ip: "69.62.93.116" },
+  { id: 7301, country: "CL", country_name: "Chile", host: "7301.master.brandmeister.network", ip: "170.239.84.17" },
+  { id: 3341, country: "MX", country_name: "Mexico", host: "3341.master.brandmeister.network", ip: "72.1.241.232" }
 ];
 
+function getBannerCurrentLang() {
+  if (typeof window !== "undefined") {
+    const direct = (window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) ||
+      (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang)) ||
+      window.currentLang;
+    if (direct) return direct;
+    try {
+      const stored = (typeof localStorage !== "undefined") ? localStorage.getItem("proxdmr_language") : "";
+      if (stored) return stored;
+    } catch (_) {}
+    if (typeof document !== "undefined" && document.documentElement && document.documentElement.lang) {
+      return document.documentElement.lang;
+    }
+  }
+  return "ru";
+}
+
+function resolveServerCountryName(m, fallback, curLang) {
+  const lang = curLang || getBannerCurrentLang();
+  const cKey = m && m.country_key;
+  if (cKey && typeof window !== "undefined" && typeof window.t === "function") {
+    const tr = window.t(cKey, {}, "");
+    if (tr) return tr;
+  }
+  const cCode = String((m && (m.country_code || m.country)) || "").trim().toUpperCase();
+  if (cCode === "GLOBAL" || cCode === "EU" || cCode === "LOCAL") {
+    if (typeof window !== "undefined" && typeof window.t === "function") {
+      const tr = window.t(`countries.${cCode}`, {}, "");
+      if (tr) return tr;
+    }
+  }
+  if (cCode && cCode !== "GLOBAL" && cCode !== "XX") {
+    return getLocalizedCountryName(cCode, fallback || (m && m.country_name) || cCode, lang);
+  }
+  return fallback || (m && m.country_name) || "";
+}
+
+function resolveServerDisplayName(m, fallbackCountryName, curLang) {
+  if (!m) return "";
+  const locCountry = resolveServerCountryName(m, fallbackCountryName || m.country_name || "", curLang);
+  if (m.name_tpl) {
+    return m.name_tpl.replace("{country}", locCountry || fallbackCountryName || "");
+  }
+  const rawName = (m.name || "").trim();
+  const bmNameMatch = rawName.match(/\(BM\s+(\d+)\)\s*$/i);
+  if (bmNameMatch && locCountry) {
+    return `${locCountry} (BM ${bmNameMatch[1]})`;
+  }
+  const fdmrMatch = rawName.match(/^FreeDMR\s+(.+?)\s*\((\d+)\)\s*$/i);
+  if (fdmrMatch && locCountry) {
+    const fdmrLabel = fdmrMatch[1].trim();
+    if (m.country_key || !/[\s-]/.test(fdmrLabel) || /^(united kingdom|uk)$/i.test(fdmrLabel)) {
+      return `FreeDMR ${locCountry} (${fdmrMatch[2]})`;
+    }
+  }
+  return rawName;
+}
+
 export const KNOWN_TGIF_SERVERS = [
-  { id: "TGIF-US", country: "US", country_name: "США", name: "TGIF Primary", host: "tgif.network", port: 62031 }
+  { id: "TGIF-US", country: "US", country_name: "USA", name: "TGIF Primary", host: "tgif.network", port: 62031 }
 ];
 
 export const KNOWN_FREEDMR_SERVERS = [
-  { id: "FDMR-EU", country: "EU", country_name: "Европа (Хаб)", name: "FreeDMR Europe (Main Hub)", host: "freedmreu.gb7fr.org.uk", port: 62031, password: "passw0rd" },
-  { id: "FDMR-DE", country: "DE", country_name: "Германия", name: "FreeDMR Германия (2621)", host: "178.254.30.151", port: 62031, password: "passw0rd" },
-  { id: "FDMR-UK", country: "GB", country_name: "Великобритания", name: "FreeDMR UK (2341)", host: "hotspot.uk.freedmr.link", port: 62031, password: "passw0rd" },
-  { id: "FDMR-SCT", country: "GB", country_name: "Шотландия", name: "FreeDMR Scotland (2345)", host: "freedmr.m0xfn.radio", port: 62031, password: "passw0rd" },
-  { id: "FDMR-BG", country: "BG", country_name: "Болгария", name: "FreeDMR Болгария (2841)", host: "fdmrbg.ddns.net", port: 62031, password: "passw0rd" },
-  { id: "FDMR-GR", country: "GR", country_name: "Греция", name: "FreeDMR Греция (2021)", host: "dmr.freedmr.gr", port: 62031, password: "passw0rd" },
-  { id: "FDMR-SE", country: "SE", country_name: "Швеция", name: "FreeDMR Швеция (2401)", host: "2401.freedmrsweden.se", port: 62031, password: "passw0rd" },
-  { id: "FDMR-NO", country: "NO", country_name: "Норвегия", name: "FreeDMR Норвегия (2421)", host: "norway.freedmr.no", port: 62031, password: "passw0rd" },
-  { id: "FDMR-FR", country: "FR", country_name: "Франция", name: "FreeDMR Франция (2082)", host: "alpes-grenoble.ovh", port: 62031, password: "passw0rd" },
-  { id: "FDMR-IT", country: "IT", country_name: "Италия", name: "FreeDMR Италия (2221)", host: "hotspots.freedmr.it", port: 62031, password: "PASSWORD" },
-  { id: "FDMR-US-FL", country: "US", country_name: "США (Флорида)", name: "FreeDMR USA Florida (3109)", host: "freedmr.dvswitch.org", port: 62031, password: "passw0rd" },
-  { id: "FDMR-US-SF", country: "US", country_name: "США (Сан-Франциско)", name: "FreeDMR USA West (3103)", host: "us-sf.freedmr.cc", port: 62031, password: "passw0rd" },
-  { id: "FDMR-BR", country: "BR", country_name: "Бразилия", name: "FreeDMR Бразилия (7242)", host: "freedmr.network365.com.br", port: 62031, password: "passw0rd" },
-  { id: "ADN-GL", country: "GLOBAL", country_name: "ADN Systems", name: "ADN Global Router", host: "master.adn.systems", port: 62031, password: "passw0rd" }
+  { id: "FDMR-EU", country: "EU", country_key: "servers.fdmr_eu_hub", country_name: "Europe (Hub)", name: "FreeDMR Europe (Main Hub)", host: "freedmreu.gb7fr.org.uk", port: 62031, password: "passw0rd" },
+  { id: "FDMR-DE", country: "DE", country_name: "Germany", name: "FreeDMR Germany (2621)", name_tpl: "FreeDMR {country} (2621)", host: "178.254.30.151", port: 62031, password: "passw0rd" },
+  { id: "FDMR-UK", country: "GB", country_name: "United Kingdom", name: "FreeDMR UK (2341)", host: "hotspot.uk.freedmr.link", port: 62031, password: "passw0rd" },
+  { id: "FDMR-SCT", country: "GB", country_key: "servers.sct", country_name: "Scotland", name: "FreeDMR Scotland (2345)", name_tpl: "FreeDMR {country} (2345)", host: "freedmr.m0xfn.radio", port: 62031, password: "passw0rd" },
+  { id: "FDMR-BG", country: "BG", country_name: "Bulgaria", name: "FreeDMR Bulgaria (2841)", name_tpl: "FreeDMR {country} (2841)", host: "fdmrbg.ddns.net", port: 62031, password: "passw0rd" },
+  { id: "FDMR-GR", country: "GR", country_name: "Greece", name: "FreeDMR Greece (2021)", name_tpl: "FreeDMR {country} (2021)", host: "dmr.freedmr.gr", port: 62031, password: "passw0rd" },
+  { id: "FDMR-SE", country: "SE", country_name: "Sweden", name: "FreeDMR Sweden (2401)", name_tpl: "FreeDMR {country} (2401)", host: "2401.freedmrsweden.se", port: 62031, password: "passw0rd" },
+  { id: "FDMR-NO", country: "NO", country_name: "Norway", name: "FreeDMR Norway (2421)", name_tpl: "FreeDMR {country} (2421)", host: "norway.freedmr.no", port: 62031, password: "passw0rd" },
+  { id: "FDMR-FR", country: "FR", country_name: "France", name: "FreeDMR France (2082)", name_tpl: "FreeDMR {country} (2082)", host: "alpes-grenoble.ovh", port: 62031, password: "passw0rd" },
+  { id: "FDMR-IT", country: "IT", country_name: "Italy", name: "FreeDMR Italy (2221)", name_tpl: "FreeDMR {country} (2221)", host: "hotspots.freedmr.it", port: 62031, password: "PASSWORD" },
+  { id: "FDMR-US-FL", country: "US", country_key: "servers.fdmr_us_fl", country_name: "USA (Florida)", name: "FreeDMR USA Florida (3109)", host: "freedmr.dvswitch.org", port: 62031, password: "passw0rd" },
+  { id: "FDMR-US-SF", country: "US", country_key: "servers.fdmr_us_sf", country_name: "USA (San Francisco)", name: "FreeDMR USA West (3103)", host: "us-sf.freedmr.cc", port: 62031, password: "passw0rd" },
+  { id: "FDMR-BR", country: "BR", country_name: "Brazil", name: "FreeDMR Brazil (7242)", name_tpl: "FreeDMR {country} (7242)", host: "freedmr.network365.com.br", port: 62031, password: "passw0rd" }
+];
+
+export const KNOWN_YSF_SERVERS = [
+  { id: "25000", country: "RU", country_name: "Russia", name: "YSF-Russia (25000)", host: "ysf.brandmeister.ru", port: 42000, description: "Russia National Multi-Protocol Hub" },
+  { id: "21080", country: "US", country_name: "USA", name: "America-Link (21080)", host: "americalink.duckdns.org", port: 42000, description: "America-Link C4FM Room" },
+  { id: "20000", country: "EU", country_key: "countries.EU", country_name: "Europe", name: "Europe-Link (20000)", host: "eu-link.ysfreflector.de", port: 42000, description: "Europe International Room" },
+  { id: "26200", country: "DE", country_name: "Germany", name: "DL-Germany (26200)", host: "ysf.xreflector.net", port: 42000, description: "Germany Fusion Master" },
+  { id: "23400", country: "GB", country_name: "United Kingdom", name: "UK-YSF (23400)", host: "uk-ysf.org.uk", port: 42000, description: "UK YSF Reflector" }
+];
+
+export const KNOWN_ADN_SERVERS = [
+  { id: "ADN-GLOBAL", country: "GLOBAL", country_key: "countries.GLOBAL", country_name: "International", name: "ADN Global Master Hub", host: "master.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-DE", country: "DE", country_name: "Germany", name: "ADN Germany (2621)", host: "2621.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-EE", country: "EE", country_name: "Estonia", name: "ADN Estonia (2481)", host: "2481.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-UA", country: "UA", country_name: "Ukraine", name: "ADN Ukraine (2551)", host: "2551.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-GR", country: "GR", country_name: "Greece", name: "ADN Hellas (2021)", host: "2021.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-IT", country: "IT", country_name: "Italy", name: "ADN Italy (2221)", host: "2221.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-BG", country: "BG", country_name: "Bulgaria", name: "ADN Bulgaria (2841)", host: "2841.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-FR", country: "FR", country_name: "France", name: "ADN France (2082)", host: "2082.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-BR", country: "BR", country_name: "Brazil", name: "ADN Brazil (7241)", host: "7241.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-CL", country: "CL", country_name: "Chile", name: "ADN Chile (7301)", host: "7301.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-MX", country: "MX", country_name: "Mexico", name: "ADN Mexico (3341)", host: "3341.adn.systems", port: 62031, password: "passw0rd" },
+  { id: "ADN-US", country: "US", country_name: "USA", name: "ADN USA West (3103)", host: "3103.adn.systems", port: 62031, password: "passw0rd" }
 ];
 
 export const KNOWN_DMRPLUS_SERVERS = [
-  { id: "IPSC2-DMR-DL", country: "DE", country_name: "Германия", name: "IPSC2-DMR-DL DE", host: "5.28.41.138", port: 55555, password: "PASSWORD" },
-  { id: "IPSC2-DL-HOTSPOT", country: "DE", country_name: "Германия", name: "IPSC2-DL-HOTSPOT DE", host: "91.132.144.235", port: 55555, password: "PASSWORD" },
-  { id: "IPSC2-Austria", country: "AT", country_name: "Австрия", name: "IPSC2-Austria AT", host: "89.185.97.234", port: 55555, password: "PASSWORD" },
-  { id: "IPSC2-Italia", country: "IT", country_name: "Италия", name: "IPSC2-Italia IT", host: "85.10.203.242", port: 55555, password: "PASSWORD" },
-  { id: "IPSC2-RU", country: "RU", country_name: "Россия", name: "IPSC2-RU", host: "ipsc2.ru", port: 55555, password: "PASSWORD" },
-  { id: "IPSC2-QuadNet", country: "US", country_name: "США", name: "IPSC2-QuadNet US", host: "ipsc2.openquad.net", port: 55555, password: "PASSWORD" }
+  { id: "IPSC2-DMR-DL", country: "DE", country_name: "Germany", name: "IPSC2-DMR-DL DE", host: "5.28.41.138", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-DL-HOTSPOT", country: "DE", country_name: "Germany", name: "IPSC2-DL-HOTSPOT DE", host: "91.132.144.235", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-Austria", country: "AT", country_name: "Austria", name: "IPSC2-Austria AT", host: "89.185.97.234", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-Italia", country: "IT", country_name: "Italy", name: "IPSC2-Italia IT", host: "85.10.203.242", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-RU", country: "RU", country_name: "Russia", name: "IPSC2-RU", host: "ipsc2.ru", port: 55555, password: "PASSWORD" },
+  { id: "IPSC2-QuadNet", country: "US", country_name: "USA", name: "IPSC2-QuadNet US", host: "ipsc2.openquad.net", port: 55555, password: "PASSWORD" }
 ];
 
 export const KNOWN_XLX_SERVERS = [
-  { id: "XLX270", country: "LU", country_name: "Люксембург", name: "XLX270 LU", host: "158.64.26.132", port: 62030 },
-  { id: "XLX250", country: "RU", country_name: "Россия", name: "XLX250 US/RU", host: "23.130.172.11", port: 62030 },
-  { id: "XLX777", country: "RU", country_name: "Россия", name: "XLX777 CIS", host: "194.182.80.219", port: 62030 },
-  { id: "XLX002", country: "DE", country_name: "Германия", name: "XLX002 DE", host: "223.95.197.217", port: 62030 },
-  { id: "XLX020", country: "US", country_name: "США", name: "XLX020 US", host: "66.175.215.217", port: 62030 },
-  { id: "XLX950", country: "GB", country_name: "Великобритания", name: "XLX950 UK", host: "158.64.26.134", port: 62030 }
+  { id: "XLX270", country: "LU", country_name: "Luxembourg", name: "XLX270 LU", host: "158.64.26.132", port: 62030 },
+  { id: "XLX250", country: "RU", country_name: "Russia", name: "XLX250 US/RU", host: "23.130.172.11", port: 62030 },
+  { id: "XLX777", country: "RU", country_name: "Russia", name: "XLX777 CIS", host: "194.182.80.219", port: 62030 },
+  { id: "XLX002", country: "DE", country_name: "Germany", name: "XLX002 DE", host: "223.95.197.217", port: 62030 },
+  { id: "XLX020", country: "US", country_name: "USA", name: "XLX020 US", host: "66.175.215.217", port: 62030 },
+  { id: "XLX950", country: "GB", country_name: "United Kingdom", name: "XLX950 UK", host: "158.64.26.134", port: 62030 }
 ];
 
 export const DMR_NETWORK_PROFILES = {
@@ -138,7 +299,7 @@ export const DMR_NETWORK_PROFILES = {
     id: "freedmr",
     shortLabel: "FDMR",
     badgePrefix: "FDMR",
-    fullName: "FreeDMR / ADN",
+    fullName: "FreeDMR",
     defaultHost: "178.254.30.151",
     defaultPort: 62031,
     defaultPassword: "passw0rd",
@@ -149,6 +310,39 @@ export const DMR_NETWORK_PROFILES = {
     hasXlxModule: false,
     customIconUrl: "",
     svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>`
+  },
+  adn: {
+    id: "adn",
+    shortLabel: "ADN",
+    badgePrefix: "ADN",
+    fullName: "ADN Systems",
+    defaultHost: "master.adn.systems",
+    defaultPort: 62031,
+    defaultPassword: "passw0rd",
+    defaultTgTs1: 91,
+    defaultTgTs2: 2501,
+    hasBmApi: false,
+    hasRpto: true,
+    hasXlxModule: false,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="7" r="2"/><circle cx="20" cy="7" r="2"/><circle cx="4" cy="17" r="2"/><circle cx="20" cy="17" r="2"/><line x1="6" y1="8" x2="10" y2="10.5"/><line x1="18" y1="8" x2="14" y2="10.5"/><line x1="6" y1="16" x2="10" y2="13.5"/><line x1="18" y1="16" x2="14" y2="13.5"/></svg>`
+  },
+  ysf: {
+    id: "ysf",
+    shortName: "YSF",
+    shortLabel: "YSF",
+    badgePrefix: "YSF",
+    fullName: "Yaesu System Fusion",
+    defaultHost: "ysf.brandmeister.ru",
+    defaultPort: 42000,
+    defaultPassword: "",
+    defaultRoom: "25000",
+    hasBmApi: false,
+    hasRpto: false,
+    hasXlxModule: false,
+    isSimplex: true,
+    customIconUrl: "",
+    svgIcon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="12 6 15 11 9 11 12 6"/><line x1="12" y1="11" x2="12" y2="18"/></svg>`
   },
   dmrplus: {
     id: "dmrplus",
@@ -211,7 +405,7 @@ export const DMR_NETWORK_PROFILES = {
     defaultTgTs1: 0,
     defaultTgTs2: 0,
     hasBmApi: false,
-    hasRpto: false,
+    hasRpto: true,
     hasXlxModule: false,
     isAllStar: true,
     customIconUrl: "",
@@ -220,7 +414,7 @@ export const DMR_NETWORK_PROFILES = {
 };
 
 export const KNOWN_ALLSTAR_SERVERS = [
-  { id: "ASL-LOCAL", country: "LOCAL", country_name: "Локальный ASL", name: "Local ASL Node", host: "127.0.0.1", port: 4569, node: "1999" },
+  { id: "ASL-LOCAL", country: "LOCAL", country_key: "countries.LOCAL", country_name: "Local ASL", name: "Local ASL Node", host: "127.0.0.1", port: 4569, node: "1999" },
   { id: "ASL-REG", country: "GLOBAL", country_name: "AllStarLink", name: "AllStarLink Central", host: "register.allstarlink.org", port: 4569, node: "1999" }
 ];
 
@@ -284,6 +478,18 @@ export function getNetworkServersList(netType) {
     }
     return (typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["xlx"]) || KNOWN_XLX_SERVERS;
   }
+  if (key === "adn") {
+    if (typeof window !== "undefined" && (!window._dmrServersCache || !window._dmrServersCache["adn"])) {
+      refreshAdnServers();
+    }
+    return (typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["adn"]) || KNOWN_ADN_SERVERS;
+  }
+  if (key === "ysf") {
+    if (typeof window !== "undefined" && (!window._dmrServersCache || !window._dmrServersCache["ysf"])) {
+      refreshYsfServers();
+    }
+    return (typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["ysf"]) || KNOWN_YSF_SERVERS;
+  }
   if (key === "allstar") return KNOWN_ALLSTAR_SERVERS;
   if (key === "custom") return [];
   const bmMastersList = (typeof window !== "undefined" && window.bmMastersList) || [];
@@ -293,24 +499,50 @@ export function getNetworkServersList(netType) {
 let _freedmrRefreshPromise = null;
 
 let _dmrplusRefreshPromise = null;
+let _dmrplusFollowupTimer = null;
 
-export async function refreshDmrPlusServers() {
+export async function refreshDmrPlusServers(force = false) {
   if (_dmrplusRefreshPromise) return _dmrplusRefreshPromise;
   _dmrplusRefreshPromise = (async () => {
     try {
-      const resp = await fetch("/api/dmrplus/hosts");
+      const url = force ? "/api/dmrplus/hosts?force=true" : "/api/dmrplus/hosts";
+      const resp = await fetch(url);
       if (!resp.ok) return KNOWN_DMRPLUS_SERVERS;
       const data = await resp.json().catch(() => ({}));
-      if (data && Array.isArray(data.servers) && data.servers.length >= 3) {
-        KNOWN_DMRPLUS_SERVERS.splice(0, KNOWN_DMRPLUS_SERVERS.length, ...data.servers);
+      const list = Array.isArray(data) ? data : (data && Array.isArray(data.servers) ? data.servers : []);
+      if (list.length >= 3) {
+        KNOWN_DMRPLUS_SERVERS.splice(0, KNOWN_DMRPLUS_SERVERS.length, ...list);
         if (typeof window !== "undefined") {
           window._dmrServersCache = window._dmrServersCache || {};
-          window._dmrServersCache["dmrplus"] = data.servers;
+          window._dmrServersCache["dmrplus"] = list;
           window._dmrServersCacheVer = Date.now();
           if (typeof window.renderRadiosGrid === "function") {
             window.renderRadiosGrid();
           }
         }
+      }
+      if (data && !Array.isArray(data) && data.sync_in_progress && !_dmrplusFollowupTimer) {
+        _dmrplusFollowupTimer = setTimeout(async () => {
+          _dmrplusFollowupTimer = null;
+          try {
+            const fResp = await fetch("/api/dmrplus/hosts");
+            if (fResp.ok) {
+              const fData = await fResp.json().catch(() => ({}));
+              const fList = Array.isArray(fData) ? fData : (fData && Array.isArray(fData.servers) ? fData.servers : []);
+              if (fList.length >= 3) {
+                KNOWN_DMRPLUS_SERVERS.splice(0, KNOWN_DMRPLUS_SERVERS.length, ...fList);
+                if (typeof window !== "undefined") {
+                  window._dmrServersCache = window._dmrServersCache || {};
+                  window._dmrServersCache["dmrplus"] = fList;
+                  window._dmrServersCacheVer = Date.now();
+                  if (typeof window.renderRadiosGrid === "function") {
+                    window.renderRadiosGrid();
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }, 4000);
       }
     } catch (e) {
       console.warn("[BM-BANNER] Failed to refresh DMR+ servers:", e);
@@ -352,6 +584,123 @@ export async function refreshXlxServers() {
   return _xlxRefreshPromise;
 }
 
+let _ysfRefreshPromise = null;
+
+export async function refreshYsfServers() {
+  if (_ysfRefreshPromise) return _ysfRefreshPromise;
+  _ysfRefreshPromise = (async () => {
+    try {
+      const resp = await fetch("/api/ysf/hosts");
+      if (!resp.ok) return KNOWN_YSF_SERVERS;
+      const data = await resp.json().catch(() => ({}));
+      if (data && Array.isArray(data.rooms) && data.rooms.length >= 3) {
+        KNOWN_YSF_SERVERS.splice(0, KNOWN_YSF_SERVERS.length, ...data.rooms);
+        if (typeof window !== "undefined") {
+          window._dmrServersCache = window._dmrServersCache || {};
+          window._dmrServersCache["ysf"] = data.rooms;
+          window._dmrServersCacheVer = Date.now();
+          if (typeof window.renderRadiosGrid === "function") {
+            window.renderRadiosGrid();
+          }
+          if (typeof document !== "undefined") {
+            const curHsList = window.currentHotspots || [];
+            document.querySelectorAll('.radio-container.card-net-ysf, .radio-container[data-network-type="ysf"]').forEach(cardEl => {
+              const cid = cardEl.dataset.hotspotId;
+              const hsObj = curHsList.find(h => h && h.id === cid);
+              if (hsObj) {
+                if (typeof window.updateCardYsfPanel === "function") window.updateCardYsfPanel(cardEl, hsObj);
+                if (typeof window.syncCardYsfDgIdBar === "function") window.syncCardYsfDgIdBar(cardEl, hsObj);
+              }
+            });
+            const ysfView = document.getElementById("ysfRoomsView");
+            if (ysfView && ysfView.style.display !== "none" && typeof window.renderYsfRoomsList === "function") {
+              const qEl = document.getElementById("ysfRoomSearchInput");
+              window.renderYsfRoomsList(qEl ? qEl.value : "");
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[BM-BANNER] Failed to refresh YSF servers:", e);
+    } finally {
+      _ysfRefreshPromise = null;
+    }
+    return KNOWN_YSF_SERVERS;
+  })();
+  return _ysfRefreshPromise;
+}
+
+let _adnRefreshPromise = null;
+let _adnFollowupTimer = null;
+
+export async function refreshAdnServers(force = false) {
+  if (_adnRefreshPromise) return _adnRefreshPromise;
+  _adnRefreshPromise = (async () => {
+    try {
+      const url = force ? "/api/adn/hosts?force=true" : "/api/adn/hosts";
+      const resp = await fetch(url);
+      if (!resp.ok) return KNOWN_ADN_SERVERS;
+      const data = await resp.json().catch(() => ({}));
+      if (data && Array.isArray(data.servers) && data.servers.length >= 3) {
+        KNOWN_ADN_SERVERS.splice(0, KNOWN_ADN_SERVERS.length, ...data.servers);
+        if (typeof window !== "undefined") {
+          window._dmrServersCache = window._dmrServersCache || {};
+          window._dmrServersCache["adn"] = data.servers;
+          window._dmrServersCacheVer = Date.now();
+          if (typeof window.renderRadiosGrid === "function") {
+            window.renderRadiosGrid();
+          }
+        }
+      }
+
+      if (typeof window !== "undefined") {
+        let localTgTs = 0;
+        try {
+          localTgTs = parseInt(localStorage.getItem("proxdmr_adn_tg_last_sync_ts") || "0", 10) || 0;
+        } catch (_) {}
+        const srvTgTs = Number(data && data.tg_last_sync_ts) || 0;
+        const adnMapLen = Object.keys(window.ADN_TG_NAMES || {}).length;
+        if ((srvTgTs > localTgTs || adnMapLen < 50) && typeof window.syncTgNamesFromServer === "function") {
+          window.syncTgNamesFromServer("adn").catch(() => {});
+        }
+      }
+
+      // If backend triggered >24h background parse of adn.systems, schedule one silent pull after completion
+      if (data && data.sync_in_progress && !_adnFollowupTimer) {
+        _adnFollowupTimer = setTimeout(async () => {
+          _adnFollowupTimer = null;
+          try {
+            const fResp = await fetch("/api/adn/hosts");
+            if (fResp.ok) {
+              const fData = await fResp.json().catch(() => ({}));
+              if (fData && Array.isArray(fData.servers) && fData.servers.length >= 3) {
+                KNOWN_ADN_SERVERS.splice(0, KNOWN_ADN_SERVERS.length, ...fData.servers);
+                if (typeof window !== "undefined") {
+                  window._dmrServersCache = window._dmrServersCache || {};
+                  window._dmrServersCache["adn"] = fData.servers;
+                  window._dmrServersCacheVer = Date.now();
+                  if (typeof window.renderRadiosGrid === "function") {
+                    window.renderRadiosGrid();
+                  }
+                }
+              }
+            }
+            if (typeof window !== "undefined" && typeof window.syncTgNamesFromServer === "function") {
+              await window.syncTgNamesFromServer("adn");
+            }
+          } catch (_) {}
+        }, 4000);
+      }
+    } catch (e) {
+      console.warn("[BM-BANNER] Failed to refresh ADN servers:", e);
+    } finally {
+      _adnRefreshPromise = null;
+    }
+    return KNOWN_ADN_SERVERS;
+  })();
+  return _adnRefreshPromise;
+}
+
 export async function refreshFreeDmrServers() {
   if (_freedmrRefreshPromise) return _freedmrRefreshPromise;
   _freedmrRefreshPromise = (async () => {
@@ -361,17 +710,6 @@ export async function refreshFreeDmrServers() {
       const data = await resp.json().catch(() => ({}));
       if (data && Array.isArray(data.servers) && data.servers.length >= 3) {
         KNOWN_FREEDMR_SERVERS.splice(0, KNOWN_FREEDMR_SERVERS.length, ...data.servers);
-        if (!KNOWN_FREEDMR_SERVERS.some(s => (s.host || "").toLowerCase() === "master.adn.systems")) {
-          KNOWN_FREEDMR_SERVERS.push({
-            id: "ADN-GL",
-            country: "GLOBAL",
-            country_name: "ADN Systems",
-            name: "ADN Global Router",
-            host: "master.adn.systems",
-            port: 62031,
-            password: "passw0rd"
-          });
-        }
       }
     } catch (e) {
       console.warn("[BM-BANNER] Failed to refresh FreeDMR servers:", e);
@@ -408,11 +746,11 @@ export function renderNetworkBadgeElement(badgeEl, netType, xlxModule = "") {
   }
 
   const titlePrefix = (typeof window !== "undefined" && window.t)
-    ? window.t("hotspots.net_badge_prefix", {}, "Сеть")
-    : "Сеть";
+    ? window.t("hotspots.net_badge_prefix", {}, "Network")
+    : "Network";
   const clickHint = (typeof window !== "undefined" && window.t)
-    ? window.t("hotspots.net_badge_click_hint", {}, "клик — параметры подключения")
-    : "клик — параметры подключения";
+    ? window.t("hotspots.net_badge_click_hint", {}, "click for connection settings")
+    : "click for connection settings";
   badgeEl.title = `${titlePrefix}: ${profile.fullName} (${clickHint})`;
 }
 
@@ -434,7 +772,7 @@ export function updateCardNetworkBadge(card, hs) {
   const netType = (hs && hs.network_type) ? hs.network_type : "bm";
   const profile = getDmrNetworkProfile(netType);
   const pId = profile.id;
-  ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom"].forEach(n => {
+  ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom", "adn", "ysf"].forEach(n => {
     card.classList.toggle(`card-net-${n}`, pId === n);
   });
   card.dataset.networkType = pId;
@@ -498,17 +836,20 @@ export function getBmServerInfo(hostVal, networkType = "bm") {
 
   if (match) {
     const cCode = (match.country_code || match.country || "GLOBAL").toUpperCase();
-    const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
-    const cName = cCode !== "GLOBAL" ? getLocalizedCountryName(cCode, match.country_name || match.country || cCode, curLang) : (match.country_name || profile.shortLabel);
+    const curLang = getBannerCurrentLang();
+    const cName = resolveServerCountryName(match, match.country_name || match.country || profile.shortLabel, curLang);
 
     const countryMasters = list.filter(m => {
       const cc = (m.country_code || m.country || "").toUpperCase();
       return cc === cCode;
     }).sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
 
+    const resolvedName = resolveServerDisplayName(match, cName, curLang);
     let displayName = cName;
-    if (match.name && match.name.trim()) {
-      displayName = match.name.trim();
+    if (netKey === "bm") {
+      displayName = match.id ? `${cName} (${match.id})` : (resolvedName || cName);
+    } else if (resolvedName) {
+      displayName = resolvedName;
     } else if (countryMasters.length > 1) {
       const idx = countryMasters.findIndex(m => m.id === match.id);
       const num = idx >= 0 ? (idx + 1) : 1;
@@ -527,14 +868,16 @@ export function getBmServerInfo(hostVal, networkType = "bm") {
   if (netKey === "allstar") {
     const isLocal = clean === "127.0.0.1" || clean === "localhost";
     const matched = KNOWN_ALLSTAR_SERVERS.find(s => (s.host || "").toLowerCase() === clean);
-    const title = matched ? matched.name : (isLocal ? "Local Node" : (raw ? raw.split(":")[0] : "AllStarLink"));
+    const localNodeLabel = (typeof window !== "undefined" && window.t) ? window.t("asl.local_node_title", {}, "ASL Local Node") : "Local Node";
+    const localCountryLabel = (typeof window !== "undefined" && window.t) ? window.t("countries.LOCAL", {}, "Local") : "Local";
+    const title = matched ? resolveServerDisplayName(matched, localCountryLabel, getBannerCurrentLang()) : (isLocal ? localNodeLabel : (raw ? raw.split(":")[0] : "AllStarLink"));
     return {
       countryCode: isLocal ? "LOCAL" : "GLOBAL",
-      countryName: isLocal ? "Локальный" : "AllStarLink",
+      countryName: isLocal ? localCountryLabel : "AllStarLink",
       displayName: title,
       host: raw || "127.0.0.1",
       flagHtml: isLocal
-        ? `<span class="flag-badge flag-local" title="Локальный узел ASL">🏠</span>`
+        ? `<span class="flag-badge flag-local" title="${escapeComboHtml(localNodeLabel)}">🏠</span>`
         : `<span class="flag-badge flag-global" title="AllStarLink IAX2">🌐</span>`
     };
   }
@@ -563,39 +906,134 @@ export function populateBmServerSelect(select, currentHost, networkType = "bm") 
   const targetCount = masters.length;
   const currentCount = parseInt(select.dataset.masterCount || "0", 10);
   const lastNet = select.dataset.networkType || "";
-  const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+  const curLang = getBannerCurrentLang();
   const lastLang = select.dataset.lang || "";
   const lastCacheVer = select.dataset.cacheVer || "";
   const curCacheVer = String((typeof window !== "undefined" && window._dmrServersCacheVer) || 0);
   const pinnedList = getPinnedServers(netKey);
   const pinnedStr = pinnedList.join(",");
   const lastPinned = select.dataset.pinned || "";
+  const ysfFavSig = (netKey === "ysf")
+    ? ((typeof window.getYsfBookmarks === "function" ? window.getYsfBookmarks() : []).map(r => String(r.id || r.host || "")).join(","))
+    : "";
+  const lastYsfFavSig = select.dataset.ysfFavSig || "";
 
-  if (currentCount !== targetCount || lastLang !== curLang || lastNet !== netKey || lastCacheVer !== curCacheVer || lastPinned !== pinnedStr) {
+  if (currentCount !== targetCount || lastLang !== curLang || lastNet !== netKey || lastCacheVer !== curCacheVer || lastPinned !== pinnedStr || lastYsfFavSig !== ysfFavSig) {
     select.innerHTML = "";
+    select.dataset.ysfFavSig = ysfFavSig;
     select.dataset.masterCount = String(targetCount);
     select.dataset.lang = curLang;
     select.dataset.networkType = netKey;
     select.dataset.cacheVer = curCacheVer;
     select.dataset.pinned = pinnedStr;
 
+    if (netKey === "ysf") {
+      // Выпадающий список = точный клон «Контактов YSF» (комнаты, добавленные из Каталога). Без служебных пунктов.
+      const favList = (typeof window.getYsfBookmarks === "function") ? window.getYsfBookmarks() : [];
+      const roomsToShow = [...favList];
+
+      roomsToShow.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.host || m.id || "";
+        let cCode = (m.country_code || m.country || "").toUpperCase();
+        let refName = (m.reflector_name || m.name || "").trim();
+        const rawName = (m.name || "").trim();
+
+        if (!refName || !cCode || cCode === "GLOBAL") {
+          const match = rawName.match(/^([A-Za-z]{2})[-_ ]\s*(.*)$/);
+          if (match) {
+            if (!cCode || cCode === "GLOBAL") cCode = match[1].toUpperCase();
+            if (!refName) refName = match[2].trim();
+          }
+        }
+        if (!cCode) cCode = "XX";
+        if (m.id) opt.dataset.roomId = String(m.id);
+
+        const isGlobalOrXx = !cCode || cCode === "GLOBAL" || cCode === "XX";
+        const flag = m.flag || (!isGlobalOrXx ? isoToEmoji(cCode) : "🌐");
+        const localizedCountry = !isGlobalOrXx
+          ? getLocalizedCountryName(cCode, cCode, curLang)
+          : (window.t ? window.t("countries.GLOBAL", {}, "International") : "International");
+        const targetName = refName || localizedCountry;
+        const idTag = m.id ? ` #${m.id}` : "";
+        opt.textContent = `${flag} ${cCode} ${targetName}${idTag} (${m.host || ""})`;
+        select.appendChild(opt);
+      });
+
+      // Синхронизация выбранного пункта с текущей комнатой HS.
+      let ysfMatched = false;
+      if (cleanCurrent) {
+        for (let i = 0; i < select.options.length; i++) {
+          const ov = select.options[i].value.toLowerCase();
+          if (ov === cleanCurrent || ov.split(":")[0] === cleanCurrent) {
+            select.selectedIndex = i;
+            ysfMatched = true;
+            break;
+          }
+        }
+        // Текущая комната не в Контактах: показываем её ТОЛЬКО как отображаемое значение закрытого списка (в раскрытом списке её нет).
+        if (!ysfMatched) {
+          const curOpt = document.createElement("option");
+          curOpt.value = currentHost;
+          curOpt.textContent = `🌐 ${currentHost}`;
+          curOpt.hidden = true;
+          curOpt.disabled = true;
+          curOpt.dataset.currentOnly = "1";
+          select.insertBefore(curOpt, select.firstChild);
+          select.selectedIndex = 0;
+        }
+      }
+      return;
+    }
+
     if (netKey !== "custom" && netKey !== "allstar") {
       const benchOpt = document.createElement("option");
       benchOpt.value = "__TEST_SERVERS__";
-      benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
+      benchOpt.textContent = window.t ? window.t("hotspots.bench_opt", {}, "⚡ SERVER BENCHMARK (ping all masters)") : "⚡ SERVER BENCHMARK (ping all masters)";
       select.appendChild(benchOpt);
     }
 
-    const recTag = window.t ? window.t("bm.master_recommended", {}, "⭐ [Рекомендуется]") : "⭐ [Рекомендуется]";
+    const recTag = window.t ? window.t("bm.master_recommended", {}, "⭐ [Recommended]") : "⭐ [Recommended]";
+    const deadTag = window.t ? window.t("server_probe.status_dead", {}, "OFFLINE") : "OFFLINE";
+    const unitMs = window.t ? window.t("ping.unit_ms", {}, "ms") : "ms";
 
     masters.forEach(m => {
       const opt = document.createElement("option");
       opt.value = m.host || "";
-      const cCode = (m.country_code || m.country || "GLOBAL").toUpperCase();
-      const countryName = cCode !== "GLOBAL" ? getLocalizedCountryName(cCode, m.country_name || m.country || profile.shortLabel, curLang) : (m.country_name || profile.shortLabel);
-      const flag = m.flag || (cCode !== "GLOBAL" ? isoToEmoji(cCode) : "🌐");
+      let cCode = (m.country_code || m.country || "").toUpperCase();
+      let refName = (m.reflector_name || "").trim();
+      const rawName = (m.name || "").trim();
+
+      if (netKey === "ysf") {
+        if (!refName || !cCode || cCode === "GLOBAL") {
+          const match = rawName.match(/^([A-Za-z]{2})[-_ ]\s*(.*)$/);
+          if (match) {
+            if (!cCode || cCode === "GLOBAL") cCode = match[1].toUpperCase();
+            if (!refName) refName = match[2].trim();
+          }
+        }
+        if (!cCode) cCode = "XX";
+        if (m.id) opt.dataset.roomId = String(m.id);
+      }
+
+      const isGlobalOrXx = !cCode || cCode === "GLOBAL" || cCode === "XX";
+      const flag = m.flag || (!isGlobalOrXx ? isoToEmoji(cCode) : "🌐");
       const recSuffix = m.recommended ? ` ${recTag}` : "";
-      const labelMid = netKey === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || profile.shortLabel);
+
+      let itemCore = "";
+      if (netKey === "ysf") {
+        const localizedCountry = !isGlobalOrXx
+          ? getLocalizedCountryName(cCode, cCode, curLang)
+          : (window.t ? window.t("countries.GLOBAL", {}, "International") : "International");
+        const targetName = refName || localizedCountry;
+        const idTag = m.id ? ` #${m.id}` : "";
+        itemCore = `${flag} ${cCode} ${targetName}${idTag} (${m.host || ""})`;
+      } else {
+        const countryName = resolveServerCountryName(m, m.country_name || m.country || profile.shortLabel, curLang);
+        const resolvedMid = resolveServerDisplayName(m, countryName, curLang);
+        const labelMid = netKey === "bm" ? `BM ${m.id || ""}` : (resolvedMid || m.id || profile.shortLabel);
+        itemCore = `${flag} ${countryName} — ${labelMid} (${m.host || ""})`;
+      }
 
       const st = (m.state || "").toLowerCase();
       const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
@@ -608,14 +1046,14 @@ export function populateBmServerSelect(select, currentHost, networkType = "bm") 
       const pinPrefix = isPinned ? "📌 " : "";
 
       if (isDead) {
-        opt.textContent = `${pinPrefix}🔴 НЕ ОТВЕЧАЕТ · ${flag} ${countryName} — ${labelMid} (${m.host || ""})`;
+        opt.textContent = `${pinPrefix}🔴 ${deadTag} · ${itemCore}`;
         opt.style.color = "#ef4444";
         opt.dataset.dead = "1";
       } else if (pingVal !== null && !isNaN(pingVal)) {
-        opt.textContent = `${pinPrefix}⚡ ${Math.round(pingVal)} мс · ${flag} ${countryName} — ${labelMid} (${m.host || ""})${recSuffix}`;
+        opt.textContent = `${pinPrefix}⚡ ${Math.round(pingVal)} ${unitMs} · ${itemCore}${recSuffix}`;
         opt.dataset.ping = String(Math.round(pingVal));
       } else {
-        opt.textContent = `${pinPrefix}${flag} ${countryName} — ${labelMid} (${m.host || ""})${recSuffix}`;
+        opt.textContent = `${pinPrefix}${itemCore}${recSuffix}`;
       }
 
       select.appendChild(opt);
@@ -716,7 +1154,7 @@ export function updateCardBmBanner(card, hs) {
     const hid = card.dataset.hotspotId || "default";
     const cid = resolveHotspotId(hid);
     hs = (currentHotspots && currentHotspots.length)
-      ? (currentHotspots.find(h => h.id === cid) || currentHotspots.find(h => h.id === hid) || (hid === "default" ? currentHotspots[0] : null) || currentHotspots[0])
+      ? (currentHotspots.find(h => h.id === hid) || currentHotspots.find(h => h.id === cid) || (hid === "default" ? currentHotspots[0] : null) || currentHotspots[0])
       : null;
   }
 
@@ -729,7 +1167,7 @@ export function updateCardBmBanner(card, hs) {
   const netType = (hs && hs.network_type) ? hs.network_type : (card.dataset.networkType || "bm");
   const profile = getDmrNetworkProfile(netType);
   const pId = profile.id;
-  ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom"].forEach(n => {
+  ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom", "adn", "ysf"].forEach(n => {
     card.classList.toggle(`card-net-${n}`, pId === n);
   });
   card.dataset.networkType = pId;
@@ -811,7 +1249,8 @@ export function updateCardBmBanner(card, hs) {
       const allHotspots = getCurrentHotspots();
       const rawId = card.dataset.hotspotId || "default";
       const cid = (typeof resolveHotspotId === "function") ? resolveHotspotId(rawId) : rawId;
-      const targetHs = allHotspots.find(h => h.id === cid || h.id === rawId) ||
+      const targetHs = allHotspots.find(h => h.id === rawId) ||
+                       allHotspots.find(h => h.id === cid) ||
                        (rawId === "default" ? allHotspots[0] : null) ||
                        allHotspots[0];
       const currHost = (targetHs && targetHs.bm_master_host) || select.value || hostVal;
@@ -827,7 +1266,8 @@ export function updateCardBmBanner(card, hs) {
       const allHotspots = getCurrentHotspots();
       const rawId = card.dataset.hotspotId || "default";
       const cid = (typeof resolveHotspotId === "function") ? resolveHotspotId(rawId) : rawId;
-      const targetHs = allHotspots.find(h => h.id === cid || h.id === rawId) ||
+      const targetHs = allHotspots.find(h => h.id === rawId) ||
+                       allHotspots.find(h => h.id === cid) ||
                        (rawId === "default" ? allHotspots[0] : null) ||
                        allHotspots[0];
       const currNet = (targetHs && targetHs.network_type) || "bm";
@@ -842,9 +1282,29 @@ export function updateCardBmBanner(card, hs) {
         return;
       }
 
+      if (newHost === "__OPEN_YSF_CATALOG__") {
+        const currHost = (targetHs && targetHs.bm_master_host) || "";
+        populateBmServerSelect(select, currHost, currNet);
+        const targetId = (targetHs && targetHs.id) ? targetHs.id : cid;
+        if (typeof window.openMyContactsModal === "function") {
+          window.openMyContactsModal(targetId, "ysf_dir");
+        }
+        return;
+      }
+
       if (!targetHs) {
         console.warn("[BM-BANNER] targetHs not found for card:", rawId, cid);
         return;
+      }
+
+      if (currNet === "ysf") {
+        const ysfFavs = (typeof window.getYsfBookmarks === "function") ? window.getYsfBookmarks() : [];
+        const ysfList = [...ysfFavs, ...(getNetworkServersList("ysf") || [])];
+        const foundRoom = (ysfList || []).find(r => r && ((r.host && r.host.toLowerCase() === newHost.toLowerCase()) || String(r.id) === newHost));
+        if (foundRoom) {
+          targetHs.ysf_room = String(foundRoom.id || "").trim();
+          targetHs.ysf_name = String(foundRoom.reflector_name || foundRoom.name || "").trim();
+        }
       }
 
       if (targetHs.bm_master_host === newHost) return;
@@ -856,7 +1316,8 @@ export function updateCardBmBanner(card, hs) {
         window.updateCardXlxPanel(card, targetHs);
       }
       if (typeof window !== "undefined" && typeof window.updateBmStatus === "function") {
-        window.updateBmStatus("connecting", `Подключение к ${newHost}...`, targetId);
+        const msg = window.t ? window.t("status.bm_connecting_host", { host: newHost }, `Connecting to ${newHost}...`) : `Подключение к ${newHost}...`;
+        window.updateBmStatus("connecting", msg, targetId);
       }
 
       // Immediate reset of packet loss counter for new server
@@ -934,14 +1395,10 @@ export function updateCardBmBanner(card, hs) {
   if (nameBadge) {
     nameBadge.classList.toggle("is-online", isOnline);
   }
-  const isPrimary = (card.dataset.hotspotId === "default") ||
-    (currentHotspots[0] && (currentHotspots[0].id === hid || currentHotspots[0].id === rawHid)) ||
-    (card === document.querySelector(".radio-container"));
-
   let pingMs = null;
   const cachedBmPings = (typeof window !== "undefined" && window.cachedBmPings) || {};
   const cachedBmHostPings = (typeof window !== "undefined" && window.cachedBmHostPings) || {};
-  if (isPrimary || isOnline) {
+  if (isOnline || !isCollapsed) {
     pingMs = (cachedBmPings[hid] !== undefined && cachedBmPings[hid] !== null)
       ? cachedBmPings[hid]
       : ((cachedBmPings[rawHid] !== undefined && cachedBmPings[rawHid] !== null)
@@ -1017,19 +1474,23 @@ export function updateCardBmBanner(card, hs) {
       updatePingElement(pingEl, isWsOpen ? clientPing : null, clientLossData, "client", profile.shortLabel);
     } else {
       const isAslNoNode = (profile.id === "allstar" && !hostVal);
-      const isOfflineCard = isCollapsed || (!isOnline && !isPrimary) || isAslNoNode;
+      const isOfflineCard = isCollapsed || !isOnline || isAslNoNode;
       const lossData = isOfflineCard ? { lossPercent: 0, isOffline: false } : calculateCardPacketLoss(cid, hostVal);
       updatePingElement(pingEl, isOfflineCard ? null : pingMs, lossData, "server", profile.shortLabel);
       if (profile.id === "allstar") {
         const targetNode = (hs && (hs.connected_node || hs._last_asl_node || hs._active_asl_node)) || "";
         const isConnected = Boolean(targetNode && String(targetNode).trim() !== "1999" && String(targetNode).trim() !== "0");
-        const nodeStr = isConnected ? `Node #${targetNode}` : "* disconnect *";
-        pingEl.title = `HUB/Node: ${nodeStr} (${pingMs !== null ? pingMs + " ms" : "--"}). Клик для смены режима`;
+        const nodeStr = isConnected ? `#${targetNode}` : (window.t ? window.t("asl.node_disconnected", {}, "* disconnect *") : "* disconnect *");
+        const unitMs = window.t ? window.t("ping.unit_ms", {}, "ms") : "ms";
+        const msStr = pingMs !== null ? `${pingMs} ${unitMs}` : "--";
+        pingEl.title = window.t
+          ? window.t("asl.ping_mode_card_title", { node: nodeStr, ms: msStr }, `ASL ↔ ${nodeStr} (${msStr})`)
+          : `ASL ↔ ${nodeStr} (${msStr})`;
       }
     }
   }
 
-  const isOfflineCardForE2e = isCollapsed || (!isOnline && !isPrimary);
+  const isOfflineCardForE2e = isCollapsed || !isOnline;
   card._lastServerPingMs = (!isOfflineCardForE2e && pingMs !== null && pingMs !== undefined && !isNaN(Number(pingMs)) && Number(pingMs) >= 0)
     ? Math.round(Number(pingMs))
     : null;
@@ -1074,31 +1535,32 @@ export function updateCardE2eDisplay(card) {
     : NaN;
   const srvMs = (!isNaN(rawSrv) && rawSrv >= 0) ? Math.round(rawSrv) : null;
 
-  const curLang = (typeof window !== "undefined" && ((window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang)))) || "ru";
-  const isEn = (curLang !== "ru" && curLang !== "uk");
-
+  const tr = (typeof window !== "undefined" && typeof window.t === "function") ? window.t : null;
   let displayedMs = null;
 
   if (clientMs !== null && srvMs !== null) {
     displayedMs = clientMs + srvMs;
     rttEl.textContent = `E2E: ${displayedMs}ms`;
-    rttEl.title = isEn
-      ? `End-to-End Latency (E2E): ${displayedMs} ms (Client: ${clientMs} ms + Network: ${srvMs} ms)`
-      : `Сквозная задержка (E2E): ${displayedMs} мс (Клиент: ${clientMs} мс + Сеть: ${srvMs} мс)`;
+    rttEl.title = tr
+      ? tr("vfo.e2e_client_net_title", { total: displayedMs, client: clientMs, srv: srvMs })
+      : `End-to-End Latency (E2E): ${displayedMs} ms (Client: ${clientMs} ms + Network: ${srvMs} ms)`;
   } else if (clientMs !== null) {
     displayedMs = clientMs;
     rttEl.textContent = `E2E: ${clientMs}ms`;
-    rttEl.title = isEn
-      ? `End-to-End Latency (E2E): ${clientMs} ms (Client: ${clientMs} ms, network ping N/A)`
-      : `Сквозная задержка (E2E): ${clientMs} мс (Клиент: ${clientMs} мс, пинг сети н/д)`;
+    rttEl.title = tr
+      ? tr("vfo.e2e_client_only_title", { total: clientMs, client: clientMs })
+      : `End-to-End Latency (E2E): ${clientMs} ms (Client: ${clientMs} ms, network ping N/A)`;
   } else if (srvMs !== null) {
     displayedMs = srvMs;
     rttEl.textContent = `E2E: ${srvMs}ms`;
-    rttEl.title = isEn
-      ? `End-to-End Latency (E2E): ${srvMs} ms (Network: ${srvMs} ms)`
-      : `Сквозная задержка (E2E): ${srvMs} мс (Сеть: ${srvMs} мс)`;
+    rttEl.title = tr
+      ? tr("vfo.e2e_net_only_title", { total: srvMs, srv: srvMs })
+      : `End-to-End Latency (E2E): ${srvMs} ms (Network: ${srvMs} ms)`;
   } else {
     rttEl.textContent = "E2E: --ms";
+    rttEl.title = tr
+      ? tr("vfo.e2e_no_data_title", {}, "End-to-End Latency (E2E): N/A")
+      : "End-to-End Latency (E2E): N/A";
   }
 
   applyE2eColorClass(rttEl, displayedMs);
@@ -1111,9 +1573,11 @@ export function refreshAllCardsBmBanner() {
     const hid = card.dataset.hotspotId || "default";
     const cid = resolveHotspotId(hid);
     const hs = (currentHotspots && currentHotspots.length)
-      ? (currentHotspots.find(h => h.id === cid) || currentHotspots.find(h => h.id === hid) || currentHotspots[0])
+      ? (currentHotspots.find(h => h.id === hid) || currentHotspots.find(h => h.id === cid) || currentHotspots[0])
       : null;
-    updateCardBmBanner(card, hs);
+    if (hs) {
+      updateCardBmBanner(card, hs);
+    }
   });
 }
 
@@ -1127,6 +1591,9 @@ export function updateRxLiveBanner(data) {}
    ========================================================================== */
 
 export function getPinnedServers(netKey) {
+  const cached = _pinnedServersCache[netKey];
+  if (Array.isArray(cached)) return cached.slice();
+  if (_pinnedServersCacheLoaded) return [];
   try {
     const raw = localStorage.getItem(`pinnedServers_${netKey}`);
     return raw ? JSON.parse(raw) : [];
@@ -1144,6 +1611,7 @@ export function togglePinServer(netKey, serverKey) {
   } else {
     pinned.push(serverKey);
   }
+  _savePinnedServerToServer(netKey, pinned);
   try {
     localStorage.setItem(`pinnedServers_${netKey}`, JSON.stringify(pinned));
   } catch (e) {}
@@ -1258,8 +1726,9 @@ export function sortServersByCriteria(servers, mode = "ping", dir = "asc", netKe
         const addrB = String(b.host || b.ip || "").toLowerCase();
         res = addrA.localeCompare(addrB);
       } else if (mode === "country") {
-        const cA = String(a.country_name || a.country || "").toLowerCase();
-        const cB = String(b.country_name || b.country || "").toLowerCase();
+        const lang = getBannerCurrentLang();
+        const cA = String(resolveServerCountryName(a, a.country_name || a.country || "", lang)).toLowerCase();
+        const cB = String(resolveServerCountryName(b, b.country_name || b.country || "", lang)).toLowerCase();
         res = cA.localeCompare(cB);
         if (res === 0) {
           res = extractServerNumber(a) - extractServerNumber(b);
@@ -1314,11 +1783,12 @@ export function filterServersList(servers, query, curLang = "ru") {
 
   return servers.filter(s => {
     if (!s) return false;
-    const cCode = (s.country_code || s.country || "").toUpperCase();
-    const locCountry = cCode ? getLocalizedCountryName(cCode, s.country_name || s.country, curLang) : "";
+    const locCountry = resolveServerCountryName(s, s.country_name || s.country, curLang);
+    const locName = resolveServerDisplayName(s, locCountry, curLang);
     const haystack = [
       s.id,
       s.name,
+      locName,
       s.host,
       s.ip,
       s.country,
@@ -1394,7 +1864,7 @@ function renderComboboxList(select) {
   if (!banner || !banner._srvCombo) return;
   const combo = banner._srvCombo;
   const netKey = (select.dataset.networkType || "xlx").toLowerCase();
-  const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+  const curLang = getBannerCurrentLang();
   const rawMasters = getNetworkServersList(netKey);
   const profile = getDmrNetworkProfile(netKey);
   const currentVal = (select.value || "").trim().toLowerCase();
@@ -1440,9 +1910,10 @@ function renderComboboxList(select) {
     li.dataset.index = String(idx);
 
     const cCode = (m.country_code || m.country || "GLOBAL").toUpperCase();
-    const countryName = cCode !== "GLOBAL" ? getLocalizedCountryName(cCode, m.country_name || m.country || profile.shortLabel, curLang) : (m.country_name || profile.shortLabel);
+    const countryName = resolveServerCountryName(m, m.country_name || m.country || profile.shortLabel, curLang);
     const flag = m.flag || (cCode !== "GLOBAL" ? isoToEmoji(cCode) : "🌐");
-    const labelMid = netKey === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || profile.shortLabel);
+    const resolvedMid = resolveServerDisplayName(m, countryName, curLang);
+    const labelMid = netKey === "bm" ? `BM ${m.id || ""}` : (resolvedMid || m.id || profile.shortLabel);
 
     const st = (m.state || "").toLowerCase();
     const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
@@ -1476,11 +1947,13 @@ function renderComboboxList(select) {
     const hlCountry = highlightComboMatches(countryName, tokens);
     const hlHost = mHost && mHost !== labelMid ? highlightComboMatches(`(${mHost})`, tokens) : "";
 
+    const deadLabel = window.t ? window.t("server_probe.status_dead", {}, "NO REPLY") : "NO REPLY";
+    const unitMs = window.t ? window.t("ping.unit_ms", {}, "ms") : "ms";
     let pingHtml = "";
     if (isDead) {
-      pingHtml = `<span class="srv-item-ping">🔴 НЕ ОТВЕЧАЕТ</span>`;
+      pingHtml = `<span class="srv-item-ping">🔴 ${escapeComboHtml(deadLabel)}</span>`;
     } else if (pingVal !== null && !isNaN(pingVal)) {
-      pingHtml = `<span class="srv-item-ping">⚡ ${Math.round(pingVal)} мс</span>`;
+      pingHtml = `<span class="srv-item-ping">⚡ ${Math.round(pingVal)} ${escapeComboHtml(unitMs)}</span>`;
     }
 
     li.innerHTML = `
@@ -1598,7 +2071,7 @@ export function setupServerCombobox(select, currentHost, networkType = "xlx") {
     panel.className = "srv-combo-panel";
     panel.style.display = "none";
 
-    const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+    const curLang = getBannerCurrentLang();
     const placeholder = window.t ? window.t("servers.search_placeholder", {}, "Поиск сервера...") : "Поиск сервера...";
     const clearTitle = window.t ? window.t("servers.clear_search", {}, "Очистить поиск") : "Очистить поиск";
     const testTitle = window.t ? window.t("hotspots.bench_opt", {}, "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)") : "⚡ ТЕСТ СЕРВЕРОВ (пинг-тест всех мастеров)";
@@ -1637,12 +2110,15 @@ export function setupServerCombobox(select, currentHost, networkType = "xlx") {
     const testRow = panel.querySelector(".srv-combo-test-row");
 
     const rawMasters = getNetworkServersList(netKey);
-    let savedMode = null;
-    let savedDir = "asc";
-    try {
-      savedMode = localStorage.getItem(`srvSortMode_${netKey}`);
-      savedDir = localStorage.getItem(`srvSortDir_${netKey}`) || "asc";
-    } catch (_) {}
+    let savedMode = _srvSortPrefsCache[`srvSortMode_${netKey}`] || null;
+    let savedDir = _srvSortPrefsCache[`srvSortDir_${netKey}`] || null;
+    if (!savedMode || !savedDir) {
+      try {
+        if (!savedMode) savedMode = localStorage.getItem(`srvSortMode_${netKey}`);
+        if (!savedDir) savedDir = localStorage.getItem(`srvSortDir_${netKey}`) || "asc";
+      } catch (_) {}
+    }
+    savedDir = savedDir || "asc";
 
     banner._srvCombo = {
       panel,
@@ -1713,10 +2189,7 @@ export function setupServerCombobox(select, currentHost, networkType = "xlx") {
           banner._srvCombo.mode = mode;
           banner._srvCombo.dir = "asc";
         }
-        try {
-          localStorage.setItem(`srvSortMode_${curNet}`, banner._srvCombo.mode);
-          localStorage.setItem(`srvSortDir_${curNet}`, banner._srvCombo.dir);
-        } catch (_) {}
+        _saveSrvSortPrefsToServer(curNet, banner._srvCombo.mode, banner._srvCombo.dir);
         renderComboboxList(select);
       });
     });
@@ -1736,8 +2209,13 @@ export function setupServerCombobox(select, currentHost, networkType = "xlx") {
   }
 }
 
+export { _loadPinnedServersFromServer, _applyBannerCollections };
+
 // Window & __proxdmr bridge for backward compatibility
 if (typeof window !== "undefined") {
+  window.__proxdmrApplyBannerCollections = _applyBannerCollections;
+  _loadPinnedServersFromServer();
+  window._loadPinnedServersFromServer = _loadPinnedServersFromServer;
   window.KNOWN_BM_MASTERS = KNOWN_BM_MASTERS;
   window.DMR_NETWORK_PROFILES = DMR_NETWORK_PROFILES;
   window.getDmrNetworkProfile = getDmrNetworkProfile;
@@ -1757,6 +2235,7 @@ if (typeof window !== "undefined") {
   window.updateRxLiveBanner = updateRxLiveBanner;
   window.refreshXlxServers = refreshXlxServers;
   window.refreshDmrPlusServers = refreshDmrPlusServers;
+  window.refreshAdnServers = refreshAdnServers;
   window.getPinnedServers = getPinnedServers;
   window.togglePinServer = togglePinServer;
   window.isSearchComboEnabled = isSearchComboEnabled;
@@ -1786,6 +2265,7 @@ if (typeof window !== "undefined") {
     updateRxLiveBanner,
     refreshXlxServers,
     refreshDmrPlusServers,
+    refreshAdnServers,
     getPinnedServers,
     togglePinServer,
     isSearchComboEnabled,
@@ -1807,6 +2287,31 @@ if (typeof window !== "undefined") {
       const host = hs ? hs.bm_master_host : "";
       const netType = hs ? (hs.network_type || "bm") : "bm";
       populateBmServerSelect(sel, host, netType);
+
+      const banner = sel.closest(".bm-info-banner");
+      if (banner && banner._srvCombo) {
+        const c = banner._srvCombo;
+        if (c.input && window.t) c.input.placeholder = window.t("servers.search_placeholder", {}, "Search server...");
+        if (c.clearBtn && window.t) c.clearBtn.title = window.t("servers.clear_search", {}, "Clear search");
+        if (c.testRow && window.t) {
+          const tTitle = window.t("hotspots.bench_opt", {}, "⚡ SERVER BENCHMARK");
+          c.testRow.title = tTitle;
+          const tLbl = c.testRow.querySelector(".srv-combo-test-lbl");
+          if (tLbl) tLbl.textContent = tTitle;
+        }
+        if (c.panel && window.t) {
+          c.panel.querySelectorAll(".srv-sort-btn").forEach(btn => {
+            const mode = btn.dataset.mode;
+            if (!mode) return;
+            btn.title = window.t(`servers.sort_${mode}_title`, {}, btn.title);
+            const lbl = btn.querySelector(".srv-sort-lbl");
+            if (lbl) lbl.textContent = window.t(`servers.sort_${mode}`, {}, lbl.textContent);
+          });
+        }
+        if (c.isOpen) {
+          renderComboboxList(sel);
+        }
+      }
     });
     refreshAllCardsBmBanner();
   });

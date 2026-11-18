@@ -25,39 +25,45 @@ from tts_normalizer import (
     normalize_for_russian_tts,
     filter_hesitation_fillers,
     strip_json_artifacts,
+    deduplicate_repeated_phrases,
     NOISE_PLACEHOLDER,
     is_noise_placeholder,
 )
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.transcriber")
 
 LANG_NAMES: Dict[str, str] = {
-    "ru": "русский",
-    "en": "английский",
-    "uk": "украинский",
-    "de": "немецкий",
-    "fr": "французский",
-    "es": "испанский",
-    "it": "итальянский",
-    "pl": "польский",
-    "pt": "португальский",
-    "nl": "нидерландский",
-    "tr": "турецкий",
-    "ja": "японский",
-    "zh": "китайский",
-    "ko": "корейский",
-    "cs": "чешский",
-    "ro": "румынский",
-    "bg": "болгарский",
-    "el": "греческий",
-    "hu": "венгерский",
-    "sv": "шведский",
-    "no": "норвежский",
-    "fi": "финский",
-    "da": "датский",
-    "he": "иврит",
-    "ar": "арабский",
-    "none": "без перевода"
+    "ru": "Russian",
+    "en": "English",
+    "uk": "Ukrainian",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "nl": "Dutch",
+    "tr": "Turkish",
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "ko": "Korean",
+    "cs": "Czech",
+    "ro": "Romanian",
+    "bg": "Bulgarian",
+    "el": "Greek",
+    "hu": "Hungarian",
+    "sv": "Swedish",
+    "no": "Norwegian",
+    "fi": "Finnish",
+    "da": "Danish",
+    "he": "Hebrew",
+    "ar": "Arabic",
+    "none": "No translation"
 }
 
 
@@ -138,178 +144,243 @@ LANG_3LETTER_MAP: Dict[str, str] = {
 DEFAULT_MODELS_DATA: List[Dict[str, Any]] = [
     {
         "id": "gemini-3.1-flash-lite",
-        "name": "Gemini 3.1 Flash-Lite — ⚡ Free Tier (Ультрабыстрая, для бесплатных ключей)",
-        "description": "Наилучший выбор для бесплатных API-ключей: минимальная задержка, максимальная доступность и стабильная работа с аудио и переводом.",
+        "name": "Gemini 3.1 Flash-Lite — ⚡ Free Tier (Ultra-fast, for free keys)",
+        "description": "Best choice for free API keys: lowest latency, maximum availability, and stable audio recognition & translation.",
         "badge": "Free Tier",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Free Tier", "Ультранизкая задержка"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Free Tier", "Ultra-Low Latency"]
     },
     {
         "id": "gemini-3.5-flash",
-        "name": "Gemini 3.5 Flash — ⚡ Речь + Перевод (Рекомендуется)",
-        "description": "Оптимальный баланс скорости и качества для радиоэфира в реальном времени. Высокая точность радиотерминологии.",
-        "badge": "Рекомендуется",
+        "name": "Gemini 3.5 Flash — ⚡ Speech + Translation (Recommended)",
+        "description": "Optimal balance of speed and quality for real-time radio traffic. High accuracy with amateur radio terminology.",
+        "badge": "Recommended",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Низкая задержка"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Low Latency"]
     },
     {
         "id": "gemini-3.5-flash-lite",
-        "name": "Gemini 3.5 Flash-Lite — 🚀 Ультрабыстрая (Минимальная задержка)",
-        "description": "Минимальная задержка отклика, идеальна при плотном радиообмене и экономии квот.",
-        "badge": "Минимальная задержка",
+        "name": "Gemini 3.5 Flash-Lite — 🚀 Ultra-fast (Minimum Latency)",
+        "description": "Minimum response latency, ideal for busy radio traffic and saving quota.",
+        "badge": "Min Latency",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Ультранизкая задержка"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Ultra-Low Latency"]
     },
     {
         "id": "gemini-3.1-flash-lite-preview",
         "name": "Gemini 3.1 Flash-Lite Preview — ⚡ Free Tier Preview",
-        "description": "Предварительная версия 3.1 Flash-Lite для распознавания и перевода речи.",
+        "description": "Preview version of 3.1 Flash-Lite for speech recognition and translation.",
         "badge": "Free Preview",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Free Tier"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Free Tier"]
     },
     {
         "id": "gemini-3.6-flash",
-        "name": "Gemini 3.6 Flash — ✨ Новое поколение (Высокая детализация)",
-        "description": "Новейшая архитектура Flash с улучшенным распознаванием зашумленной речи и сложных позывных.",
-        "badge": "Новое поколение",
+        "name": "Gemini 3.6 Flash — ✨ Next Generation (High Detail)",
+        "description": "Latest Flash architecture with improved recognition of noisy speech and difficult callsigns.",
+        "badge": "Next Gen",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Шумоподавление"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Noise Reduction"]
     },
     {
         "id": "gemini-3.7-flash",
-        "name": "Gemini 3.7 Flash — ⚡ Новая версия Flash",
-        "description": "Новое поколение гибридной модели Flash с высокой скоростью и точностью.",
+        "name": "Gemini 3.7 Flash — ⚡ New Flash Version",
+        "description": "Next-generation hybrid Flash model with high speed and accuracy.",
         "badge": "Flash 3.7",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation"]
     },
     {
         "id": "gemini-3.8-flash",
-        "name": "Gemini 3.8 Flash — ⚡ Новейшая Flash",
-        "description": "Самая современная модель серии Flash для обработки звука и текста.",
+        "name": "Gemini 3.8 Flash — ⚡ Latest Flash",
+        "description": "Most modern Flash series model for processing audio and text.",
         "badge": "Flash 3.8",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation"]
     },
     {
         "id": "gemini-flash-latest",
-        "name": "Gemini Flash Latest — 🔄 Всегда актуальная версия Flash",
-        "description": "Автоматически использует самую свежую стабильную версию линейки Flash от Google.",
-        "badge": "Авто-обновление",
+        "name": "Gemini Flash Latest — 🔄 Always Current Flash",
+        "description": "Automatically uses Google's latest stable Flash release.",
+        "badge": "Auto-Update",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Авто-обновление"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Auto-Update"]
     },
     {
         "id": "gemini-flash-lite-latest",
-        "name": "Gemini Flash-Lite Latest — 🔄 Всегда актуальная Lite",
-        "description": "Автоматически использует самую свежую облегченную версию Gemini Flash-Lite.",
-        "badge": "Авто-обновление",
+        "name": "Gemini Flash-Lite Latest — 🔄 Always Current Lite",
+        "description": "Automatically uses the latest lightweight Gemini Flash-Lite release.",
+        "badge": "Auto-Update",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод", "Авто-обновление"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation", "Auto-Update"]
     },
     {
         "id": "gemini-2.5-flash",
-        "name": "Gemini 2.5 Flash — ⚡ Стабильная Flash (Free/Paid)",
-        "description": "Надежная стабильная рабочая модель для транскрипции и перевода.",
+        "name": "Gemini 2.5 Flash — ⚡ Stable Flash (Free/Paid)",
+        "description": "Reliable stable production model for transcription and translation.",
         "badge": "Flash 2.5",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation"]
     },
     {
         "id": "gemini-2.5-flash-lite",
-        "name": "Gemini 2.5 Flash-Lite — ⚡ Стабильная Lite (Free/Paid)",
-        "description": "Легковесная стабильная модель линейки 2.5 с низким расходом квот.",
+        "name": "Gemini 2.5 Flash-Lite — ⚡ Stable Lite (Free/Paid)",
+        "description": "Lightweight stable 2.5 model with low quota consumption.",
         "badge": "Lite 2.5",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Синхронный перевод"]
+        "capabilities": ["Speech Recognition", "Simultaneous Translation"]
     },
     {
         "id": "gemini-3.5-transcribe",
-        "name": "Gemini 3.5 Transcribe — 🎙️ Распознавание речи (ASR)",
-        "description": "Специализированная аудио модель Google для распознавания речи.",
+        "name": "Gemini 3.5 Transcribe — 🎙️ Speech Recognition (ASR)",
+        "description": "Specialized Google audio model for automatic speech recognition.",
         "badge": "ASR",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "ASR"]
+        "capabilities": ["Speech Recognition", "ASR"]
     },
     {
         "id": "gemini-3.1-pro-preview",
-        "name": "Gemini 3.1 Pro — 🧠 Pro (Максимальная точность)",
-        "description": "Флагманская модель Pro с максимальным качеством и глубоким пониманием радио-жаргона.",
+        "name": "Gemini 3.1 Pro — 🧠 Pro (Maximum Accuracy)",
+        "description": "Flagship Pro model with maximum quality and deep understanding of radio jargon.",
         "badge": "Pro",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Высочайшее качество перевода", "Глубокий контекст"]
+        "capabilities": ["Speech Recognition", "Highest Translation Quality", "Deep Context"]
     },
     {
         "id": "gemini-2.5-pro",
-        "name": "Gemini 2.5 Pro — 🧠 Pro (Высокое качество)",
-        "description": "Качественная флагманская модель линейки 2.5 для точного контекстного анализа.",
+        "name": "Gemini 2.5 Pro — 🧠 Pro (High Quality)",
+        "description": "High-quality 2.5 flagship model for accurate contextual analysis.",
         "badge": "Pro",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Высокая точность перевода", "Глубокий контекст"]
+        "capabilities": ["Speech Recognition", "High Translation Accuracy", "Deep Context"]
     },
     {
         "id": "gemini-pro-latest",
-        "name": "Gemini Pro Latest — 🧠 Актуальная Pro",
-        "description": "Самая свежая версия флагманской модели Pro от Google.",
+        "name": "Gemini Pro Latest — 🧠 Current Pro",
+        "description": "Latest release of Google's flagship Pro model.",
         "badge": "Pro",
         "category": "transcribe",
-        "capabilities": ["Распознавание речи", "Высокая точность перевода"]
+        "capabilities": ["Speech Recognition", "High Translation Accuracy"]
     }
 ]
 
 DEFAULT_TTS_MODELS_DATA: List[Dict[str, Any]] = [
     {
         "id": "gemini-3.1-flash-tts-preview",
-        "name": "Gemini 3.1 Flash TTS Preview — ⚡ Новейшая (Рекомендуется)",
-        "description": "Новейшая TTS: низкая задержка, 30 голосов, поддержка стриминга, мульти-спикеры.",
-        "badge": "Рекомендуется",
+        "name": "Gemini 3.1 Flash TTS Preview — ⚡ Latest (Recommended)",
+        "description": "Latest TTS: low latency, 30 voices, streaming support, multi-speaker.",
+        "badge": "Recommended",
         "category": "tts",
-        "capabilities": ["Синтез речи", "30 голосов", "Низкая задержка", "Free Tier"]
+        "capabilities": ["Speech Synthesis", "30 Voices", "Low Latency", "Free Tier"]
     },
     {
         "id": "gemini-3.8-flash-lite-tts",
-        "name": "Gemini 3.8 Flash-Lite TTS — ⚡ Быстрый синтез (TTS)",
-        "description": "Облегченная модель генерации речи Text-to-Speech с ультранизкой задержкой.",
-        "badge": "Быстрая TTS",
+        "name": "Gemini 3.8 Flash-Lite TTS — ⚡ Fast Synthesis (TTS)",
+        "description": "Lightweight Text-to-Speech generation model with ultra-low latency.",
+        "badge": "Fast TTS",
         "category": "tts",
-        "capabilities": ["Синтез речи", "Низкая задержка", "Text-to-Speech"]
+        "capabilities": ["Speech Synthesis", "Low Latency", "Text-to-Speech"]
     },
     {
         "id": "gemini-3.8-flash-tts",
-        "name": "Gemini 3.8 Flash TTS — 🔊 Синтез речи (TTS)",
-        "description": "Полноформатная модель Text-to-Speech высокого качества.",
+        "name": "Gemini 3.8 Flash TTS — 🔊 Speech Synthesis (TTS)",
+        "description": "Full-format high-quality Text-to-Speech model.",
         "badge": "TTS",
         "category": "tts",
-        "capabilities": ["Синтез речи", "Высокое качество", "Text-to-Speech"]
+        "capabilities": ["Speech Synthesis", "High Quality", "Text-to-Speech"]
     },
     {
         "id": "gemini-2.5-flash-preview-tts",
-        "name": "Gemini 2.5 Flash TTS Preview — 🚀 Быстрая (Free Tier)",
-        "description": "Быстрая и экономичная генерация речи с минимальной задержкой.",
-        "badge": "Быстрая",
+        "name": "Gemini 2.5 Flash TTS Preview — 🚀 Fast (Free Tier)",
+        "description": "Fast and economical speech generation with minimal latency.",
+        "badge": "Fast",
         "category": "tts",
-        "capabilities": ["Синтез речи", "Быстрый отклик", "Free Tier"]
+        "capabilities": ["Speech Synthesis", "Fast Response", "Free Tier"]
     },
     {
         "id": "gemini-2.5-pro-preview-tts",
-        "name": "Gemini 2.5 Pro TTS Preview — 🧠 Студийное качество (Paid)",
-        "description": "Студийное качество синтеза речи — для подкастов и аудиокниг. Только платный тариф.",
+        "name": "Gemini 2.5 Pro TTS Preview — 🧠 Studio Quality (Paid)",
+        "description": "Studio quality speech synthesis — for podcasts and audiobooks. Paid tier only.",
         "badge": "Pro",
         "category": "tts",
-        "capabilities": ["Синтез речи", "Студийное качество", "Paid Tier"]
+        "capabilities": ["Speech Synthesis", "Studio Quality", "Paid Tier"]
     },
     {
         "id": "gemini-3.1-flash-live-preview",
-        "name": "Gemini 3.1 Flash Live — 🎙️ Live Voice (Двустороннее аудио)",
-        "description": "Интерактивная голосовая модель реального времени Live API.",
+        "name": "Gemini 3.1 Flash Live — 🎙️ Live Voice (Two-Way Audio)",
+        "description": "Interactive real-time voice model for Live API.",
         "badge": "Live Voice",
         "category": "tts",
-        "capabilities": ["Генерация речи в реальном времени", "Live API"]
+        "capabilities": ["Real-time Speech Generation", "Live API"]
     }
 ]
 
 DEFAULT_MODELS = [m["id"] for m in DEFAULT_MODELS_DATA]
+
+_BADGE_I18N_KEYS: Dict[str, str] = {
+    "Free Tier": "free_tier",
+    "Recommended": "recommended",
+    "Min Latency": "min_latency",
+    "Free Preview": "free_preview",
+    "Next Gen": "next_gen",
+    "Flash 3.7": "flash_3_7",
+    "Flash 3.8": "flash_3_8",
+    "Auto-Update": "auto_update",
+    "Flash 2.5": "flash_2_5",
+    "Lite 2.5": "lite_2_5",
+    "ASR": "asr",
+    "Pro": "pro",
+    "Fast TTS": "fast_tts",
+    "TTS": "tts",
+    "Fast": "fast",
+    "Live Voice": "live_voice",
+    "Live Translate": "live_translate",
+    "Flash-Lite": "flash_lite",
+    "Flash": "flash",
+}
+
+_CAP_I18N_KEYS: Dict[str, str] = {
+    "Speech Recognition": "speech_recognition",
+    "Simultaneous Translation": "simultaneous_translation",
+    "Free Tier": "free_tier",
+    "Ultra-Low Latency": "ultra_low_latency",
+    "Low Latency": "low_latency",
+    "Noise Reduction": "noise_reduction",
+    "Auto-Update": "auto_update",
+    "ASR": "asr",
+    "Highest Translation Quality": "highest_translation_quality",
+    "Deep Context": "deep_context",
+    "High Translation Accuracy": "high_translation_accuracy",
+    "Speech Synthesis": "speech_synthesis",
+    "30 Voices": "30_voices",
+    "Text-to-Speech": "tts",
+    "High Quality": "high_quality",
+    "Fast Response": "fast_response",
+    "Studio Quality": "studio_quality",
+    "Paid Tier": "paid_tier",
+    "Real-time Speech Generation": "realtime_tts",
+    "Live API": "live_api",
+    "Live Audio": "live_audio",
+}
+
+
+def _localize_model_item(item: Dict[str, Any], lang: Optional[str] = None) -> Dict[str, Any]:
+    out = dict(item)
+    mid = str(item.get("id", "") or "")
+    known_ids = {m["id"] for m in DEFAULT_MODELS_DATA} | {m["id"] for m in DEFAULT_TTS_MODELS_DATA}
+    if mid in known_ids:
+        safe_id = mid.replace(".", "_").replace("-", "_")
+        out["name"] = _tr(f"transcriber.model_{safe_id}_name", lang=lang, fallback=item.get("name", mid))
+        out["description"] = _tr(f"transcriber.model_{safe_id}_desc", lang=lang, fallback=item.get("description", ""))
+    badge = item.get("badge", "")
+    bkey = _BADGE_I18N_KEYS.get(badge)
+    if bkey:
+        out["badge"] = _tr(f"transcriber.badge_{bkey}", lang=lang, fallback=badge)
+    out["capabilities"] = [
+        _tr(f"transcriber.cap_{_CAP_I18N_KEYS[c]}", lang=lang, fallback=c) if c in _CAP_I18N_KEYS else c
+        for c in (item.get("capabilities") or [])
+    ]
+    return out
 
 PHONETIC_LETTERS_MAP: Dict[str, str] = {
     # English NATO & common DX phonetic words
@@ -1009,6 +1080,8 @@ def clean_transcription_text(text: str) -> str:
 
     # 7. Strip standalone hesitation sounds ("э", "э-э", etc.)
     text = filter_hesitation_fillers(text)
+    # 8. Deduplicate consecutive repeated phrases (1-5 words)
+    text = deduplicate_repeated_phrases(text)
 
     return text.strip()
 
@@ -1843,8 +1916,8 @@ class GeminiTranscriberService:
         keys = self.get_all_groq_keys()
         if not keys:
             if self.groq_api_keys and not self.groq_use_first_key and self.groq_use_other_keys and len(self.groq_api_keys) < 2:
-                return None, "Нет дополнительных ключей Groq (№2+) в списке: добавьте бесплатные ключи или включите 1-й ключ"
-            return None, "Не указан API ключ Groq"
+                return None, _tr("transcriber.no_extra_groq_keys", fallback="No additional Groq keys (#2+) in list: add free keys or enable key #1")
+            return None, _tr("transcriber.no_groq_key", fallback="Groq API key is not configured")
         attempts = 1 if len(keys) == 1 else min(len(keys), 12)
         last_err = None
         tried_keys: set = set()
@@ -1872,8 +1945,8 @@ class GeminiTranscriberService:
         keys = self.get_all_groq_keys()
         if not keys:
             if self.groq_api_keys and not self.groq_use_first_key and self.groq_use_other_keys and len(self.groq_api_keys) < 2:
-                return None, "Нет дополнительных ключей Groq (№2+) в списке: добавьте бесплатные ключи или включите 1-й ключ"
-            return None, "Не указан API ключ Groq"
+                return None, _tr("transcriber.no_extra_groq_keys", fallback="No additional Groq keys (#2+) in list: add free keys or enable key #1")
+            return None, _tr("transcriber.no_groq_key", fallback="Groq API key is not configured")
         attempts = 1 if len(keys) == 1 else min(len(keys), 12)
         last_err = None
         tried_keys: set = set()
@@ -1903,8 +1976,8 @@ class GeminiTranscriberService:
         keys = self.get_all_keys()
         if not keys:
             if self.api_keys and not self.gemini_use_first_key and self.gemini_use_other_keys and len(self.api_keys) < 2:
-                return None, "Нет дополнительных ключей Gemini (№2+) в списке: добавьте бесплатные ключи или включите 1-й ключ"
-            return None, "Не указан API ключ Gemini"
+                return None, _tr("transcriber.no_extra_gemini_keys", fallback="No additional Gemini keys (#2+) in list: add free keys or enable key #1")
+            return None, _tr("transcriber.no_gemini_key", fallback="Gemini API key is not configured")
         attempts = 1 if len(keys) == 1 else min(len(keys), 12)
         last_err = None
         tried_keys: set = set()
@@ -1969,7 +2042,7 @@ class GeminiTranscriberService:
             ready, voice_id, reason = piper_srv.is_voice_ready_for_lang(effective_lang, voice)
             if not ready or not voice_id:
                 logger.warning(f"[TRANSCRIBER] Piper TTS not ready for language '{effective_lang}': {reason}")
-                return None, f"Модель речи для языка '{effective_lang.upper()}' не готова ({reason})"
+                return None, _tr("transcriber.piper_not_ready", fallback="Speech model for language '{lang}' is not ready ({reason})", lang=effective_lang.upper(), reason=reason)
 
             if raw_phrase:
                 wav_bytes, sample_rate, err = await piper_srv.synthesize_async(
@@ -2008,7 +2081,7 @@ class GeminiTranscriberService:
             if not speech_text or not speech_text.strip():
                 if call_announcement_wav:
                     return call_announcement_wav, None
-                return None, "Пустой текст для озвучки (отфильтрован как чужеродный язык)"
+                return None, _tr("transcriber.empty_tts_filtered", fallback="Empty text for speech synthesis (filtered as foreign language)")
 
             wav_bytes, sample_rate, err = await piper_srv.synthesize_async(
                 text=speech_text,
@@ -2060,7 +2133,7 @@ class GeminiTranscriberService:
             if not speech_text or not speech_text.strip():
                 if call_announcement_wav:
                     return call_announcement_wav, None
-                return None, "Пустой текст для озвучки"
+                return None, _tr("transcriber.empty_tts_text", fallback="Empty text for speech synthesis")
 
             wav_bytes, err = await silero_srv.synthesize_async(
                 text=speech_text,
@@ -2083,12 +2156,12 @@ class GeminiTranscriberService:
             if call_phrase:
                 clean_text = f"{call_phrase} {clean_text}".strip() if clean_text else call_phrase
         if not clean_text or not clean_text.strip():
-            return None, "Пустой текст для озвучки"
+            return None, _tr("transcriber.empty_tts_text", fallback="Empty text for speech synthesis")
 
         if eff_engine == "groq":
             groq_keys = [api_key.strip()] if (api_key and api_key.strip()) else self.get_all_groq_keys()
             if not groq_keys:
-                return None, "Не указан API ключ Groq для синтеза речи"
+                return None, _tr("transcriber.no_groq_key_tts", fallback="Groq API key is not configured for speech synthesis")
 
             groq_model = (model or "canopylabs/orpheus-v1-english").strip()
             if "orpheus" not in groq_model.lower():
@@ -2130,10 +2203,10 @@ class GeminiTranscriberService:
                             if not api_key:
                                 self._clear_key_cooldown(groq_key)
                             return wav_data, None
-                        return None, "Groq TTS вернул пустые аудиоданные"
+                        return None, _tr("transcriber.groq_tts_empty", fallback="Groq TTS returned empty audio")
                 except urllib.error.HTTPError as e:
                     err_body = e.read().decode("utf-8", errors="replace")
-                    last_err = f"Ошибка Groq TTS {e.code}: {err_body[:200]}"
+                    last_err = _tr("transcriber.groq_tts_http_err", fallback="Groq TTS error {code}: {body}", code=e.code, body=err_body[:200])
                     should_switch, cd_sec = self._classify_key_error(last_err)
                     if not api_key and cd_sec > 0 and len(groq_keys) > 1:
                         self._mark_key_cooldown(groq_key, cd_sec, last_err[:80])
@@ -2142,14 +2215,14 @@ class GeminiTranscriberService:
                         continue
                     return None, last_err
                 except Exception as e:
-                    last_err = f"Ошибка Groq TTS: {e}"
+                    last_err = _tr("transcriber.groq_tts_err", fallback="Groq TTS error: {error}", error=e)
                     return None, last_err
             return None, last_err
 
         if eff_engine == "deepgram":
             dg_key = (api_key or self.deepgram_api_key or "").strip()
             if not dg_key:
-                return None, "Не указан API ключ Deepgram для синтеза речи"
+                return None, _tr("transcriber.no_deepgram_key_tts", fallback="Deepgram API key is not configured for speech synthesis")
 
             dg_voice = (voice or "").strip()
             if not dg_voice or dg_voice in ("auto", "default"):
@@ -2178,14 +2251,14 @@ class GeminiTranscriberService:
                     wav_data = resp.read()
                     if wav_data and len(wav_data) > 44:
                         return wav_data, None
-                    return None, "Deepgram TTS вернул пустые аудиоданные"
+                    return None, _tr("transcriber.deepgram_tts_empty", fallback="Deepgram TTS returned empty audio")
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode("utf-8", errors="replace")
                 logger.warning(f"[TRANSCRIBER] Deepgram TTS HTTP {e.code}: {err_body}")
-                return None, f"Ошибка Deepgram TTS {e.code}: {err_body[:200]}"
+                return None, _tr("transcriber.deepgram_tts_http_err", fallback="Deepgram TTS error {code}: {body}", code=e.code, body=err_body[:200])
             except Exception as e:
                 logger.warning(f"[TRANSCRIBER] Deepgram TTS error: {e}")
-                return None, f"Ошибка Deepgram TTS: {e}"
+                return None, _tr("transcriber.deepgram_tts_err", fallback="Deepgram TTS error: {error}", error=e)
 
         eff_style = (style or self.tts_style or "radio").lower().strip()
         style_cfg = TTS_STYLE_CONFIG.get(eff_style, TTS_STYLE_CONFIG["radio"])
@@ -2231,27 +2304,27 @@ class GeminiTranscriberService:
                 self._http_post_json_with_retry, endpoint, payload
             )
         if err or not result_json:
-            return None, err or "Пустой ответ Gemini TTS"
+            return None, err or _tr("transcriber.gemini_tts_empty_resp", fallback="Empty response from Gemini TTS")
 
         candidates = result_json.get("candidates", [])
         if not candidates:
-            return None, "Нет кандидатов в ответе TTS"
+            return None, _tr("transcriber.tts_no_candidates", fallback="No candidates in TTS response")
 
         parts = candidates[0].get("content", {}).get("parts", [])
         if not parts:
-            return None, "Нет данных аудио в кандидате TTS"
+            return None, _tr("transcriber.tts_no_audio_data", fallback="No audio data in TTS candidate")
 
         inline_data = parts[0].get("inlineData", {})
         b64_audio = inline_data.get("data", "")
         if not b64_audio:
-            return None, "Пустые аудиоданные TTS"
+            return None, _tr("transcriber.tts_empty_audio", fallback="Empty TTS audio data")
 
         try:
             pcm_bytes = base64.b64decode(b64_audio)
             wav_bytes = self._pcm_to_wav(pcm_bytes, sample_rate=24000)
             return wav_bytes, None
         except Exception as e:
-            return None, f"Ошибка декодирования аудио TTS: {e}"
+            return None, _tr("transcriber.tts_decode_err", fallback="TTS audio decode error: {error}", error=e)
 
     async def _notify_error(self, hid: str, slot: int, error_text: str, stage: str = "asr"):
         if self.broadcast_fn:
@@ -2470,13 +2543,13 @@ class GeminiTranscriberService:
 
             if self.transcriber_engine == "groq":
                 if not self.get_all_groq_keys():
-                    err = "Нет доступных ключей Groq (проверьте настройки ключей)" if self.groq_api_keys else "Не указан API ключ Groq"
+                    err = _tr("transcriber.no_avail_groq_keys", fallback="No available Groq keys (check key settings)") if self.groq_api_keys else _tr("transcriber.no_groq_key", fallback="Groq API key is not configured")
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
                 res, err = await asyncio.to_thread(self._post_multipart_groq_asr_with_retry, wav_bytes)
                 if err or not res:
-                    error_text = err or "Ошибка распознавания Groq Cloud API"
+                    error_text = err or _tr("transcriber.groq_asr_err", fallback="Groq Cloud API recognition error")
                     logger.warning(f"[TRANSCRIBER] TS{slot} Groq ASR error: {error_text}")
                     await self._notify_error(hid, slot, error_text)
                     return
@@ -2499,13 +2572,13 @@ class GeminiTranscriberService:
 
             elif self.transcriber_engine == "deepgram":
                 if not self.deepgram_api_key:
-                    err = "Не указан API ключ Deepgram"
+                    err = _tr("transcriber.no_deepgram_key", fallback="Deepgram API key is not configured")
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
                 res, err = await asyncio.to_thread(self._post_deepgram_asr, wav_bytes, self.deepgram_api_key)
                 if err or not res:
-                    error_text = err or "Ошибка распознавания Deepgram API"
+                    error_text = err or _tr("transcriber.deepgram_asr_err", fallback="Deepgram API recognition error")
                     logger.warning(f"[TRANSCRIBER] TS{slot} Deepgram ASR error: {error_text}")
                     await self._notify_error(hid, slot, error_text)
                     return
@@ -2519,13 +2592,13 @@ class GeminiTranscriberService:
 
             else:
                 if not self.get_all_keys():
-                    err = "Нет доступных ключей Gemini (проверьте настройки ключей)" if self.api_keys else "Не указан API ключ Gemini"
+                    err = _tr("transcriber.no_avail_gemini_keys", fallback="No available Gemini keys (check key settings)") if self.api_keys else _tr("transcriber.no_gemini_key", fallback="Gemini API key is not configured")
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
 
                 if not await self._check_rate_limit():
-                    err = "Превышен минутный лимит запросов к Gemini API"
+                    err = _tr("transcriber.gemini_rpm_limit", fallback="Gemini API per-minute rate limit exceeded")
                     logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                     await self._notify_error(hid, slot, err)
                     return
@@ -2591,14 +2664,14 @@ class GeminiTranscriberService:
                         self._http_post_json_with_retry, endpoint, payload_stage1
                     )
                     if err or not result_json:
-                        error_text = err or "Пустой ответ Gemini API (ASR)"
+                        error_text = err or _tr("transcriber.gemini_asr_empty_resp", fallback="Empty response from Gemini API (ASR)")
                         logger.warning(f"[TRANSCRIBER] TS{slot} Stage 1 error: {error_text}")
                         await self._notify_error(hid, slot, error_text)
                         return
 
                     if "promptFeedback" in result_json and result_json["promptFeedback"].get("blockReason"):
                         reason = result_json["promptFeedback"]["blockReason"]
-                        err = f"Блокировка фильтром Gemini ({reason})"
+                        err = _tr("transcriber.gemini_blocked", fallback="Blocked by Gemini safety filter ({reason})", reason=reason)
                         logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                         await self._notify_error(hid, slot, err)
                         return
@@ -2607,7 +2680,7 @@ class GeminiTranscriberService:
                         cand = result_json["candidates"][0]
                         finish_reason = cand.get("finishReason")
                         if finish_reason and finish_reason not in ("STOP", "MAX_TOKENS"):
-                            err = f"Отклонено Gemini ({finish_reason})"
+                            err = _tr("transcriber.gemini_rejected", fallback="Rejected by Gemini ({reason})", reason=finish_reason)
                             logger.warning(f"[TRANSCRIBER] TS{slot}: {err}")
                             await self._notify_error(hid, slot, err)
                             return
@@ -2877,7 +2950,7 @@ class GeminiTranscriberService:
             final_text = original_text if is_direct else translated_text
             if not is_direct:
                 final_text = filter_hesitation_fillers(final_text)
-            display_text = clean_display_text(final_text, callsign=callsign)
+            display_text = deduplicate_repeated_phrases(clean_display_text(final_text, callsign=callsign))
 
             if not display_text or not display_text.strip():
                 logger.info(
@@ -2963,7 +3036,7 @@ class GeminiTranscriberService:
                                     "type": "tts_error",
                                     "hotspot_id": hid,
                                     "slot": slot,
-                                    "error": f"⚠️ Silero TTS не поддерживает язык [{eff_l_choice.upper()}]. Выберите Piper TTS или Gemini API в настройках."
+                                    "error": _tr("transcriber.silero_lang_unsupported_settings", fallback="⚠️ Silero TTS does not support language [{lang}]. Select Piper TTS or Gemini API in settings.", lang=eff_l_choice.upper())
                                 })
                             except Exception:
                                 pass
@@ -3007,7 +3080,7 @@ class GeminiTranscriberService:
                                             "type": "tts_error",
                                             "hotspot_id": hid,
                                             "slot": slot,
-                                            "error": f"⏳ Загрузка модели Piper для языка [{eff_lang.upper()}]... Озвучка возобновится после готовности."
+                                            "error": _tr("transcriber.piper_downloading_lang", fallback="⏳ Downloading Piper model for language [{lang}]... Voice synthesis will resume when ready.", lang=eff_lang.upper())
                                         })
                                     except Exception:
                                         pass
@@ -3208,7 +3281,7 @@ class GeminiTranscriberService:
                                 pass
                 elif self.tts_engine == "browser":
                     if self.broadcast_fn:
-                        clean_speech = strip_callsigns_for_tts(display_text, callsign=callsign)
+                        clean_speech = deduplicate_repeated_phrases(strip_callsigns_for_tts(display_text, callsign=callsign))
                         clean_speech = prepare_text_for_tts(clean_speech, self.target_lang, callsign=callsign)
                         if clean_speech and clean_speech.strip():
                             await self.broadcast_fn({
@@ -3231,7 +3304,7 @@ class GeminiTranscriberService:
                             })
         except Exception as e:
             logger.warning(f"[TRANSCRIBER] Processing failed for TS{slot}: {e}")
-            await self._notify_error(hid, slot, f"Сбой обработки: {e}")
+            await self._notify_error(hid, slot, _tr("transcriber.processing_failed", fallback="Processing failed: {error}", error=e))
 
     async def transcribe_wav(
         self,
@@ -3245,7 +3318,7 @@ class GeminiTranscriberService:
         Returns (transcribed_text, detected_lang, error_str).
         """
         if not self.get_all_keys():
-            return None, None, "Не указан API ключ Gemini"
+            return None, None, _tr("transcriber.no_gemini_key", fallback="Gemini API key is not configured")
 
         b64_audio = base64.b64encode(wav_bytes).decode("ascii")
         sl_info = self._source_lang_info()
@@ -3305,14 +3378,14 @@ class GeminiTranscriberService:
                 self._http_post_json_with_retry, endpoint, payload_stage1
             )
             if err or not result_json:
-                return None, None, err or "Пустой ответ Gemini API (ASR)"
+                return None, None, err or _tr("transcriber.gemini_asr_empty_resp", fallback="Empty response from Gemini API (ASR)")
 
             if "promptFeedback" in result_json and result_json["promptFeedback"].get("blockReason"):
-                return None, None, f"Блокировка фильтром Gemini ({result_json['promptFeedback']['blockReason']})"
+                return None, None, _tr("transcriber.gemini_blocked", fallback="Blocked by Gemini safety filter ({reason})", reason=result_json['promptFeedback']['blockReason'])
 
             parsed = self._extract_result(result_json)
             if not parsed or not parsed.get("text"):
-                return None, None, "Не удалось распознать речь"
+                return None, None, _tr("transcriber.asr_recognize_failed", fallback="Failed to recognize speech")
 
             if sl_info:
                 detected_lang = sl_info[2]
@@ -3322,7 +3395,7 @@ class GeminiTranscriberService:
                     detected_lang = detected_lang[:3]
             original_text = clean_transcription_text(parsed.get("text", "").strip())
             if not original_text:
-                return None, detected_lang, "Речь не обнаружена"
+                return None, detected_lang, _tr("transcriber.asr_no_speech", fallback="No speech detected")
 
             target_lang_code = self.target_lang.lower().strip()
             is_direct = target_lang_code == "none"
@@ -3503,13 +3576,13 @@ class GeminiTranscriberService:
             return None, clean_msg
         except urllib.error.URLError as e:
             logger.error(f"[TRANSCRIBER] Gemini network error: {e.reason}")
-            return None, f"Ошибка сети: {e.reason}"
+            return None, _tr("transcriber.net_err_reason", fallback="Network error: {reason}", reason=e.reason)
         except TimeoutError:
             logger.error(f"[TRANSCRIBER] Gemini timeout (>12s)")
-            return None, "Таймаут соединения с Gemini API (>12с)"
+            return None, _tr("transcriber.gemini_timeout", fallback="Gemini API connection timeout (>12s)")
         except Exception as e:
             logger.error(f"[TRANSCRIBER] Gemini request error: {e}")
-            return None, f"Ошибка запроса: {e}"
+            return None, _tr("transcriber.req_err", fallback="Request error: {error}", error=e)
 
     def _extract_result(self, resp_json: Dict[str, Any]) -> Optional[Dict[str, str]]:
         try:
@@ -3562,7 +3635,7 @@ class GeminiTranscriberService:
             return self.fetch_available_models(explicit_key.strip())
         active_keys = self.get_all_keys()
         if not active_keys:
-            return list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)
+            return [_localize_model_item(m) for m in (DEFAULT_MODELS_DATA + DEFAULT_TTS_MODELS_DATA)]
         tried = set()
         for _ in range(min(len(active_keys), 3)):
             cand = self._get_next_key(exclude=tried)
@@ -3570,14 +3643,14 @@ class GeminiTranscriberService:
                 break
             tried.add(cand)
             res = self.fetch_available_models(cand)
-            if res and res != (list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)):
+            if res and res != [_localize_model_item(m) for m in (list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA))]:
                 return res
-        return list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)
+        return [_localize_model_item(m) for m in (list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA))]
 
     @staticmethod
     def fetch_available_models(api_key: str) -> List[Dict[str, Any]]:
         """Queries Gemini API models.list and returns models capable of speech recognition/translation and TTS speech synthesis."""
-        fallback_all = list(DEFAULT_MODELS_DATA) + list(DEFAULT_TTS_MODELS_DATA)
+        fallback_all = [_localize_model_item(m) for m in (DEFAULT_MODELS_DATA + DEFAULT_TTS_MODELS_DATA)]
         if not api_key:
             return fallback_all
 
@@ -3616,58 +3689,58 @@ class GeminiTranscriberService:
 
                     # If already in curated catalog, use curated details
                     if short_id in known_map:
-                        result.append(dict(known_map[short_id]))
+                        result.append(_localize_model_item(known_map[short_id]))
                     else:
                         disp = m.get("displayName") or short_id
                         disp_lower = disp.lower()
                         if "tts" in id_lower or "tts" in disp_lower or "native-audio" in id_lower:
                             category = "tts"
                             badge = "TTS"
-                            desc = "Специализированная модель синтеза речи Gemini (Text-to-Speech)."
-                            caps = ["Синтез речи", "Text-to-Speech"]
-                            name_str = f"{disp} — 🔊 Синтез речи (TTS)"
+                            desc = _tr("transcriber.dyn_tts_desc", fallback="Specialized Gemini speech synthesis model (Text-to-Speech).")
+                            caps = [_tr("transcriber.cap_speech_synthesis", fallback="Speech Synthesis"), _tr("transcriber.cap_tts", fallback="Text-to-Speech")]
+                            name_str = f"{disp} — 🔊 {_tr('transcriber.dyn_tts_name', fallback='Speech Synthesis (TTS)')}"
                         elif "live-translate" in id_lower:
                             category = "transcribe"
                             badge = "Live Translate"
-                            desc = "Модель перевода речи в реальном времени."
-                            caps = ["Распознавание речи", "Синхронный перевод"]
-                            name_str = f"{disp} — 🌐 Синхронный перевод (Live)"
+                            desc = _tr("transcriber.dyn_live_translate_desc", fallback="Real-time speech translation model.")
+                            caps = [_tr("transcriber.cap_speech_recognition", fallback="Speech Recognition"), _tr("transcriber.cap_simultaneous_translation", fallback="Simultaneous Translation")]
+                            name_str = f"{disp} — 🌐 {_tr('transcriber.dyn_live_translate_name', fallback='Simultaneous Translation (Live)')}"
                         elif "live" in id_lower:
                             category = "tts"
                             badge = "Live Voice"
-                            desc = "Интерактивная голосовая модель Live API с генерацией речи."
-                            caps = ["Синтез речи", "Live Audio"]
+                            desc = _tr("transcriber.dyn_live_voice_desc", fallback="Interactive Live API voice model with speech generation.")
+                            caps = [_tr("transcriber.cap_speech_synthesis", fallback="Speech Synthesis"), _tr("transcriber.cap_live_audio", fallback="Live Audio")]
                             name_str = f"{disp} — 🎙️ Live Voice"
                         elif "transcribe" in id_lower:
                             category = "transcribe"
                             badge = "ASR"
-                            desc = "Специализированная модель для аудио-транскрипции и перевода речи."
-                            caps = ["Транскрипция речи", "Синхронный перевод"]
-                            name_str = f"{disp} — ⚡ Распознавание речи (ASR)"
+                            desc = _tr("transcriber.dyn_asr_desc", fallback="Specialized model for audio transcription and speech translation.")
+                            caps = [_tr("transcriber.cap_speech_transcription", fallback="Speech Transcription"), _tr("transcriber.cap_simultaneous_translation", fallback="Simultaneous Translation")]
+                            name_str = f"{disp} — ⚡ {_tr('transcriber.dyn_asr_name', fallback='Speech Recognition (ASR)')}"
                         elif "lite" in id_lower:
                             category = "transcribe"
                             badge = "Flash-Lite"
-                            desc = "Облегченная модель с минимальным временем отклика для распознавания речи и перевода."
-                            caps = ["Распознавание речи", "Синхронный перевод", "Низкая задержка"]
-                            name_str = f"{disp} — ⚡ Речь + Перевод ({badge})"
+                            desc = _tr("transcriber.dyn_lite_desc", fallback="Lightweight model with minimum latency for speech recognition and translation.")
+                            caps = [_tr("transcriber.cap_speech_recognition", fallback="Speech Recognition"), _tr("transcriber.cap_simultaneous_translation", fallback="Simultaneous Translation"), _tr("transcriber.cap_low_latency", fallback="Low Latency")]
+                            name_str = f"{disp} — ⚡ {_tr('transcriber.dyn_speech_plus_translate', fallback='Speech + Translate')} ({badge})"
                         elif "pro" in id_lower:
                             category = "transcribe"
                             badge = "Pro"
-                            desc = "Флагманская модель Pro с высоким качеством понимания сложного контекста речи."
-                            caps = ["Распознавание речи", "Высокая точность перевода", "Глубокий контекст"]
-                            name_str = f"{disp} — 🧠 Pro (Максимальная точность)"
+                            desc = _tr("transcriber.dyn_pro_desc", fallback="Flagship Pro model with high quality understanding of complex speech context.")
+                            caps = [_tr("transcriber.cap_speech_recognition", fallback="Speech Recognition"), _tr("transcriber.cap_high_translation_accuracy", fallback="High Translation Accuracy"), _tr("transcriber.cap_deep_context", fallback="Deep Context")]
+                            name_str = f"{disp} — 🧠 {_tr('transcriber.dyn_pro_name', fallback='Pro (Maximum Accuracy)')}"
                         else:
                             category = "transcribe"
                             badge = "Flash"
-                            desc = "Скоростная модель для распознавания речи радиоэфира и синхронного перевода."
-                            caps = ["Распознавание речи", "Синхронный перевод"]
-                            name_str = f"{disp} — ⚡ Речь + Перевод ({badge})"
+                            desc = _tr("transcriber.dyn_flash_desc", fallback="High-speed model for radio speech recognition and simultaneous translation.")
+                            caps = [_tr("transcriber.cap_speech_recognition", fallback="Speech Recognition"), _tr("transcriber.cap_simultaneous_translation", fallback="Simultaneous Translation")]
+                            name_str = f"{disp} — ⚡ {_tr('transcriber.dyn_speech_plus_translate', fallback='Speech + Translate')} ({badge})"
 
                         result.append({
                             "id": short_id,
                             "name": name_str,
                             "description": desc,
-                            "badge": badge,
+                            "badge": _tr(f"transcriber.badge_{_BADGE_I18N_KEYS[badge]}", fallback=badge) if badge in _BADGE_I18N_KEYS else badge,
                             "category": category,
                             "capabilities": caps
                         })
@@ -3678,13 +3751,13 @@ class GeminiTranscriberService:
                 if not has_tts:
                     for dm in DEFAULT_TTS_MODELS_DATA:
                         if dm["id"] not in existing_ids:
-                            result.append(dict(dm))
+                            result.append(_localize_model_item(dm))
 
                 has_transcribe = any(m.get("category") == "transcribe" for m in result)
                 if not has_transcribe:
                     for dm in DEFAULT_MODELS_DATA:
                         if dm["id"] not in existing_ids:
-                            result.append(dict(dm))
+                            result.append(_localize_model_item(dm))
 
                 # Sort: transcription models first, then TTS models
                 def sort_key(item):

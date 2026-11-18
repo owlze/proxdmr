@@ -1430,12 +1430,14 @@ class AllStarClientAdapter:
     def _on_asl_state_change(self, new_state: str):
         try:
             from dmr.homebrew import BMState
+            from i18n_backend import tr as _tr
+            uid = getattr(self, "user_id", None)
             if new_state == "ACTIVE":
-                self.manager._on_client_status(self.hotspot_id, BMState.ONLINE, "AllStarLink IAX2 активен", user_id=self.user_id)
+                self.manager._on_client_status(self.hotspot_id, BMState.ONLINE, _tr("status.asl_iax2_active", user_id=uid, fallback="AllStarLink IAX2 active"), user_id=self.user_id)
             elif new_state == "CONNECTING":
-                self.manager._on_client_status(self.hotspot_id, BMState.CONNECTING, "Подключение к AllStarLink...", user_id=self.user_id)
+                self.manager._on_client_status(self.hotspot_id, BMState.CONNECTING, _tr("status.asl_connecting", user_id=uid, fallback="Connecting to AllStarLink..."), user_id=self.user_id)
             else:
-                self.manager._on_client_status(self.hotspot_id, BMState.DISCONNECTED, "Отключен", user_id=self.user_id)
+                self.manager._on_client_status(self.hotspot_id, BMState.DISCONNECTED, _tr("status.asl_disconnected", user_id=uid, fallback="Disconnected"), user_id=self.user_id)
         except Exception as e:
             logger.error(f"[ALLSTAR-ADAPTER] State change notification error: {e}")
 

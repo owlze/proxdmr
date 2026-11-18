@@ -1,6 +1,6 @@
-import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js?v=2.9.547';
-import { showToast } from '../core/toast.js';
-import { logSelection } from './log-selection.js';
+import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
+import { logSelection } from './log-selection.js?v=2.9.736';
 
   // --- BrandMeister Live Activity Monitor ---
   const logCountBadge = document.getElementById("logCountBadge");
@@ -55,12 +55,13 @@ Object.defineProperty(window, 'heardCalls', {
       }
 
       // Update only live duration tickers (no full DOM rebuild)
+      const sUnit = (typeof window !== "undefined" && window.t) ? window.t("live.sec", {}, "s") : "s";
       const ticks = document.querySelectorAll(".live-duration-tick");
       ticks.forEach(el => {
         const start = parseFloat(el.dataset.start);
         if (start && !isNaN(start)) {
           const sec = Math.max(0, nowSec - start).toFixed(1);
-          el.textContent = `🔴 ${sec}с`;
+          el.textContent = `🔴 ${sec}${sUnit}`;
         }
       });
     }, 500);
@@ -143,12 +144,12 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     }
 
     const effectiveHid = (!window.currentLogHotspotId || window.currentLogHotspotId === "all")
-      ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
+      ? (window.activeHotspotId || ((window.currentHotspots || []).find(h => !h.hidden) || {}).id || "default")
       : window.currentLogHotspotId;
 
     const targetCard = (effectiveHid && effectiveHid !== "all")
-      ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
-      : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
+      ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]:not(.collapsed)`) || document.querySelector(".radio-container:not(.collapsed)"))
+      : document.querySelector(".radio-container:not(.collapsed)");
 
     if (logPcHeightMode === "hotspot") {
       liveMonitorPanel.classList.add("pc-height-hotspot");
@@ -161,24 +162,45 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
       const syncHeight = () => {
         if (!targetCard || !isLogVisible || window.innerWidth <= 768) return;
-        const targetH = targetCard.offsetHeight || targetCard.getBoundingClientRect().height;
-        if (targetH > 100) {
-          const roundedH = `${Math.round(targetH)}px`;
-          if (liveMonitorPanel.style.height !== roundedH) {
-            liveMonitorPanel.style.setProperty("--desktop-log-height", roundedH);
-            liveMonitorPanel.style.height = roundedH;
-            liveMonitorPanel.style.maxHeight = roundedH;
-          }
+        const targetRect = targetCard.getBoundingClientRect();
+        const cardH = Math.round((targetRect && targetRect.height) || targetCard.offsetHeight || 0);
+        if (cardH <= 100) return;
+
+        const panelRect = liveMonitorPanel.getBoundingClientRect();
+        let desiredH = cardH;
+        // Match parent floor when History starts higher than its parent card in the same desktop row
+        if (
+          panelRect &&
+          panelRect.width > 0 &&
+          targetRect &&
+          panelRect.top < targetRect.top - 0.5 &&
+          targetRect.bottom > panelRect.top &&
+          Math.abs(panelRect.left - targetRect.left) > 20
+        ) {
+          desiredH = Math.max(cardH, Math.round(targetRect.bottom - panelRect.top));
+        }
+
+        const roundedH = `${desiredH}px`;
+        if (liveMonitorPanel.style.height !== roundedH) {
+          liveMonitorPanel.style.setProperty("--desktop-log-height", roundedH);
+          liveMonitorPanel.style.height = roundedH;
+          liveMonitorPanel.style.maxHeight = roundedH;
         }
       };
 
       syncHeight();
+      if (typeof window.syncDesktopHotspotsTopAlignment === "function") {
+        window.syncDesktopHotspotsTopAlignment();
+      }
 
       if (window.ResizeObserver && targetCard) {
         pcCardResizeObserver = new ResizeObserver(() => {
           if (pcCardRaf) cancelAnimationFrame(pcCardRaf);
           pcCardRaf = requestAnimationFrame(() => {
             syncHeight();
+            if (typeof window.scheduleDesktopHotspotsTopAlignment === "function") {
+              window.scheduleDesktopHotspotsTopAlignment();
+            }
           });
         });
         pcCardResizeObserver.observe(targetCard);
@@ -188,6 +210,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       liveMonitorPanel.style.removeProperty("--desktop-log-height");
       liveMonitorPanel.style.height = "";
       liveMonitorPanel.style.maxHeight = "";
+      if (typeof window.syncDesktopHotspotsTopAlignment === "function") {
+        window.syncDesktopHotspotsTopAlignment();
+      }
       if (toggleBtn) {
         toggleBtn.classList.remove("is-hotspot-mode");
         toggleBtn.classList.add("is-screen-mode");
@@ -235,26 +260,30 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       }
     }
 
-    const cardH = targetCard.offsetHeight || targetCard.getBoundingClientRect().height;
+    const toolbarEl = document.getElementById("proxdmrTopToolbar");
+    const toolbarH = toolbarEl ? (toolbarEl.offsetHeight || toolbarEl.getBoundingClientRect().height || 0) : 0;
+    const isVisibleCard = targetCard && !targetCard.classList.contains("collapsed");
+    const cardH = isVisibleCard ? (targetCard.offsetHeight || targetCard.getBoundingClientRect().height) : 0;
     const gap = 5;
     const bottomSafe = 5;
-    const topOffset = 5;
+    const topOffset = toolbarH ? (toolbarH + 5) : 5;
     let logH;
     if (logPcHeightMode === "hotspot") {
       const availableSpace = viewportH - cardH - gap - bottomSafe - topOffset;
       logH = Math.max(160, Math.floor(availableSpace));
     } else {
-      logH = Math.max(260, Math.floor(viewportH - 70));
+      logH = Math.max(260, Math.floor(viewportH - topOffset - 16));
     }
 
     liveMonitorPanel.style.setProperty("--mobile-log-height", `${logH}px`);
     liveMonitorPanel.style.height = `${logH}px`;
     liveMonitorPanel.style.maxHeight = `${logH}px`;
 
-    const cardRect = targetCard.getBoundingClientRect();
+    const anchorTarget = isVisibleCard ? targetCard : liveMonitorPanel;
+    const targetRect = anchorTarget.getBoundingClientRect();
     const currentScrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
-    const cardTop = cardRect.top + currentScrollY;
-    const targetScrollY = Math.max(0, Math.floor(cardTop - topOffset));
+    const targetTop = targetRect.top + currentScrollY;
+    const targetScrollY = Math.max(0, Math.floor(targetTop - topOffset));
 
     window.scrollTo({
       top: targetScrollY,
@@ -266,8 +295,14 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     if (!isLogVisible || !liveMonitorPanel) return;
     if (window.innerWidth <= 768) {
       adjustMobileLogHeight(null, false);
+      if (typeof window.syncDesktopHotspotsTopAlignment === "function") {
+        window.syncDesktopHotspotsTopAlignment();
+      }
     } else {
       applyDesktopLogHeight();
+      if (typeof window.scheduleDesktopHotspotsTopAlignment === "function") {
+        window.scheduleDesktopHotspotsTopAlignment();
+      }
     }
   }
 
@@ -290,7 +325,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         window.syncLogSortOrderForCurrentHotspot();
       }
       isLogVisible = true;
-      if (isHotspotChanged && isSmartVersion()) {
+      const curHsObj = (window.currentHotspots || []).find(h => h.id === cardHotspotId);
+      const isCurNoTs = ((curHsObj?.network_type || "").toLowerCase() === "allstar" || (curHsObj?.network_type || "").toLowerCase() === "ysf");
+      if (isCurNoTs || (isHotspotChanged && isSmartVersion())) {
         logFilter = "all";
         syncLogFilterUI();
       }
@@ -318,10 +355,11 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       const allHsLabel = window.t ? window.t("live.tab_all_hotspots") : "Все хотспоты";
       let html = `<button type="button" class="log-hs-tab-btn ${window.currentLogHotspotId === "all" ? "active" : ""}" data-hid="all">${allHsLabel}</button>`;
 
+      const defaultHsLabel = window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot";
       const hsList = (window.currentHotspots && (window.currentHotspots || []).length) ? window.currentHotspots : [{ id: "default", name: "Main 📻" }];
       hsList.forEach(hs => {
         const isActive = (window.currentLogHotspotId === hs.id);
-        const label = hs.name || hs.callsign || "Хотспот";
+        const label = hs.name || hs.callsign || defaultHsLabel;
         html += `<button type="button" class="log-hs-tab-btn ${isActive ? "active" : ""}" data-hid="${hs.id}">${label}</button>`;
       });
 
@@ -333,6 +371,12 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
           localStorage.setItem("proxdmr_log_hotspot", window.currentLogHotspotId);
           if (typeof window.syncLogSortOrderForCurrentHotspot === "function") {
             window.syncLogSortOrderForCurrentHotspot();
+          }
+          const tabHsObj = (window.currentHotspots || []).find(h => h.id === window.currentLogHotspotId);
+          const isTabNoTs = ((tabHsObj?.network_type || "").toLowerCase() === "allstar" || (tabHsObj?.network_type || "").toLowerCase() === "ysf");
+          if (isTabNoTs) {
+            logFilter = "all";
+            syncLogFilterUI();
           }
           renderLogHotspotTabs();
           updateLogVisibility(false);
@@ -346,17 +390,18 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
     const liveTitleText = document.getElementById("liveTitleText");
     if (liveTitleText) {
+      const defaultHsLabel = window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot";
       if (isMobile) {
         const effectiveHid = (!window.currentLogHotspotId || window.currentLogHotspotId === "all")
           ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
           : window.currentLogHotspotId;
         const hsObj = (window.currentHotspots || []).find(h => h.id === effectiveHid);
-        liveTitleText.textContent = hsObj ? hsObj.name : "Хотспот";
+        liveTitleText.textContent = hsObj ? hsObj.name : defaultHsLabel;
       } else if (window.currentLogHotspotId === "all") {
         liveTitleText.textContent = window.t ? window.t("live.tab_all_hotspots", {}, "Все хотспоты") : "Все хотспоты";
       } else {
         const hsObj = (window.currentHotspots || []).find(h => h.id === window.currentLogHotspotId);
-        liveTitleText.textContent = hsObj ? hsObj.name : "Хотспот";
+        liveTitleText.textContent = hsObj ? hsObj.name : defaultHsLabel;
       }
     }
   }
@@ -365,10 +410,44 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     return window.innerWidth <= 768 || document.body.classList.contains("is-apk-mode");
   }
 
+  function isHistoryNoTsNetwork() {
+    const isMobile = window.innerWidth <= 768;
+    const rawHid = window.currentLogHotspotId;
+    const effectiveHid = (isMobile && (!rawHid || rawHid === "all"))
+      ? (window.activeHotspotId || ((window.currentHotspots || []).find(h => !h.hidden) || {}).id || "default")
+      : (rawHid || "all");
+    if (!effectiveHid || effectiveHid === "all") return false;
+    const hs = (window.currentHotspots || []).find(h => h.id === effectiveHid);
+    if (!hs) return false;
+    const net = (hs.network_type || "").toLowerCase();
+    return net === "allstar" || net === "ysf";
+  }
+
   function syncLogFilterUI() {
+    const isNoTs = isHistoryNoTsNetwork();
     const cycleBtn = document.getElementById("logFilterTsCycleBtn");
     const cycleImg = document.getElementById("logFilterTsCycleImg");
-    if (cycleBtn && cycleImg) {
+
+    if (isNoTs) {
+      logFilter = "all";
+      if (cycleBtn) {
+        cycleBtn.classList.add("hidden");
+        cycleBtn.style.setProperty("display", "none", "important");
+      }
+      if (liveMonitorPanel) {
+        liveMonitorPanel.classList.add("is-no-ts-network");
+      }
+    } else {
+      if (cycleBtn) {
+        cycleBtn.classList.remove("hidden");
+        cycleBtn.style.removeProperty("display");
+      }
+      if (liveMonitorPanel) {
+        liveMonitorPanel.classList.remove("is-no-ts-network");
+      }
+    }
+
+    if (!isNoTs && cycleBtn && cycleImg) {
       if (logFilter === "1") {
         cycleImg.src = "/static/img/Bu1.png?v=2.9.310";
         cycleImg.alt = "TS1";
@@ -400,6 +479,46 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
   }
 
   let _prevLogVisible = null;
+
+  function resolveLiveMonitorTargetContext() {
+    const isMobile = window.innerWidth <= 768;
+    const rawHid = window.currentLogHotspotId;
+    const effectiveHid = (isMobile && (!rawHid || rawHid === "all"))
+      ? (window.activeHotspotId || ((window.currentHotspots || []).find(h => !h.hidden) || {}).id || "default")
+      : (rawHid || "all");
+    const radiosGrid = document.getElementById("radiosGrid");
+    const searchRoot = radiosGrid || document;
+
+    let targetCard = null;
+    if (effectiveHid && effectiveHid !== "all") {
+      targetCard =
+        searchRoot.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]:not(.collapsed)`) ||
+        searchRoot.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) ||
+        null;
+    }
+    if (!targetCard && (isMobile || effectiveHid !== "all")) {
+      targetCard = searchRoot.querySelector(".radio-container:not(.collapsed)") || null;
+    }
+    return { isMobile, effectiveHid, radiosGrid, targetCard };
+  }
+
+  function syncLiveMonitorPlacement() {
+    if (!liveMonitorPanel) return { isMobile: window.innerWidth <= 768, effectiveHid: window.currentLogHotspotId || "all", radiosGrid: null, targetCard: null };
+    const ctx = resolveLiveMonitorTargetContext();
+    const { radiosGrid, targetCard } = ctx;
+    if (!radiosGrid) return ctx;
+
+    if (isLogVisible) {
+      if (targetCard && targetCard.parentElement === radiosGrid) {
+        if (targetCard.nextElementSibling !== liveMonitorPanel) {
+          targetCard.after(liveMonitorPanel);
+        }
+      } else if (liveMonitorPanel.parentElement !== radiosGrid || radiosGrid.lastElementChild !== liveMonitorPanel) {
+        radiosGrid.appendChild(liveMonitorPanel);
+      }
+    }
+    return ctx;
+  }
 
   function updateLogVisibility(savePreference = true) {
     if (!liveMonitorPanel) return;
@@ -435,27 +554,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       }
     }
 
-    const isMobile = window.innerWidth <= 768;
-    const effectiveHid = (isMobile && (!window.currentLogHotspotId || window.currentLogHotspotId === "all"))
-      ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
-      : window.currentLogHotspotId;
-
-    // Reposition liveMonitorPanel immediately after calling hotspot card
-    const targetCard = (effectiveHid && effectiveHid !== "all")
-      ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
-      : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
-
-    if (isLogVisible && targetCard && liveMonitorPanel) {
-      const anchorEl = (targetCard && targetCard.closest(".collapsed-hotspots-stack")) || targetCard;
-      if (anchorEl && anchorEl.nextElementSibling !== liveMonitorPanel) {
-        anchorEl.after(liveMonitorPanel);
-      }
-    } else if (!isLogVisible && liveMonitorPanel) {
-      const dashboard = document.querySelector(".app-dashboard");
-      if (dashboard && liveMonitorPanel.parentElement !== dashboard) {
-        dashboard.appendChild(liveMonitorPanel);
-      }
-    }
+    const { isMobile, effectiveHid, targetCard } = syncLiveMonitorPlacement();
 
     document.querySelectorAll(".radio-container").forEach(card => {
       const cId = card.dataset.hotspotId || "default";
@@ -486,6 +585,15 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       liveMonitorPanel.style.removeProperty("--mobile-log-height");
       liveMonitorPanel.style.height = "";
       liveMonitorPanel.style.maxHeight = "";
+    }
+
+    if (!isMobile) {
+      if (typeof window.syncDesktopHotspotsTopAlignment === "function") {
+        window.syncDesktopHotspotsTopAlignment();
+      }
+      if (typeof window.scheduleDesktopHotspotsTopAlignment === "function") {
+        window.scheduleDesktopHotspotsTopAlignment();
+      }
     }
 
     if (savePreference) {
@@ -529,6 +637,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         adjustMobileLogHeight(null, true);
       } else {
         applyDesktopLogHeight();
+        if (typeof window.scheduleDesktopHotspotsTopAlignment === "function") {
+          window.scheduleDesktopHotspotsTopAlignment();
+        }
       }
     });
   }
@@ -582,6 +693,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     logFilterTsCycleBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isHistoryNoTsNetwork()) return;
       if (logFilter === "all") {
         logFilter = "1";
       } else if (logFilter === "1") {
@@ -731,39 +843,57 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
   }
 
   window.TG_NAMES = {
-    91: "Worldwide (Весь мир)",
-    92: "Europe (Европа)",
+    91: "Worldwide",
+    92: "Europe",
     113: "English WW",
-    250: "Россия (Общий / CIS)",
-    2501: "Россия 1 (National)",
-    2502: "Москва и Московская обл.",
-    2503: "Санкт-Петербург и СЗФО",
-    2504: "Центральный ФО",
-    2505: "Южный & Кавказский ФО",
-    2506: "Приволжский ФО",
-    2507: "Уральский ФО",
-    2508: "Сибирский ФО",
-    2509: "Дальневосточный ФО",
-    25011: "Калининградская обл.",
-    25020: "Конференция РОСХАМ",
-    25033: "Ленинградская обл.",
-    250601: "Волгоградская обл.",
-    250602: "Ростовская обл.",
-    250603: "Армения / Репитер",
-    250641: "Краснодарский край",
-    250647: "Ставропольский край",
-    250907: "Приморский край",
-    262: "Германия (National)",
-    310: "США (TAC 310)",
-    9990: "Parrot (Эхо-тест)",
-    4000: "Отключение (Unlink)",
+    250: "Russia (General / CIS)",
+    2501: "Russia 1 (National)",
+    2502: "Moscow & Moscow Region",
+    2503: "St. Petersburg & NWFD",
+    2504: "Central Federal District",
+    2505: "Southern & Caucasus FD",
+    2506: "Volga Federal District",
+    2507: "Ural Federal District",
+    2508: "Siberian Federal District",
+    2509: "Far Eastern Federal District",
+    25011: "Kaliningrad Oblast",
+    25020: "ROSHAM Conference",
+    25033: "Leningrad Oblast",
+    250601: "Volgograd Oblast",
+    250602: "Rostov Oblast",
+    250603: "Armenia / Repeater",
+    250641: "Krasnodar Krai",
+    250647: "Stavropol Krai",
+    250907: "Primorsky Krai",
+    262: "Germany (National)",
+    310: "USA (TAC 310)",
+    9990: "Parrot (Echo Test)",
+    4000: "Disconnect (Unlink)",
   };
   window.TG_NAMES = window.TG_NAMES;
   window.TGIF_TG_NAMES = window.TGIF_TG_NAMES || {
     777: "TGIF Multi-Lang",
     31665: "TGIF The Mothership",
-    9990: "Parrot (Эхо-тест)",
+    9990: "Parrot (Echo Test)",
     4000: "Disconnect (Unlink)"
+  };
+  window.ADN_TG_NAMES = window.ADN_TG_NAMES || {
+    91: "Worldwide",
+    92: "Europe",
+    250: "Russia National",
+    9990: "Parrot (Echo Test)",
+    4000: "Disconnect (Unlink)"
+  };
+  window.FREEDMR_TG_NAMES = window.FREEDMR_TG_NAMES || {};
+  window.DMRPLUS_TG_NAMES = window.DMRPLUS_TG_NAMES || {
+    4530: "Reflector 4530 RU (Russia / CIS)",
+    4001: "Reflector 4001 DL (Germany General)",
+    4020: "Reflector 4020 HB9 (Switzerland German)",
+    4030: "Reflector 4030 OE (Austria National)",
+    4400: "Reflector 4400 UK (United Kingdom Call)",
+    4500: "Reflector 4500 EA (Spain National)",
+    4700: "Reflector 4700 US (North America)",
+    4800: "Reflector 4800 PY (Brazil National)"
   };
 
   // Populate Russian regional talkgroups 250001 - 250099 into window.TG_NAMES
@@ -799,38 +929,89 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         Object.assign(window.TGIF_TG_NAMES, parsedTgif);
       }
     }
+    const localAdnCache = localStorage.getItem("proxdmr_adn_tg_names_cache");
+    if (localAdnCache) {
+      const parsedAdn = JSON.parse(localAdnCache);
+      if (parsedAdn && typeof parsedAdn === "object") {
+        Object.assign(window.ADN_TG_NAMES, parsedAdn);
+      }
+    }
+    const localFreeDmrCache = localStorage.getItem("proxdmr_freedmr_tg_names_cache");
+    if (localFreeDmrCache) {
+      const parsedFdmr = JSON.parse(localFreeDmrCache);
+      if (parsedFdmr && typeof parsedFdmr === "object") {
+        Object.assign(window.FREEDMR_TG_NAMES, parsedFdmr);
+      }
+    }
+    const localDmrPlusCache = localStorage.getItem("proxdmr_dmrplus_tg_names_cache");
+    if (localDmrPlusCache) {
+      const parsedDmrp = JSON.parse(localDmrPlusCache);
+      if (parsedDmrp && typeof parsedDmrp === "object") {
+        Object.assign(window.DMRPLUS_TG_NAMES, parsedDmrp);
+      }
+    }
   } catch (e) {
     console.warn("Could not load local TG names cache:", e);
   }
 
   // Fetch updated catalog from backend
-  async function syncTgNamesFromServer() {
+  async function syncTgNamesFromServer(networkType = "bm") {
     try {
-      const resp = await fetch("/api/tg/names");
+      const netParam = encodeURIComponent(String(networkType || "bm").toLowerCase());
+      const resp = await fetch(`/api/tg/names?network=${netParam}`);
       const data = await resp.json();
       if (data.status === "ok") {
         if (data.names) {
-          Object.keys(data.names).forEach(k => {
-            const cleaned = getCleanTgDesc(k, data.names[k]);
-            if (cleaned) {
-              window.TG_NAMES[k] = cleaned;
-            } else if (data.names[k]) {
-              window.TG_NAMES[k] = data.names[k];
-            }
-          });
-          localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES));
+          if (netParam === "adn") {
+            Object.assign(window.ADN_TG_NAMES, data.names);
+            try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (_) {}
+          } else if (netParam === "freedmr") {
+            Object.assign(window.FREEDMR_TG_NAMES, data.names);
+            try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+          } else if (netParam === "dmrplus") {
+            Object.assign(window.DMRPLUS_TG_NAMES, data.names);
+            try { localStorage.setItem("proxdmr_dmrplus_tg_names_cache", JSON.stringify(window.DMRPLUS_TG_NAMES)); } catch (_) {}
+          } else {
+            Object.keys(data.names).forEach(k => {
+              const cleaned = getCleanTgDesc(k, data.names[k]);
+              if (cleaned) {
+                window.TG_NAMES[k] = cleaned;
+              } else if (data.names[k]) {
+                window.TG_NAMES[k] = data.names[k];
+              }
+            });
+            try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify(window.TG_NAMES)); } catch (_) {}
+          }
         }
         if (data.tgif_names && typeof data.tgif_names === "object") {
           Object.assign(window.TGIF_TG_NAMES, data.tgif_names);
-          localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES));
+          try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+        }
+        if (data.freedmr_names && typeof data.freedmr_names === "object") {
+          Object.assign(window.FREEDMR_TG_NAMES, data.freedmr_names);
+          try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+        }
+        if (data.adn_names && typeof data.adn_names === "object") {
+          Object.assign(window.ADN_TG_NAMES, data.adn_names);
+          try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (_) {}
+        }
+        if (data.dmrplus_names && typeof data.dmrplus_names === "object") {
+          Object.assign(window.DMRPLUS_TG_NAMES, data.dmrplus_names);
+          try { localStorage.setItem("proxdmr_dmrplus_tg_names_cache", JSON.stringify(window.DMRPLUS_TG_NAMES)); } catch (_) {}
+        }
+        if (typeof data.adn_last_sync_ts === "number" && data.adn_last_sync_ts > 0) {
+          try { localStorage.setItem("proxdmr_adn_tg_last_sync_ts", String(data.adn_last_sync_ts)); } catch (_) {}
         }
         if (typeof window.updateTgDisplay === "function") window.updateTgDisplay();
         if (typeof window.renderQuickMemButtons === "function") window.renderQuickMemButtons();
       }
+      return data;
     } catch (e) {
       console.debug("Background TG names sync skipped:", e);
+      return null;
     }
   }
+  window.syncTgNamesFromServer = syncTgNamesFromServer;
   syncTgNamesFromServer();
 
   function renderLogList() {
@@ -845,27 +1026,65 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
     const effResolved = resolveHid(effectiveHid);
 
     const curHsObj = (window.currentHotspots || []).find(h => h.id === effectiveHid);
-    const isAslSelected = (effectiveHid !== "all") && ((curHsObj?.network_type || "").toLowerCase() === "allstar");
+    const curNetType = (curHsObj?.network_type || "").toLowerCase();
+    const isAslSelected = (effectiveHid !== "all") && (curNetType === "allstar");
+    const isYsfSelected = (effectiveHid !== "all") && (curNetType === "ysf");
+    const isNoTsNetwork = isAslSelected || isYsfSelected;
 
-    // Dynamic headers and controls for AllStar vs DMR
+    if (isNoTsNetwork) {
+      logFilter = "all";
+    }
+
+    if (liveMonitorPanel) {
+      liveMonitorPanel.classList.toggle("is-no-ts-network", isNoTsNetwork);
+    }
+
+    // Dynamic headers and controls for AllStar vs YSF vs DMR
     const colStationEl = document.querySelector(".live-table-header .col-station");
     const colTgEl = document.querySelector(".live-table-header .col-tg");
     const colSlotEl = document.querySelector(".live-table-header .col-slot");
     const tsCycleBtn = document.getElementById("logFilterTsCycleBtn");
 
-    if (colStationEl) colStationEl.textContent = isAslSelected ? (window.t ? window.t("live.col_asl_station", {}, "ОПЕРАТОР / УЗЕЛ") : "ОПЕРАТОР / УЗЕЛ") : (window.t ? window.t("live.col_station", {}, "Оператор / DMR ID") : "Оператор / DMR ID");
-    if (colTgEl) colTgEl.textContent = isAslSelected ? (window.t ? window.t("live.col_asl_target", {}, "ЦЕЛЕВОЙ УЗЕЛ") : "ЦЕЛЕВОЙ УЗЕЛ") : (window.t ? window.t("live.col_tg", {}, "Группа") : "Группа");
-    if (colSlotEl) colSlotEl.textContent = isAslSelected ? (window.t ? window.t("live.col_asl_type", {}, "ТИП") : "ТИП") : (window.t ? window.t("live.col_slot", {}, "Слот") : "Слот");
-    if (tsCycleBtn) tsCycleBtn.style.display = isAslSelected ? "none" : "";
+    if (colStationEl) {
+      colStationEl.textContent = isAslSelected
+        ? (window.t ? window.t("live.col_asl_station", {}, "ОПЕРАТОР / УЗЕЛ") : "ОПЕРАТОР / УЗЕЛ")
+        : (isYsfSelected
+          ? (window.t ? window.t("live.col_ysf_station", {}, "ОПЕРАТОР / ПОЗЫВНОЙ") : "ОПЕРАТОР / ПОЗЫВНОЙ")
+          : (window.t ? window.t("live.col_station", {}, "Оператор / DMR ID") : "Оператор / DMR ID"));
+    }
+    if (colTgEl) {
+      colTgEl.textContent = isAslSelected
+        ? (window.t ? window.t("live.col_asl_target", {}, "ЦЕЛЕВОЙ УЗЕЛ") : "ЦЕЛЕВОЙ УЗЕЛ")
+        : (isYsfSelected
+          ? (window.t ? window.t("live.col_ysf_target", {}, "КОМНАТА") : "КОМНАТА")
+          : (window.t ? window.t("live.col_tg", {}, "Группа") : "Группа"));
+    }
+    if (colSlotEl) {
+      colSlotEl.textContent = isAslSelected
+        ? (window.t ? window.t("live.col_asl_type", {}, "ТИП") : "ТИП")
+        : (isYsfSelected
+          ? (window.t ? window.t("live.col_ysf_mode", {}, "ТИП") : "ТИП")
+          : (window.t ? window.t("live.col_slot", {}, "Слот") : "Слот"));
+    }
+    if (tsCycleBtn) {
+      if (isNoTsNetwork) {
+        tsCycleBtn.classList.add("hidden");
+        tsCycleBtn.style.setProperty("display", "none", "important");
+      } else {
+        tsCycleBtn.classList.remove("hidden");
+        tsCycleBtn.style.removeProperty("display");
+      }
+    }
 
     const filtered = heardCalls.filter(c => {
       if (totalHs > 1 && (isMobile || effectiveHid !== "all")) {
         const callHidResolved = resolveHid(c.hotspot_id);
         if (callHidResolved !== effResolved) return false;
       }
-      if (logFilter !== "all" && c.slot.toString() !== logFilter) return false;
+      if (!isNoTsNetwork && logFilter !== "all" && c.slot.toString() !== logFilter) return false;
       if (logSearchQuery) {
-        const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery));
+        const txWord = (typeof window !== "undefined" && window.t) ? String(window.t("live.tx_search_word", {}, "tx")).toLowerCase() : "tx";
+        const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery) || (txWord && txWord.includes(logSearchQuery)));
         const call = (c.src_callsign || "").toLowerCase();
         const name = (c.src_name || "").toLowerCase();
         const idStr = (c.src_id || "").toString();
@@ -935,9 +1154,10 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       const callNetType = (typeof window.getHotspotNetworkType === "function")
         ? window.getHotspotNetworkType(c.hotspot_id)
         : "bm";
-      const isAllStarCall = (c.network_type === "allstar" || callNetType === "allstar" || String(c.id).startsWith("asl_"));
-      const isPrivateCall = !isAllStarCall && (c.call_type !== "GROUP");
-      const isNonMccNet = (callNetType === "tgif" || callNetType === "xlx");
+      const isAllStarCall = (c.network_type === "allstar" || callNetType === "allstar" || String(c.id || "").startsWith("asl_"));
+      const isYsfCall = (c.network_type === "ysf" || callNetType === "ysf" || String(c.id || "").startsWith("ysf_") || String(c.dst_name || "").startsWith("YSF #"));
+      const isPrivateCall = !isAllStarCall && !isYsfCall && (c.call_type !== "GROUP");
+      const isNonMccNet = (callNetType === "tgif" || callNetType === "xlx" || isYsfCall);
       const callerCountry = getCountryInfo(c.src_id, c.src_callsign);
       const tgCountry = (!isPrivateCall && !isNonMccNet && !isAllStarCall) ? getCountryInfo(c.dst_id) : null;
 
@@ -959,32 +1179,47 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         const linkModeTitle = window.t ? window.t("live.asl_link_mode_tooltip", {}, "Режим линка: приём и передача (RX/TX)") : "Режим линка: приём и передача (RX/TX)";
         tgDescHtml = `<span class="asl-link-mode-badge" title="${linkModeTitle}">RX/TX</span>`;
         tgCellTitle = window.t ? window.t("live.asl_target_node_title", { node: targetNode }, `Целевой узел: Node ${targetNode} (RX/TX)`) : `Целевой узел: Node ${targetNode} (RX/TX)`;
+      } else if (isYsfCall) {
+        const ysfRoomId = String(c.dst_id || "25000").trim();
+        const ysfRoomName = String(c.dst_name || c.talker_alias || `YSF #${ysfRoomId}`).trim();
+        tgText = `#${ysfRoomId}`;
+        tgDisplayHtml = `<span class="ysf-room-badge-text">#<strong>${ysfRoomId}</strong></span>`;
+        tgDesc = ysfRoomName;
+        tgCellTitle = `${ysfRoomName} (#${ysfRoomId})`;
       } else {
         tgText = isPrivateCall ? `ID ${c.dst_id}` : `${c.dst_id}`;
         tgDisplayHtml = isPrivateCall ? `ID <span class="dmr-id-text">${c.dst_id}</span>` : `${c.dst_id}`;
 
         if (!isPrivateCall && tgCountry) {
-          const callerName = (callerCountry && callerCountry.name) ? callerCountry.name.trim().toLowerCase() : "";
-          const targetCountryName = (tgCountry.name) ? tgCountry.name.trim().toLowerCase() : "";
+          const resolveCtry = (obj) => {
+            if (!obj) return "";
+            return (typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function")
+              ? window.resolveCountryDisplayName(obj)
+              : (obj.name || "");
+          };
+          const callerKey = String(callerCountry?.iso || callerCountry?.name_en || callerCountry?.name || "").trim().toLowerCase();
+          const tgKey = String(tgCountry?.iso || tgCountry?.name_en || tgCountry?.name || "").trim().toLowerCase();
+          const isTgGlobal = Boolean(tgCountry.iso === "GLOBAL" || tgCountry.flag === "🌐" || tgKey === "global" || tgKey.includes("worldwide"));
 
-          if (targetCountryName === "global" || targetCountryName.includes("worldwide")) {
-            if (callerName && callerName !== "global") {
+          if (isTgGlobal) {
+            if (callerKey && callerKey !== "global") {
               isDiffCountry = true;
             }
-          } else if (targetCountryName && targetCountryName !== "global") {
-            if (callerName !== targetCountryName) {
+          } else if (tgKey && tgKey !== "global") {
+            if (callerKey !== tgKey) {
               isDiffCountry = true;
             }
           }
 
           if (isDiffCountry) {
-            tgFlagHtml = `<span class="tg-flag" title="${tgCountry.name || ''}">${getFlagBadgeHtml(tgCountry, c.dst_id === 9990)}</span>`;
-            if (tgCountry.name && tgCountry.name !== "Global") {
-              tgCountryName = tgCountry.name;
+            const locTgCountry = resolveCtry(tgCountry);
+            tgFlagHtml = `<span class="tg-flag" title="${locTgCountry || ''}">${getFlagBadgeHtml(tgCountry, c.dst_id === 9990)}</span>`;
+            if (!isTgGlobal && locTgCountry) {
+              tgCountryName = locTgCountry;
             } else if (c.dst_id === 91) {
-              tgCountryName = "Worldwide";
+              tgCountryName = window.t ? window.t("tg_special.91", {}, "Worldwide") : "Worldwide";
             } else if (c.dst_id === 92) {
-              tgCountryName = "Europe";
+              tgCountryName = window.t ? window.t("countries.EU", {}, "Europe") : "Europe";
             }
           }
         }
@@ -1030,8 +1265,11 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
           }
         }
 
-        tgDescHtml = tgDesc ? `<span class="tg-desc-text" title="${tgDesc}">${tgDesc}</span>` : "";
-        tgCellTitle = `${tgText}${isDiffCountry && tgCountry?.name ? ' [' + tgCountry.name + ']' : ''}${tgDesc ? ' — ' + tgDesc : ''}`;
+      const tgCountryDisp = (tgCountry && typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function")
+        ? window.resolveCountryDisplayName(tgCountry)
+        : (tgCountry?.name || "");
+      tgDescHtml = tgDesc ? `<span class="tg-desc-text" title="${tgDesc}">${tgDesc}</span>` : "";
+      tgCellTitle = `${tgText}${isDiffCountry && tgCountryDisp ? ' [' + tgCountryDisp + ']' : ''}${tgDesc ? ' — ' + tgDesc : ''}`;
       }
       const activeClass = c.active ? (isTx ? " active-call active-tx-call" : " active-call") : "";
       const txRowClass = isTx ? " is-tx-row" : "";
@@ -1047,7 +1285,14 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         ? `<span class="live-duration-tick duration-active" data-start="${c.timestamp}">🔴 ${elapsed}${sUnit}</span>` 
         : `<span class="duration-text" style="color: #ffffff;">${c.duration ? c.duration + sUnit : '—'}</span>`;
 
-      const locationInfo = (isTx && !isAllStarCall) ? "" : (c.city ? `${c.city}, ${country.name}` : country.name);
+      const rawCityStr = (c.city || "").trim();
+      const locCity = rawCityStr && typeof window !== "undefined" && typeof window.resolveCityName === "function"
+        ? window.resolveCityName(rawCityStr)
+        : rawCityStr;
+      const locCountry = (typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function")
+        ? window.resolveCountryDisplayName(country)
+        : (country?.name || "");
+      const locationInfo = (isTx && !isAllStarCall) ? "" : (locCity ? (locCountry ? `${locCity}, ${locCountry}` : locCity) : locCountry);
       const plainTitle = `${(isTx ? '[TX] ' : '')}${baseCaller.replace(/<[^>]+>/g, '')}${locationInfo ? ' - ' + locationInfo : ''}`;
       
       const hsObj = (window.currentHotspots || []).find(h => h.id === (c.hotspot_id || "default"));
@@ -1088,9 +1333,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       let stationSubHtml = "";
       if (isAllStarCall) {
         const nodeStr = validId ? `<span class="asl-station-node">#${validId}</span>` : "";
-        const cityStr = (c.city || "").trim();
-        const countryName = (typeof window !== "undefined" && window.currentLang && window.currentLang !== "ru" && country?.name_en) ? country.name_en : (country?.name || "");
-        const locDetail = cityStr || (countryName && countryName !== "Unknown" ? countryName : "");
+        const locDetail = locCity || (locCountry && locCountry !== "Unknown" ? locCountry : "");
         const locSpan = locDetail ? `<span class="station-country">(${locDetail})</span>` : "";
         stationSubHtml = [nodeStr, locSpan].filter(Boolean).join(" ");
       } else {
@@ -1102,7 +1345,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       const srcType = c.source_type || 'VoIP';
       const slotHtml = isAllStarCall
         ? `<span class="asl-cell-badge asl-cell-badge-${srcType.toLowerCase()}" title="${window.t ? window.t("live.asl_source_type_tooltip", { type: srcType }, `Источник вызова: ${srcType}`) : `Источник вызова: ${srcType}`}">${srcType}</span>`
-        : `<span class="slot-text-ts${c.slot}">TS${c.slot}</span>`;
+        : (isYsfCall
+          ? `<span class="ysf-cell-badge" title="C4FM / YSF">C4FM</span>`
+          : `<span class="slot-text-ts${c.slot}">TS${c.slot}</span>`);
 
       const hasTranscription = Boolean(c.transcription && c.transcription.trim());
       const flagClass = hasTranscription ? "station-flag has-transcription" : "station-flag";
@@ -1118,11 +1363,11 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       const playBtnHtml = hasRec ? `<button type="button" class="log-play-btn${isCurPlaying ? ' playing' : ''}" data-call-id="${c.id}" title="${window.t ? window.t("recordings.play_tooltip", {}, "Прослушать запись") : "Прослушать запись"}"><img src="/static/img/Log_PLAY.png" class="log-play-img" alt="Play"></button>` : '';
 
       return `
-        <div class="live-call-row${txRowClass}${activeClass}${recRowClass}" data-id="${c.id}">
+        <div class="live-call-row${txRowClass}${activeClass}${recRowClass}" data-id="${c.id}" data-hid="${c.hotspot_id || 'default'}" data-net="${callNetType}">
           <!-- Desktop 4-column 2-line layout -->
           <div class="live-row-desktop">
             <div class="cell-station" title="${plainTitle}" data-radio-id="${c.src_id}" data-callsign="${c.src_callsign || ''}" data-name="${c.src_name || ''}">
-              <span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? (window.t ? window.t("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)") : country.name}">${flagHtml}</span>
+              <span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? (window.t ? window.t("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)") : locCountry}">${flagHtml}</span>
               ${transMarkerHtml}
               <div class="station-text-wrap" data-radio-id="${c.src_id}">
                 <div class="station-name-line">${isTx ? '<span class="log-tx-badge">TX</span>' : ''}${callerNameLine}${hsBadge}</div>
@@ -1131,7 +1376,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
             </div>
             <div class="cell-tg" title="${tgCellTitle}">
               <div class="tg-line-top">
-                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isPrivateCall ? 'is-id' : 'is-tg')}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}" title="${isAllStarCall ? `Узел ${c.dst_id}` : (window.t ? window.t("live.tune_title", { tg: tgText, slot: c.slot }) : `Tune to ${tgText} (TS${c.slot})`)}">
+                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isYsfCall ? 'is-ysf-room' : (isPrivateCall ? 'is-id' : 'is-tg'))}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}" title="${isAllStarCall ? (window.t ? window.t("live.asl_node_title", { node: c.dst_id }, `Node ${c.dst_id}`) : `Node ${c.dst_id}`) : (isYsfCall ? (window.t ? window.t("live.tune_ysf_title", { room: tgText }, `Перейти в комнату ${tgText}`) : `Перейти в комнату ${tgText}`) : (window.t ? window.t("live.tune_title", { tg: tgText, slot: c.slot }) : `Tune to ${tgText} (TS${c.slot})`))}">
                   ${tgDisplayHtml}
                 </span>
                 ${tgFlagHtml}
@@ -1158,7 +1403,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
           <!-- Mobile layout (matches desktop 5-column 2-line structure) -->
           <div class="live-row-mobile">
-            <span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? (window.t ? window.t("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)") : country.name}">${flagHtml}</span>
+            <span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? (window.t ? window.t("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)") : locCountry}">${flagHtml}</span>
             ${transMarkerHtml}
             <div class="station-text-wrap" data-radio-id="${c.src_id}">
               <div class="station-name-line">${isTx ? '<span class="log-tx-badge">TX</span>' : ''}${callerNameLine}${hsBadge}</div>
@@ -1166,7 +1411,7 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
             </div>
             <div class="cell-tg" title="${tgCellTitle}">
               <div class="tg-line-top">
-                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isPrivateCall ? 'is-id' : 'is-tg')}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}">${tgDisplayHtml}</span>
+                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isYsfCall ? 'is-ysf-room' : (isPrivateCall ? 'is-id' : 'is-tg'))}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}">${tgDisplayHtml}</span>
                 ${tgFlagHtml}
               </div>
               <div class="tg-line-sub">${tgDescHtml || '—'}</div>
@@ -1225,6 +1470,13 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
         const hid = btn.dataset.hid;
         if (hid && typeof window.switchActiveHotspot === "function") window.switchActiveHotspot(hid);
         if (btn.classList.contains("is-asl-node")) return;
+        if (btn.classList.contains("is-ysf-room")) {
+          if (tg > 0 && typeof window.connectYsfRoomById === "function") {
+            const card = hid ? document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`) : null;
+            window.connectYsfRoomById(String(tg), `YSF #${tg}`, card);
+          }
+          return;
+        }
         if (tg > 0) {
           if (slot === 1 || slot === 2) {
             if (typeof window.setActiveSlot === "function") window.setActiveSlot(slot, true);
@@ -1385,6 +1637,7 @@ window.ensureLiveTicker = ensureLiveTicker;
 
 initLogSwipe();
 logSelection.init();
+window.syncLiveMonitorPlacement = syncLiveMonitorPlacement;
 window.updateLogVisibility = updateLogVisibility;
 window.syncLogFilterUI = syncLogFilterUI;
 window.renderLogHotspotTabs = renderLogHotspotTabs;
@@ -1392,6 +1645,7 @@ window.pruneHeardCalls = pruneHeardCalls;
 window.handleLogHeightOnFullscreenOrResize = handleLogHeightOnFullscreenOrResize;
 window.handleFullscreenOrResize = handleFullscreenOrResize;
 window.__proxdmr = window.__proxdmr || {};
+window.__proxdmr.syncLiveMonitorPlacement = syncLiveMonitorPlacement;
 window.__proxdmr.addOrUpdateCall = addOrUpdateCall;
 window.__proxdmr.endCall = endCall;
 window.__proxdmr.resolveCaller = resolveCaller;
@@ -1416,5 +1670,14 @@ if (typeof document !== "undefined") {
     if (typeof window !== "undefined" && typeof window.handleCardLogClick === "function") {
       window.handleCardLogClick(cid);
     }
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("languageChanged", () => {
+    if (typeof renderLogHotspotTabs === "function") renderLogHotspotTabs();
+    if (typeof syncLogFilterUI === "function") syncLogFilterUI();
+    if (typeof updateLogVisibility === "function") updateLogVisibility(false);
+    if (typeof renderLogList === "function") renderLogList();
   });
 }

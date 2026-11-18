@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 cmake_minimum_required(VERSION 3.20)
 
-project(mbelib-neo VERSION 2.6.5 LANGUAGES C)
+project(mbelib-neo VERSION 2.6.11 LANGUAGES C)
 if(POLICY CMP0083)
     cmake_policy(SET CMP0083 NEW)
 endif()
@@ -312,6 +312,7 @@ set(MBELIB_FIRST_PARTY_SOURCES
     src/core/mbe_adaptive.c
     src/core/mbe_encoder.c
     src/core/mbe_speech_analysis.c
+    src/core/mbe_subframe.c
     src/core/mbe_tone_detect.c
     src/core/mbe_tone_fit.c
     src/core/mbe_tone_fit_avx2.c
@@ -1448,8 +1449,12 @@ if(MBELIB_BUILD_TESTS)
             test_tetra_decoder
             test_tetra_simd
             test_dsp_equations
+            test_unvoiced_subframes
+            test_subframe_synthesis
             test_adaptive_equations
             test_ambe2400_frame_types
+            test_ambe2450_frame_types
+            test_pcm_rounding
     )
         add_executable(${_mbelib_private_test} tests/${_mbelib_private_test}.c)
         target_link_libraries(${_mbelib_private_test} PRIVATE mbe-static)
@@ -1459,6 +1464,15 @@ if(MBELIB_BUILD_TESTS)
                 "${PROJECT_SOURCE_DIR}/include"
                 "${PROJECT_SOURCE_DIR}/src/internal"
         )
+        # A library built with fast-math may round an expression otherwise
+        # than a test's reference does; tests that compare the two exactly in
+        # an IEEE build allow for it then.
+        if(MBELIB_ENABLE_FAST_MATH)
+            target_compile_definitions(
+                ${_mbelib_private_test}
+                PRIVATE MBELIB_TEST_LIBRARY_FAST_MATH=1
+            )
+        endif()
         if(_SAN_CFLAGS)
             target_compile_options(
                 ${_mbelib_private_test}
@@ -1559,27 +1573,6 @@ if(MBELIB_BUILD_TESTS)
         )
     endif()
     add_test(NAME test_floattoshort_parity COMMAND test_floattoshort_parity)
-
-    add_executable(test_ambe2450_frame_types tests/test_ambe2450_frame_types.c)
-    target_link_libraries(
-        test_ambe2450_frame_types
-        PRIVATE ${MBELIB_EXEC_LINK_TGT}
-    )
-    target_include_directories(
-        test_ambe2450_frame_types
-        PRIVATE "${PROJECT_SOURCE_DIR}/include"
-    )
-    if(_SAN_CFLAGS)
-        target_compile_options(test_ambe2450_frame_types PRIVATE ${_SAN_CFLAGS})
-    endif()
-    if(_SAN_LDFLAGS)
-        target_link_options(
-            test_ambe2450_frame_types
-            BEFORE
-            PRIVATE ${_SAN_LDFLAGS}
-        )
-    endif()
-    add_test(NAME test_ambe2450_frame_types COMMAND test_ambe2450_frame_types)
 
     add_executable(test_tones tests/test_tones.c)
     target_link_libraries(test_tones PRIVATE ${MBELIB_EXEC_LINK_TGT})
@@ -1806,8 +1799,8 @@ if(MBELIB_BUILD_TESTS)
                     PROPERTIES SKIP_RETURN_CODE 77
                 )
                 # The A/B runner locks its run directory with fcntl, so it is POSIX-only, and
-                # uses assignment expressions, so it needs Python 3.8.
-                if(NOT WIN32 AND Python3_VERSION VERSION_GREATER_EQUAL 3.8)
+                # checks paths with Path.is_relative_to(), so it needs Python 3.9.
+                if(NOT WIN32 AND Python3_VERSION VERSION_GREATER_EQUAL 3.9)
                     add_test(
                         NAME test_quality_ab_finalize
                         COMMAND
@@ -1828,12 +1821,16 @@ if(MBELIB_BUILD_TESTS)
                 ${Python3_EXECUTABLE}
                 ${PROJECT_SOURCE_DIR}/tests/test_ci_scheduling.py
         )
-        add_test(
-            NAME test_legal_release
-            COMMAND
-                ${Python3_EXECUTABLE}
-                ${PROJECT_SOURCE_DIR}/tests/test_legal_release.py
-        )
+        # The release SBOM hashes with usedforsecurity=False and the reference
+        # provenance checks paths with Path.is_relative_to(): both need Python 3.9.
+        if(Python3_VERSION VERSION_GREATER_EQUAL 3.9)
+            add_test(
+                NAME test_legal_release
+                COMMAND
+                    ${Python3_EXECUTABLE}
+                    ${PROJECT_SOURCE_DIR}/tests/test_legal_release.py
+            )
+        endif()
         add_test(
             NAME test_release_assets
             COMMAND
@@ -2079,6 +2076,8 @@ if(MBELIB_BUILD_TESTS)
     set(_MBELIB_TEST_TARGETS
         test_cpu_dispatch
         test_dsp_equations
+        test_unvoiced_subframes
+        test_subframe_synthesis
         test_adaptive_equations
         test_assertions
         test_api
@@ -2098,6 +2097,7 @@ if(MBELIB_BUILD_TESTS)
         test_quality_dvsi
         test_input_validation
         test_floattoshort_parity
+        test_pcm_rounding
         test_ambe2450_frame_types
         test_ambe2400_frame_types
         test_tones

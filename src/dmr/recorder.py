@@ -409,49 +409,88 @@ class ServerAudioRecorder:
         self._muted_hotspots: Set[str] = set()
 
         self._last_recording_state: Optional[Any] = None
+        self._last_recording_states_by_user: Dict[int, Any] = {}
 
         # Ссылки на фоновые задачи (защита от GC)
         self._bg_tasks: Set[asyncio.Task] = set()
 
+    def prune_stale_rx_buffers(self, max_idle_sec: float = 3.5) -> None:
+        """Finalizes and removes any RX buffer that has not received audio frames within max_idle_sec."""
+        if not self._rx_buffers:
+            return
+        now = time.time()
+        stale_items = [
+            (rx_key, buf)
+            for rx_key, buf in list(self._rx_buffers.items())
+            if (now - getattr(buf, "last_activity", now)) > max_idle_sec
+        ]
+        for rx_key, buf in stale_items:
+            popped = self._rx_buffers.pop(rx_key, None)
+            uid = int(getattr(buf, "user_id", 1) or 1)
+            self._check_and_notify_recording_state(uid)
+            if popped:
+                self._spawn_bg(self._finalize_and_persist(popped, "RX", f"{popped.hotspot_id}_TS{popped.slot}"))
+
     def is_recording(self, user_id: int = 1) -> bool:
         """Returns True if any recording is currently taking place (session, RX call, or TX call)."""
-        return bool(self.is_session_active(user_id) or self._rx_buffers or self._tx_buffer)
+        now = time.time()
+        has_rx = any(
+            getattr(buf, "user_id", 1) == user_id and (now - getattr(buf, "last_activity", now)) <= 3.5
+            for buf in self._rx_buffers.values()
+        )
+        has_tx = bool(self._tx_buffer and getattr(self._tx_buffer, "user_id", 1) == user_id)
+        return bool(self.is_session_active(user_id) or has_rx or has_tx)
 
-    def get_recording_hotspots(self) -> List[str]:
+    def get_recording_hotspots(self, user_id: Optional[int] = None) -> List[str]:
         """Returns list of hotspot IDs currently having active audio recording."""
+        now = time.time()
         hids = set()
         for buf in self._rx_buffers.values():
-            if buf.hotspot_id:
+            if (now - getattr(buf, "last_activity", now)) > 3.5:
+                continue
+            if buf.hotspot_id and (user_id is None or getattr(buf, "user_id", 1) == user_id):
                 hids.add(str(buf.hotspot_id))
-        if self._tx_buffer and self._tx_buffer.hotspot_id:
+        if self._tx_buffer and self._tx_buffer.hotspot_id and (
+            user_id is None or getattr(self._tx_buffer, "user_id", 1) == user_id
+        ):
             hids.add(str(self._tx_buffer.hotspot_id))
         return sorted(list(hids))
 
     def on_hotspot_auto_record_disabled(self, hotspot_id: str) -> None:
         """Immediately discard in-flight recordings for a hotspot when its auto-record is disabled."""
         hid_key = str(hotspot_id).strip().lower()
-        to_del = [k for k in self._rx_buffers if k.startswith(f"{hid_key}_") or (hid_key == "default" and "_" in k)]
+        affected_uids: Set[int] = set()
+        to_del = [k for k in self._rx_buffers if k.startswith(f"{hid_key}_")]
         for k in to_del:
             buf = self._rx_buffers.pop(k, None)
             if buf:
+                affected_uids.add(int(getattr(buf, "user_id", 1) or 1))
                 logger.info(f"[RECORDER] Auto-record disabled for {hotspot_id}: cancelled in-flight RX call {k}")
-        if self._tx_buffer and (str(self._tx_buffer.hotspot_id).lower() == hid_key or hid_key == "default"):
+        if self._tx_buffer and str(self._tx_buffer.hotspot_id).strip().lower() == hid_key:
+            affected_uids.add(int(getattr(self._tx_buffer, "user_id", 1) or 1))
             self._tx_buffer = None
             logger.info(f"[RECORDER] Auto-record disabled for {hotspot_id}: cancelled in-flight TX call")
-        self._check_and_notify_recording_state(1)
+        if not affected_uids:
+            affected_uids.add(1)
+        for uid in sorted(affected_uids):
+            self._check_and_notify_recording_state(uid)
 
     def _check_and_notify_recording_state(self, user_id: int = 1) -> None:
         is_rec = self.is_recording(user_id)
-        rec_hids = self.get_recording_hotspots()
+        rec_hids = self.get_recording_hotspots(user_id=user_id)
+        has_rx = any(getattr(buf, "user_id", 1) == user_id for buf in self._rx_buffers.values())
+        has_tx = bool(self._tx_buffer and getattr(self._tx_buffer, "user_id", 1) == user_id)
         state_key = (is_rec, tuple(rec_hids), self.is_session_active(user_id))
-        if self._last_recording_state != state_key:
+        if self._last_recording_states_by_user.get(user_id) != state_key:
+            self._last_recording_states_by_user[user_id] = state_key
             self._last_recording_state = state_key
             self._notify_async({
                 "type": "recording_state",
+                "user_id": user_id,
                 "active": is_rec,
                 "session_active": self.is_session_active(user_id),
-                "rx_active": bool(self._rx_buffers),
-                "tx_active": bool(self._tx_buffer),
+                "rx_active": has_rx,
+                "tx_active": has_tx,
                 "recording_hotspots": rec_hids,
             })
 
@@ -589,14 +628,16 @@ class ServerAudioRecorder:
         """Discards active RX buffer without writing a WAV file to disk (e.g. for filtered kerchunks)."""
         hid_key = str(hotspot_id).strip().lower()
         rx_key = f"{hid_key}_{slot}"
-        self._rx_buffers.pop(rx_key, None)
-        self._check_and_notify_recording_state(1)
+        buf = self._rx_buffers.pop(rx_key, None)
+        uid = int(getattr(buf, "user_id", 1) or 1) if buf else 1
+        self._check_and_notify_recording_state(uid)
 
     def on_rx_call_ended(self, hotspot_id: str, slot: int, call_id: str = "") -> None:
         hid_key = str(hotspot_id).strip().lower()
         rx_key = f"{hid_key}_{slot}"
         buf = self._rx_buffers.pop(rx_key, None)
-        self._check_and_notify_recording_state(1)
+        uid = int(getattr(buf, "user_id", 1) or 1) if buf else 1
+        self._check_and_notify_recording_state(uid)
         if not buf:
             return
 
@@ -651,7 +692,8 @@ class ServerAudioRecorder:
     def stop_tx(self, call_id: str = "") -> None:
         buf = self._tx_buffer
         self._tx_buffer = None
-        self._check_and_notify_recording_state(1)
+        uid = int(getattr(buf, "user_id", 1) or 1) if buf else 1
+        self._check_and_notify_recording_state(uid)
         if not buf:
             return
 
@@ -677,10 +719,13 @@ class ServerAudioRecorder:
             loop = asyncio.get_running_loop()
             call_id_str = str(getattr(buf, "call_id", ""))
             is_asl = call_id_str.startswith("asl_") or ("allstar" in str(getattr(buf, "hotspot_id", "")).lower())
+            is_ysf = call_id_str.startswith("ysf_") or ("ysf" in str(getattr(buf, "hotspot_id", "")).lower())
             effective_min_dur = self.min_duration_sec
             rec_data = await loop.run_in_executor(_RECORDER_IO_EXECUTOR, buf.finalize, effective_min_dur)
             if rec_data:
-                if is_asl:
+                if is_ysf:
+                    rec_data["network_type"] = "ysf"
+                elif is_asl:
                     rec_data["network_type"] = "allstar"
                     node_str = str(rec_data.get("src_id") or "").strip()
                     if not node_str or node_str == "0":

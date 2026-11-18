@@ -10,7 +10,7 @@ SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 class HotspotConfig(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
-    name: str = "Основной хотспот"
+    name: str = "Main Hotspot"
     callsign: str = "N0CALL"
     dmr_id: int = 0
     bm_ssid: int = Field(default=1, ge=1, le=99)
@@ -31,6 +31,40 @@ class HotspotConfig(BaseModel):
     bm_master_port: int = 62031
     bm_password: str = ""
     bm_api_key: str = ""
+    network_type: str = "bm"
+    ysf_host: str = ""
+    ysf_port: int = 42000
+    ysf_room_id: str = ""
+    ysf_room_name: str = ""
+    ysf_room: Optional[str] = None
+    ysf_name: Optional[str] = None
+    ysf_dg_id: str = ""
+    ysf_tx_dg_id: Optional[int] = None
+    ysf_room_dg_ids: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_ysf_fields(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            net_type = str(values.get("network_type") or "").strip().lower()
+            if net_type == "ysf":
+                ysf_h = str(values.get("ysf_host") or "").strip()
+                if ysf_h.isdigit():
+                    values["ysf_host"] = ""
+                bm_h = str(values.get("bm_master_host") or "").strip()
+                if bm_h.isdigit():
+                    values["bm_master_host"] = ""
+
+            if "ysf_room" in values and values["ysf_room"] and not values.get("ysf_room_id"):
+                values["ysf_room_id"] = str(values["ysf_room"])
+            elif "ysf_room_id" in values and values["ysf_room_id"] and not values.get("ysf_room"):
+                values["ysf_room"] = str(values["ysf_room_id"])
+
+            if "ysf_name" in values and values["ysf_name"] and not values.get("ysf_room_name"):
+                values["ysf_room_name"] = str(values["ysf_name"])
+            elif "ysf_room_name" in values and values["ysf_room_name"] and not values.get("ysf_name"):
+                values["ysf_name"] = str(values["ysf_room_name"])
+        return values
     duplex: bool = True
     rx_freq: int = 438800000
     tx_freq: int = 431200000
@@ -64,6 +98,7 @@ class AppSettings(BaseModel):
     haptic_duration: int = 45
     simultaneous_slots: bool = False
     check_mic_on_tx: bool = True
+    single_hotspot_audio: bool = False
     theme: str = "dark"
     bg_type: str = "pattern"
     bg_color: str = "#0f1115"
@@ -108,9 +143,12 @@ class AppSettings(BaseModel):
     hamqth_username: str = ""
     hamqth_password: str = ""
     disable_update_notifications: bool = False
+    enable_network_colors: bool = True
+    network_brand_colors: Dict[str, Any] = Field(default_factory=dict)
     hotspots: List[HotspotConfig] = Field(default_factory=list)
     contacts: List[Dict[str, Any]] = Field(default_factory=list)
     contacts_gateway: Dict[str, Any] = Field(default_factory=lambda: {"hotspot_id": "default", "slot": 2})
+    ysf_favorites: List[Dict[str, Any]] = Field(default_factory=list)
     model_config = {"extra": "allow"}
 
     @model_validator(mode="after")
@@ -153,7 +191,7 @@ class AppSettings(BaseModel):
 def load_app_settings() -> AppSettings:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not SETTINGS_FILE.exists():
-        default_hs = HotspotConfig(id="default", name="Основной хотспот")
+        default_hs = HotspotConfig(id="default", name="Main Hotspot")
         app_settings = AppSettings(active_hotspot_id="default", hotspots=[default_hs])
         save_app_settings(app_settings)
         return app_settings
@@ -166,7 +204,7 @@ def load_app_settings() -> AppSettings:
         if "hotspots" not in raw:
             hs = HotspotConfig(
                 id="default",
-                name="Основной хотспот",
+                name="Main Hotspot",
                 callsign=raw.get("callsign", "N0CALL"),
                 dmr_id=raw.get("dmr_id", 0),
                 bm_ssid=raw.get("bm_ssid", 1) if raw.get("bm_ssid", 0) > 0 else 1,
@@ -194,7 +232,7 @@ def load_app_settings() -> AppSettings:
         app_settings = AppSettings(**raw)
         settings_modified = False
         if not app_settings.hotspots:
-            app_settings.hotspots.append(HotspotConfig(id="default", name="Основной хотспот"))
+            app_settings.hotspots.append(HotspotConfig(id="default", name="Main Hotspot"))
             settings_modified = True
 
         for raw_hs in raw.get("hotspots", []):
@@ -234,7 +272,7 @@ def load_app_settings() -> AppSettings:
         return app_settings
     except Exception as e:
         print(f"[CONFIG] Error loading settings: {e}, using default")
-        default_hs = HotspotConfig(id="default", name="Основной хотспот")
+        default_hs = HotspotConfig(id="default", name="Main Hotspot")
         return AppSettings(active_hotspot_id="default", hotspots=[default_hs])
 
 def save_app_settings(app_settings: AppSettings) -> None:

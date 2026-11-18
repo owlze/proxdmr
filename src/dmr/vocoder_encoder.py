@@ -61,17 +61,21 @@ class HighPassFilter300Hz:
 # Bit pattern: 0xACAA40200044408080
 AMBE_SILENCE_FRAME = bytes.fromhex("acaa40200044408080")
 
+# Valid AMBE 2450 49-bit silence vector (b0 = 124 -> MBE_AMBE2450_FRAME_SILENCE)
+AMBE_SILENCE_49 = bytes(1 if i in (0, 1, 2, 3, 37) else 0 for i in range(49))
+
 
 class DMRVocoderEncoder:
     """
-    AMBE+2 Voice Encoder for DMR powered by mbelib-neo.
-    Converts 8000 Hz 16-bit PCM (480 samples = 60 ms) into 3 AMBE+2 frames (27 bytes = 216 bits).
+    AMBE+2 Voice Encoder for DMR and YSF powered by mbelib-neo.
+    Converts 8000 Hz 16-bit PCM into 72-bit (DMR) or 49-bit (YSF VD2) AMBE+2 frames.
     """
     def __init__(self):
         self.lib = self._load_library()
         self.enc = None
         self.hpf = HighPassFilter300Hz()
         self.is_ready = False
+        self.has_encode_49 = False
         self._pcm_buffer = bytearray()
 
         if self.lib:
@@ -86,10 +90,19 @@ class DMRVocoderEncoder:
                 ]
                 self.lib.mbe_neo_encode_72.restype = ctypes.c_int
 
+                if hasattr(self.lib, "mbe_neo_encode_49"):
+                    self.lib.mbe_neo_encode_49.argtypes = [
+                        ctypes.c_void_p,
+                        ctypes.POINTER(ctypes.c_int16),
+                        ctypes.POINTER(ctypes.c_uint8)
+                    ]
+                    self.lib.mbe_neo_encode_49.restype = ctypes.c_int
+                    self.has_encode_49 = True
+
                 self.enc = self.lib.mbe_neo_encoder_create()
                 if self.enc:
                     self.is_ready = True
-                    logger.info("[VOCODER_ENC] mbelib-neo AMBE+2 Encoder initialized successfully")
+                    logger.info(f"[VOCODER_ENC] mbelib-neo AMBE+2 Encoder initialized (encode_49={self.has_encode_49})")
                 else:
                     logger.error("[VOCODER_ENC] Failed to create mbelib-neo encoder instance")
             except Exception as e:
@@ -195,6 +208,45 @@ class DMRVocoderEncoder:
                 return None
 
         return frames
+
+    def encode_ysf_20ms_49(self, pcm_160_samples: List[int]) -> bytes:
+        """
+        Encodes exactly 160 samples (20 ms) of 16-bit 8000 Hz PCM into a 49-bit AMBE+2 vector
+        (49 bytes of 0/1) for YSF VD Mode 2.
+        """
+        if not self.is_ready or not self.enc or not self.has_encode_49:
+            return AMBE_SILENCE_49
+
+        filtered = self.hpf.process(pcm_160_samples)
+        peak = max(abs(s) for s in filtered)
+        if peak < 70:
+            return AMBE_SILENCE_49
+
+        pcm_arr = (ctypes.c_int16 * 160)(*filtered)
+        ambe49_arr = (ctypes.c_uint8 * 49)()
+
+        res = self.lib.mbe_neo_encode_49(self.enc, pcm_arr, ambe49_arr)
+        if res == 0:
+            return bytes(ambe49_arr)
+        return AMBE_SILENCE_49
+
+    def encode_ysf_100ms_frame(self, pcm_bytes_1600: bytes) -> List[bytes]:
+        """
+        Encodes 1600 bytes (800 samples = 100 ms) of 8000 Hz 16-bit PCM into 5 AMBE+2
+        49-bit vectors for one YSF VD2 packet.
+        """
+        if not pcm_bytes_1600:
+            return [AMBE_SILENCE_49] * 5
+
+        buf = pcm_bytes_1600[:1600]
+        if len(buf) < 1600:
+            buf = buf + (b"\x00" * (1600 - len(buf)))
+
+        samples = struct.unpack("<800h", buf)
+        if max(abs(s) for s in samples) < 70:
+            return [AMBE_SILENCE_49] * 5
+
+        return [self.encode_ysf_20ms_49(samples[i * 160:(i + 1) * 160]) for i in range(5)]
 
     def close(self):
         """Explicitly release C-allocated encoder context."""

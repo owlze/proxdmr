@@ -1,87 +1,231 @@
 <!-- lang:en -->
-# ProxDMR v2.16 — Release Notes
+# ProxDMR v2.17b — Release Notes
 
-* Replaced the vocoder/encoder core with the significantly higher-quality and more advanced mbelib-neo.
-* Implemented a separate asynchronous receive pipeline module and a dedicated jitter buffer. BrandMeister network packet reception is completely isolated from decoding and web transmission, eliminating stuttering and audio dropouts caused by network fluctuations. Inter-frame transition smoothing has been added.
-* Low-latency web engine based on AudioWorklet. Audio playback in the browser has been offloaded to a dedicated AudioWorklet. A 4-stage Chebyshev IIR filter has been implemented for sample rate interpolation (8 kHz → 48 kHz) with effective suppression of mirror frequencies without resource-intensive Fourier transforms. Automatic dynamic buffer adaptation to client network jitter.
-* Complete separation of audio processing chains: independent 10-band graphic equalizers, AGC, and limiters for both digital and analog (ASL) modes.
-* Optimization of the analog path (ASL): increased Asterisk resource limits and expansion of the IAX2 network jitter buffer.
-* Fault tolerance for connections with BrandMeister. Automatic failover mechanism: if communication with the current BM master is lost for more than 1 minute, the system automatically switches to the next server from the lowest-latency table.
-* Isolated mode for the built-in "Parrot" echo test. Server-side processing of digital and analog echo tests has been implemented, with temporary isolation of the client's WebSocket session from the general airwaves during self-voice calibration.
+List of Changes
+
+1. Support for Yaesu System Fusion (YSF / C4FM). A full-featured network client for YSF repeaters, a global room directory with background online monitoring, support for FCS/YCS multi-room hubs, and DG-ID selector control.
+
+2. Integration with the Amateur Digital Network (ADN). An ADN server network module with a built-in TG directory.
+
+3. Interface changes: Creation of a universal hotspot manager toolbar with a comprehensive system for switching between hotspots, enabling/disabling them, changing their status, etc.
+
+4. Implementation of a local echo repeater with audio passing entirely through the encoder-decoder for a comprehensive assessment of the quality, spectrum, and signal level of one's microphone. Modification and optimization of audio processing for transmission (microphone, DSP, codec).
+
+5. Complete isolation of contact lists across networks. Each digital network (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) has its own isolated address book while maintaining cross-network call sign search.
+
+6. Speech deduplication in TTS and independent HAM settings: An algorithm for suppressing cyclic phrase repetitions in the transcriber and speech synthesizer.
+
+7. Updated user interface and localization into 8 languages
+
+8. New feature: playing recorded audio clips to on air.
+
+9. Update to mbelib-neo (ambe+2 decoder/encoder)
+
+10. Fixes in the Android APK client—a modification related to configuring and using the smartphone's hardware button as a PTT.
+
+11. A host of minor conflicts, bugs, unclear program behaviors, etc.
+
+I also ask everyone who uses this program to be understanding regarding any bugs and unstable program features; I'm just a hobbyist coder with limited programming experience, and this is a completely amateur project. In any case, if you'd like, feel free to email me at the address listed in the "About" section of the program.
 
 <!-- lang:ru -->
-# ProxDMR v2.16 — Список изменений
+# ProxDMR v2.17b — Список изменений
 
-* Заменено ядро вокодера/энкодера на значительно более качественную и продвинутую библиотеку mbelib-neo.
-* Реализован отдельный асинхронный модуль конвейера приёма и выделенный джиттер-буфер. Приём сетевых пакетов BrandMeister полностью изолирован от декодирования и веб-передачи, что устраняет заикания и выпадения звука из-за сетевых флуктуаций. Добавлено сглаживание межфреймовых переходов.
-* Низколатентный веб-движок на базе AudioWorklet. Воспроизведение звука в браузере переведено на выделенный AudioWorklet. Реализован 4-каскадный IIR-фильтр Чебышёва для интерполяции частоты дискретизации (8 кГц → 48 кГц) с эффективным подавлением зеркальных частот без ресурсоёмких преобразований Фурье. Автоматическая динамическая адаптация буфера под реальный сетевой джиттер клиента.
-* Полное разделение цепочек обработки звука: независимые 10-полосные графические эквалайзеры, АРУ и лимитеры как для цифрового (DMR), так и для аналогового (ASL) режимов.
-* Оптимизация аналогового тракта (ASL): увеличены лимиты вычислительных ресурсов для Asterisk и расширен сетевой джиттер-буфер IAX2.
-* Отказоустойчивость соединения с BrandMeister: автоматический механизм отказоустойчивости (failover) — при потере связи с текущим мастером BM более чем на 1 минуту система автоматически переключается на следующий сервер из таблицы наименьших задержек.
-* Изолированный режим встроенного эхо-теста («Попугай»). Реализована серверная обработка цифрового и аналогового эхо-теста с временной изоляцией WebSocket-сессии клиента от общего радиоэфира на время калибровки собственного голоса.
+Список изменений
+
+1. Поддержка Yaesu System Fusion (YSF / C4FM). Полнофункциональный сетевой клиент для репитеров и рефлекторов YSF, глобальный каталог комнат с фоновым мониторингом онлайна, поддержка мультикомнатных хабов FCS/YCS и управление селектором DG-ID.
+
+2. Интеграция с Amateur Digital Network (ADN). Модуль сети серверов ADN со встроенным справочником разговорных групп (TG).
+
+3. Изменения интерфейса: создан универсальный тулбар управления хотспотами с комплексной системой переключения между хотспотами, их включения/выключения, смены статуса и др.
+
+4. Реализация локального эхо-репитера («Попугай») с полным прохождением звука через кодер-декодер для комплексной оценки качества, спектра и уровня сигнала собственного микрофона. Модификация и оптимизация обработки звука при передаче (микрофон, DSP, кодек).
+
+5. Полная изоляция списков контактов по сетям. Каждая цифровая сеть (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) имеет собственную изолированную адресную книгу с сохранением сквозного поиска по позывным между сетями.
+
+6. Дедупликация речи в TTS и независимые настройки HAM: алгоритм подавления циклических повторений фраз в транскрибере и синтезаторе речи.
+
+7. Обновлённый пользовательский интерфейс и локализация на 8 языков.
+
+8. Новая функция: воспроизведение записанных аудиоклипов в эфир.
+
+9. Обновление mbelib-neo (декодер/кодер AMBE+2).
+
+10. Исправления в Android APK-клиенте — доработка настройки и использования аппаратной кнопки смартфона в качестве PTT.
+
+11. Множество мелких исправлений конфликтов, багов, неясного поведения программы и прочих улучшений.
+
+Также прошу всех пользователей программы с пониманием относиться к возможным ошибкам и нестабильной работе отдельных функций — я всего лишь программист-любитель с небольшим опытом, и это полностью любительский проект. В любом случае, при желании вы всегда можете написать мне на электронную почту, указанную в разделе «О программе».
 
 <!-- lang:uk -->
-# ProxDMR v2.16 — Список змін
+# ProxDMR v2.17b — Список змін
 
-* Замінено ядро вокодера/енкодера на значно якіснішу та передовішу бібліотеку mbelib-neo.
-* Реалізовано окремий асинхронний модуль конвеєра прийому та виділений джитер-буфер. Прийом мережевих пакетів BrandMeister повністю ізольовано від декодування та веб-передачі, що усуває заїкання та випадання звуку через мережеві флуктуації. Додано згладжування міжфреймових переходів.
-* Низьколатентний веб-рушій на базі AudioWorklet. Відтворення звуку в браузері переведено на виділений AudioWorklet. Реалізовано 4-каскадний IIR-фільтр Чебишова для інтерполяції частоти дискретизації (8 кГц → 48 кГц) з ефективним придушенням дзеркальних частот без ресурсомістких перетворень Фур'є. Автоматична динамічна адаптація буфера під реальний мережевий джитер клієнта.
-* Повне розділення ланцюжків обробки звуку: незалежні 10-смугові графічні еквалайзери, АРП та лімітери як для цифрового (DMR), так і для аналогового (ASL) режимів.
-* Оптимізація аналогового тракту (ASL): збільшено ліміти обчислювальних ресурсів для Asterisk та розширено мережевий джитер-буфер IAX2.
-* Відмовостійкість з'єднання з BrandMeister: автоматичний механізм відмовостійкості (failover) — при втраті зв'язку з поточним майстром BM понад 1 хвилину система автоматично перемикається на наступний сервер із таблиці найменших затримок.
-* Ізольований режим вбудованого ехо-тесту («Папуга»). Реалізовано серверну обробку цифрового та аналогового ехо-тесту з тимчасовою ізоляцією WebSocket-сесії клієнта від загального радіоефіру на час калібрування власного голосу.
+Список змін
+
+1. Підтримка Yaesu System Fusion (YSF / C4FM). Повнофункціональний мережевий клієнт для репітерів та рефлекторів YSF, глобальний каталог кімнат із фоновим моніторингом онлайну, підтримка мультикімнатних хабів FCS/YCS і керування селектором DG-ID.
+
+2. Інтеграція з Amateur Digital Network (ADN). Мережевий модуль серверів ADN із вбудованим довідником розмовних груп (TG).
+
+3. Зміни інтерфейсу: створено універсальний тулбар керування хотспотами з комплексною системою перемикання між хотспотами, їх увімкнення/вимкнення, зміни статусу тощо.
+
+4. Реалізація локального ехо-репітера («Папуга») із повним проходженням звуку через кодер-декодер для комплексної оцінки якості, спектра та рівня сигналу власного мікрофона. Модифікація та оптимізація обробки звуку під час передачі (мікрофон, DSP, кодек).
+
+5. Повна ізоляція списків контактів між мережами. Кожна цифрова мережа (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) має власну ізольовану адресну книгу зі збереженням наскрізного пошуку за позивними між мережами.
+
+6. Дедуплікація мовлення в TTS та незалежні налаштування HAM: алгоритм придушення циклічних повторів фраз у транскрибері та синтезаторі мовлення.
+
+7. Оновлений інтерфейс користувача та локалізація 8 мовами.
+
+8. Нова функція: відтворення записаних аудіокліпів в ефір.
+
+9. Оновлення mbelib-neo (декодер/кодер AMBE+2).
+
+10. Виправлення в Android APK-клієнті — доопрацювання налаштування та використання апаратної кнопки смартфона як PTT.
+
+11. Багато дрібних виправлень конфліктів, помилок, незрозумілої поведінки програми тощо.
+
+Також прошу всіх користувачів програми із розумінням ставитися до можливих помилок і нестабільної роботи окремих функцій; я лише програміст-аматор із невеликим досвідом, і це повністю аматорський проєкт. У будь-якому разі, за бажання, можете написати мені на електронну пошту, зазначену в розділі «Про програму».
 
 <!-- lang:de -->
-# ProxDMR v2.16 — Änderungsprotokoll
+# ProxDMR v2.17b — Änderungsprotokoll
 
-* Der Vocoder/Encoder-Kern wurde durch das deutlich hochwertigere und fortschrittlichere mbelib-neo ersetzt.
-* Ein separates asynchrones Empfangspipeline-Modul und ein dedizierter Jitter-Puffer wurden implementiert. Der Netzwerkpaketempfang von BrandMeister ist vollständig von der Dekodierung und Webübertragung isoliert, wodurch Stottern und Audioaussetzer durch Netzwerkschwankungen vermieden werden. Eine Glättung der Übergänge zwischen den Frames wurde hinzugefügt.
-* Low-Latency-Web-Engine auf Basis von AudioWorklet. Die Audiowiedergabe im Browser wurde auf ein dediziertes AudioWorklet ausgelagert. Ein 4-stufiger Chebyshev-IIR-Filter zur Abtastraten-Interpolation (8 kHz → 48 kHz) mit effektiver Unterdrückung von Spiegelfrequenzen ohne rechenintensive Fourier-Transformationen wurde implementiert. Automatische dynamische Pufferanpassung an den tatsächlichen Netzwerk-Jitter des Clients.
-* Vollständige Trennung der Audioverarbeitungsketten: unabhängige 10-Band-Grafik-Equalizer, AGC und Limiter sowohl für digitale als auch für analoge (ASL) Modi.
-* Optimierung des analogen Signalwegs (ASL): Erhöhung der Asterisk-Ressourcenlimits und Erweiterung des IAX2-Netzwerk-Jitter-Puffers.
-* Fehlertoleranz für BrandMeister-Verbindungen. Automatischer Failover-Mechanismus: Geht die Verbindung zum aktuellen BM-Master für mehr als 1 Minute verloren, wechselt das System automatisch zum nächsten Server aus der Tabelle mit den niedrigsten Latenzen.
-* Isolierter Modus für den integrierten „Parrot“-Echotest. Serverseitige Verarbeitung digitaler und analoger Echotests wurde implementiert, mit temporärer Isolierung der WebSocket-Sitzung des Clients vom allgemeinen Funkverkehr während der Kalibrierung der eigenen Stimme.
+Liste der Änderungen
+
+1. Unterstützung für Yaesu System Fusion (YSF / C4FM). Ein vollwertiger Netzwerk-Client für YSF-Repeater, ein globales Raumverzeichnis mit Hintergrund-Online-Monitoring, Unterstützung für FCS/YCS-Multiraum-Hubs und DG-ID-Auswahlsteuerung.
+
+2. Integration mit dem Amateur Digital Network (ADN). Ein ADN-Server-Netzwerkmodul mit integriertem TG-Verzeichnis.
+
+3. Änderungen der Benutzeroberfläche: Erstellung einer universellen Hotspot-Manager-Symbolleiste mit umfassendem System zum Wechseln zwischen Hotspots, Aktivieren/Deaktivieren, Statusänderung usw.
+
+4. Implementierung eines lokalen Echo-Repeaters, bei dem das Audio vollständig durch den Encoder-Decoder läuft, um Qualität, Spektrum und Signalpegel des eigenen Mikrofons umfassend zu beurteilen. Anpassung und Optimierung der Audioverarbeitung für das Senden (Mikrofon, DSP, Codec).
+
+5. Vollständige Isolierung der Kontaktlisten nach Netzwerken. Jedes digitale Netzwerk (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) besitzt sein eigenes isoliertes Adressbuch bei gleichzeitiger netzwerkübergreifender Rufzeichensuche.
+
+6. Sprachdeduplizierung im TTS und unabhängige HAM-Einstellungen: Ein Algorithmus zur Unterdrückung zyklischer Phrasenwiederholungen im Transkriptor und Sprachsynthesizer.
+
+7. Aktualisierte Benutzeroberfläche und Lokalisierung in 8 Sprachen.
+
+8. Neue Funktion: Wiedergabe aufgenommener Audioclips auf Sendung (On Air).
+
+9. Aktualisierung auf mbelib-neo (AMBE+2 Decoder/Encoder).
+
+10. Korrekturen im Android-APK-Client — Anpassung zur Konfiguration und Nutzung der Hardware-Taste des Smartphones als PTT.
+
+11. Zahlreiche kleinere Behebungen von Konflikten, Fehlern und unklarem Programmverhalten.
+
+Ich bitte außerdem alle Nutzer dieses Programms um Verständnis für eventuelle Fehler und instabile Funktionen; ich bin nur ein Hobbyprogrammierer mit begrenzter Erfahrung, und dies ist ein reines Amateurprojekt. Bei Interesse können Sie mir gerne an die im Abschnitt „Über das Programm“ angegebene E-Mail-Adresse schreiben.
 
 <!-- lang:es -->
-# ProxDMR v2.16 — Registro de cambios
+# ProxDMR v2.17b — Registro de cambios
 
-* Sustitución del núcleo del vocoder/codificador por mbelib-neo, significativamente más avanzado y de mayor calidad.
-* Implementación de un módulo de canalización de recepción asíncrono independiente y un búfer de fluctuación (jitter buffer) dedicado. La recepción de paquetes de red de BrandMeister está completamente aislada de la decodificación y transmisión web, eliminando cortes y pérdidas de audio por fluctuaciones de red. Se ha añadido suavizado en las transiciones entre tramas.
-* Motor web de baja latencia basado en AudioWorklet. La reproducción de audio en el navegador se ha trasladado a un AudioWorklet dedicado. Se implementó un filtro IIR de Chebyshev de 4 etapas para la interpolación de frecuencia de muestreo (8 kHz → 48 kHz) con supresión eficaz de frecuencias espejo sin transformadas de Fourier intensivas. Adaptación dinámica automática del búfer a la fluctuación de red del cliente.
-* Separación completa de las cadenas de procesamiento de audio: ecualizadores gráficos de 10 bandas independientes, AGC y limitadores para los modos digital y analógico (ASL).
-* Optimización de la ruta analógica (ASL): mayores límites de recursos para Asterisk y ampliación del búfer de fluctuación de red IAX2.
-* Tolerancia a fallos en las conexiones con BrandMeister. Mecanismo de conmutación automática por error: si se pierde la comunicación con el maestro de BM actual durante más de 1 minuto, el sistema cambia automáticamente al siguiente servidor de la tabla de menor latencia.
-* Modo aislado para la prueba de eco integrada ("Parrot"). Se ha implementado el procesamiento en el servidor de pruebas de eco digitales y analógicas, con aislamiento temporal de la sesión WebSocket del cliente respecto a las ondas generales durante la calibración de su propia voz.
+Lista de cambios
+
+1. Soporte para Yaesu System Fusion (YSF / C4FM). Cliente de red completo para repetidores YSF, directorio global de salas con monitoreo en segundo plano, soporte para concentradores multisala FCS/YCS y control del selector DG-ID.
+
+2. Integración con Amateur Digital Network (ADN). Módulo de red de servidores ADN con directorio de grupos (TG) integrado.
+
+3. Cambios en la interfaz: creación de una barra de herramientas universal para gestionar hotspots con un sistema completo para alternar entre hotspots, activarlos/desactivarlos, cambiar su estado, etc.
+
+4. Implementación de un repetidor de eco local con paso íntegro del audio por el codificador-decodificador para evaluar la calidad, el espectro y el nivel de señal del micrófono. Modificación y optimización del procesamiento de audio en transmisión (micrófono, DSP, códec).
+
+5. Aislamiento completo de las listas de contactos por red. Cada red digital (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) dispone de su propia agenda aislada manteniendo la búsqueda de indicativos entre redes.
+
+6. Deduplicación de voz en TTS y ajustes HAM independientes: algoritmo para suprimir repeticiones cíclicas de frases en el transcriptor y sintetizador de voz.
+
+7. Interfaz de usuario actualizada y localización en 8 idiomas.
+
+8. Nueva función: reproducción de clips de audio grabados al aire.
+
+9. Actualización de mbelib-neo (decodificador/codificador AMBE+2).
+
+10. Correcciones en el cliente Android APK: modificación para configurar y utilizar el botón físico del teléfono como PTT.
+
+11. Numerosas correcciones menores de conflictos, errores y comportamientos poco claros del programa.
+
+También pido comprensión a quienes utilicen este programa ante posibles errores y funciones inestables; soy solo un programador aficionado con experiencia limitada y este es un proyecto completamente amateur. En cualquier caso, si lo desean, pueden escribirme al correo indicado en la sección «Acerca de».
 
 <!-- lang:fr -->
-# ProxDMR v2.16 — Notes de version
+# ProxDMR v2.17b — Notes de version
 
-* Remplacement du cœur du vocodeur/encodeur par mbelib-neo, nettement plus performant et de meilleure qualité.
-* Implémentation d'un module de pipeline de réception asynchrone distinct et d'un tampon de gigue (jitter buffer) dédié. La réception des paquets réseau BrandMeister est totalement isolée du décodage et de la transmission web, éliminant les saccades et coupures audio causées par les fluctuations réseau. Le lissage des transitions entre trames a été ajouté.
-* Moteur web à faible latence basé sur AudioWorklet. La lecture audio dans le navigateur a été transférée vers un AudioWorklet dédié. Un filtre IIR Chebyshev à 4 étages a été implémenté pour l'interpolation du taux d'échantillonnage (8 kHz → 48 kHz) avec suppression efficace des fréquences miroirs sans transformées de Fourier gourmandes en ressources. Adaptation dynamique automatique du tampon à la gigue réseau réelle du client.
-* Séparation complète des chaînes de traitement audio : égaliseurs graphiques 10 bandes indépendants, AGC et limiteurs pour les modes numérique et analogique (ASL).
-* Optimisation de la voie analogique (ASL) : augmentation des limites de ressources d'Asterisk et extension du tampon de gigue réseau IAX2.
-* Tolérance aux pannes pour les connexions avec BrandMeister. Mécanisme de basculement automatique : en cas de perte de communication avec le maître BM actuel pendant plus d'une minute, le système bascule automatiquement vers le serveur suivant dans le tableau des latences les plus faibles.
-* Mode isolé pour le test d'écho intégré (« Perroquet »). Le traitement côté serveur des tests d'écho numériques et analogiques a été mis en œuvre, avec isolation temporaire de la session WebSocket du client des ondes radio générales pendant l'étalonnage de sa propre voix.
+Liste des modifications
+
+1. Prise en charge de Yaesu System Fusion (YSF / C4FM). Client réseau complet pour répéteurs YSF, annuaire mondial des salons avec surveillance en ligne en arrière-plan, prise en charge des hubs multisalons FCS/YCS et contrôle du sélecteur DG-ID.
+
+2. Intégration d'Amateur Digital Network (ADN). Module réseau pour serveurs ADN avec annuaire TG intégré.
+
+3. Évolutions de l'interface : création d'une barre d'outils universelle de gestion des hotspots offrant basculement entre hotspots, activation/désactivation, changement d'état, etc.
+
+4. Mise en œuvre d'un répéteur d'écho local faisant passer intégralement l'audio par le codeur-décodeur pour évaluer la qualité, le spectre et le niveau du microphone. Modification et optimisation du traitement audio à l'émission (microphone, DSP, codec).
+
+5. Isolation complète des listes de contacts par réseau. Chaque réseau numérique (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) possède son propre carnet d'adresses isolé tout en conservant la recherche d'indicatifs inter-réseaux.
+
+6. Déduplication vocale dans le TTS et réglages HAM indépendants : algorithme de suppression des répétitions cycliques de phrases dans le transcripteur et le synthétiseur vocal.
+
+7. Interface utilisateur mise à jour et localisation en 8 langues.
+
+8. Nouvelle fonctionnalité : lecture à l'antenne de clips audio enregistrés.
+
+9. Mise à jour vers mbelib-neo (décodeur/encodeur AMBE+2).
+
+10. Correctifs dans le client Android APK — modification liée à la configuration et à l'utilisation du bouton matériel du smartphone comme PTT.
+
+11. Diverses corrections mineures de conflits, bogues et comportements imprécis.
+
+Je demande également à tous les utilisateurs de faire preuve de compréhension face aux éventuels bogues et fonctionnalités instables ; je suis un développeur amateur avec une expérience limitée et ce projet est entièrement bénévole. N'hésitez pas à m'écrire à l'adresse e-mail indiquée dans la section « À propos » du programme.
 
 <!-- lang:it -->
-# ProxDMR v2.16 — Registro delle modifiche
+# ProxDMR v2.17b — Registro delle modifiche
 
-* Sostituzione del core del vocoder/encoder con mbelib-neo, notevolmente più avanzato e di qualità superiore.
-* Implementazione di un modulo di pipeline di ricezione asincrono separato e di un jitter buffer dedicato. La ricezione dei pacchetti di rete BrandMeister è completamente isolata dalla decodifica e dalla trasmissione web, eliminando balbettii e interruzioni audio causati dalle fluttuazioni di rete. È stato aggiunto il livellamento delle transizioni tra i frame.
-* Motore web a bassa latenza basato su AudioWorklet. La riproduzione audio nel browser è stata demandata a un AudioWorklet dedicato. È stato implementato un filtro IIR Chebyshev a 4 stadi per l'interpolazione della frequenza di campionamento (8 kHz → 48 kHz) con soppressione efficace delle frequenze speculari senza trasformate di Fourier ad alto consumo di risorse. Adattamento dinamico automatico del buffer al reale jitter di rete del client.
-* Separazione completa delle catene di elaborazione audio: equalizzatori grafici a 10 bande indipendenti, AGC e limiter sia per la modalità digitale che per quella analogica (ASL).
-* Ottimizzazione del percorso analogico (ASL): incremento dei limiti delle risorse Asterisk ed estensione del jitter buffer di rete IAX2.
-* Tolleranza ai guasti per le connessioni con BrandMeister. Meccanismo di failover automatico: in caso di perdita di comunicazione con l'attuale master BM per più di 1 minuto, il sistema passa automaticamente al server successivo dalla tabella a latenza più bassa.
-* Modalità isolata per l'echo test integrato ("Pappagallo"). È stata implementata l'elaborazione lato server dei test di eco digitali e analogici, con isolamento temporaneo della sessione WebSocket del client dall'etere generale durante la calibrazione della propria voce.
+Elenco delle modifiche
+
+1. Supporto per Yaesu System Fusion (YSF / C4FM). Client di rete completo per ripetitori YSF, directory globale delle stanze con monitoraggio online in background, supporto per hub multistanza FCS/YCS e controllo del selettore DG-ID.
+
+2. Integrazione con Amateur Digital Network (ADN). Modulo di rete per server ADN con directory TG integrata.
+
+3. Modifiche all'interfaccia: creazione di una barra degli strumenti universale per gestire gli hotspot con sistema completo per passare da un hotspot all'altro, attivarli/disattivarli, cambiarne lo stato, ecc.
+
+4. Implementazione di un ripetitore di eco locale con audio che attraversa interamente il codificatore-decodificatore per valutare qualità, spettro e livello del segnale del microfono. Modifica e ottimizzazione dell'elaborazione audio in trasmissione (microfono, DSP, codec).
+
+5. Isolamento completo degli elenchi contatti tra reti. Ogni rete digitale (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) dispone di una propria rubrica isolata mantenendo la ricerca dei nominativi tra reti.
+
+6. Deduplicazione vocale nel TTS e impostazioni HAM indipendenti: algoritmo per sopprimere ripetizioni cicliche di frasi nel trascrittore e nel sintetizzatore vocale.
+
+7. Interfaccia utente aggiornata e localizzazione in 8 lingue.
+
+8. Nuova funzione: riproduzione in onda di clip audio registrate.
+
+9. Aggiornamento a mbelib-neo (decoder/encoder AMBE+2).
+
+10. Correzioni nel client Android APK — modifica relativa alla configurazione e all'uso del tasto fisico dello smartphone come PTT.
+
+11. Numerose correzioni minori di conflitti, bug e comportamenti poco chiari del programma.
+
+Chiedo inoltre comprensione a chiunque utilizzi questo programma per eventuali bug o funzioni instabili; sono solo un programmatore per hobby con esperienza limitata e questo è un progetto amatoriale. In ogni caso, potete scrivermi all'indirizzo e-mail indicato nella sezione « Informazioni ».
 
 <!-- lang:nl -->
-# ProxDMR v2.16 — Wijzigingslogboek
+# ProxDMR v2.17b — Wijzigingslogboek
 
-* De vocoder/encoder-kern is vervangen door het aanzienlijk hoogwaardigere en geavanceerdere mbelib-neo.
-* Er is een aparte asynchrone ontvangstpijplijnmodule en een speciale jitterbuffer geïmplementeerd. De netwerkpakketontvangst van BrandMeister is volledig geïsoleerd van decodering en webtransmissie, waardoor haperingen en audio-uitval door netwerkschommelingen worden geëlimineerd. Egalisatie van overgangen tussen frames is toegevoegd.
-* Webengine met lage latentie gebaseerd op AudioWorklet. Het afspelen van audio in de browser is overgedragen aan een speciale AudioWorklet. Er is een 4-traps Chebyshev IIR-filter geïmplementeerd voor bemonsteringsfrequentie-interpolatie (8 kHz → 48 kHz) met effectieve onderdrukking van spiegelfrequenties zonder rekenintensieve Fourier-transformaties. Automatische dynamische bufferaanpassing aan de werkelijke netwerkjitter van de client.
-* Volledige scheiding van audioverwerkingsketens: onafhankelijke 10-bands grafische equalizers, AGC en limiters voor zowel digitale als analoge (ASL) modi.
-* Optimalisatie van het analoge pad (ASL): verhoogde Asterisk-resourcelimieten en uitbreiding van de IAX2-netwerkjitterbuffer.
-* Fouttolerantie voor verbindingen met BrandMeister. Automatisch failover-mechanisme: als de communicatie met de huidige BM-master langer dan 1 minuut wegvalt, schakelt het systeem automatisch over naar de volgende server uit de tabel met de laagste latentie.
-* Geïsoleerde modus voor de ingebouwde "Papegaai"-echotest. Server-side verwerking van digitale en analoge echotests is geïmplementeerd, met tijdelijke isolatie van de WebSocket-sessie van de client van de algemene ether tijdens kalibratie van de eigen stem.
+Lijst met wijzigingen
+
+1. Ondersteuning voor Yaesu System Fusion (YSF / C4FM). Volwaardige netwerkclient voor YSF-repeaters, wereldwijde roomdirectory met online achtergrondmonitoring, ondersteuning voor FCS/YCS multi-room hubs en DG-ID selectorbediening.
+
+2. Integratie met het Amateur Digital Network (ADN). Een ADN-servernetwerkmodule met ingebouwde TG-directory.
+
+3. Interfacewijzigingen: universele werkbalk voor hotspotbeheer met uitgebreid systeem om tussen hotspots te schakelen, ze in/uit te schakelen, status te wijzigen, enz.
+
+4. Implementatie van een lokale echorepeater waarbij audio volledig door de encoder-decoder gaat voor een uitgebreide beoordeling van de kwaliteit, het spectrum en het signaalniveau van de microfoon. Aanpassing en optimalisatie van audioverwerking voor zenden (microfoon, DSP, codec).
+
+5. Volledige isolatie van contactlijsten per netwerk. Elk digitaal netwerk (BM, TGIF, FreeDMR, DMR+, XLX, ADN, YSF, ASL) heeft een eigen geïsoleerd adresboek met behoud van netwerkoverschrijdend zoeken op roepnaam.
+
+6. Spraakdeduplicatie in TTS en onafhankelijke HAM-instellingen: algoritme voor het onderdrukken van cyclische zins-herhalingen in de transcriber en spraaksynthesizer.
+
+7. Vernieuwde gebruikersinterface en lokalisatie in 8 talen.
+
+8. Nieuwe functie: opgenomen audioclips uitzenden via de ether (On Air).
+
+9. Update naar mbelib-neo (AMBE+2 decoder/encoder).
+
+10. Oplossingen in de Android APK-client — een wijziging voor het configureren en gebruiken van de hardwareknop van de smartphone als PTT.
+
+11. Diverse kleine conflicten, bugs en onduidelijk programmagedrag opgelost.
+
+Ik vraag iedereen die dit programma gebruikt begrip voor eventuele bugs en onstabiele functies; ik ben slechts een hobbyprogrammeerder met beperkte ervaring en dit is een volledig amateurproject. U kunt mij gerust mailen op het adres dat vermeld staat in de sectie "Over" van het programma.

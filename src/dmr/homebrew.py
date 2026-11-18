@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.homebrew")
 
 @dataclass
@@ -74,6 +79,7 @@ class HomeBrewClient:
         check_credentials_valid_cb: Optional[Callable[[], bool]] = None,
         get_failover_candidates_cb: Optional[Callable[[str, int], list]] = None,
         on_failover_event_cb: Optional[Callable[[dict], None]] = None,
+        user_id: Optional[int] = None,
     ):
         self.base_repeater_id = repeater_id
         self.ssid = ssid
@@ -94,6 +100,7 @@ class HomeBrewClient:
         self.check_credentials_valid_cb = check_credentials_valid_cb
         self.get_failover_candidates_cb = get_failover_candidates_cb
         self.on_failover_event_cb = on_failover_event_cb
+        self.user_id = user_id
 
         self.state: BMState = BMState.DISCONNECTED
         self.transport: Optional[asyncio.DatagramTransport] = None
@@ -136,6 +143,8 @@ class HomeBrewClient:
             return "XLX"
         if nt == "custom":
             return "HBP"
+        if nt == "adn":
+            return "ADN"
         return "BM"
 
     @property
@@ -212,17 +221,17 @@ class HomeBrewClient:
 
         rep_id = self.effective_repeater_id
         if rep_id <= 0:
-            self.set_state(BMState.ERROR, "Не указан DMR ID")
+            self.set_state(BMState.ERROR, _tr("hb.no_dmr_id", user_id=self.user_id, fallback="DMR ID is not specified"))
             return False
 
         if not self.password:
-            self.set_state(BMState.ERROR, "Не указан пароль хотспота (SelfCare)")
+            self.set_state(BMState.ERROR, _tr("hb.no_password", user_id=self.user_id, fallback="Hotspot password is not specified (SelfCare)"))
             return False
 
         if self._is_fast_reconnecting:
-            attempt_text = f"Быстрое переподключение к {self.master_host}:{self.master_port} ({self.connect_attempt} из 5)..."
+            attempt_text = _tr("hb.fast_reconnecting", user_id=self.user_id, fallback="Fast reconnecting to {host}:{port} ({attempt} of 5)...", host=self.master_host, port=self.master_port, attempt=self.connect_attempt)
         else:
-            attempt_text = f"Подключение к {self.master_host}:{self.master_port} (попытка {self.connect_attempt} из 5)..."
+            attempt_text = _tr("hb.connecting_attempt", user_id=self.user_id, fallback="Connecting to {host}:{port} (attempt {attempt} of 5)...", host=self.master_host, port=self.master_port, attempt=self.connect_attempt)
 
         self.set_state(BMState.CONNECTING, attempt_text)
         loop = asyncio.get_running_loop()
@@ -237,7 +246,7 @@ class HomeBrewClient:
                 logger.info(f"[HB] Aborting stale connection attempt to {self.master_host} after socket error")
                 return False
             logger.error(f"[HB] UDP Socket create failed: {e}")
-            return self._handle_attempt_failure(f"Ошибка сокета: {e}")
+            return self._handle_attempt_failure(_tr("hb.socket_error", user_id=self.user_id, fallback="Socket error: {error}", error=e))
 
         if self._is_manual_disconnect or my_gen != self._connect_gen:
             try:
@@ -398,12 +407,21 @@ class HomeBrewClient:
             idx_num = self._failover_index + 1
             total_c = len(self._failover_candidates)
             if self._failover_active:
-                status_msg = (
-                    f"Переход на резервный сервер #{idx_num}/{total_c}: "
-                    f"{self.master_host}..."
+                status_msg = _tr(
+                    "hb.failover_switching",
+                    user_id=self.user_id,
+                    fallback="Switching to backup server #{idx}/{total}: {host}...",
+                    idx=idx_num,
+                    total=total_c,
+                    host=self.master_host,
                 )
             else:
-                status_msg = f"Возврат на основной сервер {self.master_host}..."
+                status_msg = _tr(
+                    "hb.failover_returning",
+                    user_id=self.user_id,
+                    fallback="Returning to primary server {host}...",
+                    host=self.master_host,
+                )
             self.set_state(BMState.CONNECTING, status_msg)
 
             async def _do_failover_step():
@@ -426,7 +444,10 @@ class HomeBrewClient:
                     f"[HB] Fast reconnect attempt {self.connect_attempt}/5 failed ({error_detail}). "
                     f"Retrying in 1s ({next_attempt}/5)..."
                 )
-                self.set_state(BMState.CONNECTING, f"Быстрый повтор через 1с ({next_attempt} из 5)...")
+                self.set_state(
+                    BMState.CONNECTING,
+                    _tr("hb.fast_retry_in_1s", user_id=self.user_id, fallback="Fast retry in 1s ({attempt} of 5)...", attempt=next_attempt),
+                )
 
                 async def _do_fast_retry():
                     await self.disconnect(is_retry=True)
@@ -445,7 +466,7 @@ class HomeBrewClient:
                     f"[HB] All 5 fast reconnect attempts failed ({error_detail}). "
                     f"Pausing 7s before transitioning to standard retry protocol..."
                 )
-                self.set_state(BMState.CONNECTING, "Быстрое восстановление не удалось. Пауза 7с перед повторным циклом...")
+                self.set_state(BMState.CONNECTING, _tr("hb.fast_reconnect_failed_pause", user_id=self.user_id, fallback="Fast reconnect failed. Pausing 7s before retry cycle..."))
                 self._is_fast_reconnecting = False
                 self.connect_attempt = 1
                 delay = 7.0
@@ -471,7 +492,7 @@ class HomeBrewClient:
                     f"[HB] Attempt {self.connect_attempt}/5 failed ({error_detail}). "
                     f"Retrying in {int(delay)}s ({next_attempt}/5)..."
                 )
-                self.set_state(BMState.CONNECTING, f"Повтор через {int(delay)}с ({next_attempt} из 5)...")
+                self.set_state(BMState.CONNECTING, _tr("hb.retry_in", user_id=self.user_id, fallback="Retrying in {delay}s ({attempt} of 5)...", delay=int(delay), attempt=next_attempt))
 
                 async def _do_standard_retry():
                     await self.disconnect(is_retry=True)
@@ -490,7 +511,7 @@ class HomeBrewClient:
                     f"[HB] All 5 connection attempts failed ({error_detail}). "
                     f"Pausing 7s before repeating connection cycle..."
                 )
-                self.set_state(BMState.CONNECTING, "Все 5 попыток завершились неудачей. Пауза 7с перед повтором...")
+                self.set_state(BMState.CONNECTING, _tr("hb.all_attempts_failed_pause", user_id=self.user_id, fallback="All 5 attempts failed. Pausing 7s before retrying..."))
                 self.connect_attempt = 1
                 delay = 7.0
 
@@ -518,7 +539,15 @@ class HomeBrewClient:
             f"[HB] Unexpected disconnect from BM ({reason}). "
             f"Starting fast reconnect protocol (5 attempts, 1s interval)..."
         )
-        self.set_state(BMState.CONNECTING, f"Разрыв связи с BM: {reason}. Быстрое переподключение (1 из 5)...")
+        self.set_state(
+            BMState.CONNECTING,
+            _tr(
+                "hb.unexpected_disconnect_fast",
+                user_id=self.user_id,
+                fallback="BM connection lost: {reason}. Fast reconnect (1 of 5)...",
+                reason=reason,
+            ),
+        )
         self._is_fast_reconnecting = True
         self.connect_attempt = 1
 
@@ -548,7 +577,7 @@ class HomeBrewClient:
         packet = b"RPTK" + struct.pack(">I", rep_id) + auth_hash
         logger.info(f"[HB] Sending RPTK auth hash for ID {rep_id}...")
         self.send_raw(packet)
-        self.set_state(BMState.AUTHENTICATING, "Проверка пароля")
+        self.set_state(BMState.AUTHENTICATING, _tr("hb.authenticating", user_id=self.user_id, fallback="Checking password"))
 
     def send_config(self):
         rep_id = self.effective_repeater_id
@@ -578,6 +607,7 @@ class HomeBrewClient:
             "dmrplus": "http://www.dmrplus.de",
             "xlx": "https://xlxbbs.epf.lu",
             "custom": "https://proxdmr.local",
+            "adn": "https://adn.systems",
         }
         url_str = net_urls.get(self.network_type, "https://brandmeister.network")
         url_bytes = f"{url_str:<124.124}".encode("ascii")
@@ -603,7 +633,7 @@ class HomeBrewClient:
         packet = b"RPTC" + struct.pack(">I", rep_id) + payload
         logger.info(f"[HB] Sending RPTC config ({len(packet)} bytes, Duplex={self.duplex}, Net={self.network_label})...")
         self.send_raw(packet)
-        self.set_state(BMState.CONFIGURING, "Отправка конфигурации хотспота")
+        self.set_state(BMState.CONFIGURING, _tr("hb.configuring", user_id=self.user_id, fallback="Sending hotspot configuration"))
 
     def send_options(self, options_str: Optional[str] = None) -> bool:
         opts = (options_str if options_str is not None else self.rpto_options or "").strip()
@@ -733,14 +763,45 @@ class HomeBrewClient:
                         f"as abnormal server reaction (ever_ok={self._ever_authenticated_ok}, "
                         f"unhealthy_since={self._unhealthy_since > 0.0}, creds_valid={creds_known_valid})"
                     )
-                    self._handle_attempt_failure(f"Неадекватный ответ сервера {self.master_host}: отказ RPTK/NAK при валидном пароле")
+                    self._handle_attempt_failure(
+                        _tr(
+                            "hb.server_fault_nak",
+                            user_id=self.user_id,
+                            fallback="Abnormal response from server {host}: RPTK/NAK rejection with valid password",
+                            host=self.master_host,
+                        )
+                    )
                 else:
-                    self.set_state(BMState.AUTH_FAILED, f"Неверный пароль хотспота ({self.network_label} NAK)")
+                    self.set_state(
+                        BMState.AUTH_FAILED,
+                        _tr(
+                            "hb.auth_failed_nak",
+                            user_id=self.user_id,
+                            fallback="Invalid hotspot password ({network} NAK)",
+                            network=self.network_label,
+                        ),
+                    )
                     asyncio.create_task(self.disconnect())
             elif self.state == BMState.CONFIGURING:
-                self._handle_attempt_failure(f"Конфигурация отклонена ({self.network_label} {self.master_host})")
+                self._handle_attempt_failure(
+                    _tr(
+                        "hb.config_rejected",
+                        user_id=self.user_id,
+                        fallback="Configuration rejected ({network} {host})",
+                        network=self.network_label,
+                        host=self.master_host,
+                    )
+                )
             else:
-                self._handle_attempt_failure(f"Соединение отклонено ({self.network_label} {self.master_host})")
+                self._handle_attempt_failure(
+                    _tr(
+                        "hb.connection_rejected",
+                        user_id=self.user_id,
+                        fallback="Connection rejected ({network} {host})",
+                        network=self.network_label,
+                        host=self.master_host,
+                    )
+                )
             return
 
         # 2. Challenge packet received while CONNECTING
@@ -805,7 +866,10 @@ class HomeBrewClient:
                     self._unhealthy_since = 0.0
                     self._unhealthy_reason = ""
                     self._failover_primary_host = self.master_host
-                self.set_state(BMState.ONLINE, f"Подключен к {self.network_label}")
+                self.set_state(
+                    BMState.ONLINE,
+                    _tr("hb.connected_to", user_id=self.user_id, fallback="Connected to {network}", network=self.network_label),
+                )
                 self.last_keepalive_rx = time.time()
                 self._start_keepalive_task()
                 if self.rpto_options:
@@ -830,9 +894,9 @@ class HomeBrewClient:
         if data.startswith(b"MSTCL"):
             logger.warning("[HB] Master closing connection (MSTCL)")
             if self._was_connected:
-                self._handle_unexpected_disconnect("Мастер завершил сессию (MSTCL)")
+                self._handle_unexpected_disconnect(_tr("hb.master_closed_mstcl", user_id=self.user_id, fallback="Master closed session (MSTCL)"))
             else:
-                self.set_state(BMState.DISCONNECTED, "Мастер завершил сессию")
+                self.set_state(BMState.DISCONNECTED, _tr("hb.master_closed", user_id=self.user_id, fallback="Master closed session"))
                 asyncio.create_task(self.disconnect())
             return
 
@@ -879,12 +943,13 @@ class HomeBrewClient:
 
     def handle_error(self, exc: Exception):
         logger.error(f"[HB] Transport error: {exc}")
+        err_msg = _tr("hb.net_err", user_id=self.user_id, fallback="Network error: {error}", error=exc)
         if self.state in (BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING):
-            self._handle_attempt_failure(f"Сетевая ошибка: {exc}")
+            self._handle_attempt_failure(err_msg)
         elif self.state == BMState.ONLINE:
-            self._handle_unexpected_disconnect(f"Сетевая ошибка: {exc}")
+            self._handle_unexpected_disconnect(err_msg)
         else:
-            self.set_state(BMState.ERROR, f"Сетевая ошибка: {exc}")
+            self.set_state(BMState.ERROR, err_msg)
 
     def _start_keepalive_task(self):
         if self.keepalive_task and not self.keepalive_task.done():
@@ -903,7 +968,7 @@ class HomeBrewClient:
 
                 if time.time() - self.last_keepalive_rx > 20.0:
                     logger.warning("[HB] Keepalive timeout: no response from BM master for >20s")
-                    self._handle_unexpected_disconnect("Таймаут соединения с BM (>20с)")
+                    self._handle_unexpected_disconnect(_tr("hb.keepalive_timeout", user_id=self.user_id, fallback="BM connection timeout (>20s)"))
                     break
         except asyncio.CancelledError:
             pass
@@ -917,8 +982,8 @@ class HomeBrewClient:
             if self._is_manual_disconnect or my_gen != self._connect_gen:
                 return
             if self.state in (BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING):
-                logger.warning(f"[HB] Handshake timed out (попытка {self.connect_attempt}/5)")
-                self._handle_attempt_failure("Мастер BM не отвечает (таймаут)")
+                logger.warning(f"[HB] Handshake timed out (attempt {self.connect_attempt}/5)")
+                self._handle_attempt_failure(_tr("hb.handshake_timeout", user_id=self.user_id, fallback="BM master not responding (timeout)"))
         except asyncio.CancelledError:
             pass
 
@@ -962,7 +1027,7 @@ class HomeBrewClient:
         self.protocol = None
         if not is_retry:
             if self.state not in (BMState.AUTH_FAILED, BMState.ERROR):
-                self.set_state(BMState.DISCONNECTED, "Отключено пользователем")
+                self.set_state(BMState.DISCONNECTED, _tr("hb.disconnected_by_user", user_id=self.user_id, fallback="Disconnected by user"))
         else:
             if self.state not in (BMState.AUTH_FAILED, BMState.ERROR):
-                self.set_state(BMState.DISCONNECTED, "Переподключение")
+                self.set_state(BMState.DISCONNECTED, _tr("hb.reconnecting", user_id=self.user_id, fallback="Reconnecting"))

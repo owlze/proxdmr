@@ -6,6 +6,17 @@
 
   let currentUserRole = null;
   let currentUserId = null;
+  let _lastRenderedUsers = null;
+
+  function _t(key, params, fallback) {
+    return (typeof window.t === 'function') ? window.t(key, params || {}, fallback || '') : (fallback || key);
+  }
+
+  window.refreshAdminLocalization = function () {
+    if (Array.isArray(_lastRenderedUsers)) {
+      renderUsers(_lastRenderedUsers);
+    }
+  };
 
   window.ProxDMRAdmin = {
     init: initAdmin,
@@ -222,11 +233,12 @@
   }
 
   function renderUsers(users) {
+    _lastRenderedUsers = users;
     const tbody = document.getElementById('adminUsersTableBody');
     if (!tbody) return;
 
     if (users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e;">${window.t ? window.t('admin.no_users', {}, 'Нет пользователей') : 'Нет пользователей'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e;">${_t('admin.no_users', {}, 'No users')}</td></tr>`;
       return;
     }
 
@@ -358,16 +370,14 @@
 
   window.ProxDMRAdmin._setRole = async function (userId, role) {
     const roleName = role === 'admin'
-      ? (window.t ? window.t('admin.role_admin', {}, '🛡️ Администратор') : '🛡️ Администратор')
-      : (window.t ? window.t('admin.role_user', {}, '👤 Пользователь') : '👤 Пользователь');
-    const msg = window.t
-      ? window.t('admin.confirm_role_msg', { role: roleName }, `Назначить роль ${roleName}?`)
-      : `Назначить роль ${roleName}?`;
+      ? _t('admin.role_admin', {}, '🛡️ Admin')
+      : _t('admin.role_user', {}, '👤 User');
+    const msg = _t('admin.confirm_role_msg', { role: roleName }, `Assign role ${roleName}?`);
     const ok = await showAppConfirm({
-      title: window.t ? window.t('admin.confirm_role_title', {}, 'Изменение роли') : 'Изменение роли',
+      title: _t('admin.confirm_role_title', {}, 'Change role'),
       icon: role === 'admin' ? '🛡️' : '👤',
       message: msg,
-      confirmText: window.t ? window.t('admin.confirm_role_btn', {}, 'Назначить') : 'Назначить',
+      confirmText: _t('admin.confirm_role_btn', {}, 'Assign'),
       confirmStyle: 'primary'
     });
     if (!ok) return;
@@ -375,14 +385,12 @@
   };
 
   window.ProxDMRAdmin._delete = async function (userId, login) {
-    const msg = window.t
-      ? window.t('admin.confirm_delete_msg', { login: login }, `Удалить пользователя "${login}"?\n\nВсе настройки и данные аккаунта будут безвозвратно удалены. Это действие необратимо!`)
-      : `Удалить пользователя "${login}"?\n\nВсе настройки и данные аккаунта будут безвозвратно удалены. Это действие необратимо!`;
+    const msg = _t('admin.confirm_delete_msg', { login: login }, `Delete user "${login}"? All settings and data will be permanently lost.`);
     const ok = await showAppConfirm({
-      title: window.t ? window.t('admin.confirm_delete_title', {}, 'Удаление пользователя') : 'Удаление пользователя',
+      title: _t('admin.confirm_delete_title', {}, 'Delete user'),
       icon: '🗑️',
       message: msg,
-      confirmText: window.t ? window.t('admin.confirm_delete_btn', {}, 'Удалить навсегда') : 'Удалить навсегда',
+      confirmText: _t('admin.confirm_delete_btn', {}, 'Delete forever'),
       confirmStyle: 'danger'
     });
     if (!ok) return;

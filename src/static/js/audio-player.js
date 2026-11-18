@@ -11,19 +11,46 @@ class ClassicalDspAgc {
   constructor() {
     this.enabled = true;
     this.profile = "standard";
-    this.targetRms = 0.16;          // Nominal comfortable speech level (~ -16 dBFS)
-    this.speechThreshold = 0.016;   // Active speech threshold (~ -36 dBFS)
-    this.noiseGate = 0.012;         // Hysteresis release gate (~ -38 dBFS)
-    this.minGainDb = -12;           // Max attenuation for loud stations (-12 dB)
-    this.maxGainDb = 12;            // Max boost for quiet stations (+12 dB)
-    this.boostRatio = 0.85;         // Compression pull-up curve factor (0.0 - 1.0)
-    this.attenRatio = 0.85;         // Compression push-down curve factor (0.0 - 1.0)
-    this.hangTime = 0.35;           // 350ms hang time (freezes gain during natural pauses)
-    this.decayTime = 0.60;          // 600ms smooth return to 0 dB after hang
-    this.envelope = 0.16;           // Running speech envelope
-    this.lastSpeechTime = 0;        // Timestamp of last active speech
-    this.isSpeechActive = false;    // Hysteresis speech activity state
-    this.currentGain = 1.0;         // Current linear multiplier
+    this.depthDb = 18;
+    this.gainRaw = 35;
+    this.targetRms = 0.228;         // Calibrated from gainRaw=35 (3.5x -> ~ -12.8 dBFS)
+    this.speechThreshold = 0.006;   // Active speech onset (~ -44.4 dBFS)
+    this.noiseGate = 0.0038;        // Hysteresis release gate (~ -48.4 dBFS)
+    this.minGainDb = -14;           // Max attenuation for loud stations
+    this.maxGainDb = 18;            // Max boost for quiet stations
+    this.boostRatio = 0.925;
+    this.attenRatio = 0.85;
+    this.hangTime = 0.35;           // 350ms pause freeze
+    this.decayTime = 0.50;          // 500ms release to unity
+    this.envelope = 0.0;
+    this.initialized = false;
+    this.lastSpeechTime = 0;
+    this.streamTime = 0;
+    this.isSpeechActive = false;
+    this.currentGain = 1.0;
+    this.lastAppliedGain = 1.0;
+  }
+
+  configure({ enabled, depthDb, gainRaw } = {}) {
+    if (enabled !== undefined) this.enabled = Boolean(enabled);
+    if (depthDb !== undefined) {
+      const d = parseFloat(depthDb);
+      if (!isNaN(d)) {
+        this.depthDb = Math.max(6, Math.min(30, d));
+        this.maxGainDb = this.depthDb;
+        this.minGainDb = -Math.min(16, Math.round(this.depthDb * 0.8));
+        this.boostRatio = Math.min(1.0, 0.55 + (this.depthDb / 48.0));
+        this.attenRatio = 0.85;
+      }
+    }
+    if (gainRaw !== undefined) {
+      const g = parseFloat(gainRaw);
+      if (!isNaN(g)) {
+        this.gainRaw = Math.max(10, Math.min(120, g));
+        const gainMult = this.gainRaw / 10.0;
+        this.targetRms = Math.min(0.42, Math.max(0.08, 0.065 * gainMult));
+      }
+    }
   }
 
   setAgcParams({ minGainDb, maxGainDb, hangTime }) {
@@ -33,7 +60,8 @@ class ClassicalDspAgc {
     }
     if (typeof maxGainDb === "number") {
       this.maxGainDb = Math.abs(Math.min(30, Math.max(0, maxGainDb)));
-      this.boostRatio = Math.min(1.0, 0.50 + (this.maxGainDb / 48.0));
+      this.depthDb = this.maxGainDb;
+      this.boostRatio = Math.min(1.0, 0.55 + (this.maxGainDb / 48.0));
     }
     if (typeof hangTime === "number") {
       this.hangTime = Math.max(0.1, Math.min(2.0, hangTime));
@@ -76,75 +104,102 @@ class ClassicalDspAgc {
     }
   }
 
-  processChunk(chunkRms, now) {
+  processChunk(chunkRms, now, chunkDur = 0.06, chunkPeak = 0.0) {
+    const gainMult = (this.gainRaw || 35) / 10.0;
     if (!this.enabled) {
-      this.currentGain = 1.0;
-      return 1.0;
+      let manual = Math.min(4.0, Math.max(0.4, gainMult / 2.5));
+      if (chunkPeak > 0.001 && (chunkPeak * manual) > 1.05) {
+        manual = Math.max(0.4, Math.min(manual, 1.05 / chunkPeak));
+      }
+      this.currentGain = manual;
+      return manual;
     }
 
-    // Speech detection with Schmitt trigger hysteresis
     if (!this.isSpeechActive) {
-      if (chunkRms >= this.speechThreshold) {
-        this.isSpeechActive = true;
-      }
-    } else {
-      if (chunkRms < this.noiseGate) {
-        this.isSpeechActive = false;
-      }
+      if (chunkRms >= this.speechThreshold) this.isSpeechActive = true;
+    } else if (chunkRms < this.noiseGate) {
+      this.isSpeechActive = false;
     }
 
     if (this.isSpeechActive) {
       this.lastSpeechTime = now;
-
-      // Fast attack (15ms) to catch transients without overshoot, smooth decay (600ms) for syllabic tracking
-      if (chunkRms > this.envelope) {
-        const alphaAtt = Math.exp(-0.06 / 0.015);
-        this.envelope = alphaAtt * this.envelope + (1.0 - alphaAtt) * chunkRms;
+      const attAlpha = Math.exp(-chunkDur / 0.045);
+      const decAlpha = Math.exp(-chunkDur / 0.500);
+      if (!this.initialized) {
+        this.envelope = chunkRms;
+        this.initialized = true;
+      } else if (chunkRms > this.envelope) {
+        this.envelope = attAlpha * this.envelope + (1.0 - attAlpha) * chunkRms;
       } else {
-        const alphaDec = Math.exp(-0.06 / 0.600);
-        this.envelope = alphaDec * this.envelope + (1.0 - alphaDec) * chunkRms;
+        this.envelope = decAlpha * this.envelope + (1.0 - decAlpha) * chunkRms;
       }
 
-      // Compute logarithmic dynamic range compression
-      const safeEnv = Math.max(0.005, this.envelope);
-      const inDb = 20.0 * Math.log10(safeEnv);
-      const targetDb = -16.0; // ~0.1585 RMS
+      const inDb = 20.0 * Math.log10(Math.max(0.001, this.envelope));
+      const targetDb = 20.0 * Math.log10(this.targetRms);
       const diffDb = targetDb - inDb;
-
-      let gainDb = 0.0;
-      if (diffDb > 0) {
-        // Boost quiet speech
-        gainDb = Math.min(this.maxGainDb, diffDb * this.boostRatio);
-      } else {
-        // Attenuate loud speech
-        gainDb = Math.max(this.minGainDb, diffDb * this.attenRatio);
+      let gainDb = (diffDb > 0)
+        ? Math.min(this.maxGainDb, diffDb * this.boostRatio)
+        : Math.max(this.minGainDb, diffDb * this.attenRatio);
+      if (gainMult > 6.0) {
+        gainDb += 20.0 * Math.log10(1.0 + (gainMult - 6.0) * 0.12);
       }
-
-      this.currentGain = Math.pow(10.0, gainDb / 20.0);
-      return this.currentGain;
+      let targetGain = Math.pow(10.0, gainDb / 20.0);
+      if (chunkPeak > 0.001 && (chunkPeak * targetGain) > 0.96) {
+        const minLin = Math.pow(10.0, this.minGainDb / 20.0);
+        targetGain = Math.max(minLin, Math.min(targetGain, 0.96 / chunkPeak));
+      }
+      this.currentGain = targetGain;
+      return targetGain;
     } else {
-      // Pause or background noise
-      const elapsedSinceSpeech = (this.lastSpeechTime > 0) ? (now - this.lastSpeechTime) : 999.0;
-
-      if (elapsedSinceSpeech < this.hangTime) {
-        // Hang time: freeze current gain during natural pauses between words
-        return this.currentGain;
-      } else {
-        // Speech paused or ended: smoothly decay gain back towards neutral 1.0 (0 dB)
-        // NEVER boost background noise!
-        const decayElapsed = elapsedSinceSpeech - this.hangTime;
-        const alphaRelease = Math.exp(-decayElapsed / this.decayTime);
-        this.currentGain = alphaRelease * this.currentGain + (1.0 - alphaRelease) * 1.0;
-        this.envelope = alphaRelease * this.envelope + (1.0 - alphaRelease) * this.targetRms;
+      const elapsed = (this.lastSpeechTime > 0) ? (now - this.lastSpeechTime) : 999.0;
+      if (elapsed < this.hangTime) {
         return this.currentGain;
       }
+      const alphaRelease = Math.exp(-chunkDur / Math.max(0.1, this.decayTime));
+      this.currentGain = alphaRelease * this.currentGain + (1.0 - alphaRelease) * 1.0;
+      this.envelope = alphaRelease * this.envelope;
+      return this.currentGain;
     }
   }
 
+  processSamples(inSamples, sampleRate = 8000) {
+    const n = inSamples.length;
+    if (n === 0) return;
+    let sumSq = 0.0;
+    let peak = 0.0;
+    for (let i = 0; i < n; i++) {
+      const s = inSamples[i];
+      sumSq += s * s;
+      const a = s < 0.0 ? -s : s;
+      if (a > peak) peak = a;
+    }
+    const chunkDur = Math.max(0.005, Math.min(0.200, n / sampleRate));
+    this.streamTime += chunkDur;
+    const chunkRms = Math.sqrt(sumSq / n);
+    const targetGain = this.processChunk(chunkRms, this.streamTime, chunkDur, peak);
+    const startGain = this.lastAppliedGain;
+    const gainStep = (targetGain - startGain) / n;
+    let currGain = startGain;
+    for (let i = 0; i < n; i++) {
+      currGain += gainStep;
+      let s = inSamples[i] * currGain;
+      if (s > 0.82) {
+        s = 0.82 + 0.18 * Math.tanh((s - 0.82) / 0.18);
+      } else if (s < -0.82) {
+        s = -0.82 + 0.18 * Math.tanh((s + 0.82) / 0.18);
+      }
+      inSamples[i] = s;
+    }
+    this.lastAppliedGain = targetGain;
+  }
+
   reset() {
-    this.envelope = this.targetRms;
+    this.envelope = 0.0;
+    this.initialized = false;
     this.currentGain = 1.0;
+    this.lastAppliedGain = 1.0;
     this.lastSpeechTime = 0;
+    this.streamTime = 0;
     this.isSpeechActive = false;
   }
 }
@@ -161,6 +216,10 @@ class HotspotAudioSlot {
     this.nextStartTime = 0;
     this.sampleRate = 8000;
     this.isMuted = false;
+    this.agc = new ClassicalDspAgc();
+    if (player && typeof player.getRxAgcConfig === "function") {
+      this.agc.configure(player.getRxAgcConfig());
+    }
 
     // Resampler stream continuity state (preserves sample history across 60ms chunks)
     this.resampleBuf = null;
@@ -330,23 +389,26 @@ class HotspotAudioSlot {
     const numSamples = int16Array.length;
     if (numSamples === 0) return;
 
-    // 1. Digital input Pre-Gain (-20 dB to +12 dB) & soft limiter
+    // Check if starting from silence or resuming after an idle gap (> 150ms)
+    const isNewTransmission = (this.nextStartTime <= 0) || ((now - this.nextStartTime) > 0.150);
+    if (isNewTransmission && this.agc) {
+      this.agc.reset();
+    }
+
+    // 1. Normalized PCM input + Real-Time RX AGC & Soft-Knee Limiter
     const preGainDb = (this.player && typeof this.player.getPreGainDb === "function") ? this.player.getPreGainDb() : 0;
     const preGainLinear = Math.pow(10.0, preGainDb / 20.0);
 
     const inSamples = new Float32Array(numSamples);
     for (let i = 0; i < numSamples; i++) {
-      let s = (int16Array[i] / 32768.0) * preGainLinear;
-      if (s > 0.90) {
-        s = 0.90 + 0.10 * Math.tanh((s - 0.90) / 0.10);
-      } else if (s < -0.90) {
-        s = -0.90 + 0.10 * Math.tanh((s + 0.90) / 0.10);
-      }
-      inSamples[i] = s;
+      inSamples[i] = (int16Array[i] / 32768.0) * preGainLinear;
     }
-
-    // Check if starting from silence or resuming after an idle gap (> 150ms)
-    const isNewTransmission = (this.nextStartTime <= 0) || ((now - this.nextStartTime) > 0.150);
+    if (this.agc) {
+      if (this.player && typeof this.player.getRxAgcConfig === "function") {
+        this.agc.configure(this.player.getRxAgcConfig());
+      }
+      this.agc.processSamples(inSamples, 8000);
+    }
 
     // Boundary Trajectory Micro-Crossfade on incoming 60ms chunk boundary (index 0)
     // and internal 20ms AMBE frame boundaries (indices 160 and 320)
@@ -509,6 +571,7 @@ class HotspotAudioSlot {
     this._lastFeedTime = 0;
     this.lastFeedSample = 0.0;
     this.lastFeedSlope = 0.0;
+    if (this.agc) this.agc.reset();
     // Note: Do not hard-reset this.nextStartTime = 0 immediately!
     // Hardware audio buffer is still playing out the last 120-180ms of audio.
     // Leaving this.nextStartTime allows it to expire naturally without collision.
@@ -521,6 +584,7 @@ class HotspotAudioSlot {
     this._lastFeedTime = 0;
     this.lastFeedSample = 0.0;
     this.lastFeedSlope = 0.0;
+    if (this.agc) this.agc.reset();
   }
 }
 
@@ -612,8 +676,9 @@ class HotspotAudioChannel {
           duckLevel: lvl
         });
         const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
         const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-        const isPrimary = (hid === "default" || hid === primaryId);
+        const isPrimary = hasRealDefault ? (hid === "default") : (hid === "default" || hid === primaryId);
         if (isPrimary) {
           const altId = (hid === "default") ? primaryId : "default";
           if (altId !== hid) {
@@ -674,7 +739,7 @@ class HotspotAudioChannel {
 
 }
 
-const MASTER_GAIN_9DB_ATTENUATION = Math.pow(10, -9.0 / 20.0); // 0.354813 (-9 dB)
+const MASTER_GAIN_9DB_ATTENUATION = 1.0; // Unity 0 dB master bus (no artificial -9 dB pad)
 if (typeof window !== "undefined") {
   window.MASTER_GAIN_9DB_ATTENUATION = MASTER_GAIN_9DB_ATTENUATION;
 }
@@ -689,20 +754,29 @@ class DMRAudioPlayer {
     this.eqHighNode = null;
     this.deemphasisNode = null;
     this.eq10Filters = [];
-    this.eq10Gains = [2.5, 2.0, -3.0, -4.0, 1.0, -2.5, -1.5, -2.0, -1.5, 1.5];
+    this.eq10Gains = [-1.0, -1.5, -0.5, 0.0, 1.0, 2.0, 2.5, 2.0, 1.0, -1.5];
     this.eq10Enabled = true;
     this.limiterEnabled = true;
+    this.agcEnabled = true;
+    this.agcDepthDb = 18;
+    this.agcGainRaw = 35;
     this.activeProfileNet = "dmr";
     this.dspProfiles = {
       dmr: {
         eq10Enabled: true,
-        eq10Gains: [2.5, 2.0, -3.0, -4.0, 1.0, -2.5, -1.5, -2.0, -1.5, 1.5],
-        limiterEnabled: true
+        eq10Gains: [-1.0, -1.5, -0.5, 0.0, 1.0, 2.0, 2.5, 2.0, 1.0, -1.5],
+        limiterEnabled: true,
+        agcEnabled: true,
+        agcDepthDb: 18,
+        agcGainRaw: 35
       },
       allstar: {
         eq10Enabled: false,
-        eq10Gains: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        limiterEnabled: true
+        eq10Gains: [0.0, 0.0, 0.0, 0.0, 0.5, 1.5, 2.0, 1.5, 0.5, -1.0],
+        limiterEnabled: true,
+        agcEnabled: true,
+        agcDepthDb: 16,
+        agcGainRaw: 25
       }
     };
 
@@ -722,8 +796,8 @@ class DMRAudioPlayer {
     this.workletNode = null;
     this.useWorklet = false;
     this.workletInitPromise = null;
-    // Overall coefficient attenuated by -9 dB relative to baseline of 1.20
-    this.masterVolume = 1.2 * MASTER_GAIN_9DB_ATTENUATION; // ~0.42578 (-9 dB)
+    // Master bus runs at unity 0 dB (channel GainNodes/worklet control slider attenuation)
+    this.masterVolume = 1.0;
     if (typeof window !== "undefined") {
       window.audioPlayer = this;
       window.dmrAudioPlayer = this;
@@ -746,8 +820,9 @@ class DMRAudioPlayer {
             this.rxBoostDb = parsedB;
           }
         }
-        const savedPre = localStorage.getItem("proxdmr_pre_gain_db");
-        if (savedPre !== null) this.preGainDb = Math.max(-20, Math.min(12, Math.round(parseFloat(savedPre) || 0)));
+        // Clear legacy hidden pre-gain key so it never clips incoming RX/Parrot audio
+        localStorage.removeItem("proxdmr_pre_gain_db");
+        this.preGainDb = 0;
         const sLow = localStorage.getItem("proxdmr_eq_low");
         if (sLow !== null) this.eqLow = Math.max(-12, Math.min(12, Math.round(parseFloat(sLow) || 0)));
         const sMid = localStorage.getItem("proxdmr_eq_mid");
@@ -839,10 +914,10 @@ class DMRAudioPlayer {
 
         this.masterLimiter = this.audioCtx.createDynamicsCompressor();
         this.masterLimiter.threshold.value = this.limiterEnabled ? -1.0 : 0.0; // dBFS
-        this.masterLimiter.knee.value = 1.0;       // dB
-        this.masterLimiter.ratio.value = this.limiterEnabled ? 20.0 : 1.0;     // 1.0 = linear bypass
+        this.masterLimiter.knee.value = 6.0;       // Smooth soft knee (dB)
+        this.masterLimiter.ratio.value = this.limiterEnabled ? 16.0 : 1.0;     // 1.0 = linear bypass
         this.masterLimiter.attack.value = 0.002;   // 2ms fast attack
-        this.masterLimiter.release.value = 0.080;  // 80ms fast recovery
+        this.masterLimiter.release.value = 0.100;  // 100ms smooth recovery
         try {
           this.masterLimiter.channelCount = 2;
           this.masterLimiter.channelCountMode = "explicit";
@@ -881,10 +956,11 @@ class DMRAudioPlayer {
           const _g = (this.eq10Gains && this.eq10Gains[_i] !== undefined) ? this.eq10Gains[_i] : 0.0;
           this.eq10Filters[_i].gain.value = this.eq10Enabled ? _g : 0.0;
         }
+        this._applyEq10AutoGainPad();
         // Also force-apply limiter state from loaded profile
         if (this.masterLimiter) {
           this.masterLimiter.threshold.value = this.limiterEnabled ? -1.0 : 0.0;
-          this.masterLimiter.ratio.value = this.limiterEnabled ? 20.0 : 1.0;
+          this.masterLimiter.ratio.value = this.limiterEnabled ? 16.0 : 1.0;
         }
         // Mark that graph was freshly built — ensureNetworkProfile must re-apply on first call
         this._graphJustBuilt = true;
@@ -905,8 +981,7 @@ class DMRAudioPlayer {
     }
     this.workletInitPromise = (async () => {
       try {
-        const cacheVer = (typeof window !== "undefined" && window.CACHE_VERSION) ? window.CACHE_VERSION : "2.9.619";
-        await this.audioCtx.audioWorklet.addModule(`/static/js/worklets/dmr-audio-processor.js?v=2.9.619`);
+        await this.audioCtx.audioWorklet.addModule(`/static/js/worklets/dmr-audio-processor.js?v=2.9.733`);
         this.workletNode = new AudioWorkletNode(this.audioCtx, "dmr-audio-processor", {
           numberOfInputs: 0,
           numberOfOutputs: 1,
@@ -948,6 +1023,12 @@ class DMRAudioPlayer {
       this.workletNode.port.postMessage({
         type: "set_pre_gain",
         db: this.preGainDb
+      });
+      this.workletNode.port.postMessage({
+        type: "set_agc_config",
+        enabled: this.agcEnabled,
+        depthDb: this.agcDepthDb,
+        gainRaw: this.agcGainRaw
       });
       this.workletNode.port.postMessage({
         type: "set_jitter_buffer",
@@ -1027,8 +1108,9 @@ class DMRAudioPlayer {
         ch.setSlotMute(2, window.getHotspotMute(hid, 2));
       } else if (typeof localStorage !== "undefined") {
         const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
         const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-        const isPrimary = (hid === "default" || hid === primaryId);
+        const isPrimary = hasRealDefault ? (hid === "default") : (hid === "default" || hid === primaryId);
         const m1 = localStorage.getItem(`proxdmr_mute_${hid}_ts1`) === "true" || (isPrimary && localStorage.getItem("proxdmr_mute_default_ts1") === "true");
         const m2 = localStorage.getItem(`proxdmr_mute_${hid}_ts2`) === "true" || (isPrimary && localStorage.getItem("proxdmr_mute_default_ts2") === "true");
         ch.setSlotMute(1, m1);
@@ -1039,8 +1121,9 @@ class DMRAudioPlayer {
         ch.setVolume(window.getHotspotVolume(hid) / 100.0);
       } else if (typeof localStorage !== "undefined") {
         const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
         const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-        const isPrimary = (hid === "default" || hid === primaryId);
+        const isPrimary = hasRealDefault ? (hid === "default") : (hid === "default" || hid === primaryId);
         const v = localStorage.getItem(`proxdmr_vol_${hid}`) || (isPrimary ? (localStorage.getItem("proxdmr_vol_default") || localStorage.getItem("proxdmr_volume")) : null);
         if (v !== null) {
           const p = parseInt(v, 10);
@@ -1055,8 +1138,9 @@ class DMRAudioPlayer {
         p2 = window.getHotspotPan(hid, 2);
       } else if (typeof localStorage !== "undefined") {
         const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+        const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
         const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-        const isPrimary = (hid === "default" || hid === primaryId);
+        const isPrimary = hasRealDefault ? (hid === "default") : (hid === "default" || hid === primaryId);
         p1 = localStorage.getItem(`proxdmr_pan_${hid}_ts1`) || (isPrimary ? localStorage.getItem("proxdmr_pan_default_ts1") : null) || "LR";
         p2 = localStorage.getItem(`proxdmr_pan_${hid}_ts2`) || (isPrimary ? localStorage.getItem("proxdmr_pan_default_ts2") : null) || "LR";
       }
@@ -1123,7 +1207,18 @@ class DMRAudioPlayer {
             this.dspProfiles.dmr.eq10Gains = d.eq10Gains.map(v => Number(v) / 10.0);
           }
           if (d.limiterEnable !== undefined) this.dspProfiles.dmr.limiterEnabled = Boolean(d.limiterEnable);
+          if (d.agcEnable !== undefined) this.dspProfiles.dmr.agcEnabled = Boolean(d.agcEnable);
+          if (d.agcDepth !== undefined) {
+            const ad = parseInt(d.agcDepth, 10);
+            if (!isNaN(ad)) this.dspProfiles.dmr.agcDepthDb = Math.max(6, Math.min(30, ad));
+          }
+          if (d.agcGain !== undefined) {
+            const ag = parseInt(d.agcGain, 10);
+            if (!isNaN(ag)) this.dspProfiles.dmr.agcGainRaw = Math.max(10, Math.min(120, ag));
+          }
         }
+      } else if (localStorage.getItem("proxdmr_agc") !== null) {
+        this.dspProfiles.dmr.agcEnabled = localStorage.getItem("proxdmr_agc") !== "false";
       }
 
       // AllStar Profile
@@ -1137,6 +1232,15 @@ class DMRAudioPlayer {
             this.dspProfiles.allstar.eq10Gains = a.eq10Gains.map(v => Number(v) / 10.0);
           }
           if (a.limiterEnable !== undefined) this.dspProfiles.allstar.limiterEnabled = Boolean(a.limiterEnable);
+          if (a.agcEnable !== undefined) this.dspProfiles.allstar.agcEnabled = Boolean(a.agcEnable);
+          if (a.agcDepth !== undefined) {
+            const ad = parseInt(a.agcDepth, 10);
+            if (!isNaN(ad)) this.dspProfiles.allstar.agcDepthDb = Math.max(6, Math.min(30, ad));
+          }
+          if (a.agcGain !== undefined) {
+            const ag = parseInt(a.agcGain, 10);
+            if (!isNaN(ag)) this.dspProfiles.allstar.agcGainRaw = Math.max(10, Math.min(120, ag));
+          }
         }
       }
 
@@ -1148,16 +1252,22 @@ class DMRAudioPlayer {
         this.eq10Enabled = p.eq10Enabled;
         this.eq10Gains = p.eq10Gains.slice();
         this.limiterEnabled = p.limiterEnabled;
+        this.agcEnabled = p.agcEnabled !== false;
+        this.agcDepthDb = p.agcDepthDb || 18;
+        this.agcGainRaw = p.agcGainRaw || 35;
+      }
+      if (typeof this._syncAgcToEngine === "function") {
+        this._syncAgcToEngine();
       }
     } catch (_) {}
   }
 
-  ensureNetworkProfile(targetNet) {
+  ensureNetworkProfile(targetNet, force = false) {
     const net = (targetNet === "allstar") ? "allstar" : "dmr";
     // Skip if same network AND graph was not just rebuilt.
     // _graphJustBuilt is set to true in initSync() after graph construction;
     // it is cleared here after first successful profile application.
-    if (this.activeProfileNet === net && !this._graphJustBuilt) return;
+    if (!force && this.activeProfileNet === net && !this._graphJustBuilt) return;
     this._graphJustBuilt = false;
     this.activeProfileNet = net;
     const p = this.dspProfiles[net];
@@ -1166,23 +1276,28 @@ class DMRAudioPlayer {
     this.eq10Enabled = p.eq10Enabled;
     this.eq10Gains = p.eq10Gains.slice();
     this.limiterEnabled = p.limiterEnabled;
+    this.agcEnabled = p.agcEnabled !== false;
+    this.agcDepthDb = p.agcDepthDb || (net === "allstar" ? 16 : 18);
+    this.agcGainRaw = p.agcGainRaw || (net === "allstar" ? 25 : 35);
 
-    // Apply directly to WebAudio biquad filters and limiter
+    // Apply directly to WebAudio biquad filters, limiter and real-time RX AGC
     for (let i = 0; i < this.eq10Filters.length; i++) {
       if (this.eq10Filters[i]) {
         const g = (this.eq10Gains[i] !== undefined) ? this.eq10Gains[i] : 0.0;
         this.eq10Filters[i].gain.value = this.eq10Enabled ? g : 0.0;
       }
     }
+    this._applyEq10AutoGainPad();
     if (this.masterLimiter) {
       if (this.limiterEnabled) {
         this.masterLimiter.threshold.value = -1.0;
-        this.masterLimiter.ratio.value = 20.0;
+        this.masterLimiter.ratio.value = 16.0;
       } else {
         this.masterLimiter.threshold.value = 0.0;
         this.masterLimiter.ratio.value = 1.0;
       }
     }
+    this._syncAgcToEngine();
   }
 
   ensureProfileForHotspot(hotspotId) {
@@ -1211,6 +1326,14 @@ class DMRAudioPlayer {
 
     // Check mute before sending
     if (this.isSlotMuted(hid, s) || this.isHotspotMuted(hid)) return;
+
+    // Check single hotspot audio only mode (only active hotspot is allowed to output sound)
+    if (typeof window !== "undefined" && typeof window.isSingleHotspotAudioEnabled === "function" && window.isSingleHotspotAudioEnabled()) {
+      const activeHid = String(window.activeHotspotId || ((window.currentHotspots && window.currentHotspots[0]) ? window.currentHotspots[0].id : "default"));
+      if (hid !== activeHid) {
+        return;
+      }
+    }
 
     if (this.useWorklet && this.workletNode) {
       try {
@@ -1250,8 +1373,9 @@ class DMRAudioPlayer {
     if (ch) ch.setSlotMute(s, isMuted);
 
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
     const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-    const isPrimary = (hid === "default" || hid === primaryId);
+    const isPrimary = hasRealDefault ? false : (hid === "default" || hid === primaryId);
 
     this.channels.forEach((channel, key) => {
       const sKey = String(key);
@@ -1282,11 +1406,14 @@ class DMRAudioPlayer {
     let ch = this.channels.get(hid);
     if (!ch) {
       const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+      const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
       const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-      if (hid === "default" && primaryId !== "default") {
-        ch = this.channels.get(primaryId);
-      } else if (hid === primaryId && primaryId !== "default") {
-        ch = this.channels.get("default");
+      if (!hasRealDefault) {
+        if (hid === "default" && primaryId !== "default") {
+          ch = this.channels.get(primaryId);
+        } else if (hid === primaryId && primaryId !== "default") {
+          ch = this.channels.get("default");
+        }
       }
     }
     return ch ? ch.isSlotMuted(slot) : false;
@@ -1313,8 +1440,9 @@ class DMRAudioPlayer {
     if (ch) ch.setSlotPan(s, safeMode);
 
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
     const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-    const isPrimary = (hid === "default" || hid === primaryId);
+    const isPrimary = hasRealDefault ? false : (hid === "default" || hid === primaryId);
 
     this.channels.forEach((channel, key) => {
       const sKey = String(key);
@@ -1345,11 +1473,14 @@ class DMRAudioPlayer {
     let ch = this.channels.get(hid);
     if (!ch) {
       const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+      const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
       const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-      if (hid === "default" && primaryId !== "default") {
-        ch = this.channels.get(primaryId);
-      } else if (hid === primaryId && primaryId !== "default") {
-        ch = this.channels.get("default");
+      if (!hasRealDefault) {
+        if (hid === "default" && primaryId !== "default") {
+          ch = this.channels.get(primaryId);
+        } else if (hid === primaryId && primaryId !== "default") {
+          ch = this.channels.get("default");
+        }
       }
     }
     return ch ? ch.getSlotPan(slot) : "LR";
@@ -1395,11 +1526,10 @@ class DMRAudioPlayer {
           ? Boolean(this.globalMuted || this.pttMuted)
           : Boolean(ch.isMuted || this.globalMuted || this.pttMuted || this.soloMuted));
     
-    // Balanced gain factor:
-    // DMR baseline audio passes through masterLimiter with -14 dB attenuator.
-    // TTS WAV is normalized to 0 dBFS. A gain factor of 0.70 gives crisp, clear voice
-    // that balances with DMR audio volume without clipping.
-    ttsGain.gain.value = (isSlotMuted || isChannelMuted) ? 0.0 : 0.70;
+    // Balanced gain factor with 0 dB unity master bus:
+    // TTS WAV is normalized near 0 dBFS while RX AGC targets ~ -13..-10 dBFS RMS;
+    // 0.40 balances voice announcements cleanly with DMR reception without loudness jump.
+    ttsGain.gain.value = (isSlotMuted || isChannelMuted) ? 0.0 : 0.40;
 
     source.connect(ttsGain);
 
@@ -1487,8 +1617,9 @@ class DMRAudioPlayer {
     const safeDuckLevel = !isNaN(parsedLevel) ? Math.max(0.0, Math.min(1.0, parsedLevel)) : 0.20;
 
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
     const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-    const isPrimary = (hid === "default" || hid === primaryId);
+    const isPrimary = hasRealDefault ? false : (hid === "default" || hid === primaryId);
 
     if (this.useWorklet && this.workletNode) {
       try {
@@ -1531,14 +1662,15 @@ class DMRAudioPlayer {
     const tHid = (targetHotspotId !== undefined && targetHotspotId !== null && targetHotspotId !== "") ? String(targetHotspotId) : "default";
     const tSlot = parseInt(targetSlot, 10) || 1;
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
     const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
-    const isTargetPrimary = (tHid === "default" || tHid === primaryId);
+    const isTargetPrimary = !hasRealDefault && (tHid === "default" || tHid === primaryId);
     const parsedLevel = parseFloat(duckLevel);
     const safeDuckLevel = !isNaN(parsedLevel) ? Math.max(0.0, Math.min(1.0, parsedLevel)) : 0.0;
 
     const allHids = this.getAllHotspotIds();
     allHids.forEach(hid => {
-      const isChannelPrimary = (hid === "default" || hid === primaryId);
+      const isChannelPrimary = !hasRealDefault && (hid === "default" || hid === primaryId);
       const isSameHotspot = (hid === tHid) || (isTargetPrimary && isChannelPrimary);
 
       [1, 2].forEach(slot => {
@@ -1725,11 +1857,11 @@ class DMRAudioPlayer {
   }
 
   setVolume(volume) {
-    // Master volume setter for compatibility (-9 dB relative to input)
+    // Master volume setter (unity 0 dB reference; no artificial -9 dB pad)
     const parsed = typeof volume === "number" ? volume : parseFloat(volume);
-    const raw = isNaN(parsed) ? 1.2 : parsed;
+    const raw = isNaN(parsed) ? 1.0 : parsed;
     const normalized = raw > 2.5 ? (raw / 100.0) : raw;
-    this.masterVolume = Math.max(0.0, Math.min(2.5, normalized * MASTER_GAIN_9DB_ATTENUATION));
+    this.masterVolume = Math.max(0.0, Math.min(2.5, normalized));
     this._updateMasterGain();
   }
 
@@ -1776,27 +1908,113 @@ class DMRAudioPlayer {
     }
   }
 
+  _computeEq10AutoPadLinear() {
+    if (!this.eq10Enabled || !Array.isArray(this.eq10Gains)) return 1.0;
+    const fs = (this.audioCtx && this.audioCtx.sampleRate) ? this.audioCtx.sampleRate : 48000.0;
+    const specs = [
+      { freq: 110,  type: "peaking",   q: 1.2 },
+      { freq: 200,  type: "peaking",   q: 1.4 },
+      { freq: 330,  type: "peaking",   q: 2.2 },
+      { freq: 460,  type: "peaking",   q: 2.2 },
+      { freq: 750,  type: "peaking",   q: 1.4 },
+      { freq: 1350, type: "peaking",   q: 2.2 },
+      { freq: 2150, type: "peaking",   q: 2.5 },
+      { freq: 2750, type: "peaking",   q: 2.5 },
+      { freq: 3400, type: "peaking",   q: 1.8 },
+      { freq: 5000, type: "highshelf", q: 1.0 }
+    ];
+    const coeffs = [];
+    for (let i = 0; i < specs.length; i++) {
+      const g = Number(this.eq10Gains[i]) || 0.0;
+      if (Math.abs(g) < 0.05) continue;
+      const sp = specs[i];
+      const A = Math.pow(10.0, g / 40.0);
+      const w0 = (2.0 * Math.PI * sp.freq) / fs;
+      const cosw0 = Math.cos(w0);
+      const sinw0 = Math.sin(w0);
+      let b0, b1, b2, a0, a1, a2;
+      if (sp.type === "peaking") {
+        const alpha = sinw0 / (2.0 * sp.q);
+        b0 = 1.0 + alpha * A;
+        b1 = -2.0 * cosw0;
+        b2 = 1.0 - alpha * A;
+        a0 = 1.0 + alpha / A;
+        a1 = -2.0 * cosw0;
+        a2 = 1.0 - alpha / A;
+      } else {
+        const alpha = (sinw0 / 2.0) * Math.SQRT2;
+        const beta = 2.0 * Math.sqrt(A) * alpha;
+        b0 = A * ((A + 1.0) + (A - 1.0) * cosw0 + beta);
+        b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cosw0);
+        b2 = A * ((A + 1.0) + (A - 1.0) * cosw0 - beta);
+        a0 = (A + 1.0) - (A - 1.0) * cosw0 + beta;
+        a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cosw0);
+        a2 = (A + 1.0) - (A - 1.0) * cosw0 - beta;
+      }
+      const invA0 = 1.0 / a0;
+      coeffs.push([b0 * invA0, b1 * invA0, b2 * invA0, a1 * invA0, a2 * invA0]);
+    }
+    if (coeffs.length === 0) return 1.0;
+
+    const testFreqs = [
+      80, 110, 150, 200, 260, 330, 390, 460, 580, 750,
+      950, 1150, 1350, 1600, 1850, 2150, 2450, 2750, 3050, 3400, 3800
+    ];
+    let maxDb = 0.0;
+    for (let fIdx = 0; fIdx < testFreqs.length; fIdx++) {
+      const w = (2.0 * Math.PI * testFreqs[fIdx]) / fs;
+      const cw1 = Math.cos(w);
+      const sw1 = Math.sin(w);
+      const cw2 = Math.cos(2.0 * w);
+      const sw2 = Math.sin(2.0 * w);
+      let magSqProd = 1.0;
+      for (let cIdx = 0; cIdx < coeffs.length; cIdx++) {
+        const c = coeffs[cIdx];
+        const nr = c[0] + c[1] * cw1 + c[2] * cw2;
+        const ni = -(c[1] * sw1 + c[2] * sw2);
+        const dr = 1.0 + c[3] * cw1 + c[4] * cw2;
+        const di = -(c[3] * sw1 + c[4] * sw2);
+        magSqProd *= (nr * nr + ni * ni) / Math.max(1e-12, dr * dr + di * di);
+      }
+      const db = 10.0 * Math.log10(Math.max(1e-12, magSqProd));
+      if (db > maxDb) maxDb = db;
+    }
+
+    // Gentle EQ headroom pad starting above +3.0 dB at 0.35x slope, capped at -4.5 dB
+    // (or -6.0 dB when limiter is off) so HF EQ peaks never crush speech body loudness.
+    const rawExcessDb = Math.max(0.0, maxDb - 3.0) * 0.35;
+    const maxPadDb = this.limiterEnabled ? 4.5 : 6.0;
+    const padDb = Math.min(maxPadDb, rawExcessDb);
+    return Math.pow(10.0, -padDb / 20.0);
+  }
+
+  _applyEq10AutoGainPad() {
+    if (!this.preGainNode || !this.audioCtx) return;
+    const padLinear = this._computeEq10AutoPadLinear();
+    const now = this.audioCtx.currentTime;
+    try {
+      this.preGainNode.gain.cancelScheduledValues(now);
+      this.preGainNode.gain.setTargetAtTime(padLinear, now, 0.015);
+    } catch (_) {
+      try { this.preGainNode.gain.value = padLinear; } catch (__) {}
+    }
+  }
+
   setPreGainDb(db) {
-    const val = Math.max(-20, Math.min(12, Math.round(parseFloat(db) || 0)));
-    this.preGainDb = val;
+    this.preGainDb = 0;
     if (this.useWorklet && this.workletNode) {
       try {
-        this.workletNode.port.postMessage({ type: "set_pre_gain", db: val });
+        this.workletNode.port.postMessage({ type: "set_pre_gain", db: 0 });
       } catch (_) {}
     }
-    // Input Pre-Gain is applied directly to incoming PCM samples in HotspotAudioSlot before AGC
-    if (this.preGainNode && this.audioCtx) {
-      const now = this.audioCtx.currentTime;
-      this.preGainNode.gain.cancelScheduledValues(now);
-      this.preGainNode.gain.setValueAtTime(1.0, now);
-    }
+    this._applyEq10AutoGainPad();
     try {
-      localStorage.setItem("proxdmr_pre_gain_db", val);
+      localStorage.removeItem("proxdmr_pre_gain_db");
     } catch (_) {}
   }
 
   getPreGainDb() {
-    return this.preGainDb !== undefined ? this.preGainDb : 0;
+    return 0;
   }
 
   setEqualizer(low, mid, high) {
@@ -1828,11 +2046,12 @@ class DMRAudioPlayer {
           this.eq10Filters[i].gain.value = this.eq10Enabled ? g : 0.0;
         }
       }
+      this._applyEq10AutoGainPad();
     }
   }
 
   getEq10Gains() {
-    return this.eq10Gains ? this.eq10Gains.slice() : [2.5, 2.0, -3.0, -4.0, 1.0, -2.5, -1.5, -2.0, -1.5, 1.5];
+    return this.eq10Gains ? this.eq10Gains.slice() : [-1.0, -1.5, -0.5, 0.0, 1.0, 2.0, 2.5, 2.0, 1.0, -1.5];
   }
 
   setEq10Enabled(enabled) {
@@ -1849,12 +2068,74 @@ class DMRAudioPlayer {
     if (this.masterLimiter) {
       if (this.limiterEnabled) {
         this.masterLimiter.threshold.value = -1.0;
-        this.masterLimiter.ratio.value = 20.0;
+        this.masterLimiter.ratio.value = 16.0;
       } else {
         this.masterLimiter.threshold.value = 0.0;
         this.masterLimiter.ratio.value = 1.0;
       }
     }
+    this._applyEq10AutoGainPad();
+  }
+
+  _syncAgcToEngine() {
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_agc_config",
+          enabled: this.agcEnabled,
+          depthDb: this.agcDepthDb,
+          gainRaw: this.agcGainRaw
+        });
+      } catch (_) {}
+    }
+    if (this.channels) {
+      const cfg = this.getRxAgcConfig();
+      this.channels.forEach(ch => {
+        if (ch && ch.slots) {
+          for (const s of [1, 2]) {
+            if (ch.slots[s] && ch.slots[s].agc) {
+              ch.slots[s].agc.configure(cfg);
+            }
+          }
+        }
+      });
+    }
+  }
+
+  setRxAgcConfig({ enabled, depthDb, gainRaw } = {}, targetNet = null) {
+    const net = targetNet ? (targetNet === "allstar" ? "allstar" : "dmr") : (this.activeProfileNet || "dmr");
+    const prof = this.dspProfiles && this.dspProfiles[net];
+    if (prof) {
+      if (enabled !== undefined) prof.agcEnabled = Boolean(enabled);
+      if (depthDb !== undefined) {
+        const d = parseFloat(depthDb);
+        if (!isNaN(d)) prof.agcDepthDb = Math.max(6, Math.min(30, d));
+      }
+      if (gainRaw !== undefined) {
+        const g = parseFloat(gainRaw);
+        if (!isNaN(g)) prof.agcGainRaw = Math.max(10, Math.min(120, g));
+      }
+    }
+    if (!this.activeProfileNet || this.activeProfileNet === net) {
+      if (enabled !== undefined) this.agcEnabled = Boolean(enabled);
+      if (depthDb !== undefined) {
+        const d = parseFloat(depthDb);
+        if (!isNaN(d)) this.agcDepthDb = Math.max(6, Math.min(30, d));
+      }
+      if (gainRaw !== undefined) {
+        const g = parseFloat(gainRaw);
+        if (!isNaN(g)) this.agcGainRaw = Math.max(10, Math.min(120, g));
+      }
+      this._syncAgcToEngine();
+    }
+  }
+
+  getRxAgcConfig() {
+    return {
+      enabled: this.agcEnabled !== false,
+      depthDb: this.agcDepthDb || 18,
+      gainRaw: this.agcGainRaw || 35
+    };
   }
 
   getLimiterEnabled() {

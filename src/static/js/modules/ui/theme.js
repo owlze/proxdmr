@@ -1,4 +1,4 @@
-import { showToast } from '../core/toast.js';
+import { showToast } from '../core/toast.js?v=2.9.699';
 
   function getUserPrefix() {
     const uid = window.currentUserId || (window.ProxDMRAuth && window.ProxDMRAuth.getUser() ? (window.ProxDMRAuth.getUser().id || window.ProxDMRAuth.getUser().user_id) : null);
@@ -57,6 +57,9 @@ import { showToast } from '../core/toast.js';
         sun.style.display = (theme === "light") ? "block" : "none";
       }
     });
+    if (typeof window !== "undefined" && typeof window.syncToolbarLogoContrast === "function") {
+      window.syncToolbarLogoContrast();
+    }
   }
 
   function setTheme(theme, showNotification = false) {
@@ -67,8 +70,11 @@ import { showToast } from '../core/toast.js';
     setLocalUserItem("theme", theme);
     applyThemeUI(theme);
 
-    // Apply the wallpaper saved specifically for this theme
+    // Apply the wallpaper and toolbar gradient saved specifically for this theme
     applyBackgroundForActiveTheme();
+    if (typeof window.applyToolbarBgForActiveTheme === "function") {
+      window.applyToolbarBgForActiveTheme();
+    }
 
     // If Settings modal is open, align the wallpaper mode tab
     if (typeof syncThemeBgTabs === "function") {
@@ -641,9 +647,215 @@ import { showToast } from '../core/toast.js';
     window.applyAppBorderRadius = applyRadius;
   }
 
+  const DEFAULT_TOOLBAR_BG_TOP = "#0037b4";
+  const DEFAULT_TOOLBAR_BG_BOTTOM = "#001b43";
+  const DEFAULT_TOOLBAR_BG_TOP_LIGHT = "#f4f7fb";
+  const DEFAULT_TOOLBAR_BG_BOTTOM_LIGHT = "#dbe6f4";
+
+  function _normalizeHexColor(val, fallback) {
+    const raw = String(val || "").trim();
+    return /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : fallback;
+  }
+
+  function _hexRgbLuminance(hex) {
+    const h = _normalizeHexColor(hex, "#000000");
+    const r = parseInt(h.slice(1, 3), 16);
+    const g = parseInt(h.slice(3, 5), 16);
+    const b = parseInt(h.slice(5, 7), 16);
+    return (0.299 * r) + (0.587 * g) + (0.114 * b);
+  }
+
+  function getToolbarBgConfigForTheme(theme) {
+    const target = (theme === "light") ? "light" : "dark";
+    if (target === "light") {
+      return {
+        theme: "light",
+        topKey: "toolbar_bg_top_light",
+        bottomKey: "toolbar_bg_bottom_light",
+        defTop: DEFAULT_TOOLBAR_BG_TOP_LIGHT,
+        defBottom: DEFAULT_TOOLBAR_BG_BOTTOM_LIGHT,
+        top: _normalizeHexColor(getLocalUserItem("toolbar_bg_top_light", DEFAULT_TOOLBAR_BG_TOP_LIGHT), DEFAULT_TOOLBAR_BG_TOP_LIGHT),
+        bottom: _normalizeHexColor(getLocalUserItem("toolbar_bg_bottom_light", DEFAULT_TOOLBAR_BG_BOTTOM_LIGHT), DEFAULT_TOOLBAR_BG_BOTTOM_LIGHT)
+      };
+    }
+    return {
+      theme: "dark",
+      topKey: "toolbar_bg_top",
+      bottomKey: "toolbar_bg_bottom",
+      defTop: DEFAULT_TOOLBAR_BG_TOP,
+      defBottom: DEFAULT_TOOLBAR_BG_BOTTOM,
+      top: _normalizeHexColor(getLocalUserItem("toolbar_bg_top", DEFAULT_TOOLBAR_BG_TOP), DEFAULT_TOOLBAR_BG_TOP),
+      bottom: _normalizeHexColor(getLocalUserItem("toolbar_bg_bottom", DEFAULT_TOOLBAR_BG_BOTTOM), DEFAULT_TOOLBAR_BG_BOTTOM)
+    };
+  }
+
+  function syncToolbarLogoContrast(topHex, bottomHex) {
+    const activeCfg = getToolbarBgConfigForTheme(currentTheme);
+    const inlineTop = (typeof document !== "undefined" && document.documentElement && document.documentElement.style && typeof document.documentElement.style.getPropertyValue === "function")
+      ? document.documentElement.style.getPropertyValue("--toolbar-bg-top")
+      : "";
+    const inlineBottom = (typeof document !== "undefined" && document.documentElement && document.documentElement.style && typeof document.documentElement.style.getPropertyValue === "function")
+      ? document.documentElement.style.getPropertyValue("--toolbar-bg-bottom")
+      : "";
+    const tColor = _normalizeHexColor(
+      topHex || inlineTop || activeCfg.top,
+      activeCfg.defTop
+    );
+    const bColor = _normalizeHexColor(
+      bottomHex || inlineBottom || activeCfg.bottom,
+      activeCfg.defBottom
+    );
+    const avgLum = (_hexRgbLuminance(tColor) + _hexRgbLuminance(bColor)) / 2;
+    const isLightBg = avgLum >= 150;
+    document.querySelectorAll("#proxdmrTopToolbar, .proxdmr-top-toolbar").forEach(tb => {
+      tb.classList.toggle("toolbar-bg-light", isLightBg);
+      tb.classList.toggle("toolbar-bg-dark", !isLightBg);
+    });
+  }
+
+  function initInterfaceElementsSettings() {
+    const frame = document.getElementById("interfaceElementsSettingsFrame");
+    const toggle = document.getElementById("interfaceElementsSettingsToggle");
+    if (frame && toggle && !toggle._wired) {
+      toggle._wired = true;
+      toggle.addEventListener("click", () => {
+        frame.classList.toggle("collapsed");
+      });
+    }
+  }
+
+  function initToolbarBgSettings() {
+    const kits = {
+      dark: {
+        groupEl: document.getElementById("toolbarBgGroupDark"),
+        topPicker: document.getElementById("optToolbarBgTopPicker"),
+        bottomPicker: document.getElementById("optToolbarBgBottomPicker"),
+        topSwatch: document.getElementById("toolbarBgTopSwatch"),
+        bottomSwatch: document.getElementById("toolbarBgBottomSwatch"),
+        topHexEl: document.getElementById("toolbarBgTopHex"),
+        bottomHexEl: document.getElementById("toolbarBgBottomHex"),
+        previewBar: document.getElementById("toolbarBgPreviewBarDark"),
+        btnReset: document.getElementById("btnResetToolbarBgDark")
+      },
+      light: {
+        groupEl: document.getElementById("toolbarBgGroupLight"),
+        topPicker: document.getElementById("optToolbarBgTopLightPicker"),
+        bottomPicker: document.getElementById("optToolbarBgBottomLightPicker"),
+        topSwatch: document.getElementById("toolbarBgTopLightSwatch"),
+        bottomSwatch: document.getElementById("toolbarBgBottomLightSwatch"),
+        topHexEl: document.getElementById("toolbarBgTopLightHex"),
+        bottomHexEl: document.getElementById("toolbarBgBottomLightHex"),
+        previewBar: document.getElementById("toolbarBgPreviewBarLight"),
+        btnReset: document.getElementById("btnResetToolbarBgLight")
+      }
+    };
+
+    function syncActiveThemeKitHighlight() {
+      const active = (currentTheme === "light") ? "light" : "dark";
+      if (kits.dark.groupEl) kits.dark.groupEl.classList.toggle("is-active-theme", active === "dark");
+      if (kits.light.groupEl) kits.light.groupEl.classList.toggle("is-active-theme", active === "light");
+    }
+
+    function applyToolbarBgGradientForTheme(theme, topVal, bottomVal, save = true) {
+      const target = (theme === "light") ? "light" : "dark";
+      const cfg = getToolbarBgConfigForTheme(target);
+      const ui = kits[target];
+
+      const topColor = _normalizeHexColor(
+        topVal !== undefined && topVal !== null ? topVal : cfg.top,
+        cfg.defTop
+      );
+      const bottomColor = _normalizeHexColor(
+        bottomVal !== undefined && bottomVal !== null ? bottomVal : cfg.bottom,
+        cfg.defBottom
+      );
+
+      if (ui.topPicker && ui.topPicker.value.toLowerCase() !== topColor) ui.topPicker.value = topColor;
+      if (ui.bottomPicker && ui.bottomPicker.value.toLowerCase() !== bottomColor) ui.bottomPicker.value = bottomColor;
+      if (ui.topSwatch) ui.topSwatch.style.background = topColor;
+      if (ui.bottomSwatch) ui.bottomSwatch.style.background = bottomColor;
+      if (ui.topHexEl) ui.topHexEl.textContent = topColor.toUpperCase();
+      if (ui.bottomHexEl) ui.bottomHexEl.textContent = bottomColor.toUpperCase();
+      if (ui.previewBar) {
+        ui.previewBar.style.background = `linear-gradient(180deg, ${topColor} 0%, ${bottomColor} 100%)`;
+      }
+
+      if (save) {
+        setLocalUserItem(cfg.topKey, topColor);
+        setLocalUserItem(cfg.bottomKey, bottomColor);
+        if (window.scheduleSyncClientSettings) window.scheduleSyncClientSettings();
+      }
+
+      const active = (currentTheme === "light") ? "light" : "dark";
+      if (target === active) {
+        document.documentElement.style.setProperty("--toolbar-bg-top", topColor);
+        document.documentElement.style.setProperty("--toolbar-bg-bottom", bottomColor);
+        syncToolbarLogoContrast(topColor, bottomColor);
+      }
+      syncActiveThemeKitHighlight();
+    }
+
+    function applyToolbarBgForActiveTheme() {
+      const darkCfg = getToolbarBgConfigForTheme("dark");
+      const lightCfg = getToolbarBgConfigForTheme("light");
+      applyToolbarBgGradientForTheme("dark", darkCfg.top, darkCfg.bottom, false);
+      applyToolbarBgGradientForTheme("light", lightCfg.top, lightCfg.bottom, false);
+      syncActiveThemeKitHighlight();
+    }
+
+    function applyToolbarBgGradient(topVal, bottomVal, save = true, targetTheme = null) {
+      const theme = (targetTheme === "light" || targetTheme === "dark")
+        ? targetTheme
+        : ((currentTheme === "light") ? "light" : "dark");
+      applyToolbarBgGradientForTheme(theme, topVal, bottomVal, save);
+    }
+
+    applyToolbarBgForActiveTheme();
+
+    ["dark", "light"].forEach((themeKey) => {
+      const ui = kits[themeKey];
+      if (ui.topPicker && !ui.topPicker._wiredToolbarTop) {
+        ui.topPicker._wiredToolbarTop = true;
+        const onTopInput = (e) => {
+          const curCfg = getToolbarBgConfigForTheme(themeKey);
+          const bVal = ui.bottomPicker ? ui.bottomPicker.value : curCfg.bottom;
+          applyToolbarBgGradientForTheme(themeKey, e.target.value, bVal, true);
+        };
+        ui.topPicker.addEventListener("input", onTopInput);
+        ui.topPicker.addEventListener("change", onTopInput);
+      }
+
+      if (ui.bottomPicker && !ui.bottomPicker._wiredToolbarBottom) {
+        ui.bottomPicker._wiredToolbarBottom = true;
+        const onBottomInput = (e) => {
+          const curCfg = getToolbarBgConfigForTheme(themeKey);
+          const tVal = ui.topPicker ? ui.topPicker.value : curCfg.top;
+          applyToolbarBgGradientForTheme(themeKey, tVal, e.target.value, true);
+        };
+        ui.bottomPicker.addEventListener("input", onBottomInput);
+        ui.bottomPicker.addEventListener("change", onBottomInput);
+      }
+
+      if (ui.btnReset && !ui.btnReset._wiredToolbarReset) {
+        ui.btnReset._wiredToolbarReset = true;
+        ui.btnReset.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const defCfg = getToolbarBgConfigForTheme(themeKey);
+          applyToolbarBgGradientForTheme(themeKey, defCfg.defTop, defCfg.defBottom, true);
+        });
+      }
+    });
+
+    window.applyToolbarBgGradient = applyToolbarBgGradient;
+    window.applyToolbarBgForActiveTheme = applyToolbarBgForActiveTheme;
+    window.syncToolbarLogoContrast = syncToolbarLogoContrast;
+  }
+
   initTheme();
+  initInterfaceElementsSettings();
   initBackgroundSettings();
   initBorderRadiusSettings();
+  initToolbarBgSettings();
   window.getTheme = getTheme;
   window.setTheme = setTheme;
   window.toggleTheme = toggleTheme;
@@ -651,8 +863,10 @@ import { showToast } from '../core/toast.js';
   window.applyThemeUI = applyThemeUI;
   window.wireThemeToggleButton = wireThemeToggleButton;
   window.applyBackground = applyBackground;
+  window.initInterfaceElementsSettings = initInterfaceElementsSettings;
   window.initBackgroundSettings = initBackgroundSettings;
   window.initBorderRadiusSettings = initBorderRadiusSettings;
+  window.initToolbarBgSettings = initToolbarBgSettings;
   window.syncThemeBgTabs = syncThemeBgTabs;
 
 Object.defineProperty(window, 'currentTheme', { get: () => currentTheme, set: (v) => currentTheme = v, configurable: true });

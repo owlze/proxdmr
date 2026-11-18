@@ -3,8 +3,8 @@
  * Module: modules/audio/dsp.js
  */
 
-import { getHotspotSlot as _getHotspotSlot } from '../core/state.js';
-import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, scheduleSyncClientSettings as _scheduleSyncClientSettings } from '../core/state.js';
+import { getHotspotSlot as _getHotspotSlot } from '../core/state.js?v=2.9.698';
+import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, scheduleSyncClientSettings as _scheduleSyncClientSettings } from '../core/state.js?v=2.9.698';
 
   // --- Audio Settings & DSP Modal Handler (RX / TX) ---
   // --- Audio RX Modal & DSP ---
@@ -37,10 +37,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       }
       if (hs && ((hs.network_type || "").toLowerCase() === "allstar")) {
         isAsl = true;
-      } else {
+      } else if (!hs) {
         const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${hid}"].card-net-allstar`) ||
                            document.querySelector(".radio-container.active-hotspot.card-net-allstar") ||
-                           document.querySelector(".radio-container.card-net-allstar") ||
                            document.querySelector(".hotspot-card.active-card.card-net-allstar");
         if (activeCard) {
           isAsl = true;
@@ -65,7 +64,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     if (oldRxBadge) oldRxBadge.remove();
     if (modalTitle) {
       const titleKey = isAsl ? "audio_rx.modal_title_analog" : "audio_rx.modal_title";
-      const titleDef = isAsl ? "Настройки звука приема (Аналог)" : "Настройки звука приема";
+      const titleDef = isAsl ? "Audio RX Settings (Analog)" : "Audio RX Settings";
       modalTitle.textContent = window.t ? window.t(titleKey, {}, titleDef) : titleDef;
     }
 
@@ -97,10 +96,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       }
       if (hs && ((hs.network_type || "").toLowerCase() === "allstar")) {
         isAsl = true;
-      } else {
+      } else if (!hs) {
         const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${hid}"].card-net-allstar`) ||
                            document.querySelector(".radio-container.active-hotspot.card-net-allstar") ||
-                           document.querySelector(".radio-container.card-net-allstar") ||
                            document.querySelector(".hotspot-card.active-card.card-net-allstar");
         if (activeCard) {
           isAsl = true;
@@ -125,7 +123,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     if (oldTxBadge) oldTxBadge.remove();
     if (modalTitle) {
       const titleKey = isAsl ? "audio_tx.modal_title_analog" : "audio_tx.modal_title";
-      const titleDef = isAsl ? "Настройки тракта передачи (Аналог)" : "Настройки тракта передачи";
+      const titleDef = isAsl ? "Audio TX Settings (Analog)" : "Audio TX Settings";
       modalTitle.textContent = window.t ? window.t(titleKey, {}, titleDef) : titleDef;
     }
 
@@ -177,58 +175,63 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       return n;
     }
 
-    const DEFAULT_SPEECH_EQ = [-7, -83, -11, 4, 2, 103, 118, 131, 25, -200];
+    const DEFAULT_SPEECH_EQ = [-10, -15, -5, 0, 10, 20, 25, 20, 10, -15];
+    const DEFAULT_ANALOG_SPEECH_EQ = [0, 0, 0, 0, 5, 15, 20, 15, 5, -10];
 
     const DEFAULT_PRESETS = {
       "1": {
-        name: "Стандарт",
+        name: "Standard",
         eq10Enable: true,
         eq10Linked: true,
-        eq10Gains: [-7, -83, -11, 4, 2, 103, 118, 131, 25, -200],
+        eq10Gains: [-10, -15, -5, 0, 10, 20, 25, 20, 10, -15],
         agcEnable: true,
-        agcDepth: 22,
-        agcGain: 50,
-        limiterEnable: true,
-        jitterBuffer: 1080
-      },
-      "2": {
-        name: "Мягкий эфир",
-        eq10Enable: true,
-        eq10Linked: true,
-        eq10Gains: [15, 10, -20, -30, 0, -15, -10, -15, -10, 0],
-        agcEnable: true,
-        agcDepth: 12,
+        agcDepth: 18,
         agcGain: 35,
         limiterEnable: true,
-        jitterBuffer: 140
+        jitterBuffer: 180,
+        boostPct: 50
       },
-      "3": {
-        name: "Разборчивость (DX)",
+      "2": {
+        name: "Soft Ether",
         eq10Enable: true,
         eq10Linked: true,
-        eq10Gains: [-40, -30, -20, 0, 20, 30, 25, 15, 0, -20],
+        eq10Gains: [10, 5, -10, -15, 0, -10, -10, -15, -10, -15],
         agcEnable: true,
-        agcDepth: 24,
-        agcGain: 55,
+        agcDepth: 12,
+        agcGain: 30,
         limiterEnable: true,
-        jitterBuffer: 180
+        jitterBuffer: 180,
+        boostPct: 50
+      },
+      "3": {
+        name: "Clarity (DX)",
+        eq10Enable: true,
+        eq10Linked: true,
+        eq10Gains: [-30, -25, -15, 0, 15, 30, 35, 25, 10, -20],
+        agcEnable: true,
+        agcDepth: 20,
+        agcGain: 40,
+        limiterEnable: true,
+        jitterBuffer: 180,
+        boostPct: 50
       }
     };
 
     const DEFAULT_ANALOG_RX_PRESETS = {
       "1": {
-        name: "Стандарт (Linear)",
-        eq10Enable: true,
+        name: "Standard (Linear)",
+        eq10Enable: false,
         eq10Linked: true,
-        eq10Gains: [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132],
+        eq10Gains: [0, 0, 0, 0, 5, 15, 20, 15, 5, -10],
         agcEnable: true,
-        agcDepth: 19,
-        agcGain: 10,
+        agcDepth: 16,
+        agcGain: 25,
         limiterEnable: true,
-        jitterBuffer: 1100
+        jitterBuffer: 240,
+        boostPct: 50
       },
       "2": {
-        name: "Мягкий эфир",
+        name: "Soft Ether",
         eq10Enable: false,
         eq10Linked: true,
         eq10Gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -236,18 +239,20 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         agcDepth: 12,
         agcGain: 15,
         limiterEnable: true,
-        jitterBuffer: 280
+        jitterBuffer: 240,
+        boostPct: 50
       },
       "3": {
-        name: "Разборчивый",
-        eq10Enable: false,
+        name: "Clear",
+        eq10Enable: true,
         eq10Linked: true,
-        eq10Gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        eq10Gains: [-20, -15, -5, 0, 10, 20, 25, 20, 10, -15],
         agcEnable: false,
-        agcDepth: 20,
-        agcGain: 30,
+        agcDepth: 18,
+        agcGain: 25,
         limiterEnable: true,
-        jitterBuffer: 320
+        jitterBuffer: 240,
+        boostPct: 50
       }
     };
 
@@ -286,19 +291,37 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         if (oldRxBadge) oldRxBadge.remove();
         if (modalTitle) {
           const titleKey = isAsl ? "audio_rx.modal_title_analog" : "audio_rx.modal_title";
-          const titleDef = isAsl ? "Настройки звука приема (Аналог)" : "Настройки звука приема";
+          const titleDef = isAsl ? "Audio RX Settings (Analog)" : "Audio RX Settings";
           modalTitle.textContent = window.t ? window.t(titleKey, {}, titleDef) : titleDef;
         }
-        openModal();
         const curPres = localStorage.getItem(getPresetStorageKey("active")) || "1";
-        applyAudioRxPreset(curPres);
+        applyAudioRxPreset(curPres, true);
+        openModal();
       }
     });
 
-    if (closeBtn) closeBtn.addEventListener("click", closeModal);
+    const bottomSaveRxBtn = document.getElementById("btnCloseAudioRxBottom");
+    if (bottomSaveRxBtn) {
+      bottomSaveRxBtn.addEventListener("click", () => {
+        autoSaveCurrentState();
+        _scheduleSyncClientSettings(0);
+        closeModal();
+      });
+    }
+    if (closeBtn) closeBtn.addEventListener("click", () => {
+      closeModal();
+      if (typeof window.flushPendingClientSettingsSync === "function") {
+        window.flushPendingClientSettingsSync();
+      }
+    });
     if (audioRxModal) {
       audioRxModal.addEventListener("click", (e) => {
-        if (e.target === audioRxModal) closeModal();
+        if (e.target === audioRxModal) {
+          closeModal();
+          if (typeof window.flushPendingClientSettingsSync === "function") {
+            window.flushPendingClientSettingsSync();
+          }
+        }
       });
     }
 
@@ -317,7 +340,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     function updateEqLabelsAndAudio() {
       const gains = [];
       const enabled = chkEq10Enable ? chkEq10Enable.checked : (_currentAudioRxNet !== "allstar");
-      const defFallbackGains = _currentAudioRxNet === "allstar" ? [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132] : DEFAULT_SPEECH_EQ;
+      const defFallbackGains = _currentAudioRxNet === "allstar" ? DEFAULT_ANALOG_SPEECH_EQ : DEFAULT_SPEECH_EQ;
       for (let i = 0; i < 10; i++) {
         const slider = document.getElementById(`eqSlider_${i}`);
         const valLbl = document.getElementById(`eqVal_${i}`);
@@ -334,16 +357,18 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           window.audioPlayer.dspProfiles[curNet].eq10Enabled = enabled;
           window.audioPlayer.dspProfiles[curNet].eq10Gains = gains.slice();
         }
-        if (typeof window.audioPlayer.setEq10Enabled === "function") {
-          window.audioPlayer.setEq10Enabled(enabled);
-        }
-        if (typeof window.audioPlayer.setEq10Gains === "function") {
-          window.audioPlayer.setEq10Gains(gains);
+        if (!window.audioPlayer.activeProfileNet || window.audioPlayer.activeProfileNet === curNet) {
+          if (typeof window.audioPlayer.setEq10Enabled === "function") {
+            window.audioPlayer.setEq10Enabled(enabled);
+          }
+          if (typeof window.audioPlayer.setEq10Gains === "function") {
+            window.audioPlayer.setEq10Gains(gains);
+          }
         }
       }
     }
 
-    function onEqSliderInput(idx) {
+    function onEqSliderInput(idx, immediate = false) {
       const mainSlider = document.getElementById(`eqSlider_${idx}`);
       if (!mainSlider) return;
       const newVal = parseInt(mainSlider.value, 10);
@@ -371,14 +396,14 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
       updateEqLabelsAndAudio();
       autoSaveCurrentState();
-      _scheduleSyncClientSettings();
+      _scheduleSyncClientSettings(immediate ? 0 : 200);
     }
 
     for (let i = 0; i < 10; i++) {
       const slider = document.getElementById(`eqSlider_${i}`);
       if (slider) {
-        slider.addEventListener("input", () => onEqSliderInput(i));
-        slider.addEventListener("change", () => onEqSliderInput(i));
+        slider.addEventListener("input", () => onEqSliderInput(i, false));
+        slider.addEventListener("change", () => onEqSliderInput(i, true));
       }
     }
 
@@ -386,60 +411,74 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       chkEq10Enable.addEventListener("change", () => {
         updateEqLabelsAndAudio();
         autoSaveCurrentState();
-        _scheduleSyncClientSettings();
+        _scheduleSyncClientSettings(0);
+      });
+    }
+
+    if (chkEq10Linked) {
+      chkEq10Linked.addEventListener("change", () => {
+        autoSaveCurrentState();
+        _scheduleSyncClientSettings(0);
       });
     }
 
     if (btnResetEq10Profile) {
       btnResetEq10Profile.addEventListener("click", () => {
-        const isAnalog = (_currentAudioRxNet === "allstar");
-        const resetGains = isAnalog ? [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132] : DEFAULT_SPEECH_EQ;
         for (let i = 0; i < 10; i++) {
           const s = document.getElementById(`eqSlider_${i}`);
           if (s) {
-            s.value = resetGains[i];
-            _prevEqSliderVals[i] = resetGains[i];
+            s.value = 0;
+            _prevEqSliderVals[i] = 0;
           }
         }
         updateEqLabelsAndAudio();
         autoSaveCurrentState();
-        _scheduleSyncClientSettings();
+        _scheduleSyncClientSettings(0);
       });
     }
 
     // AGC UI Listeners
     function updateAgcUI() {
       const depth = sliderAgcDepth ? parseInt(sliderAgcDepth.value, 10) : 18;
-      const gainRaw = sliderAgcGain ? parseInt(sliderAgcGain.value, 10) : 45;
+      const gainRaw = sliderAgcGain ? parseInt(sliderAgcGain.value, 10) : 35;
       const gainMult = (gainRaw / 10.0).toFixed(1);
       const en = chkAgcEnable ? chkAgcEnable.checked : true;
-      const isCyr = window.I18N && (window.I18N.currentLang === "ru" || window.I18N.currentLang === "uk");
-      const uDb = isCyr ? "дБ" : "dB";
+      const uDb = window.t ? window.t("audio.unit_db", {}, "dB") : "dB";
       if (lblAgcDepth) lblAgcDepth.textContent = `${depth} ${uDb}`;
       if (lblAgcGain) lblAgcGain.textContent = `${gainMult}x`;
       if (badgeAgcStatus) {
-        badgeAgcStatus.textContent = en ? `${depth} ${uDb} / ${gainMult}x` : (window.t ? window.t("audio.limit_off", {}, "Выкл") : "Выкл");
+        badgeAgcStatus.textContent = en ? `${depth} ${uDb} / ${gainMult}x` : (window.t ? window.t("audio.limit_off", {}, "Off") : "Off");
+      }
+      if (window.audioPlayer && typeof window.audioPlayer.setRxAgcConfig === "function") {
+        const curNet = _currentAudioRxNet === "allstar" ? "allstar" : "dmr";
+        window.audioPlayer.setRxAgcConfig({ enabled: en, depthDb: depth, gainRaw }, curNet);
       }
     }
     window.updateAgcUI = updateAgcUI;
-    if (chkAgcEnable) chkAgcEnable.addEventListener("change", () => { updateAgcUI(); autoSaveCurrentState(); _scheduleSyncClientSettings(); });
+    if (chkAgcEnable) chkAgcEnable.addEventListener("change", () => { updateAgcUI(); autoSaveCurrentState(); _scheduleSyncClientSettings(0); });
     if (sliderAgcDepth) {
-      sliderAgcDepth.addEventListener("input", updateAgcUI);
-      sliderAgcDepth.addEventListener("change", () => { autoSaveCurrentState(); _scheduleSyncClientSettings(); });
+      sliderAgcDepth.addEventListener("input", () => { updateAgcUI(); autoSaveCurrentState(); _scheduleSyncClientSettings(200); });
+      sliderAgcDepth.addEventListener("change", () => { updateAgcUI(); autoSaveCurrentState(); _scheduleSyncClientSettings(0); });
     }
     if (sliderAgcGain) {
-      sliderAgcGain.addEventListener("input", updateAgcUI);
-      sliderAgcGain.addEventListener("change", () => { autoSaveCurrentState(); _scheduleSyncClientSettings(); });
+      sliderAgcGain.addEventListener("input", () => { updateAgcUI(); autoSaveCurrentState(); _scheduleSyncClientSettings(200); });
+      sliderAgcGain.addEventListener("change", () => { updateAgcUI(); autoSaveCurrentState(); _scheduleSyncClientSettings(0); });
     }
 
     // Limiter UI Listener
     if (chkLimiterEnable) {
       chkLimiterEnable.addEventListener("change", () => {
-        if (window.audioPlayer && typeof window.audioPlayer.setLimiterEnabled === "function") {
-          window.audioPlayer.setLimiterEnabled(chkLimiterEnable.checked);
+        const curNet = _currentAudioRxNet === "allstar" ? "allstar" : "dmr";
+        if (window.audioPlayer) {
+          if (window.audioPlayer.dspProfiles && window.audioPlayer.dspProfiles[curNet]) {
+            window.audioPlayer.dspProfiles[curNet].limiterEnabled = chkLimiterEnable.checked;
+          }
+          if ((!window.audioPlayer.activeProfileNet || window.audioPlayer.activeProfileNet === curNet) && typeof window.audioPlayer.setLimiterEnabled === "function") {
+            window.audioPlayer.setLimiterEnabled(chkLimiterEnable.checked);
+          }
         }
         autoSaveCurrentState();
-        _scheduleSyncClientSettings();
+        _scheduleSyncClientSettings(0);
       });
     }
 
@@ -452,7 +491,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       if (valJitterBuffer) valJitterBuffer.textContent = `${val} ms`;
       const jitterKey = _currentAudioRxNet === "allstar" ? "proxdmr_asl_jitter_buffer_ms" : "proxdmr_jitter_buffer_ms";
       localStorage.setItem(jitterKey, val.toString());
-      if (window.audioPlayer && typeof window.audioPlayer.setJitterBufferMs === "function") {
+      if (window.audioPlayer && (!window.audioPlayer.activeProfileNet || window.audioPlayer.activeProfileNet === (_currentAudioRxNet === "allstar" ? "allstar" : "dmr")) && typeof window.audioPlayer.setJitterBufferMs === "function") {
         window.audioPlayer.setJitterBufferMs(val);
       }
     }
@@ -461,23 +500,28 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       sliderJitterBuffer.addEventListener("input", () => {
         const v = parseInt(sliderJitterBuffer.value, 10) || 120;
         if (valJitterBuffer) valJitterBuffer.textContent = `${v} ms`;
+        updateJitterUI(v);
+        autoSaveCurrentState();
+        _scheduleSyncClientSettings(200);
       });
       sliderJitterBuffer.addEventListener("change", () => {
         updateJitterUI(sliderJitterBuffer.value);
         autoSaveCurrentState();
-        _scheduleSyncClientSettings();
+        _scheduleSyncClientSettings(0);
       });
     }
 
     if (inputRxBoostDb) {
-      const handleBoostChange = () => {
+      const handleBoostChange = (e) => {
+        const isInputEvt = e && e.type === "input";
         const safe = clampRxBoostDb(inputRxBoostDb.value);
-        inputRxBoostDb.value = safe;
+        if (!isInputEvt) inputRxBoostDb.value = safe;
         localStorage.setItem("proxdmr_rx_boost_pct", safe.toString());
         if (window.audioPlayer && typeof window.audioPlayer.setRxBoostDb === "function") {
           window.audioPlayer.setRxBoostDb(safe);
         }
         autoSaveCurrentState();
+        _scheduleSyncClientSettings(isInputEvt ? 200 : 0);
       };
       inputRxBoostDb.addEventListener("input", handleBoostChange);
       inputRxBoostDb.addEventListener("change", handleBoostChange);
@@ -494,7 +538,12 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       const stored = localStorage.getItem(getPresetStorageKey("preset", id));
       if (stored) {
         try {
-          const parsed = Object.assign({}, baseDef, JSON.parse(stored));
+          const rawObj = JSON.parse(stored);
+          const parsed = Object.assign({}, baseDef, rawObj);
+          if (rawObj && rawObj.boostPct === undefined) {
+            const legacyBoost = localStorage.getItem("proxdmr_rx_boost_pct");
+            if (legacyBoost !== null) parsed.boostPct = clampRxBoostDb(legacyBoost);
+          }
           if (_currentAudioRxNet === "allstar" && (!parsed.jitterBuffer || parsed.jitterBuffer < 180)) {
             parsed.jitterBuffer = baseDef.jitterBuffer || 240;
             localStorage.setItem(getPresetStorageKey("preset", id), JSON.stringify(parsed));
@@ -538,7 +587,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       const eqEnabled = data.eq10Enable !== undefined ? Boolean(data.eq10Enable) : (_currentAudioRxNet !== "allstar");
       if (chkEq10Enable) chkEq10Enable.checked = eqEnabled;
       if (chkEq10Linked) chkEq10Linked.checked = data.eq10Linked !== undefined ? Boolean(data.eq10Linked) : true;
-      const defGains = _currentAudioRxNet === "allstar" ? [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132] : DEFAULT_SPEECH_EQ;
+      const defGains = _currentAudioRxNet === "allstar" ? DEFAULT_ANALOG_SPEECH_EQ : DEFAULT_SPEECH_EQ;
       const gains = Array.isArray(data.eq10Gains) && data.eq10Gains.length === 10 ? data.eq10Gains : defGains;
       for (let i = 0; i < 10; i++) {
         const slider = document.getElementById(`eqSlider_${i}`);
@@ -556,8 +605,14 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       // Limiter
       const limEn = data.limiterEnable !== undefined ? Boolean(data.limiterEnable) : true;
       if (chkLimiterEnable) chkLimiterEnable.checked = limEn;
-      if (window.audioPlayer && typeof window.audioPlayer.setLimiterEnabled === "function") {
-        window.audioPlayer.setLimiterEnabled(limEn);
+      if (window.audioPlayer) {
+        const curNet = _currentAudioRxNet === "allstar" ? "allstar" : "dmr";
+        if (window.audioPlayer.dspProfiles && window.audioPlayer.dspProfiles[curNet]) {
+          window.audioPlayer.dspProfiles[curNet].limiterEnabled = limEn;
+        }
+        if ((!window.audioPlayer.activeProfileNet || window.audioPlayer.activeProfileNet === curNet) && typeof window.audioPlayer.setLimiterEnabled === "function") {
+          window.audioPlayer.setLimiterEnabled(limEn);
+        }
       }
 
       // Jitter & Boost
@@ -579,14 +634,14 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       updateAgcUI();
       updateAudioRxPresetUI();
       if (!skipRemoteSync) {
-        _scheduleSyncClientSettings();
+        _scheduleSyncClientSettings(0);
       }
     }
     window.applyAudioRxPreset = applyAudioRxPreset;
 
     function saveCurrentToAudioRxPreset(id) {
       autoSaveCurrentState();
-      _scheduleSyncClientSettings();
+      _scheduleSyncClientSettings(0);
 
       if (saveAudioRxPresetBtn) {
         saveAudioRxPresetBtn.classList.add("saved-flash");
@@ -603,16 +658,31 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     }
 
     function updateAudioRxPresetUI() {
+      const dmrPres = localStorage.getItem("proxdmr_audio_rx_active_preset") || "1";
+      const aslPres = localStorage.getItem("proxdmr_asl_audio_rx_active_preset") || "1";
       audioRxPresetButtons.forEach(btn => {
         const pId = btn.getAttribute("data-audio-rx-preset");
         btn.classList.toggle("active", pId === activeAudioRxPresetId);
       });
+      document.querySelectorAll(".radio-container, .hotspot-card").forEach(card => {
+        const isCardAsl = card.classList.contains("card-net-allstar") || (card.getAttribute("data-network-type") || "").toLowerCase() === "allstar";
+        const cardPres = isCardAsl ? aslPres : dmrPres;
+        card.querySelectorAll(".btn-audio-rx-mini-preset .mini-preset-label").forEach(lbl => {
+          lbl.textContent = `P${cardPres}`;
+        });
+        card.querySelectorAll(".audio-rx-menu .mini-preset-item").forEach(item => {
+          const pId = item.getAttribute("data-audio-rx-preset");
+          item.classList.toggle("active", pId === cardPres);
+        });
+      });
       document.querySelectorAll(".btn-audio-rx-mini-preset .mini-preset-label").forEach(lbl => {
-        lbl.textContent = `P${activeAudioRxPresetId}`;
+        if (!lbl.closest(".radio-container, .hotspot-card")) lbl.textContent = `P${activeAudioRxPresetId}`;
       });
       document.querySelectorAll(".audio-rx-menu .mini-preset-item").forEach(item => {
-        const pId = item.getAttribute("data-audio-rx-preset");
-        item.classList.toggle("active", pId === activeAudioRxPresetId);
+        if (!item.closest(".radio-container, .hotspot-card")) {
+          const pId = item.getAttribute("data-audio-rx-preset");
+          item.classList.toggle("active", pId === activeAudioRxPresetId);
+        }
       });
       if (saveAudioRxPresetText) {
         saveAudioRxPresetText.textContent = window.t ? window.t("audio_rx.btn_save_text", { id: activeAudioRxPresetId }) : `Сохранить в P${activeAudioRxPresetId}`;
@@ -626,7 +696,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     audioRxPresetButtons.forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-audio-rx-preset");
-        if (id) applyAudioRxPreset(id);
+        if (id) applyAudioRxPreset(id, false);
       });
     });
 
@@ -642,7 +712,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         const defs = _currentAudioRxNet === "allstar" ? DEFAULT_ANALOG_RX_PRESETS : DEFAULT_PRESETS;
         const fresh = defs[activeAudioRxPresetId] || defs["1"];
         localStorage.setItem(getPresetStorageKey("preset", activeAudioRxPresetId), JSON.stringify(fresh));
-        applyAudioRxPreset(activeAudioRxPresetId);
+        applyAudioRxPreset(activeAudioRxPresetId, false);
       });
     }
 
@@ -731,9 +801,6 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       });
 
       selectTxBrowserMic.value = foundSaved ? savedMicId : "";
-      if (savedMicId && !foundSaved && inputs.length > 0) {
-        localStorage.setItem("proxdmr_tx_browser_mic_id", "");
-      }
       return true;
     }
 
@@ -754,7 +821,6 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       if (window.AndroidBridge && typeof window.AndroidBridge.setBluetoothMicEnabled === "function") {
         window.AndroidBridge.setBluetoothMicEnabled(false, "");
       }
-      localStorage.setItem("proxdmr_tx_bt_mic", "false");
       return false;
     }
 
@@ -972,6 +1038,13 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       }
       const clipLed = document.getElementById("txMicMeterClipLed") || (audioTxModal ? audioTxModal.querySelector(".tx-meter-clip") : null);
       if (clipLed) clipLed.classList.remove("active");
+      const parrotBar = document.getElementById("txParrotProgressBar");
+      if (parrotBar) {
+        parrotBar.style.transition = "none";
+        parrotBar.style.width = "0%";
+        void parrotBar.offsetWidth;
+        parrotBar.style.transition = "";
+      }
     }
 
     function openModal() {
@@ -1063,11 +1136,12 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           txBtDeviceBadge.textContent = `🎙️ ${dev.name}`;
           txBtDeviceBadge.style.display = "inline-block";
         } else {
-          txBtDeviceBadge.textContent = "🎙️ Bluetooth подключен";
+          txBtDeviceBadge.textContent = window.t ? window.t("audio_tx.bt_connected_badge", {}, "🎙️ Bluetooth connected") : "🎙️ Bluetooth connected";
           txBtDeviceBadge.style.display = "inline-block";
         }
       }
 
+      autoSaveCurrentTxState(false, true);
       releaseMicrophone();
       if (typeof initAudio === "function") {
         await initAudio();
@@ -1078,10 +1152,12 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     let activeAudioTxPresetId = "1";
     let _currentActiveTxEqPreset = "standard";
 
-    function autoSaveCurrentTxState() {
+    function autoSaveCurrentTxState(skipRemoteSync = false, immediate = false) {
       const pfx = getTxPrefix();
       const mgVal = sliderTxMicGain ? (parseFloat(sliderTxMicGain.value) || 0) : 0;
-      const btVal = chkTxBluetoothMic ? chkTxBluetoothMic.checked : false;
+      const btVal = (chkTxBluetoothMic && !chkTxBluetoothMic.disabled)
+        ? chkTxBluetoothMic.checked
+        : (localStorage.getItem(`${pfx}bt_mic`) === "true" || localStorage.getItem("proxdmr_tx_bt_mic") === "true");
       const nsVal = chkTxNoiseSuppression ? chkTxNoiseSuppression.checked : false;
       const agcVal = chkTxBrowserAgc ? chkTxBrowserAgc.checked : false;
       const dspAgcVal = chkTxDspAgc ? chkTxDspAgc.checked : false;
@@ -1131,7 +1207,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       localStorage.setItem(getTxPresetStorageKey("preset", activeAudioTxPresetId), JSON.stringify(presetData));
       localStorage.setItem(getTxPresetStorageKey("active"), activeAudioTxPresetId);
 
-      _scheduleSyncClientSettings();
+      if (!skipRemoteSync) {
+        _scheduleSyncClientSettings(immediate ? 0 : 200);
+      }
     }
     const saveTxSettingsToStorage = autoSaveCurrentTxState;
 
@@ -1164,11 +1242,11 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         if (oldTxBadge) oldTxBadge.remove();
         if (modalTitle) {
           const titleKey = isAsl ? "audio_tx.modal_title_analog" : "audio_tx.modal_title";
-          const titleDef = isAsl ? "Настройки тракта передачи (Аналог)" : "Настройки тракта передачи";
+          const titleDef = isAsl ? "Audio TX Settings (Analog)" : "Audio TX Settings";
           modalTitle.textContent = window.t ? window.t(titleKey, {}, titleDef) : titleDef;
         }
 
-        // В обоих режимах (DMR и ASL) доступны пресеты, Mic Gain, Gate, DSP-компрессор и 3-полосный EQ
+        // In both modes (DMR and ASL) presets, Mic Gain, Gate, DSP compressor and 3-band EQ are available
         const sections = audioTxModal ? audioTxModal.querySelectorAll(".audio-section, .dsp-section") : [];
         sections.forEach((sec) => {
           sec.style.display = "";
@@ -1216,21 +1294,32 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           return;
         }
         closeModal();
+        if (typeof window.flushPendingClientSettingsSync === "function") {
+          window.flushPendingClientSettingsSync();
+        }
       });
       closeBtn.addEventListener("pointercancel", () => {
         if (closeLongPressTimer) clearTimeout(closeLongPressTimer);
       });
     }
-    if (closeBottomBtn) closeBottomBtn.addEventListener("click", closeModal);
+    if (closeBottomBtn) closeBottomBtn.addEventListener("click", () => {
+      saveTxSettingsToStorage(false, true);
+      applyTxDspSettings(true);
+      closeModal();
+    });
     if (audioTxModal) {
       audioTxModal.addEventListener("click", (e) => {
-        if (e.target === audioTxModal) closeModal();
+        if (e.target === audioTxModal) {
+          closeModal();
+          if (typeof window.flushPendingClientSettingsSync === "function") {
+            window.flushPendingClientSettingsSync();
+          }
+        }
       });
     }
 
     function updateTxBadges() {
-      const isCyr = window.I18N && (window.I18N.currentLang === "ru" || window.I18N.currentLang === "uk");
-      const u = isCyr ? "дБ" : "dB";
+      const u = window.t ? window.t("audio.unit_db", {}, "dB") : "dB";
       if (sliderTxMicGain && valTxMicGain) {
         const v = Math.round(parseFloat(sliderTxMicGain.value) || 0);
         valTxMicGain.textContent = v > 0 ? `+${v} ${u}` : `${v} ${u}`;
@@ -1244,24 +1333,31 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         valTxPresence.textContent = v > 0 ? `+${v} ${u}` : `0 ${u}`;
       }
       if (sliderTxEqLow && valTxEqLow) {
-        valTxEqLow.textContent = `${sliderTxEqLow.value} dB`;
+        valTxEqLow.textContent = `${sliderTxEqLow.value} ${u}`;
       }
       if (sliderTxEqMid && valTxEqMid) {
         const v = parseFloat(sliderTxEqMid.value) || 0;
-        valTxEqMid.textContent = `${v > 0 ? "+" : ""}${v} dB`;
+        valTxEqMid.textContent = `${v > 0 ? "+" : ""}${v} ${u}`;
       }
       if (sliderTxEqHigh && valTxEqHigh) {
         const v = parseFloat(sliderTxEqHigh.value) || 0;
-        valTxEqHigh.textContent = `${v > 0 ? "+" : ""}${v} dB`;
+        valTxEqHigh.textContent = `${v > 0 ? "+" : ""}${v} ${u}`;
       }
     }
-
-
-
-    const onTxControlChange = () => {
+    window.refreshDspPresetLocalization = function () {
+      if (typeof window.updateAgcUI === "function") window.updateAgcUI();
       updateTxBadges();
-      saveTxSettingsToStorage();
-      applyTxDspSettings();
+      if (typeof window.updateAudioRxPresetUI === "function") window.updateAudioRxPresetUI();
+      if (typeof window.updateAudioTxPresetUI === "function") window.updateAudioTxPresetUI();
+    };
+
+
+
+    const onTxControlChange = (e) => {
+      const isImmediate = !e || e.type !== "input";
+      updateTxBadges();
+      saveTxSettingsToStorage(false, isImmediate);
+      applyTxDspSettings(true);
     };
 
     if (sliderTxMicGain) {
@@ -1271,13 +1367,14 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     if (chkTxBluetoothMic) {
       chkTxBluetoothMic.addEventListener("change", () => {
         updateBtMicRouting();
-        autoSaveCurrentTxState();
+        autoSaveCurrentTxState(false, true);
       });
     }
     if (selectTxBrowserMic) {
       selectTxBrowserMic.addEventListener("change", async () => {
         const chosenMicId = selectTxBrowserMic.value || "";
         localStorage.setItem("proxdmr_tx_browser_mic_id", chosenMicId);
+        _scheduleSyncClientSettings(0);
         releaseMicrophone();
         if (typeof initAudio === "function") {
           await initAudio();
@@ -1288,13 +1385,13 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     }
     if (chkTxNoiseSuppression) {
       chkTxNoiseSuppression.addEventListener("change", () => {
-        saveTxSettingsToStorage();
+        saveTxSettingsToStorage(false, true);
         updateMicTrackConstraints();
       });
     }
     if (chkTxBrowserAgc) {
       chkTxBrowserAgc.addEventListener("change", () => {
-        saveTxSettingsToStorage();
+        saveTxSettingsToStorage(false, true);
         updateMicTrackConstraints();
       });
     }
@@ -1303,7 +1400,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     }
     if (chkTxEchoCancellation) {
       chkTxEchoCancellation.addEventListener("change", () => {
-        saveTxSettingsToStorage();
+        saveTxSettingsToStorage(false, true);
         updateMicTrackConstraints();
       });
     }
@@ -1324,12 +1421,12 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
     const eqPresetButtons = document.querySelectorAll(".btn-tx-eq-preset");
 
-    function setEqPresetActive(presetKey) {
+    function setEqPresetActive(presetKey, skipRemoteSync = false, immediate = false) {
       eqPresetButtons.forEach(btn => {
         btn.classList.toggle("active", btn.dataset.eqPreset === presetKey);
       });
       _currentActiveTxEqPreset = presetKey;
-      autoSaveCurrentTxState();
+      autoSaveCurrentTxState(skipRemoteSync, immediate);
     }
 
     eqPresetButtons.forEach(btn => {
@@ -1337,35 +1434,48 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         const pKey = btn.dataset.eqPreset;
         const vals = defaultEqPresets[pKey];
         if (vals) {
-          if (sliderTxEqLow) { sliderTxEqLow.value = vals.low; if (valTxEqLow) valTxEqLow.textContent = `${vals.low} dB`; }
-          if (sliderTxEqMid) { sliderTxEqMid.value = vals.mid; if (valTxEqMid) valTxEqMid.textContent = `${vals.mid > 0 ? "+" : ""}${vals.mid} dB`; }
-          if (sliderTxEqHigh) { sliderTxEqHigh.value = vals.high; if (valTxEqHigh) valTxEqHigh.textContent = `${vals.high > 0 ? "+" : ""}${vals.high} dB`; }
-          setEqPresetActive(pKey);
-          saveTxSettingsToStorage();
-          applyTxDspSettings();
+          const u = window.t ? window.t("audio.unit_db", {}, "dB") : "dB";
+          if (sliderTxEqLow) { sliderTxEqLow.value = vals.low; if (valTxEqLow) valTxEqLow.textContent = `${vals.low} ${u}`; }
+          if (sliderTxEqMid) { sliderTxEqMid.value = vals.mid; if (valTxEqMid) valTxEqMid.textContent = `${vals.mid > 0 ? "+" : ""}${vals.mid} ${u}`; }
+          if (sliderTxEqHigh) { sliderTxEqHigh.value = vals.high; if (valTxEqHigh) valTxEqHigh.textContent = `${vals.high > 0 ? "+" : ""}${vals.high} ${u}`; }
+          setEqPresetActive(pKey, false, true);
+          applyTxDspSettings(true);
         }
       });
     });
 
-    const onEqSliderInput = () => {
-      if (valTxEqLow && sliderTxEqLow) valTxEqLow.textContent = `${sliderTxEqLow.value} dB`;
-      if (valTxEqMid && sliderTxEqMid) valTxEqMid.textContent = `${sliderTxEqMid.value > 0 ? "+" : ""}${sliderTxEqMid.value} dB`;
-      if (valTxEqHigh && sliderTxEqHigh) valTxEqHigh.textContent = `${sliderTxEqHigh.value > 0 ? "+" : ""}${sliderTxEqHigh.value} dB`;
-      setEqPresetActive("custom");
-      saveTxSettingsToStorage();
-      applyTxDspSettings();
+    const onEqSliderInput = (e) => {
+      const isImmediate = !e || e.type !== "input";
+      const u = window.t ? window.t("audio.unit_db", {}, "dB") : "dB";
+      if (valTxEqLow && sliderTxEqLow) valTxEqLow.textContent = `${sliderTxEqLow.value} ${u}`;
+      if (valTxEqMid && sliderTxEqMid) valTxEqMid.textContent = `${sliderTxEqMid.value > 0 ? "+" : ""}${sliderTxEqMid.value} ${u}`;
+      if (valTxEqHigh && sliderTxEqHigh) valTxEqHigh.textContent = `${sliderTxEqHigh.value > 0 ? "+" : ""}${sliderTxEqHigh.value} ${u}`;
+      setEqPresetActive("custom", false, isImmediate);
+      applyTxDspSettings(true);
     };
 
-    if (sliderTxEqLow) sliderTxEqLow.addEventListener("input", onEqSliderInput);
-    if (sliderTxEqMid) sliderTxEqMid.addEventListener("input", onEqSliderInput);
-    if (sliderTxEqHigh) sliderTxEqHigh.addEventListener("input", onEqSliderInput);
+    if (sliderTxEqLow) {
+      sliderTxEqLow.addEventListener("input", onEqSliderInput);
+      sliderTxEqLow.addEventListener("change", onEqSliderInput);
+    }
+    if (sliderTxEqMid) {
+      sliderTxEqMid.addEventListener("input", onEqSliderInput);
+      sliderTxEqMid.addEventListener("change", onEqSliderInput);
+    }
+    if (sliderTxEqHigh) {
+      sliderTxEqHigh.addEventListener("input", onEqSliderInput);
+      sliderTxEqHigh.addEventListener("change", onEqSliderInput);
+    }
 
-    // --- Parrot Test Button Setup (Trigger PTT, 30s Countdown & Audio Fix) ---
+    // --- Parrot Test Button Setup (Trigger PTT, 30s Countdown, Progress Bar & Audio Fix) ---
+    const PARROT_RECORD_DURATION_MS = 30000;
     const btnParrotTest = document.getElementById("btnParrotTest");
     const parrotTestText = document.getElementById("parrotTestText");
+    const txParrotProgressBar = document.getElementById("txParrotProgressBar");
     let _parrotState = "idle"; // "idle" | "starting" | "recording" | "waiting" | "playing"
     let _parrotCountdownInterval = null;
     let _parrotRemainingSec = 30;
+    let _parrotRecordStartMs = 0;
 
     function _triggerParrotHaptic(duration = 40) {
       try {
@@ -1373,6 +1483,20 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
           navigator.vibrate(duration);
         }
       } catch (_) {}
+    }
+
+    function _setParrotProgress(percent) {
+      const bar = txParrotProgressBar || document.getElementById("txParrotProgressBar");
+      if (!bar) return;
+      const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+      if (clamped <= 0) {
+        bar.style.transition = "none";
+        bar.style.width = "0%";
+        void bar.offsetWidth;
+        bar.style.transition = "";
+      } else {
+        bar.style.width = `${clamped.toFixed(1)}%`;
+      }
     }
 
     function _setParrotButtonUI(state, titleText) {
@@ -1406,6 +1530,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
       // 4. Старт: переводим в статус starting и инициализируем микрофон
       _parrotState = "starting";
+      _setParrotProgress(0);
       _setParrotButtonUI("waiting", window.t ? window.t("audio_tx.parrot_starting", {}, "Подготовка...") : "Подготовка...");
 
       // Гарантируем захват микрофона до отправки parrot_test_start
@@ -1445,20 +1570,31 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       }
 
       _triggerParrotHaptic(40);
+      _parrotRecordStartMs = Date.now();
       _parrotRemainingSec = 30;
+      let lastShownSec = 30;
+      _setParrotProgress(0);
       _setParrotButtonUI("recording", window.t ? window.t("audio_tx.parrot_recording", { sec: _parrotRemainingSec }, `Запись (${_parrotRemainingSec} сек)... Кликните для остановки`) : `Запись (${_parrotRemainingSec} сек)... Кликните для остановки`);
 
       clearInterval(_parrotCountdownInterval);
       _parrotCountdownInterval = setInterval(() => {
-        _parrotRemainingSec--;
-        if (_parrotRemainingSec > 0) {
-          _setParrotButtonUI("recording", window.t ? window.t("audio_tx.parrot_recording", { sec: _parrotRemainingSec }, `Запись (${_parrotRemainingSec} сек)... Кликните для остановки`) : `Запись (${_parrotRemainingSec} сек)... Кликните для остановки`);
-        } else {
+        const elapsedMs = Math.max(0, Date.now() - _parrotRecordStartMs);
+        const progressPct = Math.min(100, (elapsedMs / PARROT_RECORD_DURATION_MS) * 100);
+        _setParrotProgress(progressPct);
+
+        const secLeft = Math.max(0, Math.ceil((PARROT_RECORD_DURATION_MS - elapsedMs) / 1000));
+        if (elapsedMs >= PARROT_RECORD_DURATION_MS || secLeft <= 0) {
+          _parrotRemainingSec = 0;
+          _setParrotProgress(100);
           clearInterval(_parrotCountdownInterval);
           _parrotCountdownInterval = null;
           stopParrotRecording();
+        } else if (secLeft !== lastShownSec) {
+          lastShownSec = secLeft;
+          _parrotRemainingSec = secLeft;
+          _setParrotButtonUI("recording", window.t ? window.t("audio_tx.parrot_recording", { sec: _parrotRemainingSec }, `Запись (${_parrotRemainingSec} сек)... Кликните для остановки`) : `Запись (${_parrotRemainingSec} сек)... Кликните для остановки`);
         }
-      }, 1000);
+      }, 100);
     }
 
     function stopParrotRecording() {
@@ -1466,6 +1602,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       clearInterval(_parrotCountdownInterval);
       _parrotCountdownInterval = null;
       window.isParrotTestRecording = false;
+      _setParrotProgress(0);
 
       // Деактивируем захват ворклета микрофона
       if (window.workletNode && window.workletNode.port) {
@@ -1491,6 +1628,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       _parrotCountdownInterval = null;
       window.isParrotTestRecording = false;
       window.isParrotActive = true;
+      _setParrotProgress(0);
 
       _triggerParrotHaptic(40);
       _setParrotButtonUI("playing", window.t ? window.t("audio_tx.parrot_playing", {}, "Воспроизведение ответа попугая...") : "Воспроизведение ответа попугая...");
@@ -1527,6 +1665,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       _parrotState = "idle";
       window.isParrotTestRecording = false;
       window.isParrotActive = false;
+      _setParrotProgress(0);
       releaseMicrophone();
       _setParrotButtonUI("idle", window.t ? window.t("audio_tx.parrot_test_title", {}, "Эхо-тест попугая: клик — запись, ответ — воспроизведение") : "Эхо-тест попугая: клик — запись, ответ — воспроизведение");
 
@@ -1595,62 +1734,62 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
 
     const defaultEqPresets = {
       standard: { low: 0, mid: 0, high: 0 },
-      baritone: { low: -4, mid: 2, high: 0 },
-      bright:   { low: -2, mid: 0, high: -3 },
-      dx:       { low: -9, mid: 4, high: 2 },
+      baritone: { low: -3, mid: 1, high: 1 },
+      bright:   { low: -3, mid: 1, high: 3 },
+      dx:       { low: -6, mid: 3, high: 3 },
       custom:   { low: 0, mid: 0, high: 0 }
     };
 
     const defaultAudioTxPresets = {
       "1": {
-        name: "Стандарт",
+        name: "Standard",
         txBtMicEnabled: false,
         txMicGain: 0,
         txNoiseSuppression: false,
         txBrowserAgc: false,
-        txDspAgc: false,
+        txDspAgc: true,
         txEchoCancellation: false,
         txGateEnabled: true,
         txGateThreshold: -45,
         txHpfEnabled: true,
-        txPresenceBoost: 0,
-        txEqLow: 0,
-        txEqMid: 0,
-        txEqHigh: 0,
+        txPresenceBoost: 2,
+        txEqLow: -2,
+        txEqMid: 1,
+        txEqHigh: 2,
         txEqPreset: "standard"
       },
       "2": {
-        name: "Мягкий голос",
+        name: "Soft Voice",
+        txBtMicEnabled: false,
+        txMicGain: 1,
+        txNoiseSuppression: false,
+        txBrowserAgc: false,
+        txDspAgc: true,
+        txEchoCancellation: false,
+        txGateEnabled: true,
+        txGateThreshold: -45,
+        txHpfEnabled: true,
+        txPresenceBoost: 3,
+        txEqLow: -3,
+        txEqMid: 1,
+        txEqHigh: 3,
+        txEqPreset: "bright"
+      },
+      "3": {
+        name: "Punchy / DX",
         txBtMicEnabled: false,
         txMicGain: 2,
         txNoiseSuppression: false,
         txBrowserAgc: false,
-        txDspAgc: false,
-        txEchoCancellation: false,
-        txGateEnabled: false,
-        txGateThreshold: -45,
-        txHpfEnabled: false,
-        txPresenceBoost: 0,
-        txEqLow: -6,
-        txEqMid: 0,
-        txEqHigh: -4,
-        txEqPreset: "bright"
-      },
-      "3": {
-        name: "Пробивной / DX",
-        txBtMicEnabled: false,
-        txMicGain: 3,
-        txNoiseSuppression: false,
-        txBrowserAgc: false,
-        txDspAgc: false,
+        txDspAgc: true,
         txEchoCancellation: false,
         txGateEnabled: true,
-        txGateThreshold: -40,
+        txGateThreshold: -42,
         txHpfEnabled: true,
-        txPresenceBoost: 6,
-        txEqLow: -15,
-        txEqMid: 7,
-        txEqHigh: 2,
+        txPresenceBoost: 4,
+        txEqLow: -6,
+        txEqMid: 3,
+        txEqHigh: 3,
         txEqPreset: "dx"
       }
     };
@@ -1690,6 +1829,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       const txEqHighVal = data.txEqHigh !== undefined ? data.txEqHigh : 0;
       const txEqPresetVal = data.txEqPreset || "standard";
 
+      if (chkTxBluetoothMic && !chkTxBluetoothMic.disabled && data.txBtMicEnabled !== undefined) {
+        chkTxBluetoothMic.checked = Boolean(data.txBtMicEnabled);
+      }
       if (sliderTxMicGain) sliderTxMicGain.value = txMicGain;
       if (chkTxNoiseSuppression) chkTxNoiseSuppression.checked = txNs;
       if (chkTxBrowserAgc) chkTxBrowserAgc.checked = txAgc;
@@ -1702,44 +1844,31 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       if (sliderTxEqLow) sliderTxEqLow.value = txEqLowVal;
       if (sliderTxEqMid) sliderTxEqMid.value = txEqMidVal;
       if (sliderTxEqHigh) sliderTxEqHigh.value = txEqHighVal;
-      setEqPresetActive(txEqPresetVal);
+      setEqPresetActive(txEqPresetVal, true);
 
       updateTxBadges();
-      saveTxSettingsToStorage();
-      applyTxDspSettings();
+      saveTxSettingsToStorage(true);
+      applyTxDspSettings(true);
       updateMicTrackConstraints();
+      if (!skipRemoteSync && chkTxBluetoothMic && !chkTxBluetoothMic.disabled && isAndroidApkEnvironment() && data.txBtMicEnabled !== undefined) {
+        updateBtMicRouting();
+      }
 
       updateAudioTxPresetUI();
       if (!skipRemoteSync) {
-        _scheduleSyncClientSettings();
+        _scheduleSyncClientSettings(0);
       }
     }
 
     function saveCurrentToAudioTxPreset(id) {
-      const currentData = {
-        txBtMicEnabled: chkTxBluetoothMic ? chkTxBluetoothMic.checked : false,
-        txMicGain: sliderTxMicGain ? (parseFloat(sliderTxMicGain.value) || 0) : 0,
-        txNoiseSuppression: chkTxNoiseSuppression ? chkTxNoiseSuppression.checked : false,
-        txBrowserAgc: chkTxBrowserAgc ? chkTxBrowserAgc.checked : false,
-        txDspAgc: chkTxDspAgc ? chkTxDspAgc.checked : false,
-        txEchoCancellation: chkTxEchoCancellation ? chkTxEchoCancellation.checked : false,
-        txGateEnabled: chkTxGate ? chkTxGate.checked : true,
-        txGateThreshold: sliderTxGate ? (parseFloat(sliderTxGate.value) || -45) : -45,
-        txHpfEnabled: chkTxHpf ? chkTxHpf.checked : true,
-        txPresenceBoost: sliderTxPresence ? (parseFloat(sliderTxPresence.value) || 0) : 0,
-        txEqLow: sliderTxEqLow ? (parseFloat(sliderTxEqLow.value) || 0) : 0,
-        txEqMid: sliderTxEqMid ? (parseFloat(sliderTxEqMid.value) || 0) : 0,
-        txEqHigh: sliderTxEqHigh ? (parseFloat(sliderTxEqHigh.value) || 0) : 0,
-        txEqPreset: localStorage.getItem(`${getTxPrefix()}eq_preset`) || "standard"
-      };
-
-      localStorage.setItem(getTxPresetStorageKey("preset", id), JSON.stringify(currentData));
-      _scheduleSyncClientSettings();
+      const targetId = String(id || activeAudioTxPresetId || "1");
+      activeAudioTxPresetId = targetId;
+      autoSaveCurrentTxState(false, true);
 
       if (saveAudioTxPresetBtn) {
         saveAudioTxPresetBtn.classList.add("saved-flash");
         if (saveAudioTxPresetText) {
-          saveAudioTxPresetText.textContent = window.t ? window.t("audio_tx.btn_saved_text", { id }) : `✓ Сохранено в P${id}`;
+          saveAudioTxPresetText.textContent = window.t ? window.t("audio_tx.btn_saved_text", { id: targetId }) : `✓ Сохранено в P${targetId}`;
         }
         setTimeout(() => {
           saveAudioTxPresetBtn.classList.remove("saved-flash");
@@ -1751,16 +1880,31 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     }
 
     function updateAudioTxPresetUI() {
+      const dmrPres = localStorage.getItem("proxdmr_audio_tx_active_preset") || "1";
+      const aslPres = localStorage.getItem("proxdmr_asl_audio_tx_active_preset") || "1";
       audioTxPresetButtons.forEach(btn => {
         const pId = btn.getAttribute("data-audio-tx-preset");
         btn.classList.toggle("active", pId === activeAudioTxPresetId);
       });
+      document.querySelectorAll(".radio-container, .hotspot-card").forEach(card => {
+        const isCardAsl = card.classList.contains("card-net-allstar") || (card.getAttribute("data-network-type") || "").toLowerCase() === "allstar";
+        const cardPres = isCardAsl ? aslPres : dmrPres;
+        card.querySelectorAll(".btn-audio-tx-mini-preset .mini-preset-label").forEach(lbl => {
+          lbl.textContent = `P${cardPres}`;
+        });
+        card.querySelectorAll(".audio-tx-menu .mini-preset-item").forEach(item => {
+          const pId = item.getAttribute("data-audio-tx-preset");
+          item.classList.toggle("active", pId === cardPres);
+        });
+      });
       document.querySelectorAll(".btn-audio-tx-mini-preset .mini-preset-label").forEach(lbl => {
-        lbl.textContent = `P${activeAudioTxPresetId}`;
+        if (!lbl.closest(".radio-container, .hotspot-card")) lbl.textContent = `P${activeAudioTxPresetId}`;
       });
       document.querySelectorAll(".audio-tx-menu .mini-preset-item").forEach(item => {
-        const pId = item.getAttribute("data-audio-tx-preset");
-        item.classList.toggle("active", pId === activeAudioTxPresetId);
+        if (!item.closest(".radio-container, .hotspot-card")) {
+          const pId = item.getAttribute("data-audio-tx-preset");
+          item.classList.toggle("active", pId === activeAudioTxPresetId);
+        }
       });
       if (saveAudioTxPresetText) {
         saveAudioTxPresetText.textContent = window.t ? window.t("audio_tx.btn_save_text", { id: activeAudioTxPresetId }) : `Сохранить в P${activeAudioTxPresetId}`;
@@ -1773,7 +1917,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     audioTxPresetButtons.forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-audio-tx-preset");
-        if (id) applyAudioTxPreset(id);
+        if (id) applyAudioTxPreset(id, false);
       });
     });
 
@@ -1793,40 +1937,49 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     window.updateTxBadges = updateTxBadges;
     window.applyTxDspSettings = applyTxDspSettings;
 
-    // Restore saved TX settings from localStorage without blind overwrite
+    // Restore saved TX settings from localStorage without blind overwrite or server write
     const pfx = getTxPrefix();
-    const savedTxMicGain = localStorage.getItem(`${pfx}mic_gain`) || localStorage.getItem("proxdmr_tx_mic_gain");
+    const savedActiveTxPres = localStorage.getItem(getTxPresetStorageKey("active"));
+    const txDefsBoot = _currentAudioTxNet === "allstar" ? defaultAnalogTxPresets : defaultAudioTxPresets;
+    if (savedActiveTxPres && txDefsBoot[savedActiveTxPres]) {
+      activeAudioTxPresetId = savedActiveTxPres;
+    }
+    const readTxKey = (suffix) => {
+      const v = localStorage.getItem(`${pfx}${suffix}`);
+      return v !== null ? v : localStorage.getItem(`proxdmr_tx_${suffix}`);
+    };
+    const savedTxMicGain = readTxKey("mic_gain");
     if (savedTxMicGain !== null && sliderTxMicGain) sliderTxMicGain.value = savedTxMicGain;
     const savedTxBtMic = localStorage.getItem("proxdmr_tx_bt_mic") || localStorage.getItem(`${pfx}bt_mic`);
     if (savedTxBtMic !== null && chkTxBluetoothMic) chkTxBluetoothMic.checked = savedTxBtMic === "true";
     syncBtMicAvailability().catch(() => {});
-    const savedTxNs = localStorage.getItem(`${pfx}ns`) || localStorage.getItem("proxdmr_tx_ns");
+    const savedTxNs = readTxKey("ns");
     if (savedTxNs !== null && chkTxNoiseSuppression) chkTxNoiseSuppression.checked = savedTxNs === "true";
-    const savedTxAgc = localStorage.getItem(`${pfx}agc`) || localStorage.getItem("proxdmr_tx_agc");
+    const savedTxAgc = readTxKey("agc");
     if (savedTxAgc !== null && chkTxBrowserAgc) chkTxBrowserAgc.checked = savedTxAgc === "true";
-    const savedTxDspAgc = localStorage.getItem(`${pfx}dsp_agc`) || localStorage.getItem("proxdmr_tx_dsp_agc");
+    const savedTxDspAgc = readTxKey("dsp_agc");
     if (savedTxDspAgc !== null && chkTxDspAgc) chkTxDspAgc.checked = savedTxDspAgc === "true";
-    const savedTxAec = localStorage.getItem(`${pfx}aec`) || localStorage.getItem("proxdmr_tx_aec");
+    const savedTxAec = readTxKey("aec");
     if (savedTxAec !== null && chkTxEchoCancellation) chkTxEchoCancellation.checked = savedTxAec === "true";
-    const savedTxGate = localStorage.getItem(`${pfx}gate_enabled`) || localStorage.getItem("proxdmr_tx_gate_enabled");
+    const savedTxGate = readTxKey("gate_enabled");
     if (savedTxGate !== null && chkTxGate) chkTxGate.checked = savedTxGate !== "false";
-    const savedTxGateThr = localStorage.getItem(`${pfx}gate_threshold`) || localStorage.getItem("proxdmr_tx_gate_threshold");
+    const savedTxGateThr = readTxKey("gate_threshold");
     if (savedTxGateThr !== null && sliderTxGate) sliderTxGate.value = savedTxGateThr;
-    const savedTxHpf = localStorage.getItem(`${pfx}hpf`) || localStorage.getItem("proxdmr_tx_hpf");
+    const savedTxHpf = readTxKey("hpf");
     if (savedTxHpf !== null && chkTxHpf) chkTxHpf.checked = savedTxHpf !== "false";
-    const savedTxPres = localStorage.getItem(`${pfx}presence`) || localStorage.getItem("proxdmr_tx_presence");
+    const savedTxPres = readTxKey("presence");
     if (savedTxPres !== null && sliderTxPresence) sliderTxPresence.value = savedTxPres;
-    const savedTxEqLow = localStorage.getItem(`${pfx}eq_low`) || localStorage.getItem("proxdmr_tx_eq_low");
+    const savedTxEqLow = readTxKey("eq_low");
     if (savedTxEqLow !== null && sliderTxEqLow) sliderTxEqLow.value = savedTxEqLow;
-    const savedTxEqMid = localStorage.getItem(`${pfx}eq_mid`) || localStorage.getItem("proxdmr_tx_eq_mid");
+    const savedTxEqMid = readTxKey("eq_mid");
     if (savedTxEqMid !== null && sliderTxEqMid) sliderTxEqMid.value = savedTxEqMid;
-    const savedTxEqHigh = localStorage.getItem(`${pfx}eq_high`) || localStorage.getItem("proxdmr_tx_eq_high");
+    const savedTxEqHigh = readTxKey("eq_high");
     if (savedTxEqHigh !== null && sliderTxEqHigh) sliderTxEqHigh.value = savedTxEqHigh;
-    const savedTxEqPreset = localStorage.getItem(`${pfx}eq_preset`) || localStorage.getItem("proxdmr_tx_eq_preset") || "standard";
-    setEqPresetActive(savedTxEqPreset);
+    const savedTxEqPreset = readTxKey("eq_preset") || "standard";
+    setEqPresetActive(savedTxEqPreset, true);
 
     updateTxBadges();
-    applyTxDspSettings();
+    applyTxDspSettings(true);
     updateAudioTxPresetUI();
 
     if (resetDefaultsBtn) {
@@ -1834,7 +1987,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
         const defs = _currentAudioTxNet === "allstar" ? defaultAnalogTxPresets : defaultAudioTxPresets;
         const fresh = defs[activeAudioTxPresetId] || defs["1"];
         localStorage.setItem(getTxPresetStorageKey("preset", activeAudioTxPresetId), JSON.stringify(fresh));
-        applyAudioTxPreset(activeAudioTxPresetId);
+        applyAudioTxPreset(activeAudioTxPresetId, false);
       });
     }
   }
@@ -1932,11 +2085,13 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
   let txAgcGainNode = null;
   let txAgc = null;
 
-  function applyTxDspSettings() {
+  function applyTxDspSettings(skipRemoteSync = false, immediate = false) {
     // All TX DSP audio processing (HPF, Presence, Mic Gain, DSP AGC, Limiter)
     // is now performed server-side in Python (ServerTxDsp).
     // Here we sync parameters to the server and update the worklet noise gate.
-    _scheduleSyncClientSettings();
+    if (!skipRemoteSync) {
+      _scheduleSyncClientSettings(immediate ? 0 : 200);
+    }
 
     if (window.workletNode && window.workletNode.port) {
       const pfx = getTxPrefix();
@@ -2031,7 +2186,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
       }
 
       try {
-        await window.audioCtx.audioWorklet.addModule("/static/js/audio-processor.js?v=2.9.625");
+        await window.audioCtx.audioWorklet.addModule("/static/js/audio-processor.js?v=2.9.730");
       } catch (modErr) {
         // AudioWorklet module already added
       }
@@ -2270,14 +2425,33 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed, sch
     }
     const rawRms = Math.sqrt(sumSquares / int16.length);
 
-    // Calculate level taking digital Pre-Gain and AGC into account if enabled for this hotspot
+    // Calculate level taking digital Pre-Gain and active client RX AGC into account
     const preGainDb = (window.audioPlayer && typeof window.audioPlayer.getPreGainDb === "function")
       ? window.audioPlayer.getPreGainDb() : 0;
     const preGainLinear = Math.pow(10.0, preGainDb / 20.0);
     const effectiveInputRms = rawRms * preGainLinear;
 
     let effectiveRms = effectiveInputRms;
-    // AGC is applied server-side, effectiveRms = effectiveInputRms
+    const agcCfg = (window.audioPlayer && typeof window.audioPlayer.getRxAgcConfig === "function")
+      ? window.audioPlayer.getRxAgcConfig() : null;
+    if (agcCfg) {
+      const gainMult = Math.max(1.0, Math.min(12.0, (Number(agcCfg.gainRaw) || 35) / 10.0));
+      if (!agcCfg.enabled) {
+        const manualGain = Math.min(4.0, Math.max(0.4, gainMult / 2.5));
+        effectiveRms = Math.min(1.0, effectiveInputRms * manualGain);
+      } else if (effectiveInputRms >= 0.006) {
+        const targetRms = Math.min(0.42, Math.max(0.08, 0.065 * gainMult));
+        const depthDb = Math.max(6.0, Math.min(30.0, Number(agcCfg.depthDb) || 18.0));
+        const boostRatio = Math.min(1.0, 0.55 + (depthDb / 48.0));
+        const minGainDb = -Math.min(16.0, Math.round(depthDb * 0.8));
+        const diffDb = 20.0 * Math.log10(targetRms) - 20.0 * Math.log10(Math.max(0.001, effectiveInputRms));
+        let gainDb = (diffDb > 0) ? Math.min(depthDb, diffDb * boostRatio) : Math.max(minGainDb, diffDb * 0.85);
+        if (gainMult > 6.0) {
+          gainDb += 20.0 * Math.log10(1.0 + (gainMult - 6.0) * 0.12);
+        }
+        effectiveRms = Math.min(1.0, effectiveInputRms * Math.pow(10.0, gainDb / 20.0));
+      }
+    }
 
     const pct = Math.min(100, Math.round(Math.pow(effectiveRms * 2.5, 0.75) * 100));
 

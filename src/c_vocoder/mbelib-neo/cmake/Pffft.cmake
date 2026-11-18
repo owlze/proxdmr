@@ -23,8 +23,8 @@ foreach(_pin PFFFT_SHA PFFFT_ARCHIVE_SHA256)
     endif()
 endforeach()
 else()
-    set(PFFFT_SHA "316f0b01e3bdd327e89933891ea2c0be2d10c75e")
-    set(PFFFT_ARCHIVE_SHA256 "92c723fb1ed5ffbf3130318447a7f12acc6cdaa6c442d667d8a3eab9dd86dd02")
+    set(PFFFT_SHA "b7ed3cdb8655426a77aa26f8c0f5154205427f45")
+    set(PFFFT_ARCHIVE_SHA256 "c35ca6cff0032fac89fbec1acced75868caac0a121d947f8931f325ceae17925")
 endif()
 
 if(FETCHCONTENT_SOURCE_DIR_MBELIB_PFFFT)
@@ -86,6 +86,7 @@ set(_pffft_notice_sources
     src/pffft.c
     src/pffft_priv_impl.h
     src/pffft_passes_impl.h
+    src/pffft_pass_config.h
     src/pffft_cplx_impl.h
     src/pffft_real_impl.h
     src/pffft_internal.h

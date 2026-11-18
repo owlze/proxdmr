@@ -29,8 +29,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-DMR-DL",
         "country": "DE",
-        "country_name": "Германия",
-        "name": "IPSC2-DMR-DL DE (Германия)",
+        "country_name": "Germany",
+        "name": "IPSC2-DMR-DL DE (Germany)",
         "host": "5.28.41.138",
         "ip": "5.28.41.138",
         "port": 55555,
@@ -39,8 +39,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-DL-HOTSPOT",
         "country": "DE",
-        "country_name": "Германия",
-        "name": "IPSC2-DL-HOTSPOT DE (Германия)",
+        "country_name": "Germany",
+        "name": "IPSC2-DL-HOTSPOT DE (Germany)",
         "host": "91.132.144.235",
         "ip": "91.132.144.235",
         "port": 55555,
@@ -49,8 +49,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-Austria",
         "country": "AT",
-        "country_name": "Австрия",
-        "name": "IPSC2-Austria AT (Австрия)",
+        "country_name": "Austria",
+        "name": "IPSC2-Austria AT (Austria)",
         "host": "80.120.211.234",
         "ip": "80.120.211.234",
         "port": 55555,
@@ -59,8 +59,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-DIG-ITALIA",
         "country": "IT",
-        "country_name": "Италия",
-        "name": "IPSC2-DIG-ITALIA IT (Италия)",
+        "country_name": "Italy",
+        "name": "IPSC2-DIG-ITALIA IT (Italy)",
         "host": "145.239.75.155",
         "ip": "145.239.75.155",
         "port": 55555,
@@ -69,8 +69,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-AmComm",
         "country": "US",
-        "country_name": "США",
-        "name": "IPSC2-AmComm US (США)",
+        "country_name": "USA",
+        "name": "IPSC2-AmComm US (USA)",
         "host": "45.33.17.82",
         "ip": "45.33.17.82",
         "port": 55555,
@@ -79,8 +79,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-UK",
         "country": "GB",
-        "country_name": "Великобритания",
-        "name": "IPSC2-UK GB (Великобритания)",
+        "country_name": "United Kingdom",
+        "name": "IPSC2-UK GB (United Kingdom)",
         "host": "51.89.231.13",
         "ip": "51.89.231.13",
         "port": 55555,
@@ -89,8 +89,8 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "IPSC2-RU",
         "country": "RU",
-        "country_name": "Россия",
-        "name": "IPSC2-RU RU (Россия)",
+        "country_name": "Russia",
+        "name": "IPSC2-RU RU (Russia)",
         "host": "ipsc2.ru",
         "ip": "ipsc2.ru",
         "port": 55555,
@@ -100,32 +100,32 @@ FALLBACK_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
 
 # Country keywords mapping for IPSC2 server names
 _COUNTRY_KEYWORDS = [
-    (r"(?:-DL\b|-DL-HOTSPOT|-DB0|\bGERMANY\b)", "DE", "Германия"),
-    (r"(?:AUSTRIA|-OE\b)", "AT", "Австрия"),
-    (r"(?:ITALIA|ITALY|-IT\b)", "IT", "Италия"),
-    (r"(?:FRANCE|-FR\b)", "FR", "Франция"),
-    (r"(?:ANDALUCIA|CATALUNYA|SPAIN|-EA\b)", "ES", "Испания"),
-    (r"(?:-UK\b|-GB\b|ENGLAND|SCOTLAND)", "GB", "Великобритания"),
-    (r"(?:CHICAGO|AMCOMM|FLORIDA|QUADNET|NEW-YORK|-US\b|USA)", "US", "США"),
-    (r"(?:AUSTRALIA|-AU\b)", "AU", "Австралия"),
-    (r"(?:BRASIL|BRAZIL|-BR\b)", "BR", "Бразилия"),
-    (r"(?:BULGARIA|-BG\b)", "BG", "Болгария"),
-    (r"(?:RUSSIA|-RU\b)", "RU", "Россия"),
-    (r"(?:CAN-|-CA\b|CANADA)", "CA", "Канада"),
-    (r"(?:-DK\b|DENMARK)", "DK", "Дания"),
-    (r"(?:ARGENTINA)", "AR", "Аргентина"),
-    (r"(?:C-AMERICA)", "PA", "Центральная Америка"),
-    (r"(?:SWEDEN|-SE\b)", "SE", "Швеция"),
-    (r"(?:NORWAY|-NO\b)", "NO", "Норвегия"),
-    (r"(?:FINLAND|-FI\b)", "FI", "Финляндия"),
-    (r"(?:POLAND|-PL\b)", "PL", "Польша"),
-    (r"(?:CZECH|-CZ\b)", "CZ", "Чехия"),
-    (r"(?:SWISS|HELVETIA|-HB\b)", "CH", "Швейцария"),
-    (r"(?:PORTUGAL|-CT\b)", "PT", "Португалия"),
-    (r"(?:NETHERLANDS|-NL\b|HOLLAND)", "NL", "Нидерланды"),
-    (r"(?:BELGIUM|-ON\b)", "BE", "Бельгия"),
-    (r"(?:GREECE|-SV\b)", "GR", "Греция"),
-    (r"(?:JAPAN|-JA\b)", "JP", "Япония"),
+    (r"(?:-DL\b|-DL-HOTSPOT|-DB0|\bGERMANY\b)", "DE", "Germany"),
+    (r"(?:AUSTRIA|-OE\b)", "AT", "Austria"),
+    (r"(?:ITALIA|ITALY|-IT\b)", "IT", "Italy"),
+    (r"(?:FRANCE|-FR\b)", "FR", "France"),
+    (r"(?:ANDALUCIA|CATALUNYA|SPAIN|-EA\b)", "ES", "Spain"),
+    (r"(?:-UK\b|-GB\b|ENGLAND|SCOTLAND)", "GB", "United Kingdom"),
+    (r"(?:CHICAGO|AMCOMM|FLORIDA|QUADNET|NEW-YORK|-US\b|USA)", "US", "USA"),
+    (r"(?:AUSTRALIA|-AU\b)", "AU", "Australia"),
+    (r"(?:BRASIL|BRAZIL|-BR\b)", "BR", "Brazil"),
+    (r"(?:BULGARIA|-BG\b)", "BG", "Bulgaria"),
+    (r"(?:RUSSIA|-RU\b)", "RU", "Russia"),
+    (r"(?:CAN-|-CA\b|CANADA)", "CA", "Canada"),
+    (r"(?:-DK\b|DENMARK)", "DK", "Denmark"),
+    (r"(?:ARGENTINA)", "AR", "Argentina"),
+    (r"(?:C-AMERICA)", "PA", "Central America"),
+    (r"(?:SWEDEN|-SE\b)", "SE", "Sweden"),
+    (r"(?:NORWAY|-NO\b)", "NO", "Norway"),
+    (r"(?:FINLAND|-FI\b)", "FI", "Finland"),
+    (r"(?:POLAND|-PL\b)", "PL", "Poland"),
+    (r"(?:CZECH|-CZ\b)", "CZ", "Czech Republic"),
+    (r"(?:SWISS|HELVETIA|-HB\b)", "CH", "Switzerland"),
+    (r"(?:PORTUGAL|-CT\b)", "PT", "Portugal"),
+    (r"(?:NETHERLANDS|-NL\b|HOLLAND)", "NL", "Netherlands"),
+    (r"(?:BELGIUM|-ON\b)", "BE", "Belgium"),
+    (r"(?:GREECE|-SV\b)", "GR", "Greece"),
+    (r"(?:JAPAN|-JA\b)", "JP", "Japan"),
 ]
 
 
@@ -139,17 +139,19 @@ def detect_country(server_id: str) -> tuple[str, str]:
 
 
 class DmrPlusHostsManager:
-    """Manages downloading, caching, and serving live DMR+ IPSC2 hosts."""
+    """Manages downloading, caching, and 24-hour background sync of live DMR+ IPSC2 hosts."""
 
     def __init__(self) -> None:
         self._servers: List[Dict[str, Any]] = list(FALLBACK_DMRPLUS_SERVERS)
         self._last_loaded_ts: float = 0.0
+        self._last_failed_attempt_ts: float = 0.0
         self._source: str = "fallback"
         self._lock = asyncio.Lock()
+        self._bg_sync_task: Optional[asyncio.Task] = None
         self._load_cache_from_disk()
 
     def _load_cache_from_disk(self) -> bool:
-        """Reads cached servers from disk if valid and unexpired."""
+        """Reads cached servers from disk if valid."""
         try:
             if not DMRPLUS_HOSTS_CACHE.exists():
                 return False
@@ -158,13 +160,18 @@ class DmrPlusHostsManager:
             if not isinstance(data, dict):
                 return False
             cached_servers = data.get("servers", [])
-            ts = float(data.get("generated_at", 0))
-            if cached_servers and len(cached_servers) >= 5:
+            ts = float(data.get("generated_at", 0) or 0)
+            src = str(data.get("source") or "").strip().lower()
+            if isinstance(cached_servers, list) and len(cached_servers) >= 5:
                 self._servers = cached_servers
-                self._last_loaded_ts = ts
-                self._source = "disk_cache"
-                logger.info(f"[DMR+_HOSTS] Loaded {len(cached_servers)} servers from disk cache (age {int(time.time() - ts)}s)")
-                return True
+                if ts > 0 and src in ("pistar_live", "live", "disk_cache"):
+                    self._last_loaded_ts = ts
+                    self._source = "disk_cache"
+                    logger.info(f"[DMR+_HOSTS] Loaded {len(cached_servers)} servers from disk cache (age {int(time.time() - ts)}s)")
+                    return True
+                self._last_loaded_ts = 0.0
+                self._source = "fallback"
+                return False
         except Exception as e:
             logger.warning(f"[DMR+_HOSTS] Failed to read disk cache {DMRPLUS_HOSTS_CACHE}: {e}")
         return False
@@ -176,6 +183,7 @@ class DmrPlusHostsManager:
             payload = {
                 "status": "ok",
                 "generated_at": int(self._last_loaded_ts),
+                "updated_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._last_loaded_ts)),
                 "count": len(self._servers),
                 "source": self._source,
                 "servers": self._servers
@@ -229,14 +237,40 @@ class DmrPlusHostsManager:
 
         return servers
 
+    def needs_sync(self, now: Optional[float] = None) -> bool:
+        ts_now = now if now is not None else time.time()
+        if not DMRPLUS_HOSTS_CACHE.exists():
+            return True
+        if self._source == "fallback" or self._last_loaded_ts <= 0:
+            return True
+        return (ts_now - self._last_loaded_ts) >= DMRPLUS_HOSTS_TTL_SEC
+
+    def is_sync_running(self) -> bool:
+        return bool(self._bg_sync_task and not self._bg_sync_task.done())
+
+    def ensure_fresh_background(self) -> bool:
+        now = time.time()
+        if not self.needs_sync(now):
+            return False
+        if self.is_sync_running():
+            return True
+        if self._last_failed_attempt_ts > 0 and (now - self._last_failed_attempt_ts) < 120.0:
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+            self._bg_sync_task = loop.create_task(self.fetch_hosts(force=True))
+            return True
+        except RuntimeError:
+            return False
+
     async def fetch_hosts(self, force: bool = False) -> List[Dict[str, Any]]:
         """
         Fetches official DMR+ hosts list from pistar if cache expired.
-        Thread-safe and guarded by lock.
+        Updates timestamp ONLY after successful download & parse.
         """
         async with self._lock:
             now = time.time()
-            if not force and self._servers and (now - self._last_loaded_ts < DMRPLUS_HOSTS_TTL_SEC):
+            if not force and not self.needs_sync(now):
                 return self._servers
 
             def _fetch_sync() -> Optional[str]:
@@ -256,16 +290,18 @@ class DmrPlusHostsManager:
             if raw_text:
                 parsed = self._parse_hosts_content(raw_text)
                 if len(parsed) >= 5:
+                    success_ts = time.time()
                     self._servers = parsed
-                    self._last_loaded_ts = now
+                    self._last_loaded_ts = success_ts
+                    self._last_failed_attempt_ts = 0.0
                     self._source = "pistar_live"
                     logger.info(f"[DMR+_HOSTS] Fetched and parsed {len(parsed)} servers from Pi-Star")
                     self._save_cache_to_disk()
                     return self._servers
 
+            self._last_failed_attempt_ts = time.time()
             if not self._servers:
                 self._servers = list(FALLBACK_DMRPLUS_SERVERS)
-                self._last_loaded_ts = now
                 self._source = "fallback"
 
             return self._servers
@@ -282,6 +318,20 @@ class DmrPlusHostsManager:
         except Exception as e:
             logger.debug(f"[DMR+_HOSTS] Enrichment error: {e}")
             return servers
+
+    def get_hosts_payload(self, enriched: bool = True) -> Dict[str, Any]:
+        """Returns dictionary payload expected by frontend refreshDmrPlusServers()."""
+        servers = self.get_hosts(enriched=enriched)
+        return {
+            "status": "ok",
+            "source": self._source,
+            "generated_at": int(self._last_loaded_ts) if self._last_loaded_ts > 0 else 0,
+            "last_sync_ts": int(self._last_loaded_ts) if self._last_loaded_ts > 0 else 0,
+            "sync_in_progress": self.is_sync_running(),
+            "needs_sync": self.needs_sync(),
+            "count": len(servers),
+            "servers": servers,
+        }
 
     async def periodic_update_loop(self) -> None:
         """Background coroutine that keeps DMR+ hosts updated every 24h."""

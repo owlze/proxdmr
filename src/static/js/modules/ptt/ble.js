@@ -1,4 +1,4 @@
-import { showCenterHudToast } from '../core/toast.js';
+import { showCenterHudToast } from '../core/toast.js?v=2.9.699';
 
 /**
  * ProxDMR BLE PTT Subsystem

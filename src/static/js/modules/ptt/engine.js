@@ -3,12 +3,12 @@
  * Module: modules/ptt/engine.js
  */
 
-import { getCountryInfo, updateFlagElement } from '../core/formatters.js?v=2.9.367';
-import { updateAllHotspotRecUI } from '../audio/routing.js';
-import { initAudio, releaseMicrophone, applyTxDspSettings, syncActiveAudioTxPreset, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js?v=2.9.628';
-import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js';
+import { getCountryInfo, updateFlagElement, getHotspotNetworkType } from '../core/formatters.js?v=2.9.712';
+import { updateAllHotspotRecUI } from '../audio/routing.js?v=2.9.729';
+import { initAudio, releaseMicrophone, applyTxDspSettings, syncActiveAudioTxPreset, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js?v=2.9.733';
+import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js?v=2.9.698';
 import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, getRogerBeepDurationMs, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js?v=2.9.542';
-import { triggerHaptic } from '../core/haptic.js';
+import { triggerHaptic } from '../core/haptic.js?v=2.9.711';
 
 let txStartTime = 0;
 let totCountdownInterval = null;
@@ -374,6 +374,14 @@ function _isVolumeDownPttEnabled() {
       return;
     }
 
+    if (typeof window !== "undefined" && typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(checkHid)) {
+      clearTxIndicationUI(checkHid);
+      if (typeof window.openYsfTxDgIdModal === "function") {
+        window.openYsfTxDgIdModal(checkHid);
+      }
+      return;
+    }
+
     isTransmissionStarting = true;
     window.isTransmissionStarting = true;
     cancelTransmissionStart = false;
@@ -468,7 +476,10 @@ function _isVolumeDownPttEnabled() {
         const c = document.querySelector(`.radio-container[data-hotspot-id="${curHid}"]`);
         const b = c ? c.querySelector(".mode-badge") : (document.getElementById("modeBadge") || document.querySelector(".mode-badge"));
         const curSlot = _getHotspotSlot(curHid) || targetSlot || 2;
-        const isAsl = Boolean(c && (c.classList.contains("card-net-allstar") || c.dataset.networkType === "allstar" || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(curHid) === "allstar")));
+        const hsTxNet = getHotspotNetworkType(c || curHid);
+        const netT = (hsTxNet && hsTxNet !== "bm") ? hsTxNet : (c ? (c.dataset.networkType || hsTxNet || "bm") : (hsTxNet || "bm"));
+        const isAsl = Boolean(c && (c.classList.contains("card-net-allstar") || netT === "allstar"));
+        const isYsf = Boolean(c && (c.classList.contains("card-net-ysf") || netT === "ysf"));
         if (b && window.isPttPressed) {
           const rem = Math.max(0, sec);
           let extraCls = "";
@@ -478,7 +489,7 @@ function _isVolumeDownPttEnabled() {
             extraCls = " mode-tx-warn";
           }
           b.className = `mode-badge mode-tx${extraCls}`;
-          b.textContent = isAsl ? `TX ${rem}s` : `TX TS${curSlot} ${rem}s`;
+          b.textContent = (isAsl || isYsf) ? `TX ${rem}s` : `TX TS${curSlot} ${rem}s`;
         }
       };
 
@@ -486,8 +497,16 @@ function _isVolumeDownPttEnabled() {
         try {
           const hs = (window.currentHotspots || []).find(h => h.id === hid);
           const myCall = hs?.callsign || "ProxDMR";
-          const isCallerTarget = (pttTarget && (pttTarget.type === "CALLER" || pttTarget.type === "ID"));
-          window.AndroidBridge.updateRadioStatus(`TX: ${myCall} (TS${targetSlot} -> ${isCallerTarget ? 'ID' : 'TG'}${targetTg})`);
+          const netBr = ((hs && hs.network_type) || net || "bm").toLowerCase();
+          if (netBr === "ysf") {
+            const roomBr = String((hs && (hs.ysf_room || hs.ysf_room_id || hs.config?.ysf_room)) || targetTg || "").trim();
+            window.AndroidBridge.updateRadioStatus(roomBr ? `TX: ${myCall} -> #${roomBr}` : `TX: ${myCall}`);
+          } else if (netBr === "allstar") {
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall}`);
+          } else {
+            const isCallerTarget = (pttTarget && (pttTarget.type === "CALLER" || pttTarget.type === "ID"));
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall} (TS${targetSlot} -> ${isCallerTarget ? 'ID' : 'TG'}${targetTg})`);
+          }
         } catch (err) {
           console.warn("[AndroidBridge] updateRadioStatus TX failed:", err);
         }
@@ -505,13 +524,29 @@ function _isVolumeDownPttEnabled() {
         if (typeof window.updateCardPttHintForSlot === "function") {
           window.updateCardPttHintForSlot(targetCard, targetSlot);
         }
-        const isAsl = Boolean(targetCard && (targetCard.classList.contains("card-net-allstar") || targetCard.dataset.networkType === "allstar" || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(targetCard) === "allstar")));
+        const hsStartNet = getHotspotNetworkType(targetCard || hid);
+        const netT = (hsStartNet && hsStartNet !== "bm") ? hsStartNet : (targetCard.dataset.networkType || hsStartNet || "bm");
+        const isAsl = Boolean(targetCard && (targetCard.classList.contains("card-net-allstar") || netT === "allstar"));
+        const isYsf = Boolean(targetCard && (targetCard.classList.contains("card-net-ysf") || netT === "ysf"));
         const mb = targetCard.querySelector(".mode-badge");
         if (mb) {
           mb.className = "mode-badge mode-tx";
-          mb.textContent = isAsl ? `TX ${totRemainingSeconds}s` : `TX TS${targetSlot} ${totRemainingSeconds}s`;
+          mb.textContent = (isAsl || isYsf) ? `TX ${totRemainingSeconds}s` : `TX TS${targetSlot} ${totRemainingSeconds}s`;
         }
-        if (!isAsl) {
+        if (isAsl) {
+          const aslHsTx = (window.currentHotspots || []).find(h => String(h.id) === String(hid));
+          if (aslHsTx) aslHsTx._aslUserTxActive = true;
+          if (typeof window.renderAslNodeDashboard === "function") {
+            window.renderAslNodeDashboard(hid);
+          }
+        } else if (isYsf) {
+          const ysfRow = targetCard.querySelector(".vfo-ysf-row");
+          if (ysfRow) ysfRow.classList.add("vfo-tx-active");
+          const ysfHsTx = (window.currentHotspots || []).find(h => String(h.id) === String(hid));
+          if (ysfHsTx && typeof window.updateYsfVfoHeader === "function") {
+            window.updateYsfVfoHeader(targetCard, ysfHsTx);
+          }
+        } else {
           const txRow = targetCard.querySelector(targetSlot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
           if (txRow) {
             txRow.classList.add("vfo-tx-active");
@@ -525,9 +560,12 @@ function _isVolumeDownPttEnabled() {
             const myCountry = getCountryInfo(myId, myCall);
 
             if (callerFlag) updateFlagElement(callerFlag, myCountry);
-            if (callerCall) callerCall.textContent = `${myCall} (TX)`;
+            if (callerCall) {
+              delete callerCall.dataset.standby;
+              callerCall.textContent = `${myCall} (TX)`;
+            }
             if (callerId) callerId.textContent = myId ? `(${myId})` : "";
-            if (callerCountry) callerCountry.textContent = myCountry?.name_en || "";
+            if (callerCountry) callerCountry.textContent = myCountry?.name || myCountry?.name_en || "";
           }
           if (targetSlot === 1) {
             const tx1 = targetCard.querySelector(".vfo-ts1-tx");
@@ -535,12 +573,6 @@ function _isVolumeDownPttEnabled() {
           } else {
             const tx2 = targetCard.querySelector(".vfo-ts2-tx");
             if (tx2) tx2.classList.add("active");
-          }
-        } else {
-          const aslHsTx = (window.currentHotspots || []).find(h => String(h.id) === String(hid));
-          if (aslHsTx) aslHsTx._aslUserTxActive = true;
-          if (typeof window.renderAslNodeDashboard === "function") {
-            window.renderAslNodeDashboard(hid);
           }
         }
       }
@@ -659,7 +691,7 @@ function _isVolumeDownPttEnabled() {
         const b = card.querySelector(".mode-badge");
         if (b) {
           b.className = "mode-badge mode-standby";
-          b.textContent = "STANDBY";
+          b.textContent = window.t ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
         }
       }
       if (typeof window.updateCardPttHint === "function") {
@@ -670,7 +702,7 @@ function _isVolumeDownPttEnabled() {
     const fallbackMb = document.getElementById("modeBadge");
     if (fallbackMb && !fallbackMb.closest(".radio-container")) {
       fallbackMb.className = "mode-badge mode-standby";
-      fallbackMb.textContent = "STANDBY";
+      fallbackMb.textContent = window.t ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
     }
 
     const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(targetHid)}"]`) ||
@@ -834,6 +866,9 @@ window.triggerAslTxReadyHaptic = function(hotspotId) {
 
     const hs = (window.currentHotspots || []).find(h => h.id === hid);
     const netType = (hs?.network_type || "bm").toLowerCase();
+    if (netType === "allstar" || netType === "ysf") {
+      return false;
+    }
     const hsName = hs?.name || hs?.callsign || hid;
     const slot = (netType === "xlx")
       ? 2
@@ -856,7 +891,7 @@ window.triggerAslTxReadyHaptic = function(hotspotId) {
           window.updateCardModeBadge(targetCard);
         } else if (modeBadge) {
           modeBadge.className = "mode-badge mode-standby";
-          modeBadge.textContent = "STANDBY";
+          modeBadge.textContent = window.t ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
         }
       }
     }, 380);
@@ -923,6 +958,10 @@ window.triggerAslTxReadyHaptic = function(hotspotId) {
           notifyPttConnectionBlocked(conn);
           return;
         }
+        if (typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(hid)) {
+          if (typeof window.openYsfTxDgIdModal === "function") window.openYsfTxDgIdModal(hid);
+          return;
+        }
         startTransmission(hid);
       }
       return;
@@ -936,6 +975,10 @@ window.triggerAslTxReadyHaptic = function(hotspotId) {
       const conn = checkPttConnectionStatus(hid);
       if (!conn.ok) {
         notifyPttConnectionBlocked(conn);
+        return;
+      }
+      if (typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(hid)) {
+        if (typeof window.openYsfTxDgIdModal === "function") window.openYsfTxDgIdModal(hid);
         return;
       }
       if (!window.isPttPressed) {
@@ -977,6 +1020,10 @@ export function initPttEngine() {
       const conn = checkPttConnectionStatus(hid);
       if (!conn.ok) {
         notifyPttConnectionBlocked(conn);
+        return;
+      }
+      if (typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(hid)) {
+        if (typeof window.openYsfTxDgIdModal === "function") window.openYsfTxDgIdModal(hid);
         return;
       }
       startTransmission(hid);

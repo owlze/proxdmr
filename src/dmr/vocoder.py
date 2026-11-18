@@ -64,9 +64,9 @@ class DMRVocoderDecoder:
         c_vocoder_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "c_vocoder"))
         local_so = os.path.join(c_vocoder_dir, "libmbe_neo_bridge.so")
         candidates = [
-            "/usr/local/lib/libmbe_neo_bridge.so",
-            "/app/src/c_vocoder/libmbe_neo_bridge.so",
             local_so,
+            "/app/src/c_vocoder/libmbe_neo_bridge.so",
+            "/usr/local/lib/libmbe_neo_bridge.so",
             os.path.join(c_vocoder_dir, "mbe_neo_bridge.dll"),
             "libmbe_neo_bridge.so",
         ]
@@ -117,6 +117,15 @@ class DMRVocoderDecoder:
             ctypes.POINTER(_CMbeNeoFrameMeta)
         ]
         self.lib.mbe_neo_decode_49.restype = ctypes.c_int
+
+        if hasattr(self.lib, "mbe_neo_decode_imbe_144"):
+            self.lib.mbe_neo_decode_imbe_144.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_uint8),
+                ctypes.POINTER(ctypes.c_int16),
+                ctypes.POINTER(_CMbeNeoFrameMeta)
+            ]
+            self.lib.mbe_neo_decode_imbe_144.restype = ctypes.c_int
 
         if hasattr(self.lib, "mbe_neo_set_tuning"):
             self.lib.mbe_neo_set_tuning.argtypes = [
@@ -227,6 +236,134 @@ class DMRVocoderDecoder:
         except Exception as e:
             logger.debug(f"[VOCODER] Error decoding DMR burst on slot {slot}: {e}")
             return b"", []
+
+    def decode_ysf_vd2(self, ambe49_list: list, slot: int = 1) -> Tuple[bytes, float]:
+        """
+        Decodes five 49-bit AMBE+2 vectors (100ms voice frame in VD mode 2)
+        into 8000 Hz 16-bit mono PCM (800 samples = 1600 bytes) using mbelib-neo's
+        mbe_neo_decode_49.
+        """
+        if not self.is_ready or not self.lib:
+            return bytes(1600), 0.0
+
+        ctx = self._slots.get(slot) or self._slots.get(1)
+        if not ctx:
+            return bytes(1600), 0.0
+
+        pcm_all = bytearray()
+        total_sq = 0.0
+        total_samples = 0
+
+        for ambe49 in ambe49_list:
+            if not ambe49 or len(ambe49) < 49:
+                pcm_all.extend(b"\x00" * 320)
+                continue
+            c_buf = bytes(ambe49[:49])
+            try:
+                self.lib.mbe_neo_decode_49(
+                    ctx,
+                    c_buf,
+                    self._out160,
+                    ctypes.byref(self._meta_c)
+                )
+                pcm_all.extend(bytes(self._out160))
+                for s in self._out160:
+                    total_sq += (s / 32768.0) ** 2
+                total_samples += 160
+            except Exception as err:
+                logger.debug(f"[VOCODER] YSF VD2 vector decode error: {err}")
+                pcm_all.extend(b"\x00" * 320)
+
+        rms = math.sqrt(total_sq / max(1, total_samples)) if total_samples > 0 else 0.0
+        if len(pcm_all) < 1600:
+            pcm_all.extend(b"\x00" * (1600 - len(pcm_all)))
+        return bytes(pcm_all[:1600]), float(min(1.0, max(0.0, rms)))
+
+    def decode_ysf_vd1(self, ambe72_list: list, slot: int = 1) -> Tuple[bytes, float]:
+        """
+        Decodes five 72-bit (9-byte) AMBE+2 frames (100ms voice frame in VD mode 1)
+        into 8000 Hz 16-bit mono PCM (800 samples = 1600 bytes) via mbe_neo_decode_72.
+        """
+        if not self.is_ready or not self.lib:
+            return bytes(1600), 0.0
+
+        ctx = self._slots.get(slot) or self._slots.get(1)
+        if not ctx:
+            return bytes(1600), 0.0
+
+        pcm_all = bytearray()
+        total_sq = 0.0
+        total_samples = 0
+
+        for raw9 in ambe72_list:
+            if not raw9 or len(raw9) < 9:
+                pcm_all.extend(b"\x00" * 320)
+                continue
+            c_buf = (ctypes.c_uint8 * 9).from_buffer_copy(bytes(raw9[:9]))
+            try:
+                self.lib.mbe_neo_decode_72(
+                    ctx,
+                    c_buf,
+                    self._out160,
+                    ctypes.byref(self._meta_c)
+                )
+                pcm_all.extend(bytes(self._out160))
+                for s in self._out160:
+                    total_sq += (s / 32768.0) ** 2
+                total_samples += 160
+            except Exception as err:
+                logger.debug(f"[VOCODER] YSF VD1 frame decode error: {err}")
+                pcm_all.extend(b"\x00" * 320)
+
+        rms = math.sqrt(total_sq / max(1, total_samples)) if total_samples > 0 else 0.0
+        if len(pcm_all) < 1600:
+            pcm_all.extend(b"\x00" * (1600 - len(pcm_all)))
+        return bytes(pcm_all[:1600]), float(min(1.0, max(0.0, rms)))
+
+    def decode_ysf_vw(self, imbe144_list: list, slot: int = 1) -> Tuple[bytes, float]:
+        """
+        Decodes up to five 144-bit (18-byte) Full-Rate IMBE frames (YSF VW / dt=3)
+        into 8000 Hz 16-bit mono PCM via mbe_neo_decode_imbe_144.
+        """
+        if not self.is_ready or not self.lib or not hasattr(self.lib, "mbe_neo_decode_imbe_144"):
+            return bytes(len(imbe144_list or []) * 320), 0.0
+
+        ctx = self._slots.get(slot) or self._slots.get(1)
+        if not ctx or not imbe144_list:
+            return b"", 0.0
+
+        pcm_all = bytearray()
+        total_sq = 0.0
+        total_samples = 0
+
+        for raw18 in imbe144_list:
+            if not raw18 or len(raw18) < 18:
+                pcm_all.extend(b"\x00" * 320)
+                continue
+            c_buf = (ctypes.c_uint8 * 18).from_buffer_copy(bytes(raw18[:18]))
+            try:
+                self.lib.mbe_neo_decode_imbe_144(
+                    ctx,
+                    c_buf,
+                    self._out160,
+                    ctypes.byref(self._meta_c)
+                )
+                pcm_all.extend(bytes(self._out160))
+                for s in self._out160:
+                    total_sq += (s / 32768.0) ** 2
+                total_samples += 160
+            except Exception as err:
+                logger.debug(f"[VOCODER] YSF VW IMBE frame decode error: {err}")
+                pcm_all.extend(b"\x00" * 320)
+
+        rms = math.sqrt(total_sq / max(1, total_samples)) if total_samples > 0 else 0.0
+        return bytes(pcm_all), float(min(1.0, max(0.0, rms)))
+
+    def decode_ysf_frame(self, subframes: list, slot: int = 1) -> Tuple[bytes, float]:
+        """
+        Backwards-compatible wrapper calling decode_ysf_vd2.
+        """
+        return self.decode_ysf_vd2(subframes, slot=slot)
 
     def decode_erasure_burst(self, slot: int = 1) -> Tuple[bytes, list]:
         """

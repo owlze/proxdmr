@@ -15,6 +15,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.translation")
 
 LANG_DISPLAY_NAMES: Dict[str, str] = {
@@ -194,9 +199,9 @@ class TranslationService:
 
     def _get_or_load_qwen(self):
         if not HAVE_LLAMA_CPP:
-            raise RuntimeError("llama-cpp-python не установлен")
+            raise RuntimeError(_tr("translation.llama_not_installed", fallback="llama-cpp-python is not installed"))
         if not self._qwen_file.exists():
-            raise FileNotFoundError(f"Файл модели Qwen GGUF не найден: {self._qwen_file}")
+            raise FileNotFoundError(_tr("translation.qwen_file_not_found", fallback="Qwen GGUF model file not found: {path}", path=self._qwen_file))
 
         with self._lock:
             if self._qwen_llm is not None:
@@ -256,7 +261,7 @@ class TranslationService:
                 return content or clean_text, None
         except Exception as e:
             logger.error(f"[TRANSLATION] Qwen translation error: {e}")
-            return clean_text, f"Ошибка Qwen 2.5: {e}"
+            return clean_text, _tr("translation.qwen_error", fallback="Qwen 2.5 error: {error}", error=e)
 
     async def translate_async(
         self,

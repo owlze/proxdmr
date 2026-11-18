@@ -1,5 +1,5 @@
-import { getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, getHistoryTimeMode } from '../core/formatters.js?v=2.9.547';
-import { showToast } from '../core/toast.js';
+import { getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, getHistoryTimeMode } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 
 /**
  * ProxDMR Transcription & 24h Summary Module
@@ -13,6 +13,15 @@ let currentLogTxTriggerEl = null;
 let isLogTxPinned = false;
 let logTxHideTimeout = null;
 
+function matchesTxSearchQuery(isTx, query) {
+  if (!isTx || !query) return false;
+  if (query === "tx") return true;
+  const txWord = (typeof window !== "undefined" && typeof window.t === "function")
+    ? String(window.t("live.tx_search_word", {}, "transmit")).toLowerCase()
+    : "transmit";
+  return txWord.includes(query);
+}
+
 // --- 24-Hour Call Log Transcription Summary State ---
 let txSummarySortOrder = (typeof localStorage !== "undefined" && localStorage.getItem("proxdmr_tx_summary_sort")) || "desc"; // Default: matches exact sequence displayed in log (newest at top)
 
@@ -24,7 +33,7 @@ export function updateTxSummarySortUI() {
   sortBtn.classList.toggle("is-asc", isAsc);
   sortBtn.classList.toggle("is-desc", !isAsc);
   const titleKey = isAsc ? "log.sort_newest_bottom" : "log.sort_newest_top";
-  const titleDefault = isAsc ? "Сортировка: новые внизу" : "Сортировка: новые вверху";
+  const titleDefault = isAsc ? "Sort: newest at bottom" : "Sort: newest on top";
   const title = (window.t ? window.t(titleKey, {}, titleDefault) : titleDefault);
   sortBtn.title = title;
   sortBtn.setAttribute("aria-label", title);
@@ -186,9 +195,12 @@ export function showLogTranscriptionPopover(targetEl, callId, pin = false) {
   const langBadge = call.transcription_lang ? call.transcription_lang.toUpperCase() : "AI";
   const callerDisplay = formatCallerDisplay(call.src_callsign, call.src_name, call.talker_alias, call.src_id, call.caller_display);
   const cleanCaller = (callerDisplay || "").replace(/<[^>]+>/g, "").trim();
-  const isPrivateCall = call.call_type !== "GROUP";
-  const tgInfo = isPrivateCall ? `ID ${call.dst_id}` : `TG ${call.dst_id}`;
-  const slotInfo = `TS${call.slot}`;
+  const callNet = String(call.network_type || (typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(call.hotspot_id) : "bm") || "bm").toLowerCase();
+  const isYsfCall = (callNet === "ysf" || String(call.id || "").startsWith("ysf_"));
+  const isAslCall = (callNet === "allstar" || String(call.id || "").startsWith("asl_"));
+  const isPrivateCall = !isYsfCall && !isAslCall && (call.call_type !== "GROUP");
+  const tgInfo = isYsfCall ? `#${call.dst_id}` : (isAslCall ? `Node ${call.dst_id}` : (isPrivateCall ? `ID ${call.dst_id}` : `TG ${call.dst_id}`));
+  const slotInfo = isYsfCall ? "YSF" : (isAslCall ? "ASL" : `TS${call.slot}`);
 
   logTranscriptionPopover.innerHTML = `
     <div class="log-tx-popover-header">
@@ -480,12 +492,15 @@ export class SummaryTtsReader {
         if (callHid !== effectiveHid) return false;
       }
 
-      if (logFilter === "1" || logFilter === "2") {
+      const hsObj = currentHotspots.find(h => h.id === effectiveHid);
+      const isNoTsNet = (effectiveHid !== "all") && ((hsObj?.network_type || "").toLowerCase() === "allstar" || (hsObj?.network_type || "").toLowerCase() === "ysf");
+
+      if (!isNoTsNet && (logFilter === "1" || logFilter === "2")) {
         if (c.slot.toString() !== logFilter) return false;
       }
 
       if (logSearchQuery) {
-        const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery));
+        const isTxMatch = matchesTxSearchQuery(c.is_tx, logSearchQuery);
         const call = (c.src_callsign || "").toLowerCase();
         const name = (c.src_name || "").toLowerCase();
         const idStr = (c.src_id || "").toString();
@@ -1089,12 +1104,15 @@ export function renderTranscriptionSummary() {
       if (callHid !== effectiveHid) return false;
     }
 
-    if (logFilter === "1" || logFilter === "2") {
+    const hsObj = currentHotspots.find(h => h.id === effectiveHid);
+    const isNoTsNet = (effectiveHid !== "all") && ((hsObj?.network_type || "").toLowerCase() === "allstar" || (hsObj?.network_type || "").toLowerCase() === "ysf");
+
+    if (!isNoTsNet && (logFilter === "1" || logFilter === "2")) {
       if (c.slot.toString() !== logFilter) return false;
     }
 
     if (logSearchQuery) {
-      const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery));
+      const isTxMatch = matchesTxSearchQuery(c.is_tx, logSearchQuery);
       const call = (c.src_callsign || "").toLowerCase();
       const name = (c.src_name || "").toLowerCase();
       const idStr = (c.src_id || "").toString();
@@ -1111,14 +1129,18 @@ export function renderTranscriptionSummary() {
 
   const countEl = document.getElementById("logTxSummaryCountBadge");
   if (countEl) {
-    const curLang = (typeof window !== "undefined" && window.i18n && window.i18n.currentLang) || "ru";
+    const curLang = (typeof window !== "undefined" && ((window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang)))) || "en";
     let countStr = "";
-    if (curLang === "ru") {
-      const plural = getNounPlural(filtered.length, "запись", "записи", "записей");
+    if (filtered.length === 0) {
+      countStr = (window.t ? window.t("log.records_count_zero", {}, "0 records") : "0 records");
+    } else if (curLang === "ru" || curLang === "uk") {
+      const oneW = window.t ? window.t("log.record_one_word", {}, "запись") : "запись";
+      const fewW = window.t ? window.t("log.record_few_word", {}, "записи") : "записи";
+      const manyW = window.t ? window.t("log.record_many_word", {}, "записей") : "записей";
+      const plural = (typeof getNounPlural === "function") ? getNounPlural(filtered.length, oneW, fewW, manyW) : manyW;
       countStr = `${filtered.length} ${plural}`;
-    } else if (curLang === "uk") {
-      const plural = getNounPlural(filtered.length, "запис", "записи", "записів");
-      countStr = `${filtered.length} ${plural}`;
+    } else if (filtered.length === 1) {
+      countStr = (window.t ? window.t("log.record_singular", { count: 1 }, "1 record") : "1 record");
     } else {
       countStr = (window.t ? window.t("log.records_count", { count: filtered.length }, `${filtered.length} records`) : `${filtered.length} records`);
     }
@@ -1126,7 +1148,14 @@ export function renderTranscriptionSummary() {
     countEl.textContent = countStr;
   }
 
-  const slotLabel = (logFilter === "1") ? "TS1" : ((logFilter === "2") ? "TS2" : "TS1+TS2");
+  const effectiveNetRender = (effectiveHid && effectiveHid !== "all" && typeof window.getHotspotNetworkType === "function")
+    ? String(window.getHotspotNetworkType(effectiveHid) || "bm").toLowerCase()
+    : "bm";
+  const slotLabel = (effectiveNetRender === "ysf")
+    ? "YSF"
+    : ((effectiveNetRender === "allstar")
+      ? "ASL"
+      : ((logFilter === "1") ? "TS1" : ((logFilter === "2") ? "TS2" : "TS1+TS2")));
 
   if (filtered.length === 0) {
     bodyEl.innerHTML = `
@@ -1155,9 +1184,12 @@ export function renderTranscriptionSummary() {
       : (c.time_str || (new Date((c.timestamp || nowSec) * 1000)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     const baseCaller = formatCallerDisplay(c.src_callsign, c.src_name, c.talker_alias, c.src_id, c.caller_display);
     const cleanCaller = (baseCaller || "").replace(/<[^>]+>/g, "").trim();
-    const isPrivateCall = c.call_type !== "GROUP";
-    const tgInfo = isPrivateCall ? `ID ${c.dst_id}` : `TG ${c.dst_id}`;
-    const slotInfo = `TS${c.slot}`;
+    const cNet = String(c.network_type || (typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(c.hotspot_id) : "bm") || "bm").toLowerCase();
+    const isYsfItem = (cNet === "ysf" || String(c.id || "").startsWith("ysf_"));
+    const isAslItem = (cNet === "allstar" || String(c.id || "").startsWith("asl_"));
+    const isPrivateCall = !isYsfItem && !isAslItem && (c.call_type !== "GROUP");
+    const tgInfo = isYsfItem ? `#${c.dst_id}` : (isAslItem ? `Node ${c.dst_id}` : (isPrivateCall ? `ID ${c.dst_id}` : `TG ${c.dst_id}`));
+    const slotInfo = isYsfItem ? "YSF" : (isAslItem ? "ASL" : `TS${c.slot}`);
 
     const country = getCallCountryInfo(c);
     const flagHtml = isTx ? "🎙️ " : (country && country.flag ? `${country.flag} ` : "");
@@ -1171,7 +1203,7 @@ export function renderTranscriptionSummary() {
     return `
       <div class="tx-summary-item" data-call-id="${c.id}">
         <div class="tx-summary-item-header">
-          <span class="tx-summary-time" title="Время: нажмите для переключения LOC ↔ UTC">${timeStr}</span>
+          <span class="tx-summary-time" title="${window.t ? window.t("log.time_toggle_title", {}, "Time: click to toggle LOC ↔ UTC") : "Time: click to toggle LOC ↔ UTC"}">${timeStr}</span>
           <span class="tx-summary-station">${flagHtml}${cleanCaller}</span>
           <span class="tx-summary-tg">${tgInfo} • ${slotInfo}</span>
           ${hsTag}
@@ -1219,12 +1251,15 @@ export function copyTranscriptionSummary() {
       if (callHid !== effectiveHid) return false;
     }
 
-    if (logFilter === "1" || logFilter === "2") {
+    const hsObj = currentHotspots.find(h => h.id === effectiveHid);
+    const isNoTsNet = (effectiveHid !== "all") && ((hsObj?.network_type || "").toLowerCase() === "allstar" || (hsObj?.network_type || "").toLowerCase() === "ysf");
+
+    if (!isNoTsNet && (logFilter === "1" || logFilter === "2")) {
       if (c.slot.toString() !== logFilter) return false;
     }
 
     if (logSearchQuery) {
-      const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery));
+      const isTxMatch = matchesTxSearchQuery(c.is_tx, logSearchQuery);
       const call = (c.src_callsign || "").toLowerCase();
       const name = (c.src_name || "").toLowerCase();
       const idStr = (c.src_id || "").toString();
@@ -1239,7 +1274,14 @@ export function copyTranscriptionSummary() {
     return true;
   });
 
-  const slotLabel = (logFilter === "1") ? "TS1" : ((logFilter === "2") ? "TS2" : "TS1+TS2");
+  const effectiveNetCopy = (effectiveHid && effectiveHid !== "all" && typeof window.getHotspotNetworkType === "function")
+    ? String(window.getHotspotNetworkType(effectiveHid) || "bm").toLowerCase()
+    : "bm";
+  const slotLabel = (effectiveNetCopy === "ysf")
+    ? "YSF"
+    : ((effectiveNetCopy === "allstar")
+      ? "ASL"
+      : ((logFilter === "1") ? "TS1" : ((logFilter === "2") ? "TS2" : "TS1+TS2")));
 
   if (filtered.length === 0) {
     if (typeof showToast === "function") showToast(window.t ? window.t("live.summary_no_text_copy", { slot: slotLabel }, `Нет распознанного текста для копирования в ${slotLabel}`) : `Нет распознанного текста для копирования в ${slotLabel}`, 2500);
@@ -1262,11 +1304,15 @@ export function copyTranscriptionSummary() {
       : (c.time_str || (new Date((c.timestamp || nowSec) * 1000)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     const baseCaller = formatCallerDisplay(c.src_callsign, c.src_name, c.talker_alias, c.src_id, c.caller_display);
     const cleanCaller = (baseCaller || "").replace(/<[^>]+>/g, "").trim();
-    const isPrivateCall = c.call_type !== "GROUP";
-    const tgInfo = isPrivateCall ? `ID ${c.dst_id}` : `TG ${c.dst_id}`;
+    const cNet = String(c.network_type || (typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(c.hotspot_id) : "bm") || "bm").toLowerCase();
+    const isYsfItem = (cNet === "ysf" || String(c.id || "").startsWith("ysf_"));
+    const isAslItem = (cNet === "allstar" || String(c.id || "").startsWith("asl_"));
+    const isPrivateCall = !isYsfItem && !isAslItem && (c.call_type !== "GROUP");
+    const tgInfo = isYsfItem ? `#${c.dst_id}` : (isAslItem ? `Node ${c.dst_id}` : (isPrivateCall ? `ID ${c.dst_id}` : `TG ${c.dst_id}`));
+    const slotInfo = isYsfItem ? "YSF" : (isAslItem ? "ASL" : `TS${c.slot}`);
     const rawText = (c.transcription || "").replace(/<call>([\s\S]*?)<\/call>/gi, "$1").trim();
     const plainCaller = cleanCaller.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
-    return `[${timeStr}] ${plainCaller} (${tgInfo}, TS${c.slot}): ${rawText}`;
+    return `[${timeStr}] ${plainCaller} (${tgInfo}, ${slotInfo}): ${rawText}`;
   }).join("\n\n");
 
   const onCopied = () => {
@@ -1578,4 +1624,19 @@ if (typeof window !== "undefined") {
   window.renderTranscriptionSummary = renderTranscriptionSummary;
   window.updateLogTranscriptionPopoverIfActive = updateLogTranscriptionPopoverIfActive;
   window.summaryTtsReader = summaryTtsReader;
+
+  window.addEventListener("languageChanged", () => {
+    try { updateTxSummarySortUI(); } catch (_) {}
+    try { if (summaryTtsReader) summaryTtsReader.updateButtonUi(); } catch (_) {}
+    try {
+      const summaryBtn = document.getElementById("btnToggleTxSummary");
+      if (summaryBtn) {
+        const isOpen = Boolean(window.isTranscriptionSummaryOpen);
+        summaryBtn.title = isOpen
+          ? (window.t ? window.t("live.summary_close_title", {}, "Close summary") : "Close summary")
+          : (window.t ? window.t("live.summary_open_title", {}, "24h transcription summary (click to toggle)") : "24h transcription summary (click to toggle)");
+      }
+      if (window.isTranscriptionSummaryOpen) renderTranscriptionSummary();
+    } catch (_) {}
+  });
 }

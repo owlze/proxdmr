@@ -43,6 +43,7 @@
 #include "mbe_adaptive.h"
 #include "mbe_math.h"
 #include "mbe_result.h"
+#include "mbe_subframe.h"
 #include "mbe_tone.h"
 #include "mbe_unvoiced_fft.h"
 #include "mbe_validation.h"
@@ -351,6 +352,8 @@ mbe_resetImbeModel(mbe_parms* mp) {
     mp->swn = 0;
     mp->tonePhase = 0;
     mp->repeatCount = 0;
+    /* The mark belongs to the frame the model came from. */
+    mbe_set_frame_mark(mp, MBE_FRAME_MARK_NONE);
     mp->localEnergy = MBE_DEFAULT_LOCAL_ENERGY;
     mp->amplitudeThreshold = MBE_DEFAULT_AMPLITUDE_THRESHOLD;
     mp->mutingThreshold = MBE_MUTING_THRESHOLD_IMBE;
@@ -895,7 +898,7 @@ mbe_clipFloatSample(float sample) {
     return sample;
 }
 
-static void
+void
 mbe_clipFloatBuffer(float* samples, int count) {
     if (samples == NULL || count <= 0) {
         return;
@@ -931,9 +934,17 @@ mbe_toneAmplitude(double level_db) {
 }
 
 /* A tone whose gain moves linearly from from_gain to gain over the first
- * `ramp` samples (none for 0), clipped after the gain is applied. */
+ * `ramp` samples (none for 0), each sample limited after the gain is applied,
+ * unless the caller fades or mixes the tone and limits the result. The sample
+ * loop is the same in both modes: it limits every sample as it computes it
+ * (the limiter's classification keeps the loop scalar, so fast-math cannot
+ * vectorize it with other sine code) and keeps the unlimited sample beside
+ * it, and only after the loop is the unlimited frame chosen. So the limited
+ * rendering is computed exactly as before, and limiting the unlimited one
+ * gives it bit for bit. */
 static void
-mbe_renderToneRampf(float* out, mbe_parms* mp, float f1, float f2, float from_gain, float gain, int ramp) {
+mbe_renderToneRampf(float* out, mbe_parms* mp, float f1, float f2, float from_gain, float gain, int ramp,
+                    enum mbe_output_limit output) {
     if (out == NULL) {
         return;
     }
@@ -948,6 +959,7 @@ mbe_renderToneRampf(float* out, mbe_parms* mp, float f1, float f2, float from_ga
     uint32_t phase2 = mp->tonePhase;
     const uint32_t step1 = frequency_increment(f1);
     const uint32_t step2 = dual ? frequency_increment(f2) : 0;
+    float unlimited[160];
     for (int n = 0; n < 160; ++n) {
         const float g = (n < ramp) ? from_gain + ((gain - from_gain) * ((float)n / (float)ramp)) : gain;
         phase1 += step1;
@@ -957,14 +969,18 @@ mbe_renderToneRampf(float* out, mbe_parms* mp, float f1, float f2, float from_ga
             value += g * phase_sine(phase2);
         }
         out[n] = mbe_clipFloatSample(value);
+        unlimited[n] = value;
+    }
+    if (output == MBE_OUTPUT_UNLIMITED) {
+        memcpy(out, unlimited, sizeof(unlimited));
     }
     memcpy(&mp->swn, &phase1, sizeof(phase1));
     mp->tonePhase = phase2;
 }
 
 static void
-mbe_renderTonef(float* out, mbe_parms* mp, float f1, float f2, float gain) {
-    mbe_renderToneRampf(out, mp, f1, f2, gain, gain, 0);
+mbe_renderTonef(float* out, mbe_parms* mp, float f1, float f2, float gain, enum mbe_output_limit output) {
+    mbe_renderToneRampf(out, mp, f1, f2, gain, gain, 0, output);
 }
 #endif
 
@@ -1031,7 +1047,26 @@ mbe_synthesizeTonef(float* aout_buf, const char* ambe_d, mbe_parms* cur_mp) {
         return;
     }
 
-    mbe_renderTonef(aout_buf, cur_mp, freq1, freq2, mbe_toneAmplitude(mbe_tone_ambe2450_level_db(AD)));
+    mbe_renderTonef(aout_buf, cur_mp, freq1, freq2, mbe_toneAmplitude(mbe_tone_ambe2450_level_db(AD)),
+                    MBE_OUTPUT_LIMITED);
+#endif
+}
+
+void
+mbe_renderToneAmbe2450f(float* aout_buf, mbe_parms* mp, int id, int ad, enum mbe_output_limit output) {
+#ifdef DISABLE_AMBE_TONES
+    (void)mp;
+    (void)id;
+    (void)ad;
+    (void)output;
+    mbe_synthesizeSilencef(aout_buf);
+#else
+    float freq1, freq2;
+    if (!mbe_tone_lookup_freqs(id, &freq1, &freq2)) {
+        mbe_synthesizeSilencef(aout_buf);
+        return;
+    }
+    mbe_renderTonef(aout_buf, mp, freq1, freq2, mbe_toneAmplitude(mbe_tone_ambe2450_level_db(ad)), output);
 #endif
 }
 
@@ -1073,7 +1108,7 @@ mbe_renderToneDstarf(float* aout_buf, mbe_parms* mp, int index, int volume) {
         mbe_synthesizeSilencef(aout_buf);
         return;
     }
-    mbe_renderTonef(aout_buf, mp, freq1, freq2, mbe_toneAmplitude(mbe_tone_dstar_level_db(volume)));
+    mbe_renderTonef(aout_buf, mp, freq1, freq2, mbe_toneAmplitude(mbe_tone_dstar_level_db(volume)), MBE_OUTPUT_LIMITED);
 #endif
 }
 
@@ -1094,7 +1129,8 @@ mbe_renderToneDstarFromf(float* aout_buf, mbe_parms* mp, int index, int from_vol
         return;
     }
     mbe_renderToneRampf(aout_buf, mp, freq1, freq2, mbe_toneAmplitude(mbe_tone_dstar_level_db(from_volume)),
-                        mbe_toneAmplitude(mbe_tone_dstar_level_db(volume)), (ramp > 0 && ramp <= 160) ? ramp : 0);
+                        mbe_toneAmplitude(mbe_tone_dstar_level_db(volume)), (ramp > 0 && ramp <= 160) ? ramp : 0,
+                        MBE_OUTPUT_LIMITED);
 #endif
 }
 
@@ -1147,17 +1183,16 @@ mbe_should_mute_speech(const mbe_parms* cur_mp) {
     return mbe_isMaxFrameRepeat(cur_mp) || (mbe_uses_imbe_muting(cur_mp) && mbe_requiresMuting(cur_mp));
 }
 
-static void
-mbe_regenerate_harmonic_phases(const mbe_parms* cur_mp, float phi[57]) {
+void
+mbe_regenerate_phases(const float Ml[57], int L, float phi[57]) {
     const int D = MBE_PHASE_KERNEL_HALF_LEN;
-    const int L = cur_mp->L; /* Validated by the synthesis core. */
     static const float inv_odd[10] = {
         1.0f, 1.0f / 3, 1.0f / 5, 1.0f / 7, 1.0f / 9, 1.0f / 11, 1.0f / 13, 1.0f / 15, 1.0f / 17, 1.0f / 19,
     };
     float B[56 + 2 * MBE_PHASE_KERNEL_HALF_LEN + 1];
     B[D] = 0.0f;
     for (int l = 1; l <= L; ++l) {
-        B[D + l] = log2f(fmaxf(cur_mp->Ml[l], MBE_PHASE_MIN_MAGNITUDE));
+        B[D + l] = log2f(fmaxf(Ml[l], MBE_PHASE_MIN_MAGNITUDE));
     }
     /* Define the tail for all 56 phases, including harmonics fading out. */
     for (int l = L + 1; l <= 56 + D; ++l) {
@@ -1209,16 +1244,47 @@ mbe_reconcile_speech_model_lengths(mbe_parms* cur_mp, mbe_parms* prev_mp) {
     return maxl;
 }
 
+void
+mbe_set_frame_mark(mbe_parms* mp, enum mbe_frame_mark mark) {
+    mp->PHIl[0] = (float)mark;
+}
+
+enum mbe_frame_mark
+mbe_frame_mark(const mbe_parms* mp) {
+    /* Compare the stored bits: only an exact mark counts, so any other value
+     * a caller left there (NaN included, even under fast-math) means none. */
+    uint32_t bits;
+    memcpy(&bits, &mp->PHIl[0], sizeof(bits));
+    switch (bits) {
+        case UINT32_C(0x3F800000): return MBE_FRAME_MARK_PITCH_CARRIES; /* 1.0f */
+        case UINT32_C(0x40000000): return MBE_FRAME_MARK_PITCH_ABSENT;  /* 2.0f */
+        case UINT32_C(0x40400000): return MBE_FRAME_MARK_PREVIOUS_HELD; /* 3.0f */
+        case UINT32_C(0x42A00000): return MBE_FRAME_MARK_LATE_ONSET;    /* 80.0f */
+        default: return MBE_FRAME_MARK_NONE;
+    }
+}
+
+void
+mbe_set_voicing_onset_delay(mbe_parms* mp, int late) {
+    mbe_set_frame_mark(mp, late ? MBE_FRAME_MARK_LATE_ONSET : MBE_FRAME_MARK_NONE);
+}
+
+int
+mbe_voicing_onset_delay(const mbe_parms* mp) {
+    return (mbe_frame_mark(mp) == MBE_FRAME_MARK_LATE_ONSET) ? MBE_VOICING_ONSET_LATE : 0;
+}
+
 /**
- * PSIl is integrated linear phase (pulse position). PHIl is the phase at the
- * end of the frame: PSIl plus the regenerated spectral-envelope phase.
+ * PSIl is integrated linear phase (pulse position, TIA-102.BABA eq 139). PHIl
+ * is the phase at the end of the frame: PSIl plus the regenerated
+ * spectral-envelope phase.
  */
 static void
 mbe_update_speech_phases(mbe_parms* cur_mp, mbe_parms* prev_mp, int N) {
     const float cw0 = cur_mp->w0;
     const float pw0 = prev_mp->w0;
     float phi[57];
-    mbe_regenerate_harmonic_phases(cur_mp, phi);
+    mbe_regenerate_phases(cur_mp->Ml, cur_mp->L, phi); /* L validated by the synthesis core */
 
     for (int l = 1; l <= 56; l++) {
         float prev_psil_wrapped = fmodf(prev_mp->PSIl[l], MBE_TWO_PI);
@@ -1232,37 +1298,14 @@ mbe_update_speech_phases(mbe_parms* cur_mp, mbe_parms* prev_mp, int N) {
     }
 }
 
-/* Whether DVSI's amplitude law moves a harmonic from *prev to *cur: both
- * amplitudes positive and finite. The bit patterns of positive finite floats
- * are 1..0x7F7FFFFF; the test reads them from memory and compares against an
- * ordinary bound, so fast-math cannot fold it into accepting NaN (as it can
- * `x > 0.0f`; see mbe_encoder.c). */
-int
-mbe_voiced_amplitude_law_applies(const float* prev, const float* cur) {
-    uint32_t prev_bits, cur_bits;
-    memcpy(&prev_bits, prev, sizeof(prev_bits));
-    memcpy(&cur_bits, cur, sizeof(cur_bits));
-    return (prev_bits - 1u < 0x7F7FFFFFu) && (cur_bits - 1u < 0x7F7FFFFFu);
-}
-
-/* The value that moves linearly over the frame for an interpolated harmonic's
- * amplitude: the amplitude itself, or its fourth root as DVSI's decoders move
- * it (a law that applies only between positive amplitudes). */
-static float
-mbe_voiced_amplitude_coordinate(float amp, enum mbe_voiced_synthesis voiced) {
-    return (voiced == MBE_VOICED_SYNTHESIS_DVSI) ? sqrtf(sqrtf(amp)) : amp;
-}
-
 #if defined(MBE_VOICED_KERNELS)
 static void
 mbe_render_voiced_interpolated(float* aout_buf, const mbe_parms* cur_mp, const mbe_parms* prev_mp, int l, int N,
-                               float cw0, float pw0, float pw0l, enum mbe_voiced_synthesis voiced) {
+                               float cw0, float pw0, float pw0l) {
     float deltaphil = cur_mp->PHIl[l] - prev_mp->PHIl[l] - (((pw0 + cw0) * (float)(l * N)) / 2.0f);
     float deltawl = (1.0f / (float)N)
                     * (deltaphil - (2.0f * (float)M_PI * floorf((deltaphil + (float)M_PI) / (2.0f * (float)M_PI))));
-    mbe_voiced_interpolated(aout_buf, prev_mp->PHIl[l], mbe_voiced_amplitude_coordinate(prev_mp->Ml[l], voiced),
-                            mbe_voiced_amplitude_coordinate(cur_mp->Ml[l], voiced), pw0l + deltawl, cw0 - pw0, l,
-                            voiced == MBE_VOICED_SYNTHESIS_DVSI);
+    mbe_voiced_interpolated(aout_buf, prev_mp->PHIl[l], prev_mp->Ml[l], cur_mp->Ml[l], pw0l + deltawl, cw0 - pw0, l);
 }
 
 static void
@@ -1276,22 +1319,16 @@ mbe_render_voiced_windowed(float* aout_buf, const mbe_parms* cur_mp, const mbe_p
 #else
 static void
 mbe_render_voiced_interpolated(float* aout_buf, const mbe_parms* cur_mp, const mbe_parms* prev_mp, int l, int N,
-                               float cw0, float pw0, float pw0l, enum mbe_voiced_synthesis voiced) {
+                               float cw0, float pw0, float pw0l) {
     float* Ss = aout_buf;
     float deltaphil = cur_mp->PHIl[l] - prev_mp->PHIl[l] - (((pw0 + cw0) * (float)(l * N)) / 2.0f);
     float deltawl = (1.0f / (float)N)
                     * (deltaphil - (2.0f * (float)M_PI * floorf((deltaphil + (float)M_PI) / (2.0f * (float)M_PI))));
-    const float prev_amp = mbe_voiced_amplitude_coordinate(prev_mp->Ml[l], voiced);
-    const float cur_amp = mbe_voiced_amplitude_coordinate(cur_mp->Ml[l], voiced);
 
     for (int n = 0; n < N; n++) {
         float thetaln =
             prev_mp->PHIl[l] + ((pw0l + deltawl) * (float)n) + (((cw0 - pw0) * (float)(l * n * n)) / (float)(2 * N));
-        float aln = prev_amp + (((float)n / (float)N) * (cur_amp - prev_amp));
-        if (voiced == MBE_VOICED_SYNTHESIS_DVSI) {
-            const float square = aln * aln;
-            aln = square * square;
-        }
+        float aln = prev_mp->Ml[l] + (((float)n / (float)N) * (cur_mp->Ml[l] - prev_mp->Ml[l]));
         *Ss += 2.0f * aln * cosf(thetaln);
         Ss++;
     }
@@ -1348,9 +1385,10 @@ mbe_render_voiced_windowed(float* aout_buf, const mbe_parms* cur_mp, const mbe_p
 }
 #endif
 
+/* The voiced part as TIA-102.BABA renders it (the public synthesis; the codec
+ * paths render DVSI's subframes, mbe_subframe.h). */
 static void
-mbe_render_voiced_speech(float* aout_buf, const mbe_parms* cur_mp, const mbe_parms* prev_mp, int maxl, int N,
-                         enum mbe_voiced_synthesis voiced) {
+mbe_render_voiced_speech(float* aout_buf, const mbe_parms* cur_mp, const mbe_parms* prev_mp, int maxl, int N) {
     const float cw0 = cur_mp->w0;
     const float pw0 = prev_mp->w0;
 
@@ -1364,19 +1402,11 @@ mbe_render_voiced_speech(float* aout_buf, const mbe_parms* cur_mp, const mbe_par
         int prev_voiced = (prev_mp->Vl[l] == 1) && (pw0l < (float)M_PI);
 
         if (cur_voiced || prev_voiced) {
-            /* TIA-102.BABA interpolates harmonics 1..7 at steady pitch; DVSI's
-             * decoders move every harmonic between two levels that way
-             * (docs/dvsi-parity.md, "Voiced amplitude"). Fades from or to a
-             * silent model keep the specification's rendering. */
-            enum mbe_voiced_synthesis law = (voiced == MBE_VOICED_SYNTHESIS_DVSI
-                                             && mbe_voiced_amplitude_law_applies(&prev_mp->Ml[l], &cur_mp->Ml[l]))
-                                                ? MBE_VOICED_SYNTHESIS_DVSI
-                                                : MBE_VOICED_SYNTHESIS_SPEC;
-            int interpolated_harmonic = (l < 8) || (law == MBE_VOICED_SYNTHESIS_DVSI);
-            int use_interpolation =
-                interpolated_harmonic && cur_voiced && prev_voiced && (fabsf(cw0 - pw0) < (0.1f * cw0));
+            /* Phase/amplitude interpolation (Algorithms #134-138) for harmonics
+             * 1..7 at steady pitch, the windowed oscillators otherwise. */
+            int use_interpolation = (l < 8) && cur_voiced && prev_voiced && (fabsf(cw0 - pw0) < (0.1f * cw0));
             if (use_interpolation) {
-                mbe_render_voiced_interpolated(aout_buf, cur_mp, prev_mp, l, N, cw0, pw0, pw0l, law);
+                mbe_render_voiced_interpolated(aout_buf, cur_mp, prev_mp, l, N, cw0, pw0, pw0l);
             } else {
                 mbe_render_voiced_windowed(aout_buf, cur_mp, prev_mp, l, N, cw0l, pw0l, cur_voiced, prev_voiced);
             }
@@ -1391,9 +1421,76 @@ enum mbe_speech_smoothing {
     MBE_SMOOTHING_NONE,        /* frame repeat: synthesize the model unchanged */
 };
 
+/* A frame the core mutes: noise in place of speech (P25 IMBE uses the
+ * TIA-102.BABA 7.8 level, [-5, 5] on s(n); D-STAR, ProVoice and direct callers
+ * the library comfort-noise level), with the model's progression kept. On the
+ * codec paths DVSI's pulse train and noise generator also run through it, so
+ * the next audible frame continues from where they stand. */
+static void
+mbe_render_muted_frame(float* aout_buf, mbe_parms* cur_mp, const mbe_parms* prev_mp, enum mbe_mute_noise mute_noise,
+                       enum mbe_voiced_synthesis voiced, enum mbe_synthesis_start start) {
+    if (voiced == MBE_VOICED_SYNTHESIS_DVSI) {
+        mbe_advance_subframes(cur_mp, prev_mp, start == MBE_SYNTHESIS_FROM_SILENCE);
+    }
+    if (mute_noise == MBE_MUTE_NOISE_SPEC) {
+        mbe_synthesizeUniformNoisef(aout_buf, MBE_SPEC_MUTE_NOISE_AMPLITUDE * MBE_SPEECH_OUTPUT_GAIN);
+    } else {
+        mbe_synthesizeComfortNoisef(aout_buf);
+    }
+}
+
+/* The frame as TIA-102.BABA synthesizes it: s(n) before the output scale. */
+static void
+mbe_render_spec_frame(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp, int N) {
+    /* Algorithm #117: generate the unvoiced noise buffer first, preserving
+     * per-stream overlap and LCG consumption independently of voiced phase. */
+    float noise_buffer[256];
+    const int subframe_overlap = mbe_spec_frame_noise(noise_buffer, cur_mp, prev_mp);
+
+    /* eq 128 and 129: Handle different L values between frames */
+    int maxl = mbe_reconcile_speech_model_lengths(cur_mp, prev_mp);
+
+    /* Integrate pulse position and regenerate phase from the spectral envelope. */
+    mbe_update_speech_phases(cur_mp, prev_mp, N);
+
+    /* Render with the low-band roll-off and the voicing gains; both models
+     * keep their decoded amplitudes and phases. A caller may pass one model as
+     * both frames: prepare it once. */
+    struct mbe_render_saved cur_saved, prev_saved;
+    const int shared_model = prev_mp == cur_mp;
+    mbe_render_prepare(cur_mp, &cur_saved, maxl, MBE_RENDER_VOICED_GAIN);
+    if (!shared_model) {
+        mbe_render_prepare(prev_mp, &prev_saved, maxl, MBE_RENDER_VOICED_GAIN);
+    }
+
+    mbe_render_voiced_speech(aout_buf, cur_mp, prev_mp, maxl, N);
+
+    /* Unvoiced components from the same per-frame noise buffer (TIA-102.BABA
+     * equations 117-126). */
+    mbe_fft_plan* plan = mbe_get_fft_plan();
+    if (plan) {
+        mbe_synthesizeUnvoicedFFTFrom(aout_buf, cur_mp, prev_mp, plan, noise_buffer, subframe_overlap);
+    }
+
+    mbe_render_restore(cur_mp, &cur_saved);
+    if (!shared_model) {
+        mbe_render_restore(prev_mp, &prev_saved);
+    }
+}
+
+/* The way a frame's rendering starts (mbe_synthesis_start) and what replaces
+ * it if the core mutes it. */
+struct mbe_speech_options {
+    enum mbe_mute_noise mute_noise;
+    enum mbe_voiced_synthesis voiced;
+    enum mbe_amplitude_limit limit;
+    enum mbe_synthesis_start start;
+    enum mbe_output_limit output;
+};
+
 static void
 mbe_synthesizeSpeechCore(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp, enum mbe_speech_smoothing smoothing,
-                         float pre_enh_rm0, enum mbe_mute_noise mute_noise, enum mbe_voiced_synthesis voiced) {
+                         float pre_enh_rm0, const struct mbe_speech_options* options) {
 
     /* One frame length for the phase arithmetic, the window Ws and the
      * voiced kernels, which process exactly MBE_VOICED_FRAME samples. */
@@ -1411,7 +1508,7 @@ mbe_synthesizeSpeechCore(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp,
     /* TIA-102.BABA equations 111-116: advance smoothing state before the
      * mute decision so a muted frame retains its parameter progression. */
     if (smoothing == MBE_SMOOTHING_PRE_ENH_RM0) {
-        mbe_applyAdaptiveSmoothingWithRm0(cur_mp, prev_mp, pre_enh_rm0);
+        mbe_applyAdaptiveSmoothingWithRm0Limit(cur_mp, prev_mp, pre_enh_rm0, options->limit);
     } else if (smoothing == MBE_SMOOTHING_FROM_MODEL) {
         mbe_applyAdaptiveSmoothing(cur_mp, prev_mp);
     }
@@ -1419,86 +1516,66 @@ mbe_synthesizeSpeechCore(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp,
     /* The shared core checks repeat count and the IMBE error-rate threshold.
      * AMBE codec paths apply their own additional muting rules. */
     if (mbe_should_mute_speech(cur_mp)) {
-        /* Muted frames output noise while preserving model progression: P25
-         * IMBE uses the TIA-102.BABA 7.8 level ([-5, 5] on s(n)); D-STAR,
-         * ProVoice and direct callers use the library comfort-noise level. */
-        if (mute_noise == MBE_MUTE_NOISE_SPEC) {
-            mbe_synthesizeUniformNoisef(aout_buf, MBE_SPEC_MUTE_NOISE_AMPLITUDE * MBE_SPEECH_OUTPUT_GAIN);
-        } else {
-            mbe_synthesizeComfortNoisef(aout_buf);
-        }
+        mbe_render_muted_frame(aout_buf, cur_mp, prev_mp, options->mute_noise, options->voiced, options->start);
         return;
     }
 
-    /* Algorithm #117: generate the unvoiced noise buffer first, preserving
-     * per-stream overlap and LCG consumption independently of voiced phase. */
-    float noise_buffer[256];
-    mbe_generate_noise_with_overlap(noise_buffer, &cur_mp->noiseSeed, cur_mp->noiseOverlap);
-
-    /* Initialize output buffer to zero */
     memset(aout_buf, 0, N * sizeof(float));
-
-    /* eq 128 and 129: Handle different L values between frames */
-    int maxl = mbe_reconcile_speech_model_lengths(cur_mp, prev_mp);
-
-    /* Integrate pulse position and regenerate phase from the spectral envelope. */
-    mbe_update_speech_phases(cur_mp, prev_mp, N);
-
-    /* Render with the low-band roll-off and the voicing gains; both models
-     * keep their decoded amplitudes and phases. A caller may pass one model as
-     * both frames: prepare it once. */
-    struct mbe_render_saved cur_saved, prev_saved;
-    const int shared_model = prev_mp == cur_mp;
-    const float voiced_gain =
-        (voiced == MBE_VOICED_SYNTHESIS_DVSI) ? MBE_RENDER_VOICED_GAIN_DVSI : MBE_RENDER_VOICED_GAIN;
-    mbe_render_prepare(cur_mp, &cur_saved, maxl, voiced_gain);
-    if (!shared_model) {
-        mbe_render_prepare(prev_mp, &prev_saved, maxl, voiced_gain);
+    if (options->voiced == MBE_VOICED_SYNTHESIS_DVSI) {
+        /* The codec paths render the frame in DVSI's subframes. */
+        mbe_synthesize_subframes(aout_buf, cur_mp, prev_mp, mbe_get_fft_plan(), MBE_RENDER_VOICED_GAIN_DVSI,
+                                 options->start == MBE_SYNTHESIS_FROM_SILENCE);
+    } else {
+        mbe_render_spec_frame(aout_buf, cur_mp, prev_mp, N);
     }
 
-    /* Synthesize voiced components
-     * Use phase/amplitude interpolation (Algorithms #134-138) for low harmonics
-     * (every harmonic on the codec paths) when pitch is stable, otherwise use windowed
-     * oscillator approach
-     */
-    mbe_render_voiced_speech(aout_buf, cur_mp, prev_mp, maxl, N, voiced);
-
-    /* Synthesize unvoiced components from the same per-frame noise buffer
-     * (TIA-102.BABA equations 117-126). */
-    mbe_fft_plan* plan = mbe_get_fft_plan();
-    if (plan) {
-        mbe_synthesizeUnvoicedFFTWithNoise(aout_buf, cur_mp, prev_mp, plan, noise_buffer);
-    }
-
-    mbe_render_restore(cur_mp, &cur_saved);
-    if (!shared_model) {
-        mbe_render_restore(prev_mp, &prev_saved);
-    }
-
-    /* Convert s(n) to output scale, then limit overloads to 95% headroom. */
+    /* Convert s(n) to output scale, then limit overloads to 95% headroom,
+     * unless the caller mixes another signal in and limits the sum. */
     for (int i = 0; i < N; i++) {
         aout_buf[i] *= MBE_SPEECH_OUTPUT_GAIN;
     }
-    mbe_clipFloatBuffer(aout_buf, N);
+    if (options->output == MBE_OUTPUT_LIMITED) {
+        mbe_clipFloatBuffer(aout_buf, N);
+    }
+}
+
+void
+mbe_synthesizeSpeechWithPreEnhRm0Startf(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp, float rm0,
+                                        enum mbe_mute_noise mute_noise, enum mbe_voiced_synthesis voiced,
+                                        enum mbe_amplitude_limit limit, enum mbe_synthesis_start start,
+                                        enum mbe_output_limit output) {
+    const struct mbe_speech_options options = {mute_noise, voiced, limit, start, output};
+    mbe_synthesizeSpeechCore(aout_buf, cur_mp, prev_mp, MBE_SMOOTHING_PRE_ENH_RM0, rm0, &options);
 }
 
 void
 mbe_synthesizeSpeechWithPreEnhRm0f(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp, float rm0,
-                                   enum mbe_mute_noise mute_noise, enum mbe_voiced_synthesis voiced) {
-    mbe_synthesizeSpeechCore(aout_buf, cur_mp, prev_mp, MBE_SMOOTHING_PRE_ENH_RM0, rm0, mute_noise, voiced);
+                                   enum mbe_mute_noise mute_noise, enum mbe_voiced_synthesis voiced,
+                                   enum mbe_amplitude_limit limit) {
+    mbe_synthesizeSpeechWithPreEnhRm0Startf(aout_buf, cur_mp, prev_mp, rm0, mute_noise, voiced, limit,
+                                            MBE_SYNTHESIS_CONTINUES, MBE_OUTPUT_LIMITED);
+}
+
+void
+mbe_synthesizeRepeatedSpeechStartf(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp,
+                                   enum mbe_voiced_synthesis voiced, enum mbe_synthesis_start start,
+                                   enum mbe_output_limit output) {
+    /* Repeat paths, which never mute inside synthesis. */
+    const struct mbe_speech_options options = {MBE_MUTE_NOISE_SPEC, voiced, MBE_AMPLITUDE_LIMIT_SPEC, start, output};
+    mbe_synthesizeSpeechCore(aout_buf, cur_mp, prev_mp, MBE_SMOOTHING_NONE, 0.0f, &options);
 }
 
 void
 mbe_synthesizeRepeatedSpeechf(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp,
                               enum mbe_voiced_synthesis voiced) {
-    /* Repeat paths, which never mute inside synthesis. */
-    mbe_synthesizeSpeechCore(aout_buf, cur_mp, prev_mp, MBE_SMOOTHING_NONE, 0.0f, MBE_MUTE_NOISE_SPEC, voiced);
+    mbe_synthesizeRepeatedSpeechStartf(aout_buf, cur_mp, prev_mp, voiced, MBE_SYNTHESIS_CONTINUES, MBE_OUTPUT_LIMITED);
 }
 
 void
 mbe_synthesizeSpeechf(float* aout_buf, mbe_parms* cur_mp, mbe_parms* prev_mp) {
-    mbe_synthesizeSpeechCore(aout_buf, cur_mp, prev_mp, MBE_SMOOTHING_FROM_MODEL, 0.0f, MBE_MUTE_NOISE_COMFORT,
-                             MBE_VOICED_SYNTHESIS_SPEC);
+    const struct mbe_speech_options options = {MBE_MUTE_NOISE_COMFORT, MBE_VOICED_SYNTHESIS_SPEC,
+                                               MBE_AMPLITUDE_LIMIT_SPEC, MBE_SYNTHESIS_CONTINUES, MBE_OUTPUT_LIMITED};
+    mbe_synthesizeSpeechCore(aout_buf, cur_mp, prev_mp, MBE_SMOOTHING_FROM_MODEL, 0.0f, &options);
 }
 
 /**

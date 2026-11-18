@@ -21,6 +21,11 @@ try:
 except ImportError:
     from src.version import APP_VERSION, APP_VERSION_DATE
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.updater")
 
 REPO_OWNER = "owlze"
@@ -289,7 +294,7 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
     info = check_for_updates(force=True)
     download_url = tarball_url or info.get("tarball_url")
     if not download_url:
-        return False, "Не найден URL для скачивания обновления"
+        return False, _tr("updater.download_url_missing", fallback="Update download URL not found")
 
     app_root = Path("/app")
     if not (app_root / "src").exists():
@@ -337,7 +342,7 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
 
         new_src = root_extracted / "src"
         if not new_src.exists():
-            return False, "В скачанном обновлении отсутствует директория src"
+            return False, _tr("updater.missing_src_dir", fallback="Downloaded update is missing the src directory")
 
         # 4. Copy updated files to /app/src, skipping data/ directory
         for item in new_src.iterdir():
@@ -395,8 +400,8 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
 
         # Schedule restart
         schedule_restart(1.5)
-        return True, "Обновление успешно установлено! Перезапуск сервера..."
+        return True, _tr("updater.success_restarting", fallback="Update installed successfully! Restarting server...")
 
     except Exception as e:
         logger.error(f"[UPDATER] Update failed: {e}", exc_info=True)
-        return False, f"Ошибка установки обновления: {e}"
+        return False, _tr("updater.install_error", fallback="Failed to install update: {error}", error=e)

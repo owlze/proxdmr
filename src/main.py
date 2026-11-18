@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import base64
 import json
 import logging
@@ -7,13 +8,14 @@ import re
 import sys
 import time
 import socket
+import wave
 from datetime import datetime, timezone
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Response, Cookie, UploadFile, File, Form
 from starlette.websockets import WebSocketState
@@ -52,10 +54,26 @@ try:
         delete_all_recordings, get_recordings_stats,
         update_recording_transcription, get_untranscribed_recordings, RECORDINGS_DIR,
         get_user_role, set_user_role, set_user_blocked, is_user_blocked, update_user_password,
-        is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
+        is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data,
+        get_collection, set_collection_key, delete_collection_key, replace_collection,
+        get_all_collections, is_excluded_from_storage_dump
     )
     from settings_io import export_settings, import_settings, import_settings_bundle, get_export_filename, inspect_backup_archive
     from updater import check_for_updates, apply_update
+    from i18n_backend import (
+        SUPPORTED_LANGS as I18N_SUPPORTED_LANGS,
+        normalize_lang,
+        preload_locales,
+        set_request_lang,
+        reset_request_lang,
+        get_request_lang,
+        get_lang,
+        set_user_lang,
+        resolve_request_lang,
+        tr as _tr,
+        country_name as _i18n_country_name,
+        tg_special_name as _tg_special_name,
+    )
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings
     from src.dmr.homebrew import BMState
@@ -68,7 +86,7 @@ except ImportError:
     from src import visitor_stats
     from src import alerts_config
     from src.ssl_helper import ensure_ssl_certificates
-    from src.transcriber import GeminiTranscriberService
+    from src.transcriber import GeminiTranscriberService, get_tts_test_phrase
     from src.demo_mode import demo_manager, mask_hotspot_dict_for_demo, mask_hotspots_list_for_demo, mask_settings_for_demo, mask_call_entry_for_demo
     from src.version import APP_VERSION, APP_VERSION_DATE, APK_VERSION, APK_VERSION_DATE, get_apk_filename
     from src.auth import hash_password, verify_password, create_jwt, verify_jwt, validate_login, validate_password, JWT_EXPIRY_DAYS_REMEMBER, LOGIN_MIN_LENGTH, LOGIN_MAX_LENGTH
@@ -80,10 +98,26 @@ except ImportError:
         delete_all_recordings, get_recordings_stats,
         update_recording_transcription, get_untranscribed_recordings, RECORDINGS_DIR,
         get_user_role, set_user_role, set_user_blocked, is_user_blocked, update_user_password,
-        is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data
+        is_user_swl, set_user_swl, get_full_backup_data, restore_backup_data,
+        get_collection, set_collection_key, delete_collection_key, replace_collection,
+        get_all_collections, is_excluded_from_storage_dump
     )
-    from src.settings_io import export_settings, import_settings, get_export_filename, inspect_backup_archive
+    from src.settings_io import export_settings, import_settings, import_settings_bundle, get_export_filename, inspect_backup_archive
     from src.updater import check_for_updates, apply_update
+    from src.i18n_backend import (
+        SUPPORTED_LANGS as I18N_SUPPORTED_LANGS,
+        normalize_lang,
+        preload_locales,
+        set_request_lang,
+        reset_request_lang,
+        get_request_lang,
+        get_lang,
+        set_user_lang,
+        resolve_request_lang,
+        tr as _tr,
+        country_name as _i18n_country_name,
+        tg_special_name as _tg_special_name,
+    )
 
 logging.basicConfig(
     level=logging.INFO,
@@ -195,7 +229,7 @@ def _mask_bm_resp_for_demo(resp: dict, cfg: Optional[Any] = None) -> dict:
             ssid = 1
     out["device_id"] = f"1234567{ssid:02d}" if ssid > 0 else "1234567"
     if "callsign" in out:
-        out["callsign"] = "Ваш позывной"
+        out["callsign"] = _tr("demo.your_callsign", fallback="Your Callsign")
     return out
 
 async def broadcast_user_json(user_id: int, data: dict, exclude: Optional[WebSocket] = None):
@@ -470,6 +504,7 @@ async def periodic_directory_sync():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("[MAIN] Starting ProxDMR Gateway...")
+    preload_locales()
     await init_db()
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
         transcriber_service.disable_all_slots()
@@ -532,6 +567,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(dmrplus_hosts_mgr.periodic_update_loop())
         from allstar_directory import allstar_dir_mgr
         asyncio.create_task(allstar_dir_mgr.periodic_update_loop())
+        from dmr.ysf_directory import ysf_dir_mgr
+        asyncio.create_task(ysf_dir_mgr.periodic_update_loop())
     except Exception as e:
         logger.warning(f"[MAIN] Failed to start xlx_hosts background loop: {e}")
     yield
@@ -664,7 +701,7 @@ async def _revert_demo_runtime_state():
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
-    # Статические файлы не требуют ни JWT, ни обращений к БД
+    # Static files do not require JWT or DB access
     if path.startswith("/static/"):
         return await call_next(request)
 
@@ -677,8 +714,12 @@ async def auth_middleware(request: Request, call_next):
     if not token:
         token = request.query_params.get("token")
 
-    if token:
-        payload = verify_jwt(token)
+    payload = verify_jwt(token) if token else None
+    req_is_demo = bool(payload and payload.get("is_demo"))
+    req_uid_hint = payload.get("user_id") if (payload and not req_is_demo) else None
+    req_lang = resolve_request_lang(request, user_id=req_uid_hint, is_demo=req_is_demo)
+    lang_token = set_request_lang(req_lang)
+    try:
         if payload:
             if payload.get("is_demo"):
                 demo_sid = payload.get("demo_sid", "")
@@ -709,14 +750,14 @@ async def auth_middleware(request: Request, call_next):
                         return JSONResponse({
                             "status": "error",
                             "code": "DEMO_READ_ONLY",
-                            "detail": "🔒 Демо-режим: изменение настроек отключено",
-                            "message": "🔒 Демо-режим: изменение настроек отключено"
+                            "detail": _tr("auth.demo_read_only", fallback="🔒 Demo mode: changing settings is disabled"),
+                            "message": _tr("auth.demo_read_only", fallback="🔒 Demo mode: changing settings is disabled"),
                         }, status_code=403)
                     if path.startswith("/api/settings/export") or path.startswith("/api/admin/backup"):
                         return JSONResponse({
                             "status": "error",
                             "code": "DEMO_READ_ONLY",
-                            "detail": "🔒 Демо-режим: экспорт и резервные копии недоступны"
+                            "detail": _tr("auth.demo_export_disabled", fallback="🔒 Demo mode: exports and backups are unavailable"),
                         }, status_code=403)
             else:
                 uid = payload.get('user_id', 0)
@@ -724,12 +765,12 @@ async def auth_middleware(request: Request, call_next):
                 if blocked:
                     payload = None  # Treat as unauthenticated
                     if path.startswith('/api/') and path not in ('/api/auth/login',):
-                        return JSONResponse({"error": "Доступ заблокирован"}, status_code=403)
+                        return JSONResponse({"error": _tr("auth.access_blocked", fallback="Access is blocked")}, status_code=403)
                 if payload:
                     # Role is loaded from DB (cached for a few seconds) so role changes take effect quickly
                     payload["role"] = role
                     request.state.user = payload
-                    # Блокировка случайных мутирующих запросов от клиента на паузе (без разлогина!)
+                    # Block accidental mutating requests from paused session (without logout!)
                     req_cid = (request.headers.get("x-proxdmr-client-id") or "").strip()
                     cur_active_cid = active_user_client_cid.get(uid)
                     if (
@@ -745,24 +786,26 @@ async def auth_middleware(request: Request, call_next):
                             {
                                 "status": "error",
                                 "code": "SESSION_PAUSED",
-                                "detail": "Сессия приостановлена (активно другое устройство)"
+                                "detail": _tr("auth.session_paused", fallback="Session paused (another device is active)"),
                             },
                             status_code=409,
                         )
 
-    # Skip 401 check for public paths
-    if path in _AUTH_SKIP_EXACT or any(path.startswith(p) for p in _AUTH_SKIP_PREFIXES):
-        return await call_next(request)
-    # /download/recordings/* требует авторизации (проверяется в самом эндпоинте); остальные /download/* публичны (APK)
-    if path.startswith("/download/") and not path.startswith("/download/recordings/"):
-        return await call_next(request)
+        # Skip 401 check for public paths
+        if path in _AUTH_SKIP_EXACT or any(path.startswith(p) for p in _AUTH_SKIP_PREFIXES):
+            return await call_next(request)
+        # /download/recordings/* requires authorization (checked in endpoint); other /download/* are public (APK)
+        if path.startswith("/download/") and not path.startswith("/download/recordings/"):
+            return await call_next(request)
 
-    if not getattr(request.state, "user", None):
-        if path.startswith("/api/"):
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+        if not getattr(request.state, "user", None):
+            if path.startswith("/api/"):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return await call_next(request)
 
-    return await call_next(request)
+        return await call_next(request)
+    finally:
+        reset_request_lang(lang_token)
 
 
 @app.middleware("http")
@@ -849,6 +892,14 @@ async def ensure_active_user(user_id: int, login: str = "", force_reload: bool =
     if not getattr(user_app_settings, "theme", None):
         user_app_settings.theme = "dark"
 
+    try:
+        ysf_types_col = await get_collection(user_id, "ysf_room_types")
+    except Exception:
+        ysf_types_col = {}
+    if not hasattr(hotspot_manager, "user_ysf_room_types"):
+        hotspot_manager.user_ysf_room_types = {}
+    hotspot_manager.user_ysf_room_types[user_id] = dict(ysf_types_col or {})
+
     await hotspot_manager.ensure_user_runtimes(user_id, user_app_settings)
     hotspot_manager.apply_client_settings_to_runtimes(getattr(user_app_settings, "client_settings", {}) or {}, user_id=user_id)
     for hs_cfg in getattr(user_app_settings, "hotspots", []):
@@ -862,6 +913,11 @@ async def ensure_active_user(user_id: int, login: str = "", force_reload: bool =
             hotspot_manager.recorder.apply_settings(rec_s)
         _configure_transcriber_from_settings(user_app_settings)
 
+    set_user_lang(
+        user_id,
+        getattr(user_app_settings, "language", "ru"),
+        update_runtime_default=(user_id == 1),
+    )
     return user_app_settings
 
 
@@ -896,11 +952,11 @@ async def api_auth_status(request: Request):
 async def auth_register(body: AuthRegisterRequest, request: Request, response: Response):
     ip = request.client.host if request.client else "unknown"
     if _check_rate_limit(ip):
-        raise HTTPException(status_code=429, detail="Слишком много попыток. Подождите минуту")
+        raise HTTPException(status_code=429, detail=_tr("auth.rate_limit", fallback="Too many attempts. Please wait a minute"))
 
     # Open registration is completely disabled; endpoint is only permitted for initial onboarding
     if await user_count() > 0:
-        raise HTTPException(status_code=403, detail="Регистрация новых пользователей отключена. Новые аккаунты создаются администратором.")
+        raise HTTPException(status_code=403, detail=_tr("auth.registration_disabled", fallback="New user registration is disabled. New accounts are created by an administrator."))
 
     # Validate
     err = validate_login(body.login)
@@ -912,7 +968,7 @@ async def auth_register(body: AuthRegisterRequest, request: Request, response: R
 
     # Check login uniqueness
     if await login_exists(body.login):
-        raise HTTPException(status_code=409, detail="Этот логин уже занят")
+        raise HTTPException(status_code=409, detail=_tr("auth.login_taken", fallback="This username is already taken"))
 
     # Create user with clean default settings
     pw_hash = await asyncio.to_thread(hash_password, body.password)
@@ -923,8 +979,10 @@ async def auth_register(body: AuthRegisterRequest, request: Request, response: R
 
     # Apply initial onboarding configuration if provided
     settings_changed = False
-    if body.language and body.language in ("uk", "en", "de", "es", "fr", "it", "ru"):
-        user_settings.language = body.language
+    norm_reg_lang = normalize_lang(body.language)
+    if norm_reg_lang:
+        user_settings.language = norm_reg_lang
+        set_user_lang(user_id, norm_reg_lang, update_runtime_default=(user_id == 1))
         settings_changed = True
 
     hs = user_settings.get_active_hotspot()
@@ -981,7 +1039,7 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
     req_login = (body.login or "").strip()
     if req_login.lower() == demo_cfg.get("login", "demo").lower():
         if body.password != demo_cfg.get("password", "demo"):
-            raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+            raise HTTPException(status_code=401, detail=_tr("auth.invalid_credentials", fallback="Invalid username or password"))
         prev_sid = None
         old_tok = request.cookies.get("proxdmr_token")
         if old_tok:
@@ -1068,20 +1126,39 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
 
     ip = request.client.host if request.client else "unknown"
     if _check_rate_limit(ip):
-        raise HTTPException(status_code=429, detail="Слишком много попыток. Подождите минуту")
+        raise HTTPException(status_code=429, detail=_tr("auth.rate_limit", fallback="Too many attempts. Please wait a minute"))
 
     _record_attempt(ip)
 
     user = await get_user_by_login(body.login)
     if not user or not await asyncio.to_thread(verify_password, body.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+        raise HTTPException(status_code=401, detail=_tr("auth.invalid_credentials", fallback="Invalid username or password"))
 
     # Check if user is blocked
     if await is_user_blocked(user["id"]):
-        raise HTTPException(status_code=403, detail="Аккаунт заблокирован. Обратитесь к администратору.")
+        raise HTTPException(status_code=403, detail=_tr("auth.account_blocked", fallback="Account is blocked. Contact the administrator."))
 
     await update_last_login(user["id"])
-    await ensure_active_user(user["id"], user["login"])
+    user_settings_obj = await ensure_active_user(user["id"], user["login"])
+    user_rts = list(hotspot_manager.get_user_runtimes(user["id"]).values())
+    hs_collapsed_map = {
+        rt.config.id: bool(getattr(rt.config, "collapsed", False))
+        for rt in user_rts
+    }
+    bootstrap_state = {
+        "app_settings": {
+            "theme": getattr(user_settings_obj, "theme", "dark") or "dark",
+            "language": getattr(user_settings_obj, "language", "ru") or "ru",
+            "bg_type_dark": "color" if getattr(user_settings_obj, "bg_type_dark", "pattern") == "color" else "pattern",
+            "bg_color_dark": getattr(user_settings_obj, "bg_color_dark", "#0f1115") or "#0f1115",
+            "bg_type_light": "color" if getattr(user_settings_obj, "bg_type_light", "pattern") == "color" else "pattern",
+            "bg_color_light": getattr(user_settings_obj, "bg_color_light", "#f4f6f8") or "#f4f6f8",
+            "active_hotspot_id": getattr(user_settings_obj, "active_hotspot_id", "default") or "default",
+            "simultaneous_slots": getattr(user_settings_obj, "simultaneous_slots", False),
+        },
+        "client_settings": getattr(user_settings_obj, "client_settings", None) or {},
+        "hotspots_collapsed": hs_collapsed_map,
+    }
 
     role = await get_user_role(user["id"])
     max_age = (JWT_EXPIRY_DAYS_REMEMBER * 86400) if body.remember else None
@@ -1095,7 +1172,12 @@ async def auth_login(body: AuthLoginRequest, request: Request, response: Respons
         max_age=max_age,
         path="/",
     )
-    return {"status": "ok", "user": {"id": user["id"], "login": user["login"], "role": role}, "token": token}
+    return {
+        "status": "ok",
+        "user": {"id": user["id"], "login": user["login"], "role": role},
+        "token": token,
+        "bootstrap_state": bootstrap_state,
+    }
 
 
 def _collect_backup_wallpapers(users_list: list[dict]) -> tuple[dict[str, bytes], dict[str, dict[str, str]]]:
@@ -1265,16 +1347,16 @@ async def auth_import_config(
 ):
     ip = request.client.host if request.client else "unknown"
     if _check_rate_limit(ip):
-        raise HTTPException(status_code=429, detail="Слишком много попыток. Подождите минуту")
+        raise HTTPException(status_code=429, detail=_tr("auth.rate_limit", fallback="Too many attempts. Please wait a minute"))
 
     _record_attempt(ip)
 
     if not password:
-        raise HTTPException(status_code=400, detail="Пароль архива обязателен")
+        raise HTTPException(status_code=400, detail=_tr("auth.archive_password_required", fallback="Archive password is required"))
 
     archive_bytes = await file.read()
     if not archive_bytes:
-        raise HTTPException(status_code=400, detail="Файл архива пустой")
+        raise HTTPException(status_code=400, detail=_tr("auth.archive_empty", fallback="Archive file is empty"))
 
     try:
         backup_data, extra_files = import_settings_bundle(archive_bytes, password)
@@ -1311,7 +1393,7 @@ async def auth_import_config(
                 elif not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
                     raise HTTPException(
                         status_code=401,
-                        detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
+                        detail=_tr("auth.import_password_mismatch", fallback="A user with this login already exists, but the password does not match the archive password")
                     )
                 else:
                     user_id = existing_user["id"]
@@ -1341,7 +1423,7 @@ async def auth_import_config(
                 if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
                     raise HTTPException(
                         status_code=401,
-                        detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
+                        detail=_tr("auth.import_password_mismatch", fallback="A user with this login already exists, but the password does not match the archive password")
                     )
                 user_id = existing_user["id"]
             else:
@@ -1387,13 +1469,13 @@ async def auth_import_config(
             if not await asyncio.to_thread(verify_password, password, existing_user["password_hash"]):
                 raise HTTPException(
                     status_code=401,
-                    detail="Пользователь с таким логином уже существует, но пароль не совпадает с паролем архива"
+                    detail=_tr("auth.import_password_mismatch", fallback="A user with this login already exists, but the password does not match the archive password")
                 )
             user_id = existing_user["id"]
         else:
             err = validate_password(password)
             if err:
-                raise HTTPException(status_code=400, detail=f"Пароль архива не подходит для создания аккаунта: {err}")
+                raise HTTPException(status_code=400, detail=_tr("auth.archive_password_invalid_for_account", fallback="Archive password is not suitable for creating an account: {error}", error=err))
             pw_hash = await asyncio.to_thread(hash_password, password)
             user_id = await create_user(clean_login, pw_hash)
 
@@ -1429,7 +1511,7 @@ async def auth_import_config(
     logger.info(f"[AUTH] Configuration imported via login screen for user '{clean_login}' (id={user_id})")
     return {
         "status": "ok",
-        "message": "Конфигурация успешно загружена",
+        "message": _tr("auth.config_imported", fallback="Configuration imported successfully"),
         "user": {"id": user_id, "login": clean_login},
         "token": token,
         "client_storage": client_storage_to_return,
@@ -1464,16 +1546,16 @@ async def auth_logout(request: Request, response: Response):
 async def auth_delete(request: Request, response: Response):
     user = _get_user_from_request(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Не авторизован")
+        raise HTTPException(status_code=401, detail=_tr("auth.unauthorized", fallback="Unauthorized"))
     if user.get("role") == "superadmin":
-        raise HTTPException(status_code=403, detail="Удаление аккаунта суперадминистратора запрещено")
+        raise HTTPException(status_code=403, detail=_tr("auth.superadmin_delete_forbidden", fallback="Deleting the superadmin account is forbidden"))
     user_id = user["user_id"]
     login = user.get("login", "")
 
     await hotspot_manager.on_user_deleted(user_id)
     deleted = await delete_user(user_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
 
     # If any users remain, switch active runtime to the first user; otherwise clean defaults
     remaining_users = await list_users()
@@ -1494,7 +1576,7 @@ async def auth_delete(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     logger.info(f"[AUTH] User deleted: {login} (id={user_id})")
-    return {"status": "ok", "message": f"Аккаунт {login} успешно удален"}
+    return {"status": "ok", "message": _tr("auth.account_deleted", fallback="Account {login} successfully deleted", login=login)}
 
 
 class ChangePasswordRequest(BaseModel):
@@ -1507,16 +1589,16 @@ class ChangePasswordRequest(BaseModel):
 async def auth_change_password(body: ChangePasswordRequest, request: Request):
     user = _get_user_from_request(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
+        raise HTTPException(status_code=401, detail=_tr("auth.auth_required", fallback="Authentication required"))
     user_id = user["user_id"]
     db_user = await get_user_by_id(user_id)
     if not db_user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
 
     # 1. Verify current password
     is_valid = await asyncio.to_thread(verify_password, body.current_password, db_user.get("password_hash", ""))
     if not is_valid:
-        raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+        raise HTTPException(status_code=400, detail=_tr("auth.wrong_current_password", fallback="Incorrect current password"))
 
     # 2. Validate new password strength
     err = validate_password(body.new_password)
@@ -1527,11 +1609,11 @@ async def auth_change_password(body: ChangePasswordRequest, request: Request):
     pw_hash = await asyncio.to_thread(hash_password, body.new_password)
     ok = await update_user_password(user_id, pw_hash)
     if not ok:
-        raise HTTPException(status_code=500, detail="Не удалось обновить пароль")
+        raise HTTPException(status_code=500, detail=_tr("auth.password_update_failed", fallback="Failed to update password"))
 
     role = db_user.get("role", "user")
     logger.info(f"[AUTH] Password successfully changed by user '{db_user.get('login')}' (id={user_id}, role={role})")
-    return {"status": "ok", "message": "Пароль успешно изменен"}
+    return {"status": "ok", "message": _tr("auth.password_changed", fallback="Password changed successfully")}
 
 
 @app.get("/api/auth/me")
@@ -1602,7 +1684,7 @@ def _require_admin(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Unauthorized")
     role = user.get("role", "user")
     if role not in ("admin", "superadmin"):
-        raise HTTPException(status_code=403, detail="Доступ запрещён. Требуются права администратора.")
+        raise HTTPException(status_code=403, detail=_tr("admin.require_admin", fallback="Access denied. Administrator privileges required."))
     return user
 
 
@@ -1612,7 +1694,7 @@ def _require_superadmin(request: Request) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     if user.get("role") != "superadmin":
-        raise HTTPException(status_code=403, detail="Доступ запрещён. Требуются права суперадминистратора.")
+        raise HTTPException(status_code=403, detail=_tr("admin.require_superadmin", fallback="Access denied. Superadmin privileges required."))
     return user
 
 
@@ -1686,7 +1768,7 @@ class AdminAlertTestRequest(BaseModel):
 async def admin_get_alerts(request: Request):
     user = _get_user_from_request(request)
     if not user or (not user.get("is_demo") and user.get("role") not in ("admin", "superadmin")):
-        raise HTTPException(status_code=403, detail="Доступ запрещён")
+        raise HTTPException(status_code=403, detail=_tr("admin.access_denied", fallback="Access denied"))
     data_dir = BASE_DIR / "data"
     cfg = alerts_config.load_alerts_config(data_dir)
     wd = alerts_config.read_watchdog_status(data_dir)
@@ -1735,12 +1817,13 @@ async def admin_test_alert(request: Request, body: Optional[AdminAlertTestReques
         srv_prefix = alerts_config.format_server_prefix(cfg, fallback_label)
         effective_label = str(cfg.get("server_label") or "").strip() or fallback_label
         utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        t_lang = str(cfg.get("language") or "").strip() or None
         msg = (
-            f"<b>{srv_prefix} 🧪 Тестовое оповещение</b>\n\n"
-            f"Режим: <code>Direct (ProxDMR Fallback)</code>\n"
-            f"Хост: <code>{effective_label}</code>\n"
-            f"Версия ProxDMR: <code>{APP_VERSION}</code>\n"
-            f"Статус: <code>OK</code>\n\n"
+            f"<b>{srv_prefix} {_tr('alerts.test_title', lang=t_lang, fallback='🧪 Test Alert')}</b>\n\n"
+            f"{_tr('alerts.test_mode', lang=t_lang, fallback='Mode')}: <code>Direct (ProxDMR Fallback)</code>\n"
+            f"{_tr('alerts.test_host', lang=t_lang, fallback='Host')}: <code>{effective_label}</code>\n"
+            f"{_tr('alerts.test_version', lang=t_lang, fallback='ProxDMR Version')}: <code>{APP_VERSION}</code>\n"
+            f"{_tr('alerts.test_status', lang=t_lang, fallback='Status')}: <code>OK</code>\n\n"
             f"<i>⏱ {utc_now}</i>"
         )
         ok, err = alerts_config.send_telegram_direct(cfg, msg)
@@ -1761,7 +1844,7 @@ async def admin_test_alert_status(test_id: str, request: Request):
 async def admin_list_users(request: Request):
     user = _get_user_from_request(request)
     if not user or (not user.get("is_demo") and user.get("role") not in ("admin", "superadmin")):
-        raise HTTPException(status_code=403, detail="Доступ запрещён")
+        raise HTTPException(status_code=403, detail=_tr("admin.access_denied", fallback="Access denied"))
     if user.get("is_demo"):
         return {"users": [
             {"id": 101, "login": "call1", "role": "superadmin", "is_swl": False, "is_blocked": False, "created_at": 1728000000, "last_login": 1728540000},
@@ -1777,7 +1860,7 @@ async def admin_list_users(request: Request):
 async def admin_get_demo(request: Request):
     user = _get_user_from_request(request)
     if not user or (not user.get("is_demo") and user.get("role") not in ("admin", "superadmin")):
-        raise HTTPException(status_code=403, detail="Доступ запрещён")
+        raise HTTPException(status_code=403, detail=_tr("admin.access_denied", fallback="Access denied"))
     cfg = demo_manager.get_config()
     if user.get("is_demo"):
         cfg["password"] = "••••••••••••"
@@ -1814,10 +1897,10 @@ async def admin_create_user_endpoint(body: AdminCreateUserRequest, request: Requ
     if err:
         raise HTTPException(status_code=400, detail=err)
     if await login_exists(body.login):
-        raise HTTPException(status_code=409, detail="Этот логин уже занят")
+        raise HTTPException(status_code=409, detail=_tr("auth.login_taken", fallback="This username is already taken"))
     role = body.role if body.role in ("user", "admin") else "user"
     if role == "admin" and caller.get("role") != "superadmin":
-        raise HTTPException(status_code=403, detail="Только суперадмин может назначать роль администратора")
+        raise HTTPException(status_code=403, detail=_tr("admin.only_superadmin_assign_admin", fallback="Only superadmin can assign administrator role"))
     pw_hash = await asyncio.to_thread(hash_password, body.password)
     user_id = await create_user(body.login, pw_hash)
     effective_swl = False
@@ -1838,13 +1921,13 @@ class AdminUserActionRequest(BaseModel):
 async def admin_block_user(body: AdminUserActionRequest, request: Request):
     caller = _require_admin(request)
     if body.user_id == caller.get("user_id"):
-        raise HTTPException(status_code=400, detail="Нельзя заблокировать самого себя")
+        raise HTTPException(status_code=400, detail=_tr("admin.cannot_block_self", fallback="Cannot block yourself"))
     target_role = await get_user_role(body.user_id)
     if target_role == "superadmin":
-        raise HTTPException(status_code=403, detail="Нельзя заблокировать суперадмина")
+        raise HTTPException(status_code=403, detail=_tr("admin.cannot_block_superadmin", fallback="Cannot block superadmin"))
     ok = await set_user_blocked(body.user_id, True)
     if not ok:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
     return {"status": "ok"}
 
 
@@ -1853,7 +1936,7 @@ async def admin_unblock_user(body: AdminUserActionRequest, request: Request):
     _require_admin(request)
     ok = await set_user_blocked(body.user_id, False)
     if not ok:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
     return {"status": "ok"}
 
 
@@ -1861,13 +1944,13 @@ async def admin_unblock_user(body: AdminUserActionRequest, request: Request):
 async def admin_delete_user_endpoint(body: AdminUserActionRequest, request: Request):
     caller = _require_admin(request)
     if body.user_id == caller.get("user_id"):
-        raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
+        raise HTTPException(status_code=400, detail=_tr("admin.cannot_delete_self", fallback="Cannot delete yourself"))
     target_role = await get_user_role(body.user_id)
     if target_role == "superadmin":
-        raise HTTPException(status_code=403, detail="Нельзя удалить суперадмина")
+        raise HTTPException(status_code=403, detail=_tr("admin.cannot_delete_superadmin", fallback="Cannot delete superadmin"))
     ok = await delete_user(body.user_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
     logger.info(f"[ADMIN] User deleted by {caller.get('login','?')}: id={body.user_id}")
     return {"status": "ok"}
 
@@ -1881,17 +1964,17 @@ class AdminSetRoleRequest(BaseModel):
 async def admin_set_role(body: AdminSetRoleRequest, request: Request):
     caller = _require_admin(request)
     if body.user_id == caller.get("user_id"):
-        raise HTTPException(status_code=400, detail="Нельзя изменить свою собственную роль")
+        raise HTTPException(status_code=400, detail=_tr("admin.cannot_change_own_role", fallback="Cannot change your own role"))
     if caller.get("role") != "superadmin":
-        raise HTTPException(status_code=403, detail="Только суперадмин может менять роли")
+        raise HTTPException(status_code=403, detail=_tr("admin.only_superadmin_change_roles", fallback="Only superadmin can change roles"))
     if body.role not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="Допустимые роли: admin, user")
+        raise HTTPException(status_code=400, detail=_tr("admin.allowed_roles", fallback="Allowed roles: admin, user"))
     target_role = await get_user_role(body.user_id)
     if target_role == "superadmin":
-        raise HTTPException(status_code=403, detail="Нельзя изменить роль суперадмина")
+        raise HTTPException(status_code=403, detail=_tr("admin.cannot_change_superadmin_role", fallback="Cannot change superadmin role"))
     ok = await set_user_role(body.user_id, body.role)
     if not ok:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
     if body.role in ("admin", "superadmin"):
         await broadcast_user_json(body.user_id, {
             "type": "swl_change",
@@ -1910,10 +1993,10 @@ async def admin_set_swl(body: AdminSetSwlRequest, request: Request):
     caller = _require_admin(request)
     target_role = await get_user_role(body.user_id)
     if target_role in ("superadmin", "admin"):
-        raise HTTPException(status_code=400, detail="Флаг SWL доступен только для обычных пользователей")
+        raise HTTPException(status_code=400, detail=_tr("admin.swl_regular_only", fallback="SWL flag is only available for regular users"))
     ok = await set_user_swl(body.user_id, body.is_swl)
     if not ok:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
     await broadcast_user_json(body.user_id, {
         "type": "swl_change",
         "is_swl": body.is_swl
@@ -1932,14 +2015,14 @@ async def admin_reset_password(body: AdminResetPasswordRequest, request: Request
     caller = _require_admin(request)
     target_role = await get_user_role(body.user_id)
     if target_role == "superadmin" and caller.get("user_id") != body.user_id:
-        raise HTTPException(status_code=403, detail="Пароль суперадмина может сбросить только он сам")
+        raise HTTPException(status_code=403, detail=_tr("admin.superadmin_password_self_only", fallback="Only the superadmin can reset their own password"))
     err = validate_password(body.new_password)
     if err:
         raise HTTPException(status_code=400, detail=err)
     pw_hash = await asyncio.to_thread(hash_password, body.new_password)
     ok = await update_user_password(body.user_id, pw_hash)
     if not ok:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+        raise HTTPException(status_code=404, detail=_tr("auth.user_not_found", fallback="User not found"))
     logger.info(f"[ADMIN] Password reset by {caller.get('login','?')} for user id={body.user_id}")
     return {"status": "ok"}
 
@@ -1967,6 +2050,42 @@ async def save_user_settings_api(request: Request):
     return {"status": "ok"}
 
 
+async def _apply_and_save_client_settings(user_id: int, user_settings_obj: AppSettings, cs: dict) -> None:
+    if not isinstance(cs, dict):
+        return
+    if not hasattr(user_settings_obj, "client_settings") or user_settings_obj.client_settings is None:
+        user_settings_obj.client_settings = {}
+    sanitized_cs = dict(cs)
+    if isinstance(sanitized_cs.get("storage_dump"), dict):
+        sanitized_cs["storage_dump"] = {
+            k: v for k, v in sanitized_cs["storage_dump"].items()
+            if isinstance(k, str) and not is_excluded_from_storage_dump(k)
+        }
+    user_settings_obj.client_settings.update(sanitized_cs)
+    hotspot_manager.apply_client_settings_to_runtimes(sanitized_cs, user_id=user_id)
+    await save_user_settings(user_id, user_settings_obj.model_dump())
+    if user_id == 1:
+        save_app_settings(user_settings_obj)
+
+
+@app.post("/api/user/client-settings")
+async def save_user_client_settings_api(request: Request):
+    user = _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    if user.get("is_demo"):
+        return {"status": "ok", "demo": True}
+    uid = user["user_id"]
+    login = user.get("login", "")
+    body = await request.json()
+    cs = body.get("client_settings") if isinstance(body, dict) and isinstance(body.get("client_settings"), dict) else body
+    if not isinstance(cs, dict):
+        raise HTTPException(status_code=400, detail="Invalid client_settings payload")
+    user_settings_obj = await ensure_active_user(uid, login)
+    await _apply_and_save_client_settings(uid, user_settings_obj, cs)
+    return {"status": "ok"}
+
+
 class ExportSettingsPayload(BaseModel):
     password: str = ""
     client_storage: Optional[dict] = None
@@ -1978,10 +2097,10 @@ async def export_user_settings_post_api(request: Request, payload: ExportSetting
     if not user:
         raise HTTPException(status_code=401)
     if not payload.password:
-        raise HTTPException(status_code=400, detail="Введите пароль от вашего аккаунта")
+        raise HTTPException(status_code=400, detail=_tr("auth.enter_account_password", fallback="Enter your account password"))
     db_user = await get_user_by_id(user["user_id"])
     if not db_user or not await asyncio.to_thread(verify_password, payload.password, db_user.get("password_hash", "")):
-        raise HTTPException(status_code=400, detail="Неверный пароль аккаунта")
+        raise HTTPException(status_code=400, detail=_tr("auth.wrong_account_password", fallback="Invalid account password"))
 
     is_superadmin = (db_user.get("role") == "superadmin")
     srv_cfg = _collect_server_config_for_backup() if is_superadmin else {}
@@ -2019,10 +2138,10 @@ async def export_user_settings_api(request: Request, password: str = ""):
     if not user:
         raise HTTPException(status_code=401)
     if not password:
-        raise HTTPException(status_code=400, detail="Введите пароль от вашего аккаунта")
+        raise HTTPException(status_code=400, detail=_tr("auth.enter_account_password", fallback="Enter your account password"))
     db_user = await get_user_by_id(user["user_id"])
     if not db_user or not await asyncio.to_thread(verify_password, password, db_user.get("password_hash", "")):
-        raise HTTPException(status_code=400, detail="Неверный пароль аккаунта")
+        raise HTTPException(status_code=400, detail=_tr("auth.wrong_account_password", fallback="Invalid account password"))
 
     is_superadmin = (db_user.get("role") == "superadmin")
     srv_cfg = _collect_server_config_for_backup() if is_superadmin else {}
@@ -2064,10 +2183,10 @@ async def inspect_backup_api(
     if not user:
         raise HTTPException(status_code=401)
     if not password:
-        raise HTTPException(status_code=400, detail="Пароль архива обязателен")
+        raise HTTPException(status_code=400, detail=_tr("auth.archive_password_required", fallback="Archive password is required"))
     archive_bytes = await file.read()
     if not archive_bytes:
-        raise HTTPException(status_code=400, detail="Файл архива пустой")
+        raise HTTPException(status_code=400, detail=_tr("auth.archive_empty", fallback="Archive file is empty"))
     try:
         info = inspect_backup_archive(archive_bytes, password)
         info["current_user_role"] = await get_user_role(user["user_id"])
@@ -2133,7 +2252,7 @@ async def import_user_settings_api(
 
     return {
         "status": "ok",
-        "message": "Настройки импортированы",
+        "message": _tr("settings.imported", fallback="Settings imported"),
         "client_storage": result.get("client_storage", {}),
         "restored_users_count": result.get("restored_users_count", 1),
         "restored_user_id": result.get("restored_user_id", user["user_id"]),
@@ -2289,24 +2408,28 @@ async def get_index(request: Request):
         language = s.language
         simultaneous_slots = getattr(s, "simultaneous_slots", False)
         check_mic_on_tx = getattr(s, "check_mic_on_tx", True)
+        single_hotspot_audio = getattr(s, "single_hotspot_audio", False)
         qrz_com_username = getattr(s, "qrz_com_username", "") or ""
         qrz_com_password = getattr(s, "qrz_com_password", "") or ""
         hamqth_username = getattr(s, "hamqth_username", "") or ""
         hamqth_password = getattr(s, "hamqth_password", "") or ""
         disable_update_notifications = bool(getattr(s, "disable_update_notifications", False))
+        enable_network_colors = bool(getattr(s, "enable_network_colors", True))
+        network_brand_colors = getattr(s, "network_brand_colors", {}) or {}
 
         if user and user.get("is_demo"):
-            qrz_com_username = "Your CALL"
+            demo_call = _tr("demo.your_callsign", fallback="Your Callsign")
+            qrz_com_username = demo_call
             qrz_com_password = "••••••••••••"
-            hamqth_username = "Your CALL"
+            hamqth_username = demo_call
             hamqth_password = "••••••••••••"
-            callsign = "Ваш позывной"
+            callsign = demo_call
             dmr_id = 1234567
             if cfg:
                 cfg = cfg.model_copy(update={
-                    "callsign": "Ваш позывной",
+                    "callsign": demo_call,
                     "dmr_id": 1234567,
-                    "talker_alias": "Your Name" if getattr(cfg, "talker_alias", "") else "",
+                    "talker_alias": _tr("demo.your_name", fallback="Your Name") if getattr(cfg, "talker_alias", "") else "",
                     "bm_password": "••••••••••••" if getattr(cfg, "bm_password", "") else "",
                     "bm_api_key": "••••••••••••••••" if getattr(cfg, "bm_api_key", "") else "",
                 })
@@ -2362,11 +2485,14 @@ async def get_index(request: Request):
         language = "ru"
         simultaneous_slots = False
         check_mic_on_tx = True
+        single_hotspot_audio = False
         qrz_com_username = ""
         qrz_com_password = ""
         hamqth_username = ""
         hamqth_password = ""
         disable_update_notifications = False
+        enable_network_colors = True
+        network_brand_colors = {}
 
     uc = await user_count()
     is_first_run = (uc == 0)
@@ -2405,11 +2531,14 @@ async def get_index(request: Request):
             "language": language,
             "simultaneous_slots": simultaneous_slots,
             "check_mic_on_tx": check_mic_on_tx,
+            "single_hotspot_audio": single_hotspot_audio,
             "qrz_com_username": qrz_com_username,
             "qrz_com_password": qrz_com_password,
             "hamqth_username": hamqth_username,
             "hamqth_password": hamqth_password,
             "disable_update_notifications": True if (user and user.get("is_demo")) else disable_update_notifications,
+            "enable_network_colors": enable_network_colors,
+            "network_brand_colors": network_brand_colors,
             "is_demo": bool(user and user.get("is_demo")),
             "app_version": APP_VERSION,
             "app_version_date": APP_VERSION_DATE,
@@ -2447,6 +2576,21 @@ async def list_hotspots(request: Request):
     act_hid = getattr(user_sett, "active_hotspot_id", "default")
     if is_demo_req and rt_list and all(rt.config.id != act_hid for rt in rt_list):
         act_hid = rt_list[0].config.id
+    if any(
+        (getattr(rt.config, "network_type", "") or "").strip().lower() == "adn"
+        and not getattr(rt.config, "hidden", False)
+        and (not getattr(rt.config, "collapsed", False) or rt.config.id == act_hid)
+        for rt in rt_list
+    ):
+        adn_hosts_mgr.ensure_fresh_background()
+        tg_resolver.ensure_adn_fresh_background()
+    if any(
+        (getattr(rt.config, "network_type", "") or "").strip().lower() == "dmrplus"
+        and not getattr(rt.config, "hidden", False)
+        and (not getattr(rt.config, "collapsed", False) or rt.config.id == act_hid)
+        for rt in rt_list
+    ):
+        dmrplus_hosts_mgr.ensure_fresh_background()
     return {
         "active_hotspot_id": act_hid,
         "hotspots": [
@@ -2463,18 +2607,18 @@ async def create_hotspot(cfg: HotspotConfig, request: Request):
         await ensure_active_user(uid, user.get("login", ""))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     if len(user_sett.hotspots) >= 30:
-        raise HTTPException(status_code=400, detail="Максимум 30 виртуальных хотспотов")
+        raise HTTPException(status_code=400, detail=_tr("hotspots.max_total", fallback="Maximum 30 virtual hotspots"))
     active_count = len([h for h in user_sett.hotspots if not getattr(h, "hidden", False)])
     if not getattr(cfg, "hidden", False) and active_count >= 7:
-        raise HTTPException(status_code=400, detail="Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов")
-    if getattr(cfg, "network_type", "bm") != "allstar":
+        raise HTTPException(status_code=400, detail=_tr("hotspots.max_active", fallback="Maximum 7 active hotspots in workspace. Exclude one of the active hotspots first"))
+    if (getattr(cfg, "network_type", "bm") or "bm").lower() not in ("allstar", "ysf"):
         if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
-            raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
+            raise HTTPException(status_code=400, detail=_tr("hotspots.ssid_range", fallback="SSID must be between 1 and 99"))
         for h in user_sett.hotspots:
             if h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"SSID {cfg.bm_ssid} уже используется для DMR ID {cfg.dmr_id} в этой сети. Выберите другой SSID (например, {cfg.bm_ssid + 1})"
+                    detail=_tr("hotspots.ssid_in_use_suggest", fallback="SSID {ssid} is already in use for DMR ID {dmr_id} on this network. Choose another SSID (e.g. {next_ssid})", ssid=cfg.bm_ssid, dmr_id=cfg.dmr_id, next_ssid=cfg.bm_ssid + 1)
                 )
     rt = hotspot_manager.create_hotspot(cfg, user_id=uid)
     await save_user_settings(uid, user_sett.model_dump())
@@ -2493,7 +2637,7 @@ async def reorder_hotspots_api(body: HotspotsReorderRequest, request: Request):
         await ensure_active_user(uid, user.get("login", ""))
     success = hotspot_manager.reorder_hotspots(body.order, user_id=uid)
     if not success:
-        raise HTTPException(status_code=400, detail="Ошибка изменения порядка хотспотов")
+        raise HTTPException(status_code=400, detail=_tr("hotspots.reorder_error", fallback="Failed to reorder hotspots"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2512,9 +2656,9 @@ async def update_hotspot(hotspot_id: str, cfg: HotspotConfig, request: Request, 
     if user:
         await ensure_active_user(uid, user.get("login", ""))
     cfg.id = hotspot_id
-    if getattr(cfg, "network_type", "bm") != "allstar":
+    if (getattr(cfg, "network_type", "bm") or "bm").lower() not in ("allstar", "ysf"):
         if cfg.bm_ssid < 1 or cfg.bm_ssid > 99:
-            raise HTTPException(status_code=400, detail="SSID должен быть в диапазоне от 1 до 99")
+            raise HTTPException(status_code=400, detail=_tr("hotspots.ssid_range", fallback="SSID must be between 1 and 99"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     is_now_hidden = getattr(cfg, "hidden", False)
     cur_hs = next((h for h in user_sett.hotspots if h.id == hotspot_id), None)
@@ -2522,20 +2666,20 @@ async def update_hotspot(hotspot_id: str, cfg: HotspotConfig, request: Request, 
     if was_hidden and not is_now_hidden:
         active_count = len([h for h in user_sett.hotspots if not getattr(h, "hidden", False) and h.id != hotspot_id])
         if active_count >= 7:
-            raise HTTPException(status_code=400, detail="Максимум 7 активных хотспотов в рабочем пространстве. Сначала исключите один из активных хотспотов")
+            raise HTTPException(status_code=400, detail=_tr("hotspots.max_active", fallback="Maximum 7 active hotspots in workspace. Exclude one of the active hotspots first"))
     if is_now_hidden and getattr(user_sett, "active_hotspot_id", "") == hotspot_id:
         visible_hs = [h for h in user_sett.hotspots if not getattr(h, "hidden", False) and h.id != hotspot_id]
         if visible_hs:
             user_sett.active_hotspot_id = visible_hs[0].id
     for h in user_sett.hotspots:
-        if getattr(cfg, "network_type", "bm") != "allstar" and h.id != hotspot_id and h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
+        if (getattr(cfg, "network_type", "bm") or "bm").lower() not in ("allstar", "ysf") and h.id != hotspot_id and h.dmr_id == cfg.dmr_id and h.bm_ssid == cfg.bm_ssid and getattr(h, "network_type", "bm") == getattr(cfg, "network_type", "bm"):
             raise HTTPException(
                 status_code=400,
-                detail=f"SSID {cfg.bm_ssid} уже занят другим хотспотом с таким же DMR ID в этой сети. Выберите свободный SSID"
+                detail=_tr("hotspots.ssid_taken", fallback="SSID {ssid} is already taken by another hotspot with the same DMR ID on this network. Choose a free SSID", ssid=cfg.bm_ssid)
             )
     rt = await hotspot_manager.update_hotspot(cfg, auto_connect=True if reconnect else None, user_id=uid)
     if not rt:
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
         save_app_settings(user_sett)
@@ -2562,7 +2706,7 @@ async def update_hotspot_rpto(hotspot_id: str, body: HotspotRptoUpdate, request:
         user_id=uid,
     )
     if not res:
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2580,7 +2724,7 @@ async def toggle_hotspot_auto_tg_bm(hotspot_id: str, body: HotspotAutoTgBmUpdate
         await ensure_active_user(uid, user.get("login", ""))
     success = await hotspot_manager.set_hotspot_auto_tg_bm(hotspot_id, body.enabled, user_id=uid)
     if not success:
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2598,7 +2742,7 @@ async def toggle_hotspot_auto_record(hotspot_id: str, body: HotspotAutoRecordUpd
         await ensure_active_user(uid, user.get("login", ""))
     success = await hotspot_manager.set_hotspot_auto_record(hotspot_id, body.enabled, user_id=uid)
     if not success:
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2616,7 +2760,7 @@ async def toggle_hotspot_autoconnect(hotspot_id: str, body: HotspotAutoconnectUp
         await ensure_active_user(uid, user.get("login", ""))
     success = await hotspot_manager.set_hotspot_autoconnect(hotspot_id, body.enabled, user_id=uid)
     if not success:
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2629,9 +2773,12 @@ async def delete_hotspot(hotspot_id: str, request: Request):
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
+    user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    if len(getattr(user_sett, "hotspots", []) or []) <= 1:
+        raise HTTPException(status_code=400, detail=_tr("hotspots.cannot_delete_last", fallback="Cannot delete the only remaining hotspot"))
     success = await hotspot_manager.delete_hotspot(hotspot_id, user_id=uid)
     if not success:
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
     user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
     await save_user_settings(uid, user_sett.model_dump())
     if uid == 1:
@@ -2651,6 +2798,7 @@ class GeneralSettingsUpdate(BaseModel):
     language: Optional[str] = None
     simultaneous_slots: Optional[bool] = None
     check_mic_on_tx: Optional[bool] = None
+    single_hotspot_audio: Optional[bool] = None
     mute_on_ptt: Optional[bool] = None
     volume_down_ptt: Optional[bool] = None
     volume_up_ptt: Optional[bool] = None
@@ -2665,6 +2813,8 @@ class GeneralSettingsUpdate(BaseModel):
     hamqth_username: Optional[str] = None
     hamqth_password: Optional[str] = None
     disable_update_notifications: Optional[bool] = None
+    enable_network_colors: Optional[bool] = None
+    network_brand_colors: Optional[Dict[str, Any]] = None
 
 @app.get("/api/settings/general")
 async def get_general_settings(request: Request):
@@ -2686,6 +2836,7 @@ async def get_general_settings(request: Request):
             "language": s.language,
             "simultaneous_slots": s.simultaneous_slots,
             "check_mic_on_tx": getattr(s, "check_mic_on_tx", True),
+            "single_hotspot_audio": getattr(s, "single_hotspot_audio", False),
             "mute_on_ptt": s.mute_on_ptt,
             "volume_down_ptt": v_ptt,
             "volume_up_ptt": v_ptt,
@@ -2700,6 +2851,8 @@ async def get_general_settings(request: Request):
             "hamqth_username": ("Your CALL" if (user and user.get("is_demo")) else (getattr(s, "hamqth_username", "") or "")),
             "hamqth_password": ("••••••••••••" if (user and user.get("is_demo")) else (getattr(s, "hamqth_password", "") or "")),
             "disable_update_notifications": getattr(s, "disable_update_notifications", False),
+            "enable_network_colors": getattr(s, "enable_network_colors", True),
+            "network_brand_colors": getattr(s, "network_brand_colors", {}) or {},
         }
     }
 
@@ -2757,10 +2910,13 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
             "bg_type_light": getattr(s, "bg_type_light", "pattern"),
             "bg_color_light": getattr(s, "bg_color_light", "#f4f6f8"),
         })
-    if update.language is not None and update.language != s.language:
-        s.language = update.language
-        changed = True
-        await broadcast_user_json(uid, {"type": "language_change", "language": s.language})
+    if update.language is not None:
+        norm_upd_lang = normalize_lang(update.language)
+        if norm_upd_lang and norm_upd_lang != s.language:
+            s.language = norm_upd_lang
+            set_user_lang(uid, s.language, update_runtime_default=(uid == 1))
+            changed = True
+            await broadcast_user_json(uid, {"type": "language_change", "language": s.language})
     if update.simultaneous_slots is not None and update.simultaneous_slots != s.simultaneous_slots:
         s.simultaneous_slots = update.simultaneous_slots
         changed = True
@@ -2769,6 +2925,10 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         s.check_mic_on_tx = update.check_mic_on_tx
         changed = True
         await broadcast_user_json(uid, {"type": "check_mic_on_tx_change", "enabled": s.check_mic_on_tx})
+    if update.single_hotspot_audio is not None and update.single_hotspot_audio != getattr(s, "single_hotspot_audio", False):
+        s.single_hotspot_audio = update.single_hotspot_audio
+        changed = True
+        await broadcast_user_json(uid, {"type": "single_hotspot_audio_change", "enabled": s.single_hotspot_audio})
     if update.mute_on_ptt is not None and update.mute_on_ptt != s.mute_on_ptt:
         s.mute_on_ptt = update.mute_on_ptt
         changed = True
@@ -2805,15 +2965,17 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         await broadcast_user_json(uid, {"type": "loopback_change", "enabled": s.loopback_mode})
     if update.quick_mem is not None:
         s.quick_mem = update.quick_mem
+        await replace_collection(uid, "quick_mem", update.quick_mem if isinstance(update.quick_mem, dict) else {})
         changed = True
         await broadcast_user_json(uid, {"type": "quick_mem_change", "all_quick_mem": s.quick_mem})
-    if update.qrz_com_username is not None and update.qrz_com_username not in ("Your CALL", "Ваш позывной") and update.qrz_com_username != getattr(s, "qrz_com_username", ""):
+    demo_call_mask = _tr("demo.your_callsign", fallback="Your Callsign")
+    if update.qrz_com_username is not None and update.qrz_com_username not in ("Your CALL", "Ваш позывной", "Your Callsign", demo_call_mask) and update.qrz_com_username != getattr(s, "qrz_com_username", ""):
         s.qrz_com_username = update.qrz_com_username.strip()
         changed = True
     if update.qrz_com_password is not None and update.qrz_com_password != "••••••••••••" and update.qrz_com_password != getattr(s, "qrz_com_password", ""):
         s.qrz_com_password = update.qrz_com_password.strip()
         changed = True
-    if update.hamqth_username is not None and update.hamqth_username not in ("Your CALL", "Ваш позывной") and update.hamqth_username != getattr(s, "hamqth_username", ""):
+    if update.hamqth_username is not None and update.hamqth_username not in ("Your CALL", "Ваш позывной", "Your Callsign", demo_call_mask) and update.hamqth_username != getattr(s, "hamqth_username", ""):
         s.hamqth_username = update.hamqth_username.strip()
         changed = True
     if update.hamqth_password is not None and update.hamqth_password != "••••••••••••" and update.hamqth_password != getattr(s, "hamqth_password", ""):
@@ -2821,6 +2983,17 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         changed = True
     if update.disable_update_notifications is not None and update.disable_update_notifications != getattr(s, "disable_update_notifications", False):
         s.disable_update_notifications = bool(update.disable_update_notifications)
+        changed = True
+
+    if update.enable_network_colors is not None and update.enable_network_colors != getattr(s, "enable_network_colors", True):
+        s.enable_network_colors = bool(update.enable_network_colors)
+        changed = True
+
+    if update.network_brand_colors is not None and isinstance(update.network_brand_colors, dict):
+        cur_colors = getattr(s, "network_brand_colors", {}) or {}
+        merged_colors = dict(cur_colors)
+        merged_colors.update(update.network_brand_colors)
+        s.network_brand_colors = merged_colors
         changed = True
 
     if changed:
@@ -2850,6 +3023,134 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         }
     }
 
+SUPPORTED_CONTACT_NETS = ("bm", "adn", "freedmr", "tgif", "dmrplus", "xlx", "ysf", "allstar", "custom")
+_LEGACY_BM_FOLDER_IDS = {"fav_root", "groups_root", "tg_fed", "tg_reg", "repeaters_root", "people_root"}
+
+def _infer_node_network(node: Dict[str, Any], inherited_net: Optional[str] = None) -> str:
+    raw_net = str(node.get("network_type") or "").strip().lower()
+    if raw_net in SUPPORTED_CONTACT_NETS:
+        return raw_net
+    n_type = str(node.get("type") or "").strip().lower()
+    if n_type in ("allstar_node", "asl_macro"):
+        return "allstar"
+    if str(node.get("id") or "") in _LEGACY_BM_FOLDER_IDS:
+        return "bm"
+    if n_type == "folder":
+        children = node.get("children") or []
+        child_nets = {
+            str(ch.get("network_type") or "").strip().lower()
+            for ch in children
+            if isinstance(ch, dict) and str(ch.get("network_type") or "").strip().lower() in SUPPORTED_CONTACT_NETS
+        }
+        if len(child_nets) == 1:
+            return next(iter(child_nets))
+    if inherited_net in SUPPORTED_CONTACT_NETS:
+        return inherited_net
+    return "bm"
+
+def _normalize_contacts_tree_networks(tree: Any) -> List[Dict[str, Any]]:
+    if not isinstance(tree, list):
+        return []
+
+    def _walk(nodes: List[Any], inherited_net: Optional[str] = None) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for raw in nodes:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            net = _infer_node_network(item, inherited_net)
+            item["network_type"] = net
+            if item.get("type") == "folder":
+                item["children"] = _walk(item.get("children") or [], net)
+            out.append(item)
+        return out
+
+    return _walk(tree, None)
+
+def _partition_contacts_by_network(tree: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    books: Dict[str, List[Dict[str, Any]]] = {net: [] for net in SUPPORTED_CONTACT_NETS}
+
+    def _filter_for_net(nodes: List[Dict[str, Any]], net: str) -> List[Dict[str, Any]]:
+        res: List[Dict[str, Any]] = []
+        for n in nodes:
+            n_net = str(n.get("network_type") or "bm").strip().lower()
+            if n_net != net:
+                continue
+            copy_n = dict(n)
+            if copy_n.get("type") == "folder":
+                copy_n["children"] = _filter_for_net(copy_n.get("children") or [], net)
+            res.append(copy_n)
+        return res
+
+    for net in SUPPORTED_CONTACT_NETS:
+        books[net] = _filter_for_net(tree, net)
+    return books
+
+def _collect_user_entries_by_callsign(tree: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    by_call: Dict[str, List[Dict[str, Any]]] = {}
+
+    def _walk(nodes: List[Dict[str, Any]]) -> None:
+        for n in nodes:
+            if not isinstance(n, dict):
+                continue
+            if n.get("type") == "folder":
+                _walk(n.get("children") or [])
+                continue
+            cs = str(n.get("callsign") or "").strip().upper()
+            if cs:
+                ids = n.get("identities") if isinstance(n.get("identities"), dict) else {}
+                net = str(n.get("network_type") or "bm").strip().lower()
+                by_call.setdefault(cs, []).append({
+                    "node_id": n.get("id") or "",
+                    "network_type": net,
+                    "type": n.get("type") or "person",
+                    "name": n.get("name") or cs,
+                    "dmr_id": n.get("dmr_id") or ids.get("dmr_id") or None,
+                    "allstar_node": n.get("node_number") or n.get("allstar_node") or ids.get("allstar_node") or "",
+                    "echolink_node": n.get("echolink_node") or ids.get("echolink_node") or "",
+                    "tg": n.get("tg") or None,
+                    "city": n.get("city") or "",
+                    "comment": n.get("comment") or "",
+                })
+
+    _walk(tree)
+    return by_call
+
+def _lookup_cross_callsign_entry(cs: str, user_entries: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    clean_cs = str(cs or "").strip().upper()
+    if not clean_cs:
+        return {"callsign": "", "user_networks": [], "radioid_dmr": [], "allstar_nodes": [], "echolink_nodes": []}
+
+    radioid_dmr = user_db.get_users_by_callsign(clean_cs)
+    try:
+        from allstar_directory import allstar_dir_mgr
+    except ImportError:
+        from src.allstar_directory import allstar_dir_mgr
+    allstar_nodes = allstar_dir_mgr.get_nodes_by_callsign(clean_cs)
+
+    echo_seen = set()
+    echolink_nodes: List[str] = []
+    for ent in (user_entries or []):
+        el = str(ent.get("echolink_node") or "").strip()
+        if el and el not in echo_seen:
+            echo_seen.add(el)
+            echolink_nodes.append(el)
+
+    return {
+        "callsign": clean_cs,
+        "user_networks": list(user_entries or []),
+        "radioid_dmr": radioid_dmr,
+        "allstar_nodes": allstar_nodes,
+        "echolink_nodes": echolink_nodes,
+    }
+
+def _build_cross_callsign_index_sync(tree: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    by_call = _collect_user_entries_by_callsign(tree)
+    index: Dict[str, Dict[str, Any]] = {}
+    for cs, entries in by_call.items():
+        index[cs] = _lookup_cross_callsign_entry(cs, entries)
+    return index
+
 class ContactsUpdate(BaseModel):
     contacts: Optional[List[Dict[str, Any]]] = None
     gateway: Optional[Dict[str, Any]] = None
@@ -2861,22 +3162,49 @@ async def get_contacts(request: Request):
         return {
             "status": "ok",
             "contacts": [],
+            "books": {net: [] for net in SUPPORTED_CONTACT_NETS},
+            "cross_callsigns": {},
             "gateway": {"hotspot_id": "default", "slot": 2}
         }
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
-    login = user.get("login", "") if user else ""
-    s = await ensure_active_user(uid, login)
-    gw = getattr(s, "contacts_gateway", None) or {"hotspot_id": "default", "slot": 2}
-    valid_ids = [h.id for h in hotspot_manager.settings.hotspots]
+    contacts_col = await get_collection(uid, "contacts")
+    stored_tree = contacts_col.get("tree")
+    stored_gw = contacts_col.get("gateway")
+
+    # Fallback to legacy AppSettings if not yet in collections
+    if stored_tree is None:
+        login = user.get("login", "") if user else ""
+        s = await ensure_active_user(uid, login)
+        stored_tree = getattr(s, "contacts", []) or []
+        stored_gw = getattr(s, "contacts_gateway", None) or {"hotspot_id": "default", "slot": 2}
+        if stored_tree or stored_gw:
+            await set_collection_key(uid, "contacts", "tree", stored_tree)
+            await set_collection_key(uid, "contacts", "gateway", stored_gw)
+
+    normalized_tree = _normalize_contacts_tree_networks(stored_tree)
+    books = _partition_contacts_by_network(normalized_tree)
+    cross_index = await asyncio.to_thread(_build_cross_callsign_index_sync, normalized_tree)
+
+    if contacts_col.get("trees_by_net") is None or contacts_col.get("cross_callsigns") is None:
+        try:
+            await set_collection_key(uid, "contacts", "tree", normalized_tree)
+            await set_collection_key(uid, "contacts", "trees_by_net", books)
+            await set_collection_key(uid, "contacts", "cross_callsigns", cross_index)
+        except Exception:
+            pass
+
+    gw = stored_gw or {"hotspot_id": "default", "slot": 2}
+    bm_ids = [h.id for h in hotspot_manager.settings.hotspots if (getattr(h, "network_type", "bm") or "bm").lower() == "bm"]
+    valid_ids = bm_ids or [h.id for h in hotspot_manager.settings.hotspots]
     if valid_ids and gw.get("hotspot_id") not in valid_ids:
         gw["hotspot_id"] = valid_ids[0]
-        s.contacts_gateway = gw
-        await save_user_settings(uid, s.model_dump())
-        if uid == 1:
-            save_app_settings(s)
+        await set_collection_key(uid, "contacts", "gateway", gw)
+
     return {
         "status": "ok",
-        "contacts": getattr(s, "contacts", []) or [],
+        "contacts": normalized_tree,
+        "books": books,
+        "cross_callsigns": cross_index,
         "gateway": gw
     }
 
@@ -2884,24 +3212,275 @@ async def get_contacts(request: Request):
 async def save_contacts(update: ContactsUpdate, request: Request):
     user = _get_user_from_request(request)
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user and user.get("is_demo"):
+        norm_demo = _normalize_contacts_tree_networks(update.contacts if update.contacts is not None else [])
+        return {
+            "status": "ok",
+            "contacts": norm_demo,
+            "books": _partition_contacts_by_network(norm_demo),
+            "cross_callsigns": {},
+            "gateway": update.gateway or {"hotspot_id": "default", "slot": 2}
+        }
+    if update.contacts is not None:
+        normalized_tree = _normalize_contacts_tree_networks(update.contacts)
+        books = _partition_contacts_by_network(normalized_tree)
+        cross_index = await asyncio.to_thread(_build_cross_callsign_index_sync, normalized_tree)
+        await set_collection_key(uid, "contacts", "tree", normalized_tree)
+        await set_collection_key(uid, "contacts", "trees_by_net", books)
+        await set_collection_key(uid, "contacts", "cross_callsigns", cross_index)
+    if update.gateway is not None:
+        await set_collection_key(uid, "contacts", "gateway", update.gateway)
+
+    contacts_col = await get_collection(uid, "contacts")
+    current_tree = _normalize_contacts_tree_networks(contacts_col.get("tree", []))
+    current_books = contacts_col.get("trees_by_net") or _partition_contacts_by_network(current_tree)
+    current_cross = contacts_col.get("cross_callsigns")
+    if current_cross is None:
+        current_cross = await asyncio.to_thread(_build_cross_callsign_index_sync, current_tree)
+    current_gw = contacts_col.get("gateway", {"hotspot_id": "default", "slot": 2})
+
+    # Also mirror into user_settings for backwards compatibility with legacy readers
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
-    changed = False
-    if update.contacts is not None:
-        s.contacts = update.contacts
-        changed = True
-    if update.gateway is not None:
-        s.contacts_gateway = update.gateway
-        changed = True
-    if changed:
-        await save_user_settings(uid, s.model_dump())
-        if uid == 1:
-            save_app_settings(s)
+    s.contacts = current_tree if isinstance(current_tree, list) else []
+    s.contacts_gateway = current_gw if isinstance(current_gw, dict) else {"hotspot_id": "default", "slot": 2}
+    await save_user_settings(uid, s.model_dump())
+    if uid == 1:
+        save_app_settings(s)
+
+    await broadcast_user_json(uid, {
+        "type": "contacts_change",
+        "contacts": current_tree,
+        "books": current_books,
+        "cross_callsigns": current_cross,
+        "gateway": current_gw
+    })
+
     return {
         "status": "ok",
-        "contacts": getattr(s, "contacts", []) or [],
-        "gateway": getattr(s, "contacts_gateway", {"hotspot_id": "default", "slot": 2}) or {"hotspot_id": "default", "slot": 2}
+        "contacts": current_tree,
+        "books": current_books,
+        "cross_callsigns": current_cross,
+        "gateway": current_gw
     }
+
+@app.get("/api/contacts/cross-callsign")
+async def get_cross_callsign_info(callsign: str = "", request: Request = None):
+    """Queries cross-network databases (RadioID DMR, AllStarLink directory, and user phonebooks across networks) for one callsign."""
+    cs = str(callsign or "").strip().upper()
+    if not cs or len(cs) < 2:
+        return {
+            "status": "ok",
+            "data": {"callsign": cs, "user_networks": [], "radioid_dmr": [], "allstar_nodes": [], "echolink_nodes": []}
+        }
+    user = _get_user_from_request(request) if request else None
+    user_entries: List[Dict[str, Any]] = []
+    if user and not user.get("is_demo"):
+        uid = user["user_id"]
+        contacts_col = await get_collection(uid, "contacts")
+        raw_tree = _normalize_contacts_tree_networks(contacts_col.get("tree") or [])
+        by_call = _collect_user_entries_by_callsign(raw_tree)
+        user_entries = by_call.get(cs, [])
+    elif not user:
+        uid = hotspot_manager.active_user_id or 1
+        contacts_col = await get_collection(uid, "contacts")
+        raw_tree = _normalize_contacts_tree_networks(contacts_col.get("tree") or [])
+        by_call = _collect_user_entries_by_callsign(raw_tree)
+        user_entries = by_call.get(cs, [])
+
+    entry = await asyncio.to_thread(_lookup_cross_callsign_entry, cs, user_entries)
+    return {"status": "ok", "data": entry}
+
+class YsfFavoritesUpdate(BaseModel):
+    favorites: List[Dict[str, Any]] = Field(default_factory=list)
+
+def _sanitize_ysf_favorites(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalizes user's YSF favorites: keeps order, drops duplicates (by room id) and junk, caps size."""
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for item in (raw or []):
+        if not isinstance(item, dict):
+            continue
+        rid = str(item.get("id", "")).strip()
+        if not rid or rid in seen:
+            continue
+        seen.add(rid)
+        try:
+            port_val = int(item.get("port") or 42000)
+        except (ValueError, TypeError):
+            port_val = 42000
+        rt_val = str(item.get("reflector_type") or "").strip().lower()
+        if rt_val not in ("single", "multi_standard", "multi_mutant"):
+            rt_val = ""
+        out.append({
+            "id": rid[:16],
+            "name": str(item.get("name", "") or "")[:80],
+            "reflector_name": str(item.get("reflector_name", "") or "")[:80],
+            "description": str(item.get("description", "") or "")[:160],
+            "country_code": str(item.get("country_code", "") or item.get("country", "") or "XX")[:8].upper(),
+            "host": str(item.get("host", "") or "")[:120],
+            "port": port_val if 1 <= port_val <= 65535 else 42000,
+            "reflector_type": rt_val,
+            "is_multiroom": bool(item.get("is_multiroom", False)),
+            "multiroom_kind": str(item.get("multiroom_kind", "") or "")[:24].upper(),
+        })
+        if len(out) >= 500:
+            break
+    return out
+
+@app.get("/api/ysf/favorites")
+async def get_ysf_favorites(request: Request):
+    """Returns this user's YSF favorites (= 'YSF Contacts'), stored server-side."""
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    login = user.get("login", "") if user else ""
+    s = await ensure_active_user(uid, login)
+    return {"status": "ok", "favorites": getattr(s, "ysf_favorites", []) or []}
+
+@app.put("/api/ysf/favorites")
+async def put_ysf_favorites(update: YsfFavoritesUpdate, request: Request):
+    """Replaces this user's YSF favorites and persists them on the server."""
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    login = user.get("login", "") if user else ""
+    favorites = _sanitize_ysf_favorites(update.favorites)
+    if user and user.get("is_demo"):
+        return {"status": "ok", "favorites": favorites}
+    s = await ensure_active_user(uid, login)
+    s.ysf_favorites = favorites
+    await set_collection_key(uid, "ysf_favorites", "list", favorites)
+    await save_user_settings(uid, s.model_dump())
+    if uid == 1:
+        save_app_settings(s)
+    await broadcast_user_json(uid, {
+        "type": "ysf_favorites_change",
+        "favorites": favorites
+    })
+    return {"status": "ok", "favorites": favorites}
+
+# ── User Collections API ──────────────────────────────────────────────
+
+@app.get("/api/collections/{category}")
+async def api_get_collection(category: str, request: Request):
+    """Returns all key-value pairs for a given collection category."""
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    data = await get_collection(uid, category)
+    return {"status": "ok", "category": category, "data": data}
+
+class CollectionUpdatePayload(BaseModel):
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+def _sync_user_ysf_room_types_cache(uid: int, action: str, key: str = "", value: Any = None, data: Optional[Dict[str, Any]] = None) -> None:
+    if not hasattr(hotspot_manager, "user_ysf_room_types"):
+        hotspot_manager.user_ysf_room_types = {}
+    u_map = hotspot_manager.user_ysf_room_types.setdefault(uid, {})
+    if action == "replace":
+        u_map.clear()
+        for k, v in (data or {}).items():
+            sk = str(k).strip()
+            sv = str(v or "").strip().lower()
+            if sk and sv in ("single", "multi_standard", "multi_mutant"):
+                u_map[sk] = sv
+    elif action == "set":
+        sk = str(key).strip()
+        sv = str(value or "").strip().lower()
+        if sk:
+            if sv in ("single", "multi_standard", "multi_mutant"):
+                u_map[sk] = sv
+            else:
+                u_map.pop(sk, None)
+    elif action == "delete":
+        u_map.pop(str(key).strip(), None)
+
+    try:
+        from dmr.ysf_directory import ysf_dir_mgr, classify_ysf_reflector
+    except ImportError:
+        return
+    rts = hotspot_manager.get_user_runtimes(uid) if hasattr(hotspot_manager, "get_user_runtimes") else []
+    for rt in (rts or []):
+        if (getattr(rt.config, "network_type", "") or "").lower() != "ysf" or not rt.client:
+            continue
+        inner = getattr(rt.client, "client", rt.client)
+        cur_rid = str(getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", "") or "").strip()
+        if action in ("set", "delete") and cur_rid != str(key).strip():
+            continue
+        ovr = u_map.get(cur_rid, "")
+        found_rm = ysf_dir_mgr.get_room_by_id(cur_rid) if cur_rid else None
+        cls_info = classify_ysf_reflector(
+            room=found_rm,
+            name=getattr(rt.config, "ysf_room_name", "") or getattr(rt.config, "ysf_name", "") or "",
+            host=getattr(rt.config, "ysf_host", "") or getattr(rt.config, "bm_master_host", "") or "",
+            room_id=cur_rid,
+            override=ovr,
+        )
+        inner.room_type_override = ovr
+        inner.reflector_type = cls_info["reflector_type"]
+        inner.multiroom_kind = cls_info["multiroom_kind"]
+        inner.is_multiroom = cls_info["is_multiroom"]
+        hotspot_manager._notify_async({
+            "type": "hotspot_updated",
+            "hotspot": rt.to_dict(),
+            "user_id": uid,
+        }, user_id=uid)
+
+@app.put("/api/collections/{category}")
+async def api_put_collection(category: str, payload: CollectionUpdatePayload, request: Request):
+    """Replaces the entire collection for a category."""
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user and user.get("is_demo"):
+        return {"status": "ok", "category": category, "data": payload.data}
+    await replace_collection(uid, category, payload.data)
+    if category == "ysf_room_types":
+        _sync_user_ysf_room_types_cache(uid, "replace", data=payload.data)
+    await broadcast_user_json(uid, {
+        "type": "collection_change",
+        "category": category,
+        "action": "replace",
+        "data": payload.data
+    })
+    return {"status": "ok", "category": category, "data": payload.data}
+
+class CollectionKeyPayload(BaseModel):
+    value: Any = None
+
+@app.put("/api/collections/{category}/{key}")
+async def api_put_collection_key(category: str, key: str, payload: CollectionKeyPayload, request: Request):
+    """Upserts a single key inside a collection category."""
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user and user.get("is_demo"):
+        return {"status": "ok"}
+    await set_collection_key(uid, category, key, payload.value)
+    if category == "ysf_room_types":
+        _sync_user_ysf_room_types_cache(uid, "set", key=key, value=payload.value)
+    await broadcast_user_json(uid, {
+        "type": "collection_change",
+        "category": category,
+        "action": "set",
+        "key": key,
+        "value": payload.value
+    })
+    return {"status": "ok"}
+
+@app.delete("/api/collections/{category}/{key}")
+async def api_delete_collection_key(category: str, key: str, request: Request):
+    """Removes a single key from a collection category."""
+    user = _get_user_from_request(request)
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user and user.get("is_demo"):
+        return {"status": "ok"}
+    await delete_collection_key(uid, category, key)
+    if category == "ysf_room_types":
+        _sync_user_ysf_room_types_cache(uid, "delete", key=key)
+    await broadcast_user_json(uid, {
+        "type": "collection_change",
+        "category": category,
+        "action": "delete",
+        "key": key
+    })
+    return {"status": "ok"}
 
 class TranscriberSettingsUpdate(BaseModel):
     enabled: Optional[bool] = None
@@ -3440,7 +4019,7 @@ async def test_transcriber_tts(req: TtsTestRequest, request: Request):
         style=req.tts_style
     )
     if err or not wav_bytes:
-        return JSONResponse({"status": "error", "message": err or "Ошибка синтеза речи"}, status_code=400)
+        return JSONResponse({"status": "error", "message": err or _tr("transcriber.tts_synth_error", fallback="Speech synthesis error")}, status_code=400)
     b64 = base64.b64encode(wav_bytes).decode("ascii")
     return {"status": "ok", "audio_base64": b64, "text": test_text, "target_lang": target_lang}
 
@@ -3534,7 +4113,8 @@ async def api_translation_status():
 @app.get("/api/transcriber/models")
 async def get_transcriber_models(api_key: Optional[str] = None):
     clean_k = api_key.strip() if (api_key and not api_key.startswith("•")) else None
-    models = await asyncio.to_thread(transcriber_service.fetch_available_models_with_pool, clean_k)
+    _ctx = contextvars.copy_context()
+    models = await asyncio.to_thread(_ctx.run, transcriber_service.fetch_available_models_with_pool, clean_k)
     transcribe_models = [
         m for m in models
         if m.get("category") == "transcribe"
@@ -3630,7 +4210,7 @@ class OfflineTranscriberRunner:
                     "active": False,
                     "status": "completed",
                     "stats": self.stats,
-                    "message": f"Нет записей для хотспота {self.hotspot_id}"
+                    "message": _tr("transcriber.offline_no_recordings", user_id=user_id, fallback="No recordings for hotspot {hotspot_id}", hotspot_id=self.hotspot_id)
                 })
                 return
 
@@ -3672,7 +4252,7 @@ class OfflineTranscriberRunner:
                                 "active": False,
                                 "status": "error",
                                 "stats": self.stats,
-                                "message": "Превышена квота Google Gemini API (429 Quota Exceeded). Процесс остановлен."
+                                "message": _tr("transcriber.offline_quota_429", user_id=user_id, fallback="Google Gemini API quota exceeded (429 Quota Exceeded). Process stopped.")
                             })
                             break
                         if text:
@@ -3833,7 +4413,7 @@ async def api_start_offline_transcribe(request: Request):
     user = _get_user_from_request(request)
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if not transcriber_service.get_all_keys():
-        msg = "Нет доступных ключей Gemini (проверьте настройки ключей в менеджере)" if transcriber_service.api_keys else "Не указан API ключ Gemini в настройках транскрибации"
+        msg = _tr("transcriber.no_avail_gemini_keys_mgr", fallback="No available Gemini keys (check key settings in manager)") if transcriber_service.api_keys else _tr("transcriber.no_gemini_key_settings", fallback="Gemini API key is not specified in transcription settings")
         return JSONResponse({"status": "error", "message": msg}, status_code=400)
     delete_orig = False
     hid = "default"
@@ -3912,42 +4492,42 @@ BM_MASTERS_CACHE = {
     "data": []
 }
 
-COUNTRY_NAMES_RU = {
-    "AT": ("Австрия", "🇦🇹"),
-    "RU": ("Россия", "🇷🇺"),
-    "DE": ("Германия", "🇩🇪"),
-    "CH": ("Швейцария", "🇨🇭"),
-    "US": ("США", "🇺🇸"),
-    "FR": ("Франция", "🇫🇷"),
-    "GB": ("Великобритания", "🇬🇧"),
-    "ES": ("Испания", "🇪🇸"),
-    "IT": ("Италия", "🇮🇹"),
-    "NL": ("Нидерланды", "🇳🇱"),
-    "PL": ("Польша", "🇵🇱"),
-    "CZ": ("Чехия", "🇨🇿"),
-    "SE": ("Швеция", "🇸🇪"),
-    "FI": ("Финляндия", "🇫🇮"),
-    "NO": ("Норвегия", "🇳🇴"),
-    "DK": ("Дания", "🇩🇰"),
-    "HU": ("Венгрия", "🇭🇺"),
-    "RO": ("Румыния", "🇷🇴"),
-    "BG": ("Болгария", "🇧🇬"),
-    "SI": ("Словения", "🇸🇮"),
-    "PT": ("Португалия", "🇵🇹"),
-    "IE": ("Ирландия", "🇮🇪"),
-    "GR": ("Греция", "🇬🇷"),
-    "BE": ("Бельгия", "🇧🇪"),
-    "CA": ("Канада", "🇨🇦"),
-    "IL": ("Израиль", "🇮🇱"),
-    "AU": ("Австралия", "🇦🇺"),
-    "KR": ("Южная Корея", "🇰🇷"),
-    "CN": ("Китай", "🇨🇳"),
-    "MY": ("Малайзия", "🇲🇾"),
-    "PH": ("Филиппины", "🇵🇭"),
-    "ZA": ("ЮАР", "🇿🇦"),
-    "BR": ("Бразилия", "🇧🇷"),
-    "CL": ("Чили", "🇨🇱"),
-    "MX": ("Мексика", "🇲🇽"),
+COUNTRY_FLAGS: Dict[str, str] = {
+    "AT": "🇦🇹",
+    "RU": "🇷🇺",
+    "DE": "🇩🇪",
+    "CH": "🇨🇭",
+    "US": "🇺🇸",
+    "FR": "🇫🇷",
+    "GB": "🇬🇧",
+    "ES": "🇪🇸",
+    "IT": "🇮🇹",
+    "NL": "🇳🇱",
+    "PL": "🇵🇱",
+    "CZ": "🇨🇿",
+    "SE": "🇸🇪",
+    "FI": "🇫🇮",
+    "NO": "🇳🇴",
+    "DK": "🇩🇰",
+    "HU": "🇭🇺",
+    "RO": "🇷🇴",
+    "BG": "🇧🇬",
+    "SI": "🇸🇮",
+    "PT": "🇵🇹",
+    "IE": "🇮🇪",
+    "GR": "🇬🇷",
+    "BE": "🇧🇪",
+    "CA": "🇨🇦",
+    "IL": "🇮🇱",
+    "AU": "🇦🇺",
+    "KR": "🇰🇷",
+    "CN": "🇨🇳",
+    "MY": "🇲🇾",
+    "PH": "🇵🇭",
+    "ZA": "🇿🇦",
+    "BR": "🇧🇷",
+    "CL": "🇨🇱",
+    "MX": "🇲🇽",
 }
 
 BM_MASTERS_DEFAULT = [
@@ -3995,60 +4575,115 @@ BM_MASTERS_DEFAULT = [
 @app.get("/api/bm/masters")
 async def get_bm_masters():
     now = time.time()
-    if BM_MASTERS_CACHE["data"] and (now - BM_MASTERS_CACHE["timestamp"] < 3600):
-        return {"masters": BM_MASTERS_CACHE["data"]}
+    base_list = BM_MASTERS_CACHE["data"] if (BM_MASTERS_CACHE["data"] and (now - BM_MASTERS_CACHE["timestamp"] < 3600)) else None
 
-    def _fetch():
-        import urllib.request, json
-        data = None
-        try:
-            req = urllib.request.Request("https://api.brandmeister.network/v2/master", headers={"User-Agent": "ProxDMR/0.1"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode())
-        except Exception:
-            pass
+    if base_list is None:
+        def _fetch():
+            import urllib.request, json
+            data = None
+            try:
+                req = urllib.request.Request("https://api.brandmeister.network/v2/master", headers={"User-Agent": "ProxDMR/0.1"})
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode())
+            except Exception:
+                pass
 
-        raw_list = data if isinstance(data, list) and len(data) > 0 else BM_MASTERS_DEFAULT
-        res = []
-        for item in raw_list:
-            mid = item.get("id")
-            cc = item.get("country", "").upper()
-            c_name, c_flag = COUNTRY_NAMES_RU.get(cc, (cc or "Другая страна", "🌐"))
-            host = f"{mid}.master.brandmeister.network"
-            is_rec = (mid == 2322)
-            label = f"{c_flag} {c_name} — BM {mid} ({host})" + (" ⭐ [Рекомендуется]" if is_rec else "")
-            res.append({
-                "id": mid,
-                "country_code": cc,
-                "country_name": c_name,
-                "flag": c_flag,
-                "host": host,
-                "ip": item.get("address", ""),
-                "label": label,
-                "recommended": is_rec,
-            })
+            raw_list = data if isinstance(data, list) and len(data) > 0 else BM_MASTERS_DEFAULT
+            base = []
+            for item in raw_list:
+                mid = item.get("id")
+                cc = (item.get("country") or "").upper()
+                c_flag = COUNTRY_FLAGS.get(cc, "🌐")
+                host = f"{mid}.master.brandmeister.network"
+                is_rec = (mid == 2322)
+                base.append({
+                    "id": mid,
+                    "country_code": cc,
+                    "flag": c_flag,
+                    "host": host,
+                    "ip": item.get("address", ""),
+                    "recommended": is_rec,
+                })
+            return base
 
-        def sort_key(m):
-            if m["id"] == 2322: return (0, "")
-            if m["country_code"] == "RU": return (1, str(m["id"]))
-            if m["country_code"] == "DE": return (2, str(m["id"]))
-            return (3, m["country_name"])
+        base_list = await asyncio.to_thread(_fetch)
+        BM_MASTERS_CACHE["timestamp"] = now
+        BM_MASTERS_CACHE["data"] = base_list
 
-        res.sort(key=sort_key)
-        return res
+    res = []
+    other_label = _tr("countries.other", fallback="Other country")
+    rec_badge_txt = _tr("bm.master_recommended", fallback="⭐ [Recommended]")
+    for item in base_list:
+        cc = item["country_code"]
+        c_name = _i18n_country_name(cc, fallback=(cc or other_label))
+        c_flag = item["flag"]
+        mid = item["id"]
+        host = item["host"]
+        is_rec = item["recommended"]
+        rec_suffix = f" {rec_badge_txt}" if is_rec else ""
+        label = f"{c_flag} {c_name} — BM {mid} ({host}){rec_suffix}"
+        res.append({
+            "id": mid,
+            "country_code": cc,
+            "country_name": c_name,
+            "flag": c_flag,
+            "host": host,
+            "ip": item["ip"],
+            "label": label,
+            "recommended": is_rec,
+        })
 
-    result = await asyncio.to_thread(_fetch)
-    BM_MASTERS_CACHE["timestamp"] = now
-    BM_MASTERS_CACHE["data"] = result
-    return {"masters": result}
+    def sort_key(m):
+        if m["id"] == 2322: return (0, "")
+        if m["country_code"] == "RU": return (1, str(m["id"]))
+        if m["country_code"] == "DE": return (2, str(m["id"]))
+        return (3, m["country_name"])
+
+    res.sort(key=sort_key)
+    return {"masters": res}
+
+def _localize_bm_bench_items(items, user_id: Optional[int] = None):
+    other_label = _tr("countries.other", user_id=user_id, fallback="Other country")
+    localized = []
+    for item in (items or []):
+        if not isinstance(item, dict):
+            localized.append(item)
+            continue
+        copy_item = dict(item)
+        cc = (copy_item.get("country_code") or copy_item.get("country") or "").strip().upper()
+        c_name = _i18n_country_name(cc, user_id=user_id, fallback=(copy_item.get("country_name") or cc or other_label)) if cc else (copy_item.get("country_name") or other_label)
+        flag = copy_item.get("flag") or "🌐"
+        srv_id = copy_item.get("id")
+        copy_item["country_name"] = c_name
+        if srv_id is not None:
+            copy_item["name"] = f"{flag} {c_name} (BM {srv_id})"
+        localized.append(copy_item)
+    return localized
+
+
+def _localize_server_probe_cache(cache_dict, user_id: Optional[int] = None):
+    if not isinstance(cache_dict, dict):
+        return cache_dict
+    out = {}
+    for k, entry in cache_dict.items():
+        if str(k).lower() == "bm" and isinstance(entry, dict) and isinstance(entry.get("results"), list):
+            entry_copy = dict(entry)
+            entry_copy["results"] = _localize_bm_bench_items(entry["results"], user_id=user_id)
+            out[k] = entry_copy
+        else:
+            out[k] = entry
+    return out
+
 
 @app.get("/api/bm/benchmark/results")
-async def api_get_bm_benchmark_results():
+async def api_get_bm_benchmark_results(request: Request = None):
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else None
     return {
         "status": "ok",
         "running": bm_ping_service.is_benchmark_running(),
-        "results": bm_ping_service.get_benchmark_results()
+        "results": _localize_bm_bench_items(bm_ping_service.get_benchmark_results(), user_id=uid)
     }
 
 @app.post("/api/bm/benchmark/start")
@@ -4101,6 +4736,16 @@ async def api_start_server_probe(request: Request):
         elif net_type == "xlx":
             await xlx_hosts_mgr.fetch_hosts(force=False)
             servers = xlx_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+        elif net_type == "adn":
+            tg_resolver.ensure_adn_fresh_background()
+            if adn_hosts_mgr._source != "live" or adn_hosts_mgr._last_loaded_ts <= 0:
+                await adn_hosts_mgr.fetch_hosts(force=True)
+            else:
+                adn_hosts_mgr.ensure_fresh_background()
+            servers = adn_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+        elif net_type == "ysf":
+            await ysf_dir_mgr.fetch_hosts(force=False)
+            servers = ysf_dir_mgr.get_hosts(enriched=False).get("servers", [])
         else:
             servers = []
 
@@ -4136,14 +4781,16 @@ async def api_cancel_server_probe(request: Request):
 
 @app.get("/api/dmr/servers")
 async def api_get_dmr_servers(network_type: str = "freedmr", request: Request = None):
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else None
     net_lower = (network_type or "bm").strip().lower()
     if net_lower == "bm":
         bm_data = await get_bm_masters()
         base = bm_data.get("masters", [])
         bench = bm_ping_service.get_benchmark_results()
         if bench:
-            return {"status": "ok", "network_type": "bm", "servers": bench}
-        return {"status": "ok", "network_type": "bm", "servers": server_probe_service.enrich_servers_with_cache("bm", base)}
+            return {"status": "ok", "network_type": "bm", "servers": _localize_bm_bench_items(bench, user_id=uid)}
+        return {"status": "ok", "network_type": "bm", "servers": _localize_bm_bench_items(server_probe_service.enrich_servers_with_cache("bm", base), user_id=uid)}
     elif net_lower == "freedmr":
         await freedmr_hosts_mgr.fetch_hosts(force=False)
         base = freedmr_hosts_mgr.get_hosts(enriched=False).get("servers", [])
@@ -4151,13 +4798,32 @@ async def api_get_dmr_servers(network_type: str = "freedmr", request: Request = 
     elif net_lower == "tgif":
         return {"status": "ok", "network_type": "tgif", "servers": server_probe_service.enrich_servers_with_cache("tgif", KNOWN_TGIF_SERVERS)}
     elif net_lower == "dmrplus":
-        await dmrplus_hosts_mgr.fetch_hosts(force=False)
-        base = dmrplus_hosts_mgr.get_hosts(enriched=False)
-        return {"status": "ok", "network_type": "dmrplus", "servers": server_probe_service.enrich_servers_with_cache("dmrplus", base)}
+        sync_started = dmrplus_hosts_mgr.ensure_fresh_background()
+        payload = dmrplus_hosts_mgr.get_hosts_payload(enriched=True)
+        payload["network_type"] = "dmrplus"
+        payload["sync_in_progress"] = bool(sync_started or payload.get("sync_in_progress"))
+        return payload
     elif net_lower == "xlx":
         await xlx_hosts_mgr.fetch_hosts(force=False)
         base = xlx_hosts_mgr.get_hosts(enriched=False).get("servers", [])
         return {"status": "ok", "network_type": "xlx", "servers": server_probe_service.enrich_servers_with_cache("xlx", base)}
+    elif net_lower == "adn":
+        sync_started = adn_hosts_mgr.ensure_fresh_background()
+        tg_sync_started = tg_resolver.ensure_adn_fresh_background()
+        hosts_meta = adn_hosts_mgr.get_hosts(enriched=False)
+        base = hosts_meta.get("servers", [])
+        return {
+            "status": "ok",
+            "network_type": "adn",
+            "last_sync_ts": hosts_meta.get("last_sync_ts", 0),
+            "tg_last_sync_ts": int(getattr(tg_resolver, "_adn_last_sync_ts", 0) or 0),
+            "sync_in_progress": bool(sync_started or tg_sync_started or hosts_meta.get("sync_in_progress") or tg_resolver.is_adn_sync_running()),
+            "servers": server_probe_service.enrich_servers_with_cache("adn", base),
+        }
+    elif net_lower == "ysf":
+        await ysf_dir_mgr.fetch_hosts(force=False)
+        base = ysf_dir_mgr.get_hosts(enriched=False).get("servers", [])
+        return {"status": "ok", "network_type": "ysf", "servers": server_probe_service.enrich_servers_with_cache("ysf", base)}
     elif net_lower == "custom":
         return {"status": "ok", "network_type": "custom", "servers": []}
     return {"status": "error", "message": f"Unknown network type {network_type}"}
@@ -4173,12 +4839,13 @@ async def connect_hotspot(hotspot_id: str, request: Request):
     target_id = settings.active_hotspot_id if hotspot_id == "active" else hotspot_id
     rt_check = hotspot_manager.get_runtime(uid, target_id)
     if rt_check and getattr(rt_check.config, "hidden", False):
-        return {"status": "error", "message": "Нельзя подключить скрытый хотспот. Сначала верните его в список живых"}
+        return {"status": "error", "message": _tr("hotspots.cannot_connect_hidden", fallback="Cannot connect a hidden hotspot. Return it to the live list first")}
     if is_demo and rt_check:
         if _is_asl_hotspot_obj(rt_check):
-            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": "ASL отключен в демо-режиме"}, status_code=403)
+            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": _tr("demo.asl_disabled", fallback="ASL is disabled in demo mode")}, status_code=403)
         await _prepare_demo_hotspot_ssid(uid, rt_check)
-    success = await hotspot_manager.connect_hotspot(target_id, user_id=uid, persist=not is_demo)
+    is_auto = str(request.query_params.get("auto", "")).strip().lower() in ("1", "true", "yes")
+    success = await hotspot_manager.connect_hotspot(target_id, user_id=uid, persist=not is_demo, force=not is_auto)
     rt = hotspot_manager.get_runtime(uid, target_id)
     return {"status": "ok" if success else "error", "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
 
@@ -4197,7 +4864,7 @@ async def disconnect_hotspot(hotspot_id: str, request: Request):
         if rt_check:
             demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(rt_check.config, "collapsed", False)))
         if _is_hotspot_open_on_any_client(uid, real_hid):
-            return {"status": "ok", "bm_status": "DISCONNECTED", "detail": "Отключено"}
+            return {"status": "ok", "bm_status": "DISCONNECTED", "detail": _tr("common.disconnected", fallback="Disconnected")}
     success = await hotspot_manager.disconnect_hotspot(target_id, user_id=uid)
     rt = hotspot_manager.get_runtime(uid, target_id)
     return {"status": "ok" if success else "error", "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
@@ -4214,7 +4881,7 @@ async def reconnect_hotspot_api(hotspot_id: str, request: Request):
     rt_check = hotspot_manager.get_runtime(uid, target_id)
     if is_demo and rt_check:
         if _is_asl_hotspot_obj(rt_check):
-            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": "ASL отключен в демо-режиме"}, status_code=403)
+            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": _tr("demo.asl_disabled", fallback="ASL is disabled in demo mode")}, status_code=403)
         await _prepare_demo_hotspot_ssid(uid, rt_check)
     success = await hotspot_manager.reconnect_hotspot(target_id, user_id=uid, persist=not is_demo)
     rt = hotspot_manager.get_runtime(uid, target_id)
@@ -4236,12 +4903,14 @@ async def collapse_hotspot_api(hotspot_id: str, request: Request):
         admin_hs_cfg = next((h for h in getattr(s_admin, "hotspots", []) if h.id == real_hid), rt_check.config)
         demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(admin_hs_cfg, "collapsed", False)))
     if _is_hotspot_open_on_any_client(uid, real_hid):
-        return {"status": "ok", "collapsed": True, "bm_status": "OFFLINE", "detail": "Свернут / отключен"}
+        return {"status": "ok", "collapsed": True, "bm_status": "OFFLINE", "detail": _tr("hotspots.collapsed_disconnected", fallback="Collapsed / disconnected")}
     success = await hotspot_manager.set_hotspot_collapsed(target_id, True, user_id=uid, persist=not is_demo)
     if success:
+        if not is_demo:
+            await save_user_settings(uid, settings.model_dump())
         rt = hotspot_manager.get_runtime(uid, target_id)
         return {"status": "ok", "collapsed": True, "bm_status": rt.status.value if rt else "OFFLINE", "detail": rt.detail if rt else ""}
-    raise HTTPException(status_code=404, detail="Хотспот не найден")
+    raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
 
 @app.post("/api/hotspots/{hotspot_id}/expand")
 async def expand_hotspot_api(hotspot_id: str, request: Request):
@@ -4255,13 +4924,15 @@ async def expand_hotspot_api(hotspot_id: str, request: Request):
     rt_check = hotspot_manager.get_runtime(uid, target_id)
     if is_demo and rt_check:
         if _is_asl_hotspot_obj(rt_check):
-            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": "ASL отключен в демо-режиме"}, status_code=403)
+            return JSONResponse({"status": "error", "code": "DEMO_ASL_DISABLED", "detail": _tr("demo.asl_disabled", fallback="ASL is disabled in demo mode")}, status_code=403)
         await _prepare_demo_hotspot_ssid(uid, rt_check)
     success = await hotspot_manager.set_hotspot_collapsed(target_id, False, user_id=uid, persist=not is_demo)
     if success:
+        if not is_demo:
+            await save_user_settings(uid, settings.model_dump())
         rt = hotspot_manager.get_runtime(uid, target_id)
         return {"status": "ok", "collapsed": False, "bm_status": rt.status.value if rt else "ONLINE", "detail": rt.detail if rt else ""}
-    raise HTTPException(status_code=404, detail="Хотспот не найден")
+    raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
 
 @app.post("/api/hotspots/active")
 async def set_active_hotspot(payload: dict, request: Request):
@@ -4273,7 +4944,9 @@ async def set_active_hotspot(payload: dict, request: Request):
     if user and user.get("is_demo"):
         return {"status": "ok", "active_hotspot_id": hid or "default"}
     if not hid or not hotspot_manager.set_active_hotspot(hid, user_id=uid):
-        raise HTTPException(status_code=404, detail="Хотспот не найден")
+        raise HTTPException(status_code=404, detail=_tr("hotspots.not_found", fallback="Hotspot not found"))
+    settings = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    await save_user_settings(uid, settings.model_dump())
     return {"status": "ok", "active_hotspot_id": hid}
 
 @app.post("/api/radio/tg")
@@ -4360,20 +5033,236 @@ def _get_bm_device_and_key(
         cfg = rt_fallback.config if rt_fallback else (hotspot_manager.settings.hotspots[0] if hotspot_manager.settings.hotspots else None)
 
     if not cfg:
-        return None, None, None, "Хотспот не найден"
+        return None, None, None, _tr("hotspots.not_found", fallback="Hotspot not found")
 
     net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower()
     net_key_label = "TGIF API Key (v1)" if net_type == "tgif" else "BM API Key (v2)"
 
     api_key = (cfg.bm_api_key or "").strip()
     if not api_key and not allow_fallback:
-        return cfg, None, None, f"{net_key_label} не настроен для «{cfg.name or 'хотспота'}»"
+        return cfg, None, None, _tr("hotspots.net_key_not_configured", fallback="{key_label} is not configured for \"{name}\"", key_label=net_key_label, name=cfg.name or _tr("bm.hotspot_default_name", fallback="Hotspot"))
 
     if cfg.dmr_id <= 0 and not allow_fallback:
-        return cfg, None, None, f"DMR ID не настроен для «{cfg.name or 'хотспота'}»"
+        return cfg, None, None, _tr("hotspots.dmr_id_not_configured", fallback="DMR ID is not configured for \"{name}\"", name=cfg.name or _tr("bm.hotspot_default_name", fallback="Hotspot"))
 
     device_id = f"{cfg.dmr_id}{cfg.bm_ssid:02d}" if (cfg and cfg.bm_ssid > 0) else str(cfg.dmr_id if (cfg and cfg.dmr_id > 0) else "")
     return cfg, device_id, api_key, None
+
+@app.post("/api/hotspots/test-api-key")
+async def test_hotspot_api_key(request: Request):
+    """Online validation for BrandMeister v2 API key or TGIF static token."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "detail": _tr("hotspots.invalid_json", fallback="Invalid JSON request")}
+
+    net_type = str(body.get("network_type") or "bm").strip().lower()
+    api_key = str(body.get("api_key") or "").strip()
+    dmr_id = body.get("dmr_id")
+    ssid = body.get("ssid")
+
+    if not api_key:
+        return {"ok": False, "detail": _tr("hotspots.api_key_not_specified", fallback="API key not specified")}
+
+    device_id = ""
+    if dmr_id:
+        try:
+            d_int = int(dmr_id)
+            s_int = int(ssid) if ssid is not None else 1
+            device_id = f"{d_int}{s_int:02d}" if s_int > 0 else str(d_int)
+        except Exception:
+            device_id = str(dmr_id)
+
+    def _do_http_check():
+        import urllib.request, urllib.error
+        if net_type == "tgif":
+            url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}" if device_id else "https://api.tgif.network/v1/static-talkgroups"
+            headers = {
+                "User-Agent": "ProxDMR/1.0",
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json"
+            }
+        else:
+            # Default: BrandMeister v2
+            url = f"https://api.brandmeister.network/v2/device/{device_id}/profile" if device_id else "https://api.brandmeister.network/v2/profile"
+            headers = {
+                "User-Agent": "ProxDMR/1.0",
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json"
+            }
+
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=4.5) as resp:
+                status_code = resp.getcode()
+                if 200 <= status_code < 300:
+                    return {"ok": True, "detail": _tr("hotspots.auth_ok", fallback="Authorization successful ({code} OK)", code=status_code)}
+                return {"ok": False, "detail": _tr("hotspots.server_returned_code", fallback="Server returned code {code}", code=status_code)}
+        except urllib.error.HTTPError as e:
+            if e.code == 401 or e.code == 403:
+                return {"ok": False, "detail": _tr("hotspots.auth_err_invalid_token", fallback="Authorization error: invalid API token ({code})", code=e.code)}
+            elif e.code == 404:
+                # 404 on profile/device might mean device not found, but key is authenticated
+                return {"ok": True, "detail": _tr("hotspots.token_accepted_device_unregistered", fallback="Token accepted by server (device is not registered yet)")}
+            return {"ok": False, "detail": f"HTTP {e.code}: {e.reason}"}
+        except urllib.error.URLError as e:
+            return {"ok": False, "detail": _tr("hotspots.net_err_reason", fallback="Network error: {reason}", reason=e.reason)}
+        except Exception as ex:
+            return {"ok": False, "detail": _tr("hotspots.check_error", fallback="Check error: {error}", error=str(ex))}
+
+    _ctx = contextvars.copy_context()
+    return await asyncio.to_thread(_ctx.run, _do_http_check)
+
+
+@app.post("/api/hotspots/test-password")
+async def test_hotspot_password(request: Request):
+    """Fast HomeBrew challenge-response verification (RPTL -> RPTACK -> RPTK -> ACK/NAK)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "detail": _tr("hotspots.invalid_json", fallback="Invalid JSON request")}
+
+    net_type = str(body.get("network_type") or "bm").strip().lower()
+    host = str(body.get("host") or "").strip()
+    port = body.get("port") or 62031
+    password = str(body.get("password") or "").strip()
+    dmr_id = body.get("dmr_id")
+    ssid = body.get("ssid")
+    hid = str(body.get("hotspot_id") or "").strip()
+
+    try:
+        port = int(port)
+    except Exception:
+        port = 62031
+
+    if not host:
+        return {"ok": False, "detail": _tr("hotspots.server_addr_required", fallback="Server address not specified")}
+
+    if not password and net_type not in ("ysf",):
+        return {"ok": False, "detail": _tr("hotspots.password_required", fallback="Password not specified")}
+
+    # 1. Fast verification: if this hotspot is ALREADY ONLINE in ProxDMR with matching credentials
+    try:
+        user = _get_user_from_request(request) if request else None
+        uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+        rt = (hotspot_manager.get_runtime(uid, hid) if hid else None) or hotspot_manager.get_active_runtime(uid)
+        if rt and getattr(rt, "status", None) and getattr(rt.status, "value", "") == "ONLINE":
+            rt_cfg = getattr(rt, "config", None)
+            rt_host = str(getattr(rt_cfg, "bm_master_host", "") or getattr(rt, "master_host", "")).strip().lower()
+            rt_pwd = str(getattr(rt_cfg, "bm_password", "") or getattr(rt, "password", "")).strip()
+            if host.lower() == rt_host and password == rt_pwd:
+                return {"ok": True, "detail": _tr("hotspots.already_online_auth", fallback="Hotspot is already connected and authorized online!")}
+    except Exception:
+        pass
+
+    # Special case: YSF / C4FM (UDP ping)
+    if net_type == "ysf":
+        def _check_ysf():
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2.5)
+            try:
+                call_padded = (str(body.get("callsign") or "NOCALL").upper() + "          ")[:10]
+                sock.sendto(b"YSFP" + call_padded.encode("ascii", errors="ignore"), (host, port))
+                data, _ = sock.recvfrom(512)
+                if data.startswith(b"YSFP") or data.startswith(b"YSFS") or data.startswith(b"YSFA"):
+                    return {"ok": True, "detail": _tr("hotspots.ysf_ping_ok", fallback="YSF server is active and responds to poll (YSFP)")}
+                return {"ok": False, "detail": _tr("hotspots.ysf_unexpected_resp", fallback="Unexpected response from YSF server ({size} B)", size=len(data))}
+            except socket.timeout:
+                return {"ok": False, "detail": _tr("hotspots.ysf_ping_timeout", fallback="Timeout: YSF reflector did not respond to UDP poll (YSFP)")}
+            except Exception as e:
+                return {"ok": False, "detail": _tr("hotspots.ysf_conn_err", fallback="YSF connection error: {error}", error=e)}
+            finally:
+                sock.close()
+        _ctx = contextvars.copy_context()
+        return await asyncio.to_thread(_ctx.run, _check_ysf)
+
+    # Special case: AllStarLink (IAX2 node socket check)
+    if net_type == "allstar":
+        def _check_asl():
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2.5)
+            try:
+                poke_frame = bytes.fromhex("8000000000000000061e0000")
+                sock.sendto(poke_frame, (host, port or 4569))
+                data, _ = sock.recvfrom(512)
+                return {"ok": True, "detail": _tr("hotspots.asl_node_replied", fallback="AllStarLink node (IAX2) responded")}
+            except socket.timeout:
+                return {"ok": True, "detail": _tr("hotspots.asl_iax2_open", fallback="IAX2 port is open (node password saved)")}
+            except Exception as e:
+                return {"ok": False, "detail": _tr("hotspots.asl_conn_err", fallback="Error connecting to ASL node: {error}", error=e)}
+            finally:
+                sock.close()
+        _ctx = contextvars.copy_context()
+        return await asyncio.to_thread(_ctx.run, _check_asl)
+
+    # Standard DMR HomeBrew Handshake: BM, TGIF, FreeDMR, DMR+, XLX, ADN, Custom
+    def _check_homebrew():
+        import socket, struct, hashlib
+        rep_id = 123456701
+        try:
+            d_int = int(dmr_id or 1234567)
+            s_int = int(ssid or 1)
+            # XLX reflectors use strictly 7-digit ID without SSID
+            if net_type == "xlx":
+                rep_id = d_int
+            else:
+                rep_id = int(f"{d_int}{s_int:02d}") if (s_int > 0 and len(str(d_int)) == 7) else d_int
+        except Exception:
+            rep_id = 123456701
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(2.5)
+        try:
+            # 1. Send Login RPTL
+            packet = b"RPTL" + struct.pack(">I", rep_id)
+            sock.sendto(packet, (host, port))
+
+            # 2. Wait for challenge salt
+            data, _ = sock.recvfrom(512)
+            salt = b""
+            if data.startswith(b"RPTACK") and len(data) >= 10:
+                salt = data[6:10]
+            elif data.startswith(b"RPTL") and len(data) >= 8:
+                salt = data[4:8]
+            elif data.startswith(b"MSTNAK") or data.startswith(b"RPTNAK"):
+                return {"ok": False, "detail": _tr("hotspots.hb_mstnak", fallback="Server rejected connection (MSTNAK)")}
+            else:
+                return {"ok": False, "detail": _tr("hotspots.hb_unexpected_resp", fallback="Unexpected server response: {data}", data=repr(data[:8]))}
+
+            # 3. Calculate HomeBrew challenge response: sha256(salt[:4] + password)
+            challenge = salt[:4] + password.encode("ascii", errors="ignore")
+            auth_hash = hashlib.sha256(challenge).digest()
+
+            # 4. Send Auth RPTK (Repeater Key - 40 bytes)
+            auth_packet = b"RPTK" + struct.pack(">I", rep_id) + auth_hash
+            sock.sendto(auth_packet, (host, port))
+
+            # 5. Wait for ACK / NAK
+            resp_data, _ = sock.recvfrom(512)
+            if resp_data.startswith(b"RPTACK") or resp_data.startswith(b"MSTACK") or resp_data.startswith(b"RPTA"):
+                # Clean disconnect to avoid leaving zombie repeater on master
+                try:
+                    sock.sendto(b"RPTCL" + struct.pack(">I", rep_id), (host, port))
+                except Exception:
+                    pass
+                return {"ok": True, "detail": _tr("hotspots.hb_auth_ok", fallback="Authorization successful (RPTACK)! Password is valid")}
+            elif resp_data.startswith(b"MSTNAK") or resp_data.startswith(b"RPTNAK"):
+                return {"ok": False, "detail": _tr("hotspots.hb_invalid_password", fallback="Invalid hotspot password (server returned MSTNAK)")}
+            else:
+                return {"ok": False, "detail": _tr("hotspots.hb_unexpected_auth_resp", fallback="Unexpected authorization response: {data}", data=repr(resp_data[:8]))}
+
+        except socket.timeout:
+            return {"ok": False, "detail": _tr("hotspots.hb_timeout", fallback="Server did not respond to UDP request (timeout 2.5s)")}
+        except Exception as e:
+            return {"ok": False, "detail": _tr("hotspots.socket_err", fallback="Socket error: {error}", error=e)}
+        finally:
+            sock.close()
+
+    _ctx = contextvars.copy_context()
+    return await asyncio.to_thread(_ctx.run, _check_homebrew)
+
 
 @app.get("/api/bm/api-status")
 async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request = None):
@@ -4385,7 +5274,7 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, allow_fallback=False, user_id=uid)
     net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower() if cfg else "bm"
     if not api_key:
-        res_nk = {"status": "NO_KEY", "detail": err or "Ключ не задан", "device_id": device_id, "network_type": net_type}
+        res_nk = {"status": "NO_KEY", "detail": err or _tr("bm.key_not_set", fallback="Key not set"), "device_id": device_id, "network_type": net_type}
         return _mask_bm_resp_for_demo(res_nk, cfg) if (user and user.get("is_demo")) else res_nk
 
     def _check():
@@ -4403,16 +5292,16 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
             try:
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     if resp.status == 200:
-                        return {"status": "ONLINE", "network_type": "tgif", "detail": "Авторизован", "device_id": device_id}
+                        return {"status": "ONLINE", "network_type": "tgif", "detail": _tr("bm.authorized", fallback="Authorized"), "device_id": device_id}
                     return {"status": "ERROR", "network_type": "tgif", "detail": f"HTTP {resp.status}", "device_id": device_id}
             except urllib.error.HTTPError as e:
                 if e.code in (401, 403):
-                    return {"status": "AUTH_FAILED", "network_type": "tgif", "detail": "Неверный токен TGIF (401)", "device_id": device_id}
+                    return {"status": "AUTH_FAILED", "network_type": "tgif", "detail": _tr("tgif.invalid_token", fallback="Invalid TGIF token (401)"), "device_id": device_id}
                 if e.code == 404:
-                    return {"status": "ERROR", "network_type": "tgif", "detail": f"Устройство {device_id} не найдено в TGIF", "device_id": device_id}
+                    return {"status": "ERROR", "network_type": "tgif", "detail": _tr("tgif.device_not_found_short", fallback="Device {device_id} not found in TGIF", device_id=device_id), "device_id": device_id}
                 return {"status": "ERROR", "network_type": "tgif", "detail": f"HTTP {e.code}", "device_id": device_id}
             except Exception as e:
-                return {"status": "OFFLINE", "network_type": "tgif", "detail": "Сервер api.tgif.network недоступен", "device_id": device_id}
+                return {"status": "OFFLINE", "network_type": "tgif", "detail": _tr("tgif.api_unreachable", fallback="Server api.tgif.network unreachable"), "device_id": device_id}
 
         # BM check logic
         if device_id:
@@ -4433,11 +5322,11 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
         try:
             with urllib.request.urlopen(req, timeout=4) as resp:
                 if resp.status == 200:
-                    return {"status": "ONLINE", "network_type": "bm", "detail": "Авторизован", "device_id": device_id}
+                    return {"status": "ONLINE", "network_type": "bm", "detail": _tr("bm.authorized", fallback="Authorized"), "device_id": device_id}
                 return {"status": "ERROR", "network_type": "bm", "detail": f"HTTP {resp.status}", "device_id": device_id}
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                return {"status": "AUTH_FAILED", "network_type": "bm", "detail": "Неверный токен (401)", "device_id": device_id}
+                return {"status": "AUTH_FAILED", "network_type": "bm", "detail": _tr("bm.invalid_token_401", fallback="Invalid token (401)"), "device_id": device_id}
             # Fallback to selfcare check if repeater/device action returns 404
             if e.code == 404 and cfg and cfg.dmr_id and url != f"https://api.brandmeister.network/v2/selfcare/{cfg.dmr_id}":
                 try:
@@ -4452,29 +5341,42 @@ async def get_bm_api_status(hotspot_id: Optional[str] = None, request: Request =
                     )
                     with urllib.request.urlopen(req_fb, timeout=4) as resp_fb:
                         if resp_fb.status == 200:
-                            return {"status": "ONLINE", "network_type": "bm", "detail": "Авторизован", "device_id": device_id}
+                            return {"status": "ONLINE", "network_type": "bm", "detail": _tr("bm.authorized", fallback="Authorized"), "device_id": device_id}
                 except urllib.error.HTTPError as ef:
                     if ef.code in (401, 403):
-                        return {"status": "AUTH_FAILED", "network_type": "bm", "detail": "Неверный токен (401)", "device_id": device_id}
+                        return {"status": "AUTH_FAILED", "network_type": "bm", "detail": _tr("bm.invalid_token_401", fallback="Invalid token (401)"), "device_id": device_id}
             return {"status": "ERROR", "network_type": "bm", "detail": f"HTTP {e.code}", "device_id": device_id}
         except Exception as e:
-            return {"status": "OFFLINE", "network_type": "bm", "detail": "Сервер BM недоступен", "device_id": device_id}
+            return {"status": "OFFLINE", "network_type": "bm", "detail": _tr("bm.server_unreachable", fallback="BM server unreachable"), "device_id": device_id}
 
-    res = await asyncio.to_thread(_check)
+    _ctx = contextvars.copy_context()
+    res = await asyncio.to_thread(_ctx.run, _check)
     if user and user.get("is_demo") and isinstance(res, dict):
         res = _mask_bm_resp_for_demo(res, cfg)
     return res
 
 @app.get("/api/tg/names")
 async def get_tg_names(network: str = "bm"):
-    """Returns all locally cached and synchronized TalkGroup names (both BM and TGIF)."""
+    """Returns all locally cached and synchronized TalkGroup names (BM, TGIF, ADN)."""
     if len(tg_resolver.tgif_cache) < 50:
         await tg_resolver.fetch_tgif_catalog()
     net = (network or "bm").strip().lower()
+    if net == "adn":
+        adn_hosts_mgr.ensure_fresh_background()
+        tg_resolver.ensure_adn_fresh_background()
+    if net == "freedmr" and len(tg_resolver.freedmr_cache) < 50:
+        await tg_resolver.fetch_freedmr_catalog()
+    elif net == "dmrplus":
+        dmrplus_hosts_mgr.ensure_fresh_background()
     return {
         "status": "ok",
         "names": tg_resolver.get_all_names(net),
-        "tgif_names": tg_resolver.get_all_names("tgif")
+        "tgif_names": tg_resolver.get_all_names("tgif"),
+        "freedmr_names": tg_resolver.get_all_names("freedmr"),
+        "adn_names": tg_resolver.get_all_names("adn"),
+        "dmrplus_names": tg_resolver.get_all_names("dmrplus"),
+        "adn_last_sync_ts": int(getattr(tg_resolver, "_adn_last_sync_ts", 0) or 0),
+        "adn_sync_in_progress": bool(tg_resolver.is_adn_sync_running() or adn_hosts_mgr.is_sync_running()),
     }
 
 @app.post("/api/tg/lookup")
@@ -4482,6 +5384,8 @@ async def lookup_tg_names(payload: dict):
     """Resolves names for a list of TalkGroups according to network_type."""
     tgs = payload.get("talkgroups", [])
     net = str(payload.get("network") or payload.get("network_type") or "bm").strip().lower()
+    if net == "adn":
+        adn_hosts_mgr.ensure_fresh_background()
     try:
         tgs = [int(x) for x in tgs if int(x) > 0]
     except Exception:
@@ -4493,6 +5397,8 @@ async def lookup_tg_names(payload: dict):
 @app.get("/api/tg/stats")
 async def get_tg_stats(network: str = "bm"):
     """Returns database statistics for TalkGroups catalog."""
+    if (network or "bm").strip().lower() == "adn":
+        adn_hosts_mgr.ensure_fresh_background()
     return {"status": "ok", "stats": tg_resolver.get_stats(network_type=network)}
 
 from src.dmr.constants import (
@@ -4501,6 +5407,10 @@ from src.dmr.constants import (
     normalize_freedmr_slots,
     parse_freedmr_rpto,
     build_freedmr_rpto,
+    DMRPLUS_MAX_STATIC_PER_SLOT,
+    DMRPLUS_MAX_RPTO_BYTES,
+    parse_dmrplus_rpto,
+    build_dmrplus_rpto,
     xlx_module_to_tg,
     xlx_tg_to_module,
 )
@@ -4513,6 +5423,14 @@ try:
     from dmr.dmrplus_hosts import dmrplus_hosts_mgr
 except ImportError:
     from src.dmr.dmrplus_hosts import dmrplus_hosts_mgr
+try:
+    from dmr.adn_hosts import adn_hosts_mgr
+except ImportError:
+    from src.dmr.adn_hosts import adn_hosts_mgr
+try:
+    from dmr.ysf_directory import ysf_dir_mgr
+except ImportError:
+    from src.dmr.ysf_directory import ysf_dir_mgr
 from src.dmr.server_probe import (
     server_probe_service,
     KNOWN_TGIF_SERVERS,
@@ -4540,6 +5458,332 @@ async def get_xlx_hosts(request: Request = None):
     await xlx_hosts_mgr.fetch_hosts(force=False)
     return xlx_hosts_mgr.get_hosts(enriched=True)
 
+@app.get("/api/adn/hosts")
+async def get_adn_hosts(force: bool = False, request: Request = None):
+    """
+    Returns live/cached ADN Systems servers catalog.
+    On every entry into an ADN HS (without force), checks 24h TTL and runs background sync
+    for both ADN servers and ADN TalkGroups if expired (>24h), returning cached data immediately.
+    """
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    if force:
+        await asyncio.gather(
+            adn_hosts_mgr.fetch_hosts(force=True),
+            tg_resolver.fetch_adn_catalog(force=True),
+            return_exceptions=True,
+        )
+        hosts_started = False
+        tg_started = False
+    else:
+        hosts_started = adn_hosts_mgr.ensure_fresh_background()
+        tg_started = tg_resolver.ensure_adn_fresh_background()
+    payload = adn_hosts_mgr.get_hosts()
+    payload["tg_last_sync_ts"] = int(getattr(tg_resolver, "_adn_last_sync_ts", 0) or 0)
+    payload["tg_count"] = len(getattr(tg_resolver, "adn_cache", {}) or {})
+    payload["sync_in_progress"] = bool(
+        hosts_started or tg_started or adn_hosts_mgr.is_sync_running() or tg_resolver.is_adn_sync_running()
+    )
+    return payload
+
+@app.get("/api/ysf/hosts")
+async def get_ysf_hosts(request: Request = None):
+    """Returns live/cached YSF reflectors catalog."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    await ysf_dir_mgr.fetch_hosts(force=False)
+    return ysf_dir_mgr.get_hosts()
+
+def get_active_ysf_client(hotspot_id: str = "default", user_id: int = 1):
+    rt = hotspot_manager.get_runtime(user_id, hotspot_id)
+    if not rt or not rt.client:
+        return None
+    if (getattr(rt.config, "network_type", "") or "").lower() != "ysf":
+        return None
+    client_obj = getattr(rt.client, "client", rt.client)
+    return client_obj if hasattr(client_obj, "request_status") else None
+
+@app.get("/api/ysf/rooms")
+async def get_ysf_rooms():
+    await ysf_dir_mgr.fetch_hosts(force=False)
+    return {"rooms": ysf_dir_mgr.get_hosts().get("rooms", [])}
+
+@app.get("/api/ysf/connected")
+async def get_ysf_connected(hotspot_id: str = "default", request: Request = None):
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    client = get_active_ysf_client(hotspot_id, uid)
+    if not client:
+        return {"status": "ok", "connected": False, "online_count": 0, "last_heard": []}
+    if client.is_connected:
+        client.request_status()
+    return {
+        "status": "ok",
+        "connected": client.is_connected,
+        "room_id": getattr(client, "room_id", ""),
+        "online_count": getattr(client, "online_count", 0),
+        "caller": getattr(client, "current_caller", ""),
+        "last_heard": getattr(client, "last_heard", [])
+    }
+
+@app.post("/api/ysf/disconnect")
+async def post_ysf_disconnect(request: Request):
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    cid = str(data.get("hotspot_id", "default") or "default").strip()
+    rt = hotspot_manager.get_runtime(uid, cid)
+    if rt:
+        rt._ysf_flow_gen = getattr(rt, "_ysf_flow_gen", 0) + 1
+        rt.config.ysf_room = ""
+        rt.config.ysf_room_id = ""
+        rt.config.ysf_name = ""
+        rt.config.ysf_room_name = ""
+        rt.config.ysf_host = ""
+        rt.config.bm_master_host = ""
+        if rt.client:
+            if hasattr(rt.client, "_is_manual_disconnect"):
+                rt.client._is_manual_disconnect = True
+            inner_client = getattr(rt.client, "client", rt.client)
+            if inner_client is not None:
+                if hasattr(inner_client, "_manual_disconnect"):
+                    inner_client._manual_disconnect = True
+                if hasattr(inner_client, "_connect_gen"):
+                    inner_client._connect_gen += 1
+    ok = await hotspot_manager.disconnect_hotspot(cid, user_id=uid)
+    rt = hotspot_manager.get_runtime(uid, cid)
+    if rt:
+        rt.config.ysf_room = ""
+        rt.config.ysf_room_id = ""
+        rt.config.ysf_name = ""
+        rt.config.ysf_room_name = ""
+        rt.config.ysf_host = ""
+        rt.config.bm_master_host = ""
+        if rt.client and hasattr(rt.client, "clear_target"):
+            rt.client.clear_target()
+        rt.status = BMState.DISCONNECTED
+        rt.detail = _tr("ysf.disconnected_wait_room", user_id=uid, fallback="Disconnected (waiting for room selection)")
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        for i, h in enumerate(user_sett.hotspots):
+            if h.id == rt.config.id:
+                user_sett.hotspots[i] = rt.config
+                break
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        hotspot_manager._notify_async({
+            "type": "hotspot_updated",
+            "hotspot": rt.to_dict(),
+            "user_id": uid,
+        }, user_id=uid)
+    return {"status": "ok", "disconnected": bool(ok)}
+
+
+@app.post("/api/ysf/dg-id")
+async def post_ysf_dg_id(request: Request):
+    """Быстрая смена подписки RX DG-ID и/или TX DG-ID с мгновенной отправкой YSFO без разрыва сокета."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    if user:
+        await ensure_active_user(uid, user.get("login", ""))
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    cid = str(data.get("hotspot_id", "default") or "default").strip()
+    rt = hotspot_manager.get_runtime(uid, cid) or hotspot_manager.get_active_runtime(uid)
+    if not rt or (getattr(rt.config, "network_type", "") or "").lower() != "ysf":
+        raise HTTPException(status_code=404, detail=_tr("ysf.active_hotspot_not_found", fallback="Active YSF hotspot not found"))
+
+    from dmr.ysf_directory import (
+        ysf_dir_mgr,
+        classify_ysf_reflector,
+        normalize_ysf_dg_id_options,
+        ensure_ysf_dg_id_includes_tx,
+        resolve_ysf_room_dg_id_settings,
+    )
+
+    active_rid = str(getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", "") or "25000").strip()
+    target_rid = str(data.get("room_id") or active_rid).strip() or active_rid
+    found_room = ysf_dir_mgr.get_room_by_id(target_rid)
+    user_room_types = (getattr(hotspot_manager, "user_ysf_room_types", None) or {}).get(uid, {}) or {}
+    room_override = str(user_room_types.get(target_rid) or "").strip().lower()
+    cls_info = classify_ysf_reflector(
+        room=found_room,
+        name=getattr(rt.config, "ysf_room_name", "") or getattr(rt.config, "ysf_name", "") or "",
+        host=getattr(rt.config, "ysf_host", "") or getattr(rt.config, "bm_master_host", "") or "",
+        room_id=target_rid,
+        override=room_override,
+    )
+    is_mr = bool(cls_info["is_multiroom"])
+
+    cur_rx, cur_tx, _, _ = resolve_ysf_room_dg_id_settings(
+        rt.config, target_rid, found_room, room_type_override=room_override
+    )
+
+    if "rx_dg_id" in data:
+        new_rx = normalize_ysf_dg_id_options(str(data.get("rx_dg_id") or ""), is_multiroom=is_mr)
+    else:
+        new_rx = cur_rx
+
+    if "tx_dg_id" in data:
+        raw_tx = data.get("tx_dg_id")
+        if raw_tx is None or str(raw_tx).strip() == "" or str(raw_tx).strip() == "0" or str(raw_tx).strip() == "00":
+            new_tx: Optional[int] = None
+        else:
+            try:
+                v_tx = int(raw_tx)
+                new_tx = v_tx if 1 <= v_tx <= 99 else None
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail=_tr("ysf.invalid_tx_dg_id", fallback="Invalid TX DG-ID (allowed 1..99)"))
+    else:
+        new_tx = cur_tx
+
+    if new_tx is not None:
+        new_rx = ensure_ysf_dg_id_includes_tx(new_rx, new_tx, is_multiroom=is_mr)
+
+    if not isinstance(getattr(rt.config, "ysf_room_dg_ids", None), dict):
+        rt.config.ysf_room_dg_ids = {}
+    rt.config.ysf_room_dg_ids[target_rid] = {
+        "rx_dg_id": new_rx,
+        "tx_dg_id": new_tx,
+    }
+
+    ysfo_sent = False
+    if target_rid == active_rid:
+        rt.config.ysf_dg_id = new_rx
+        rt.config.ysf_tx_dg_id = new_tx
+        client_obj = getattr(rt.client, "client", rt.client) if rt.client else None
+        if client_obj and hasattr(client_obj, "set_dg_id_live"):
+            ysfo_sent = bool(client_obj.set_dg_id_live(
+                dg_id=new_rx,
+                tx_dg_id=new_tx,
+                is_multiroom=is_mr,
+                reflector_type=cls_info["reflector_type"],
+                multiroom_kind=cls_info["multiroom_kind"],
+            ))
+
+    user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+    for i, h in enumerate(user_sett.hotspots):
+        if h.id == rt.config.id:
+            user_sett.hotspots[i] = rt.config
+            break
+    await save_user_settings(uid, user_sett.model_dump())
+    if uid == 1:
+        save_app_settings(user_sett)
+
+    hotspot_dict = rt.to_dict()
+    await broadcast_user_json(uid, {
+        "type": "hotspot_updated",
+        "hotspot": hotspot_dict,
+        "user_id": uid,
+    })
+
+    return {
+        "status": "ok",
+        "room_id": target_rid,
+        "rx_dg_id": new_rx,
+        "tx_dg_id": new_tx,
+        "is_multiroom": is_mr,
+        "reflector_type": cls_info["reflector_type"],
+        "multiroom_kind": cls_info["multiroom_kind"],
+        "ysfo_sent": ysfo_sent,
+        "hotspot": hotspot_dict,
+    }
+
+@app.get("/api/ysf/dice")
+async def get_ysf_dice(exclude: str = ""):
+    if not ysf_dir_mgr._top_active_rooms:
+        await ysf_dir_mgr.refresh_top_active_rooms(force=False)
+    exclude_set = {x.strip() for x in str(exclude or "").split(",") if x.strip()}
+    room, live_rx, active_caller = await ysf_dir_mgr.pick_live_or_active_dice_room(exclude_ids=exclude_set or None)
+    if not room:
+        return {"status": "error", "message": "No rooms available"}
+    return {
+        "status": "ok",
+        "room": room,
+        "online_count": room.get("connections", 0),
+        "live_rx": live_rx,
+        "active_caller": active_caller
+    }
+
+@app.get("/api/adn/dice")
+async def get_adn_dice(exclude: str = ""):
+    exclude_set = set()
+    for x in str(exclude or "").split(","):
+        x = x.strip()
+        if x.isdigit():
+            exclude_set.add(int(x))
+    tg_item, live_rx, active_caller = await adn_hosts_mgr.pick_live_or_active_adn_tg(exclude_ids=exclude_set or None)
+    if not tg_item:
+        return {"status": "empty", "talkgroup": None}
+    return {
+        "status": "ok",
+        "talkgroup": tg_item,
+        "live_rx": live_rx,
+        "active_caller": active_caller
+    }
+
+@app.get("/api/ysf/active_top")
+async def get_ysf_active_top():
+    """Returns top active YSF rooms ranked by online client count."""
+    if not ysf_dir_mgr._top_active_rooms:
+        await ysf_dir_mgr.refresh_top_active_rooms(force=False)
+    return {
+        "status": "ok",
+        "count": len(ysf_dir_mgr._top_active_rooms),
+        "generated_at": int(ysf_dir_mgr._last_active_scan_ts),
+        "rooms": ysf_dir_mgr._top_active_rooms[:100]
+    }
+
+class YsfMatrixProbeRequest(BaseModel):
+    hotspot_id: str = "default"
+    rooms: List[str] = []
+    force: bool = False
+
+@app.post("/api/ysf/matrix-status")
+async def api_ysf_matrix_status(req: YsfMatrixProbeRequest, request: Request = None):
+    """Проверяет доступность (online/offline), количество подключений и активность для списка комнат YSF."""
+    user = _get_user_from_request(request) if request else None
+    uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
+    try:
+        results = await ysf_dir_mgr.probe_rooms_batch(req.rooms, force=req.force)
+        client = get_active_ysf_client(req.hotspot_id, uid)
+        if client and client.is_connected:
+            c_room = str(getattr(client, "room_id", "")).strip()
+            c_room_int = str(int(c_room)) if c_room.isdigit() else c_room
+            for target_k in (c_room, c_room_int):
+                if target_k in results or target_k in req.rooms:
+                    is_talking = bool(getattr(client, "is_rx", False) or getattr(client, "is_tx", False))
+                    cnt = getattr(client, "online_count", 0) or results.get(target_k, {}).get("connections", 1)
+                    results[target_k] = {
+                        "room": target_k,
+                        "online": True,
+                        "connections": cnt,
+                        "keyed": is_talking,
+                        "traffic_level": "high" if is_talking else results.get(target_k, {}).get("traffic_level", "medium")
+                    }
+        return {
+            "status": "ok",
+            "hotspot_id": req.hotspot_id,
+            "rooms": results
+        }
+    except Exception as e:
+        logger.error(f"[YSF] Matrix status probe error: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "hotspot_id": req.hotspot_id,
+            "rooms": {}
+        }
+
 @app.post("/api/xlx/hosts/refresh")
 async def refresh_xlx_hosts(request: Request = None):
     """Force re-fetches and updates XLX reflectors catalog."""
@@ -4556,14 +5800,20 @@ async def refresh_xlx_hosts(request: Request = None):
     }
 
 @app.get("/api/dmrplus/hosts")
-async def get_dmrplus_hosts(request: Request = None):
-    """Returns live/cached DMR+ (IPSC2) servers catalog."""
+async def get_dmrplus_hosts(force: bool = False, request: Request = None):
+    """Returns live/cached DMR+ (IPSC2) servers catalog with 24h non-blocking background refresh."""
     user = _get_user_from_request(request) if request else None
     uid = user["user_id"] if user else (hotspot_manager.active_user_id or 1)
     if user:
         await ensure_active_user(uid, user.get("login", ""))
-    await dmrplus_hosts_mgr.fetch_hosts(force=False)
-    return dmrplus_hosts_mgr.get_hosts(enriched=True)
+    if force:
+        await dmrplus_hosts_mgr.fetch_hosts(force=True)
+        started = False
+    else:
+        started = dmrplus_hosts_mgr.ensure_fresh_background()
+    payload = dmrplus_hosts_mgr.get_hosts_payload(enriched=True)
+    payload["sync_in_progress"] = bool(started or payload.get("sync_in_progress"))
+    return payload
 
 @app.post("/api/dmrplus/hosts/refresh")
 async def refresh_dmrplus_hosts(request: Request = None):
@@ -4704,12 +5954,12 @@ async def _execute_asl_disconnect_flow(
 
         if not target_hs.connected_node and not getattr(target_hs, "asl_links", None):
             target_hs.status = BMState.DISCONNECTED
-            target_hs.detail = "Отключен"
+            target_hs.detail = _tr("common.disconnected", user_id=uid, fallback="Disconnected")
             await broadcast_user_json(uid, {
                 "type": "bm_status",
                 "hotspot_id": target_hs.config.id,
                 "status": "DISCONNECTED",
-                "detail": "Отключен",
+                "detail": _tr("common.disconnected", user_id=uid, fallback="Disconnected"),
                 "user_id": uid
             })
 
@@ -4719,6 +5969,189 @@ async def _execute_asl_disconnect_flow(
             "node": disc_target
         })
         return res
+
+async def _execute_ysf_connect_flow(
+    uid: int,
+    target_hs,
+    room_id: str,
+    room_name: str = "",
+    host: str = "",
+    port: int = 0
+):
+    """Пошаговый оркестратор подключения YSF с пер-хотспотной блокировкой и выводом реальных этапов."""
+    if not hasattr(target_hs, "_ysf_flow_lock"):
+        target_hs._ysf_flow_lock = asyncio.Lock()
+
+    my_flow_gen = getattr(target_hs, "_ysf_flow_gen", 0) + 1
+    target_hs._ysf_flow_gen = my_flow_gen
+
+    async with target_hs._ysf_flow_lock:
+        if getattr(target_hs, "_ysf_flow_gen", 0) != my_flow_gen:
+            return
+        hid = target_hs.config.id
+        loop = asyncio.get_running_loop()
+
+        def emit_step(step_data: dict):
+            if getattr(target_hs, "_ysf_flow_gen", 0) != my_flow_gen:
+                return
+            payload = {
+                "type": "ysf_proc_step",
+                "hotspot_id": hid,
+                **step_data
+            }
+            asyncio.run_coroutine_threadsafe(broadcast_user_json(uid, payload), loop)
+
+        s_room = str(room_id).strip()
+
+        # 1. Поиск в реестре
+        emit_step({
+            "proc": "connect",
+            "state": "progress",
+            "code": "lookup",
+            "room_id": s_room,
+            "tone": "neutral",
+            "text": _tr("ysf.lookup_progress", user_id=uid, fallback="Reflector #{room_id}: looking up address in YSF registry...", room_id=s_room)
+        })
+
+        from dmr.ysf_directory import ysf_dir_mgr
+        rooms = ysf_dir_mgr.get_hosts().get("rooms", [])
+        found = next((r for r in rooms if str(r.get("id")).strip() == s_room), None)
+
+        # Приоритет источников хоста: (1) реестр по номеру комнаты; (2) фронтенд, если не цифры и не номер комнаты
+        target_host = ""
+        target_port = 42000
+        if found and found.get("host"):
+            target_host = str(found.get("host")).strip()
+            target_port = int(found.get("port", 42000) or 42000)
+        elif host and not host.strip().isdigit() and host.strip() != s_room:
+            target_host = host.strip()
+            target_port = int(port) if (port and 1 <= int(port) <= 65535) else 42000
+
+        if not target_host:
+            emit_step({
+                "proc": "connect",
+                "state": "failed",
+                "code": "not_found",
+                "room_id": s_room,
+                "tone": "negative",
+                "text": _tr("ysf.not_found_in_registry", user_id=uid, fallback="✕ Reflector #{room_id}: address not found in YSF registry", room_id=s_room),
+                "auto_hide_ms": 4000
+            })
+            return
+
+        resolved_name = (found.get("reflector_name") or found.get("name") if found else "") or room_name or f"YSF #{s_room}"
+
+        from dmr.ysf_directory import resolve_ysf_room_dg_id_settings, classify_ysf_reflector
+        # Запись настроек хотспота
+        target_hs.config.ysf_host = target_host
+        target_hs.config.ysf_port = target_port
+        target_hs.config.ysf_room_id = s_room
+        target_hs.config.ysf_room_name = resolved_name
+        target_hs.config.ysf_room = s_room
+        target_hs.config.ysf_name = resolved_name
+        target_hs.config.bm_master_host = target_host
+        target_hs.config.bm_master_port = target_port
+
+        user_room_types = (getattr(hotspot_manager, "user_ysf_room_types", None) or {}).get(uid, {}) or {}
+        room_override = str(user_room_types.get(s_room) or "").strip().lower()
+        rx_dg_id, tx_dg_id, is_multiroom, mr_kind = resolve_ysf_room_dg_id_settings(
+            target_hs.config, s_room, found, room_type_override=room_override
+        )
+        cls_info = classify_ysf_reflector(
+            room=found, name=resolved_name, host=target_host, room_id=s_room, override=room_override
+        )
+        target_hs.config.ysf_dg_id = rx_dg_id
+        target_hs.config.ysf_tx_dg_id = tx_dg_id
+
+        # Сохранение настроек пользователя
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        for i, h in enumerate(user_sett.hotspots):
+            if h.id == hid:
+                user_sett.hotspots[i] = target_hs.config
+                break
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+
+        terminal_emitted = False
+
+        # Привязка реального колбэка этапов плашки
+        def _proc_step_cb(code: str, text: str, tone: str, state: str):
+            nonlocal terminal_emitted
+            if state in ("done", "failed"):
+                terminal_emitted = True
+            emit_step({
+                "proc": "connect",
+                "state": state,
+                "code": code,
+                "room_id": s_room,
+                "room_name": resolved_name,
+                "host": target_host,
+                "port": target_port,
+                "dg_id": rx_dg_id,
+                "tx_dg_id": tx_dg_id,
+                "is_multiroom": is_multiroom,
+                "reflector_type": cls_info["reflector_type"],
+                "multiroom_kind": mr_kind,
+                "tone": tone,
+                "text": text,
+                "auto_hide_ms": 4000 if state in ("done", "failed") else 0
+            })
+
+        if getattr(target_hs, "_ysf_flow_gen", 0) != my_flow_gen:
+            return
+
+        client_obj = getattr(target_hs.client, "client", target_hs.client)
+        if hasattr(client_obj, "on_proc_step"):
+            client_obj.on_proc_step = _proc_step_cb
+
+        if hasattr(target_hs.client, "retarget"):
+            target_hs.client.retarget(
+                target_host,
+                target_port,
+                s_room,
+                resolved_name,
+                dg_id=rx_dg_id,
+                tx_dg_id=tx_dg_id,
+                is_multiroom=is_multiroom,
+                reflector_type=cls_info["reflector_type"],
+                multiroom_kind=mr_kind,
+                room_type_override=room_override,
+            )
+
+        ok = False
+        try:
+            ok = await hotspot_manager.reconnect_hotspot(hid, user_id=uid)
+        except Exception as e:
+            logger.error(f"[YSF] Connect flow error on {hid} room #{s_room}: {e}")
+            ok = False
+
+        if getattr(target_hs, "_ysf_flow_gen", 0) != my_flow_gen:
+            if target_hs.client and target_hs.client.is_connected:
+                await target_hs.client.disconnect()
+            return
+
+        if ok:
+            hotspot_manager._notify_async({
+                "type": "hotspot_updated",
+                "hotspot": target_hs.to_dict(),
+                "user_id": uid,
+            }, user_id=uid)
+        else:
+            target_hs.status = BMState.DISCONNECTED
+            if not terminal_emitted:
+                emit_step({
+                    "proc": "connect",
+                    "state": "failed",
+                    "code": "connect_failed",
+                    "room_id": s_room,
+                    "room_name": resolved_name,
+                    "host": target_host,
+                    "port": target_port,
+                    "tone": "negative",
+                    "text": _tr("ysf.connect_failed", user_id=uid, fallback="✕ Failed to connect to reflector #{room_id}", room_id=s_room),
+                    "auto_hide_ms": 4000
+                })
 
 async def _execute_asl_connect_flow(
     uid: int,
@@ -4826,13 +6259,13 @@ async def _execute_asl_connect_flow(
             target_hs.asl_links = []
             target_hs.asl_online_count = 0
             target_hs.status = BMState.DISCONNECTED
-            target_hs.detail = "Отключен"
+            target_hs.detail = _tr("common.disconnected", user_id=uid, fallback="Disconnected")
 
             await broadcast_user_json(uid, {
                 "type": "bm_status",
                 "hotspot_id": target_hs.config.id,
                 "status": "DISCONNECTED",
-                "detail": "Отключен",
+                "detail": _tr("common.disconnected", user_id=uid, fallback="Disconnected"),
                 "user_id": uid
             })
             await broadcast_user_json(uid, {
@@ -5070,6 +6503,12 @@ async def search_talkgroups(q: str = "", limit: int = 50, network: str = "bm"):
         await tg_resolver.fetch_tgif_catalog()
     if net == "freedmr" and len(tg_resolver.freedmr_cache) < 50:
         await tg_resolver.fetch_freedmr_catalog()
+    if net == "adn":
+        adn_hosts_mgr.ensure_fresh_background()
+        if len(tg_resolver.adn_cache) < 50:
+            await tg_resolver.fetch_adn_catalog(force=True)
+        else:
+            tg_resolver.ensure_adn_fresh_background()
     results = tg_resolver.search_talkgroups(q, limit=limit, network_type=net)
     return {"status": "ok", "query": q, "network": net, "count": len(results), "results": results, "stats": tg_resolver.get_stats(network_type=net)}
 
@@ -5086,22 +6525,28 @@ async def search_dmr_users(q: str = "", limit: int = 50):
 
 @app.post("/api/dmr/sync")
 async def manual_sync_dmr_databases():
-    """Manual trigger to update TalkGroups catalogs (BM + TGIF + FreeDMR) and RadioID user database."""
+    """Manual trigger to update TalkGroups catalogs (BM + TGIF + FreeDMR + ADN) and RadioID user database."""
     tg_count = await tg_resolver.fetch_master_catalog()
     tgif_count = await tg_resolver.fetch_tgif_catalog()
     freedmr_count = await tg_resolver.fetch_freedmr_catalog()
+    adn_tg_count = await tg_resolver.fetch_adn_catalog(force=True)
     freedmr_servers = await freedmr_hosts_mgr.fetch_hosts(force=True)
     xlx_servers = await xlx_hosts_mgr.fetch_hosts(force=True)
     dmrplus_servers = await dmrplus_hosts_mgr.fetch_hosts(force=True)
+    adn_servers = await adn_hosts_mgr.fetch_hosts(force=True)
+    ysf_servers = await ysf_dir_mgr.fetch_hosts(force=True)
     user_count = await user_db.update_from_network()
     return {
         "status": "ok",
         "talkgroups_updated": tg_count,
         "tgif_talkgroups": tgif_count,
         "freedmr_talkgroups": freedmr_count,
+        "adn_talkgroups": adn_tg_count,
         "freedmr_hosts": len(freedmr_servers),
         "xlx_hosts": len(xlx_servers),
         "dmrplus_hosts": len(dmrplus_servers),
+        "adn_hosts": len(adn_servers),
+        "ysf_hosts": len(ysf_servers),
         "users_count": user_count,
     }
 
@@ -5169,7 +6614,7 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
                 "status": "error",
                 "code": "NO_API_KEY",
                 "network_type": "tgif",
-                "detail": f"TGIF API Key не настроен для «{cfg_check.name}»",
+                "detail": _tr("tgif.api_key_not_configured", fallback='TGIF API Key is not configured for "{name}"', name=cfg_check.name),
                 "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
                 "callsign": cfg_check.callsign,
                 "hotspot_name": cfg_check.name,
@@ -5242,41 +6687,44 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
                 except Exception:
                     pass
                 if e.code in (401, 403):
-                    return {"status": "error", "code": "AUTH_FAILED", "network_type": "tgif", "detail": "Неверный токен TGIF (401)", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+                    return {"status": "error", "code": "AUTH_FAILED", "network_type": "tgif", "detail": _tr("tgif.invalid_token", fallback="Invalid TGIF token (401)"), "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
                 if e.code == 404:
-                    return {"status": "error", "code": "NOT_FOUND", "network_type": "tgif", "detail": f"Устройство {device_id_check} не найдено на сервере TGIF. Проверьте регистрацию и SSID.", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
-                return {"status": "error", "network_type": "tgif", "detail": f"Ошибка TGIF API: HTTP {e.code} ({err_text or e.reason})", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+                    return {"status": "error", "code": "NOT_FOUND", "network_type": "tgif", "detail": _tr("tgif.device_not_found", fallback="Device {device_id} not found on TGIF server. Check registration and SSID.", device_id=device_id_check), "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+                return {"status": "error", "network_type": "tgif", "detail": _tr("tgif.api_http_err", fallback="TGIF API error: HTTP {code} ({reason})", code=e.code, reason=(err_text or e.reason)), "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
             except Exception as e:
-                return {"status": "error", "network_type": "tgif", "detail": f"Сервер TGIF недоступен ({e})", "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
+                return {"status": "error", "network_type": "tgif", "detail": _tr("tgif.server_unavailable_err", fallback="TGIF server unavailable ({error})", error=e), "ts1": [], "ts2": [], "dynamic_ts1": dyn_ts1, "dynamic_ts2": dyn_ts2, "device_id": device_id_check, "hotspot_id": cfg_check.id, "tg_names": tg_resolver.get_all_names("tgif")}
 
-        return await asyncio.to_thread(_fetch_tgif)
+        _ctx = contextvars.copy_context()
+        return await asyncio.to_thread(_ctx.run, _fetch_tgif)
 
-    elif net_type == "freedmr" and cfg_check:
+    elif net_type in ("freedmr", "adn") and cfg_check:
         if len(tg_resolver.freedmr_cache) < 50:
             await tg_resolver.fetch_freedmr_catalog()
 
         parsed = parse_freedmr_rpto(getattr(cfg_check, "rpto_options", "") or "")
+        is_duplex = getattr(cfg_check, "duplex", True)
+        norm_ts1, norm_ts2 = normalize_freedmr_slots(parsed["ts1"], parsed["ts2"], duplex=is_duplex)
         ts1 = [
             {
                 "talkgroup": tg_num,
                 "slot": 1,
-                "name": tg_resolver.get_name(tg_num, network_type="freedmr")
+                "name": tg_resolver.get_name(tg_num, network_type=net_type)
             }
-            for tg_num in parsed["ts1"]
+            for tg_num in norm_ts1
         ]
         ts2 = [
             {
                 "talkgroup": tg_num,
                 "slot": 2,
-                "name": tg_resolver.get_name(tg_num, network_type="freedmr")
+                "name": tg_resolver.get_name(tg_num, network_type=net_type)
             }
-            for tg_num in parsed["ts2"]
+            for tg_num in norm_ts2
         ]
 
         local_dyn = hotspot_manager.get_dynamic_tgs(cfg_check.id, max_age_sec=900.0, user_id=uid)
         now = time.time()
-        static_1 = set(parsed["ts1"])
-        static_2 = set(parsed["ts2"])
+        static_1 = set(norm_ts1)
+        static_2 = set(norm_ts2)
         dyn_ts1 = []
         dyn_ts2 = []
         for tg, ts in local_dyn.get(1, {}).items():
@@ -5285,7 +6733,7 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
                 dyn_ts1.append({
                     "talkgroup": tg,
                     "slot": 1,
-                    "name": tg_resolver.get_name(tg, network_type="freedmr"),
+                    "name": tg_resolver.get_name(tg, network_type=net_type),
                     "last_active": ts,
                     "remaining_sec": rem
                 })
@@ -5295,7 +6743,7 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
                 dyn_ts2.append({
                     "talkgroup": tg,
                     "slot": 2,
-                    "name": tg_resolver.get_name(tg, network_type="freedmr"),
+                    "name": tg_resolver.get_name(tg, network_type=net_type),
                     "last_active": ts,
                     "remaining_sec": rem
                 })
@@ -5304,18 +6752,19 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
 
         return {
             "status": "ok",
-            "network_type": "freedmr",
+            "network_type": net_type,
             "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
             "callsign": cfg_check.callsign,
             "hotspot_name": cfg_check.name,
             "hotspot_id": cfg_check.id,
+            "duplex": is_duplex,
             "rpto_options": getattr(cfg_check, "rpto_options", "") or "",
             "rpto_extra": dict(parsed["opts"]),
             "ts1": ts1,
             "ts2": ts2,
             "dynamic_ts1": dyn_ts1,
             "dynamic_ts2": dyn_ts2,
-            "tg_names": tg_resolver.get_all_names("freedmr")
+            "tg_names": tg_resolver.get_all_names(net_type)
         }
 
     elif net_type == "xlx" and cfg_check:
@@ -5327,13 +6776,13 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
                 "talkgroup": mod_tg,
                 "slot": 2,
                 "module": mod,
-                "name": f"Module {mod} (Активный модуль → TG 9)"
+                "name": _tr("xlx.active_module_name", fallback="Module {mod} (Active module → TG 9)", mod=mod)
             })
         dyn_ts2 = [
             {
                 "talkgroup": 9,
                 "slot": 2,
-                "name": "Reflector Call (TS2)",
+                "name": _tr("xlx.reflector_call_ts2", fallback="Reflector Call (TS2)"),
                 "last_active": time.time(),
                 "remaining_sec": 900
             }
@@ -5353,6 +6802,85 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
             "dynamic_ts1": [],
             "dynamic_ts2": dyn_ts2,
             "tg_names": tg_resolver.get_all_names("xlx")
+        }
+
+    elif net_type == "dmrplus" and cfg_check:
+        dmrplus_hosts_mgr.ensure_fresh_background()
+        parsed_dp = parse_dmrplus_rpto(
+            getattr(cfg_check, "rpto_options", "") or "",
+            fallback_reflector=getattr(cfg_check, "dmrplus_reflector", "") or "",
+        )
+        eff_ref = str(parsed_dp["start_ref"]) if parsed_dp["start_ref"] else ""
+        ts1 = [
+            {
+                "talkgroup": tg_num,
+                "slot": 1,
+                "name": tg_resolver.get_name(tg_num, network_type="dmrplus"),
+            }
+            for tg_num in parsed_dp["ts1"]
+        ]
+        ts2 = [
+            {
+                "talkgroup": tg_num,
+                "slot": 2,
+                "name": tg_resolver.get_name(tg_num, network_type="dmrplus"),
+            }
+            for tg_num in parsed_dp["ts2"]
+        ]
+        local_dyn = hotspot_manager.get_dynamic_tgs(cfg_check.id, max_age_sec=900.0, user_id=uid)
+        now = time.time()
+        static_1 = set(parsed_dp["ts1"])
+        static_2 = set(parsed_dp["ts2"])
+        dyn_ts1 = []
+        dyn_ts2 = []
+        for tg, ts in local_dyn.get(1, {}).items():
+            if tg not in (0, 4000, 9990) and tg not in static_1:
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts1.append({
+                    "talkgroup": tg,
+                    "slot": 1,
+                    "name": tg_resolver.get_name(tg, network_type="dmrplus"),
+                    "last_active": ts,
+                    "remaining_sec": rem,
+                })
+        for tg, ts in local_dyn.get(2, {}).items():
+            if tg not in (0, 4000, 9990) and tg not in static_2:
+                rem = max(0, int(900.0 - (now - ts)))
+                dyn_ts2.append({
+                    "talkgroup": tg,
+                    "slot": 2,
+                    "name": tg_resolver.get_name(tg, network_type="dmrplus"),
+                    "last_active": ts,
+                    "remaining_sec": rem,
+                })
+        if eff_ref and not any(x["talkgroup"] == 9 for x in dyn_ts2):
+            dyn_ts2.append({
+                "talkgroup": 9,
+                "slot": 2,
+                "name": tg_resolver.get_name(9, network_type="dmrplus"),
+                "last_active": now,
+                "remaining_sec": 900,
+            })
+        dyn_ts1.sort(key=lambda x: x["talkgroup"])
+        dyn_ts2.sort(key=lambda x: x["talkgroup"])
+        return {
+            "status": "ok",
+            "network_type": "dmrplus",
+            "device_id": device_id_check or str(cfg_check.dmr_id or "---"),
+            "callsign": cfg_check.callsign,
+            "hotspot_name": cfg_check.name,
+            "hotspot_id": cfg_check.id,
+            "dmrplus_reflector": eff_ref,
+            "relink_time": parsed_dp["relink_time"],
+            "limit": DMRPLUS_MAX_STATIC_PER_SLOT,
+            "supports_ts1": True,
+            "supports_ts2": True,
+            "rpto_options": getattr(cfg_check, "rpto_options", "") or "",
+            "ts1": ts1,
+            "ts2": ts2,
+            "dynamic_ts1": dyn_ts1,
+            "dynamic_ts2": dyn_ts2,
+            "tg_names": tg_resolver.get_all_names("dmrplus"),
         }
 
     elif net_type != "bm" and cfg_check:
@@ -5514,14 +7042,15 @@ async def _get_bm_static_groups_impl(hotspot_id: Optional[str] = None, request: 
                 }
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                return {"status": "error", "detail": "Неверный или просроченный токен BM (401)", "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
+                return {"status": "error", "detail": _tr("bm.invalid_or_expired_token", fallback="Invalid or expired BM token (401)"), "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
             if e.code == 404:
-                return {"status": "error", "detail": f"Устройство {device_id} не найдено на сервере BM. Проверьте регистрацию устройства и SSID хотспота на BM.", "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
-            return {"status": "error", "detail": f"Ошибка BM API: HTTP {e.code}", "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
+                return {"status": "error", "detail": _tr("bm.device_not_found", fallback="Device {device_id} not found on BM server. Check device registration and hotspot SSID on BM.", device_id=device_id), "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
+            return {"status": "error", "detail": _tr("bm.api_http_err", fallback="BM API error: HTTP {code}", code=e.code), "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
         except Exception as e:
-            return {"status": "error", "detail": f"Сервер BM недоступен ({e})", "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
+            return {"status": "error", "detail": _tr("bm.server_unavailable_err", fallback="BM server unavailable ({error})", error=e), "ts1": [], "ts2": [], "dynamic_ts1": [], "dynamic_ts2": [], "device_id": device_id}
 
-    return await asyncio.to_thread(_fetch)
+    _ctx = contextvars.copy_context()
+    return await asyncio.to_thread(_ctx.run, _fetch)
 
 
 # Debounced BM reconnect tasks after group modifications: hotspot_id -> asyncio.Task
@@ -5575,7 +7104,7 @@ def schedule_bm_reconnect_after_group_mod(
             hotspot_manager._notify_async({
                 "type": "bm_reconnecting_groups",
                 "hotspot_id": rt.config.id,
-                "message": f"Переподключение к BrandMeister ({rt.config.name}) после изменения групп..."
+                "message": _tr("bm.reconnecting_after_groups", user_id=uid, fallback="Reconnecting to BrandMeister ({name}) after talkgroup changes...", name=rt.config.name)
             }, user_id=uid)
 
             await hotspot_manager.reconnect_hotspot(rt.config.id, user_id=uid)
@@ -5613,7 +7142,7 @@ async def _execute_bm_import(task: BmImportTask, device_id: str, api_key: str):
     except Exception as e:
         logger.error(f"[BM_TASK] Unhandled error in background task {task.task_id}: {e}")
         task.status = "error"
-        task.message = f"Ошибка фоновой операции: {e}"
+        task.message = _tr("bm.bg_op_error", user_id=task.user_id, fallback="Background operation error: {error}", error=e)
         task.finished_at = time.time()
         if _user_active_bm_import.get(task.user_id) == task.task_id:
             _user_active_bm_import.pop(task.user_id, None)
@@ -5633,7 +7162,7 @@ async def add_bm_static_group(payload: dict, request: Request = None):
     hotspot_id = payload.get("hotspot_id")
     slot = int(payload.get("slot", 1))
     if slot not in (1, 2):
-        raise HTTPException(status_code=400, detail="Слот должен быть 1 или 2")
+        raise HTTPException(status_code=400, detail=_tr("bm.slot_must_be_1_or_2", fallback="Slot must be 1 or 2"))
 
     tgs = payload.get("talkgroups")
     if tgs is None:
@@ -5643,12 +7172,12 @@ async def add_bm_static_group(payload: dict, request: Request = None):
         tgs = [int(x) for x in tgs if int(x) > 0]
 
     if not tgs:
-        raise HTTPException(status_code=400, detail="Не указаны TalkGroup для добавления")
+        raise HTTPException(status_code=400, detail=_tr("bm.no_tg_to_add", fallback="No TalkGroups specified to add"))
 
     cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
     net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
 
-    if net_type == "freedmr" and cfg_check:
+    if net_type in ("freedmr", "adn") and cfg_check:
         parsed = parse_freedmr_rpto(getattr(cfg_check, "rpto_options", "") or "")
         target_list = parsed["ts1"] if slot == 1 else parsed["ts2"]
         other_list = parsed["ts2"] if slot == 1 else parsed["ts1"]
@@ -5656,8 +7185,9 @@ async def add_bm_static_group(payload: dict, request: Request = None):
         errors = []
         moved_from_other_slot = []
         for tg in tgs:
-            if tg in (0, 4000, 9990):
-                errors.append(f"TG {tg}: служебная группа (не может быть статической)")
+            if tg in (0, 4000, 5000, 9990, 9991, 9999):
+                err_svc = _tr("adn.service_tg_no_static", fallback="TG {tg}: service group (cannot be static)", tg=tg) if net_type == "adn" else _tr("freedmr.service_tg_no_static", fallback="TG {tg}: service group (cannot be static)", tg=tg)
+                errors.append(err_svc)
                 continue
             if tg in other_list:
                 other_list.remove(tg)
@@ -5666,7 +7196,7 @@ async def add_bm_static_group(payload: dict, request: Request = None):
                 target_list.append(tg)
             added.append(tg)
 
-        # Simplex hotspot: FreeDMR only uses Slot 2
+        # Simplex hotspot: FreeDMR / ADN only uses Slot 2
         if not getattr(cfg_check, "duplex", True):
             for tg in parsed["ts1"]:
                 if tg not in parsed["ts2"]:
@@ -5675,9 +7205,10 @@ async def add_bm_static_group(payload: dict, request: Request = None):
 
         new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"], prefer_slot=slot)
         if len(new_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
+            err_lim = _tr("adn.rpto_limit_exceeded", fallback="ADN Systems server RPTO length limit exceeded ({max_bytes} bytes). Remove some talkgroups.", max_bytes=FREEDMR_MAX_RPTO_BYTES) if net_type == "adn" else _tr("freedmr.rpto_limit_exceeded", fallback="FreeDMR server RPTO length limit exceeded ({max_bytes} bytes). Remove some talkgroups.", max_bytes=FREEDMR_MAX_RPTO_BYTES)
             return {
                 "status": "error",
-                "detail": f"Превышен лимит длины RPTO сервера FreeDMR ({FREEDMR_MAX_RPTO_BYTES} байт). Удалите часть групп."
+                "detail": err_lim
             }
 
         await hotspot_manager.set_hotspot_rpto(cfg_check.id, rpto_options=new_rpto, user_id=uid)
@@ -5686,16 +7217,17 @@ async def add_bm_static_group(payload: dict, request: Request = None):
         if uid == 1:
             save_app_settings(user_sett)
 
+        msg_added = _tr("adn.rpto_added_count", fallback="Static talkgroups added to ADN Systems RPTO: {count}", count=len(added)) if net_type == "adn" else _tr("freedmr.rpto_added_count", fallback="Static talkgroups added to FreeDMR RPTO: {count}", count=len(added))
         return {
             "status": "ok",
-            "network_type": "freedmr",
+            "network_type": net_type,
             "slot": slot,
             "added": added,
             "moved_from_other_slot": moved_from_other_slot,
             "errors": errors,
             "talkgroup": added[0] if added else None,
             "rpto_options": new_rpto,
-            "message": f"Добавлено статических групп в RPTO FreeDMR: {len(added)}"
+            "message": msg_added
         }
 
     if net_type == "xlx" and cfg_check:
@@ -5713,13 +7245,13 @@ async def add_bm_static_group(payload: dict, request: Request = None):
                 "xlx_module": "",
                 "added": [],
                 "errors": [],
-                "message": f"Модуль XLX отключен (TG 4000)"
+                "message": _tr("xlx.module_disconnected", fallback="XLX module disconnected (TG 4000)")
             }
         mod = xlx_tg_to_module(target_tg)
         if not mod:
             return {
                 "status": "error",
-                "detail": f"В сети XLX для выбора модуля укажите TG 4001–4026 (Модули A–Z)"
+                "detail": _tr("xlx.module_tg_range", fallback="In XLX network, specify TG 4001–4026 (Modules A–Z) to select a module")
             }
         await hotspot_manager.set_hotspot_rpto(cfg_check.id, xlx_module=mod, user_id=uid)
         user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
@@ -5734,14 +7266,14 @@ async def add_bm_static_group(payload: dict, request: Request = None):
             "added": [xlx_module_to_tg(mod)],
             "errors": [],
             "talkgroup": xlx_module_to_tg(mod),
-            "message": f"Подключен модуль XLX {mod} (TG {xlx_module_to_tg(mod)}) на TS2"
+            "message": _tr("xlx.module_connected_ts2", fallback="Connected XLX module {mod} (TG {tg}) on TS2", mod=mod, tg=xlx_module_to_tg(mod))
         }
 
     if net_type == "dmrplus" and cfg_check:
         target_tg = tgs[-1]
-        if slot == 2:
+        if slot == 2 and (target_tg in (4000, 5000) or 4001 <= target_tg <= 4999):
             if target_tg == 4000:
-                await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector="", user_id=uid)
+                res_rpto = await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector="", user_id=uid)
                 user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
                 await save_user_settings(uid, user_sett.model_dump())
                 if uid == 1:
@@ -5751,9 +7283,10 @@ async def add_bm_static_group(payload: dict, request: Request = None):
                     "network_type": "dmrplus",
                     "slot": 2,
                     "dmrplus_reflector": "",
+                    "rpto_options": (res_rpto or {}).get("hotspot", {}).get("rpto_options", ""),
                     "added": [],
                     "errors": [],
-                    "message": "Рефлектор DMR+ отключен (4000 Unlink)"
+                    "message": _tr("dmrplus.reflector_unlinked", fallback="DMR+ reflector disconnected (4000 Unlink)")
                 }
             if target_tg == 5000:
                 rt = hotspot_manager.get_runtime(uid, cfg_check.id)
@@ -5765,10 +7298,10 @@ async def add_bm_static_group(payload: dict, request: Request = None):
                     "slot": 2,
                     "added": [],
                     "errors": [],
-                    "message": "Запрос статуса рефлектора DMR+ (5000 Status)"
+                    "message": _tr("dmrplus.reflector_status_query", fallback="Requesting DMR+ reflector status (5000 Status)")
                 }
             ref_str = str(target_tg)
-            await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector=ref_str, user_id=uid)
+            res_rpto = await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector=ref_str, user_id=uid)
             user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
             await save_user_settings(uid, user_sett.model_dump())
             if uid == 1:
@@ -5778,35 +7311,75 @@ async def add_bm_static_group(payload: dict, request: Request = None):
                 "network_type": "dmrplus",
                 "slot": 2,
                 "dmrplus_reflector": ref_str,
+                "rpto_options": (res_rpto or {}).get("hotspot", {}).get("rpto_options", ""),
                 "added": [target_tg],
                 "errors": [],
                 "talkgroup": target_tg,
-                "message": f"Подключен рефлектор DMR+ {ref_str} на TS2 (Голос в TG 9)"
+                "message": _tr("dmrplus.reflector_connected_ts2", fallback="Connected DMR+ reflector {reflector} on TS2 (Voice on TG 9)", reflector=ref_str)
             }
-        else:
-            cfg_check.default_tg_ts1 = target_tg
+
+        parsed_dp = parse_dmrplus_rpto(
+            getattr(cfg_check, "rpto_options", "") or "",
+            fallback_reflector=getattr(cfg_check, "dmrplus_reflector", "") or "",
+        )
+        target_list = parsed_dp["ts1"] if slot == 1 else parsed_dp["ts2"]
+        added = []
+        errors = []
+        for tg in tgs:
+            if tg in (0, 4000, 5000, 9990, 9991, 9999) or (slot == 2 and tg == 9):
+                errors.append(_tr("dmrplus.service_tg_no_static", fallback="TG {tg}: service group (cannot be static)", tg=tg))
+                continue
+            if tg in target_list:
+                added.append(tg)
+                continue
+            if len(target_list) >= DMRPLUS_MAX_STATIC_PER_SLOT:
+                errors.append(_tr("dmrplus.slot_limit_reached", fallback="TG {tg}: DMR+ allows up to {limit} static groups per slot (TS{slot})", tg=tg, limit=DMRPLUS_MAX_STATIC_PER_SLOT, slot=slot))
+                continue
+            target_list.append(tg)
+            added.append(tg)
+
+        if not added and errors:
+            return {"status": "error", "detail": "; ".join(errors[:5])}
+
+        new_rpto = build_dmrplus_rpto(
+            start_ref=parsed_dp["start_ref"],
+            ts1=parsed_dp["ts1"],
+            ts2=parsed_dp["ts2"],
+            relink_time=parsed_dp["relink_time"],
+            user_link=parsed_dp["user_link"],
+            extra_opts=parsed_dp["opts"],
+        )
+        if len(new_rpto.encode("ascii", errors="ignore")) > DMRPLUS_MAX_RPTO_BYTES:
+            return {"status": "error", "detail": _tr("dmrplus.rpto_limit_exceeded", fallback="DMR+ RPTO length limit exceeded ({max_bytes} bytes)", max_bytes=DMRPLUS_MAX_RPTO_BYTES)}
+
+        if slot == 1 and added:
+            cfg_check.default_tg_ts1 = added[-1]
             rt = hotspot_manager.get_runtime(uid, cfg_check.id)
             if rt:
-                rt.config.default_tg_ts1 = target_tg
-            user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
-            await save_user_settings(uid, user_sett.model_dump())
-            if uid == 1:
-                save_app_settings(user_sett)
-            return {
-                "status": "ok",
-                "network_type": "dmrplus",
-                "slot": 1,
-                "added": [target_tg],
-                "errors": [],
-                "talkgroup": target_tg,
-                "message": f"Установлена группа DMR+ TG {target_tg} на TS1"
-            }
+                rt.config.default_tg_ts1 = added[-1]
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, rpto_options=new_rpto, user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        return {
+            "status": "ok",
+            "network_type": "dmrplus",
+            "slot": slot,
+            "dmrplus_reflector": str(parsed_dp["start_ref"]) if parsed_dp["start_ref"] else "",
+            "added": added,
+            "errors": errors,
+            "talkgroup": added[0] if added else None,
+            "rpto_options": new_rpto,
+            "message": _tr("dmrplus.rpto_added_count", fallback="DMR+ TS{slot}: added {count} static TG(s)", slot=slot, count=len(added)),
+        }
 
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
     if err:
         return {"status": "error", "detail": err}
 
     net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower()
+    _req_lang = get_lang(user_id=uid)
 
     if net_type == "tgif":
         def _add_tgif():
@@ -5815,7 +7388,7 @@ async def add_bm_static_group(payload: dict, request: Request = None):
             errors = []
             for i, tg in enumerate(tgs):
                 if tg in (9, 777, 4000, 9990, 31000):
-                    errors.append(f"TG {tg}: служебная группа TGIF (вызывается только динамически через PTT)")
+                    errors.append(_tr("tgif.service_tg_dynamic_only", lang=_req_lang, fallback="TG {tg}: TGIF service group (activated dynamically via PTT only)", tg=tg))
                     continue
                 if i > 0:
                     time.sleep(0.06)
@@ -5856,7 +7429,7 @@ async def add_bm_static_group(payload: dict, request: Request = None):
                 "added": added,
                 "errors": errors,
                 "talkgroup": added[0] if added else None,
-                "message": f"Добавлено статических групп: {len(added)}"
+                "message": _tr("bm.static_added_count", lang=_req_lang, fallback="Static talkgroups added: {count}", count=len(added))
             }
 
         return await asyncio.to_thread(_add_tgif)
@@ -5899,7 +7472,7 @@ async def add_bm_static_group(payload: dict, request: Request = None):
             "added": added,
             "errors": errors,
             "talkgroup": added[0] if added else None,
-            "message": f"Добавлено статических групп: {len(added)}"
+            "message": _tr("bm.static_added_count", lang=_req_lang, fallback="Static talkgroups added: {count}", count=len(added))
         }
 
     res = await asyncio.to_thread(_add_all)
@@ -5919,12 +7492,12 @@ async def start_bm_static_groups_import(payload: dict, request: Request = None):
     hotspot_id = payload.get("hotspot_id")
     slot = int(payload.get("slot", 1))
     if slot not in (1, 2):
-        raise HTTPException(status_code=400, detail="Слот должен быть 1 или 2")
+        raise HTTPException(status_code=400, detail=_tr("bm.slot_must_be_1_or_2", fallback="Slot must be 1 or 2"))
 
     tgs = payload.get("talkgroups", [])
     tgs = [int(x) for x in tgs if int(x) > 0]
     if not tgs:
-        raise HTTPException(status_code=400, detail="Не указаны TalkGroup")
+        raise HTTPException(status_code=400, detail=_tr("bm.no_tg_specified", fallback="No TalkGroups specified"))
 
     filename = str(payload.get("filename", "")).strip()
     action = str(payload.get("action", "add")).lower().strip()
@@ -5935,12 +7508,16 @@ async def start_bm_static_groups_import(payload: dict, request: Request = None):
     if active_tid and active_tid in _bm_import_tasks:
         cur_task = _bm_import_tasks[active_tid]
         if cur_task.status == "running":
-            act_ru = "удаления" if cur_task.action == "delete" else "импорта"
-            return {"status": "busy", "message": f"Фоновая операция {act_ru} групп уже выполняется", "task": cur_task.to_dict()}
+            busy_msg = (
+                _tr("bm.bg_delete_already_running", fallback="Background group deletion is already running")
+                if cur_task.action == "delete"
+                else _tr("bm.bg_import_already_running", fallback="Background group import is already running")
+            )
+            return {"status": "busy", "message": busy_msg, "task": cur_task.to_dict()}
 
     cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
     net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
-    if net_type not in ("freedmr", "xlx"):
+    if net_type not in ("freedmr", "adn", "xlx", "dmrplus"):
         cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
         if err:
             return {"status": "error", "detail": err}
@@ -6015,8 +7592,8 @@ async def cancel_bm_static_groups_import(request: Request = None):
             await broadcast_user_json(uid, {"type": "bm_import_finished", "task": t.to_dict()})
         except Exception:
             pass
-        return {"status": "ok", "task": t.to_dict(), "message": "Операция отменена"}
-    return {"status": "not_running", "message": "Нет активной операции"}
+        return {"status": "ok", "task": t.to_dict(), "message": _tr("bm.bg_op_cancelled", fallback="Operation cancelled")}
+    return {"status": "not_running", "message": _tr("bm.bg_no_active_op", fallback="No active operation")}
 
 
 @app.delete("/api/bm/static-groups")
@@ -6036,12 +7613,12 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
         tgs = [int(x) for x in tgs if int(x) > 0]
 
     if not tgs:
-        raise HTTPException(status_code=400, detail="Не указаны TalkGroup для удаления")
+        raise HTTPException(status_code=400, detail=_tr("bm.no_tg_to_delete", fallback="No TalkGroups specified for deletion"))
 
     cfg_check, device_id_check, _, _ = _get_bm_device_and_key(hotspot_id, allow_fallback=True, user_id=uid)
     net_type = (getattr(cfg_check, "network_type", "bm") or "bm").strip().lower() if cfg_check else "bm"
 
-    if net_type == "freedmr" and cfg_check:
+    if net_type in ("freedmr", "adn") and cfg_check:
         parsed = parse_freedmr_rpto(getattr(cfg_check, "rpto_options", "") or "")
         target_list = parsed["ts1"] if slot == 1 else parsed["ts2"]
         deleted = []
@@ -6049,19 +7626,22 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             if tg in target_list:
                 target_list.remove(tg)
                 deleted.append(tg)
-        new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"])
+        is_duplex = getattr(cfg_check, "duplex", True)
+        norm_ts1, norm_ts2 = normalize_freedmr_slots(parsed["ts1"], parsed["ts2"], duplex=is_duplex)
+        new_rpto = build_freedmr_rpto(norm_ts1, norm_ts2, parsed["opts"])
         await hotspot_manager.set_hotspot_rpto(cfg_check.id, rpto_options=new_rpto, user_id=uid)
         user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
         await save_user_settings(uid, user_sett.model_dump())
         if uid == 1:
             save_app_settings(user_sett)
+        del_msg = _tr("adn.rpto_deleted_count", fallback="Static talkgroups removed from ADN Systems RPTO: {count}", count=len(deleted)) if net_type == "adn" else _tr("freedmr.rpto_deleted_count", fallback="Static talkgroups removed from FreeDMR RPTO: {count}", count=len(deleted))
         return {
             "status": "ok",
-            "network_type": "freedmr",
+            "network_type": net_type,
             "deleted": deleted,
             "errors": [],
             "rpto_options": new_rpto,
-            "message": f"Удалено статических групп из RPTO FreeDMR: {len(deleted)}"
+            "message": del_msg
         }
 
     if net_type == "xlx" and cfg_check:
@@ -6075,7 +7655,55 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             "network_type": "xlx",
             "xlx_module": "",
             "deleted": tgs,
-            "message": "Модуль XLX отключен (TG 4000)"
+            "message": _tr("xlx.module_disconnected", fallback="XLX module disconnected (TG 4000)")
+        }
+
+    if net_type == "dmrplus" and cfg_check:
+        if slot == 2 and any(tg == 4000 or 4001 <= tg <= 4999 for tg in tgs):
+            res_rpto = await hotspot_manager.set_hotspot_rpto(cfg_check.id, dmrplus_reflector="", user_id=uid)
+            user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+            await save_user_settings(uid, user_sett.model_dump())
+            if uid == 1:
+                save_app_settings(user_sett)
+            return {
+                "status": "ok",
+                "network_type": "dmrplus",
+                "dmrplus_reflector": "",
+                "rpto_options": (res_rpto or {}).get("hotspot", {}).get("rpto_options", ""),
+                "deleted": tgs,
+                "message": _tr("dmrplus.reflector_unlinked", fallback="DMR+ reflector disconnected (4000 Unlink)")
+            }
+        parsed_dp = parse_dmrplus_rpto(
+            getattr(cfg_check, "rpto_options", "") or "",
+            fallback_reflector=getattr(cfg_check, "dmrplus_reflector", "") or "",
+        )
+        target_list = parsed_dp["ts1"] if slot == 1 else parsed_dp["ts2"]
+        deleted = []
+        for tg in tgs:
+            if tg in target_list:
+                target_list.remove(tg)
+                deleted.append(tg)
+        new_rpto = build_dmrplus_rpto(
+            start_ref=parsed_dp["start_ref"],
+            ts1=parsed_dp["ts1"],
+            ts2=parsed_dp["ts2"],
+            relink_time=parsed_dp["relink_time"],
+            user_link=parsed_dp["user_link"],
+            extra_opts=parsed_dp["opts"],
+        )
+        await hotspot_manager.set_hotspot_rpto(cfg_check.id, rpto_options=new_rpto, user_id=uid)
+        user_sett = hotspot_manager.user_settings.get(uid, hotspot_manager.settings)
+        await save_user_settings(uid, user_sett.model_dump())
+        if uid == 1:
+            save_app_settings(user_sett)
+        return {
+            "status": "ok",
+            "network_type": "dmrplus",
+            "deleted": deleted,
+            "errors": [],
+            "dmrplus_reflector": str(parsed_dp["start_ref"]) if parsed_dp["start_ref"] else "",
+            "rpto_options": new_rpto,
+            "message": _tr("dmrplus.rpto_deleted_count", fallback="Static talkgroups removed from DMR+ RPTO: {count}", count=len(deleted)),
         }
 
     cfg, device_id, api_key, err = _get_bm_device_and_key(hotspot_id, user_id=uid)
@@ -6084,14 +7712,20 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
 
     net_type = (getattr(cfg, "network_type", "bm") or "bm").strip().lower()
 
+    _req_lang = get_lang(user_id=uid)
+
     # Automatically offload batch deletion of more than 5 groups to background task
     if len(tgs) > 5 or payload.get("background"):
         active_tid = _user_active_bm_import.get(uid)
         if active_tid and active_tid in _bm_import_tasks:
             cur_task = _bm_import_tasks[active_tid]
             if cur_task.status == "running":
-                act_ru = "удаления" if cur_task.action == "delete" else "импорта"
-                return {"status": "busy", "message": f"Фоновая операция {act_ru} групп уже выполняется", "task": cur_task.to_dict()}
+                busy_msg = (
+                    _tr("bm.bg_delete_already_running", lang=_req_lang, fallback="Background group deletion is already running")
+                    if cur_task.action == "delete"
+                    else _tr("bm.bg_import_already_running", lang=_req_lang, fallback="Background group import is already running")
+                )
+                return {"status": "busy", "message": busy_msg, "task": cur_task.to_dict()}
 
         task_id = str(uuid.uuid4())[:8]
         task = BmImportTask(
@@ -6100,7 +7734,7 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             hotspot_id=cfg.id,
             slot=slot,
             talkgroups=tgs,
-            filename="Пакетное удаление",
+            filename=_tr("bm.batch_delete_label", lang=_req_lang, fallback="Batch deletion"),
             action="delete",
             network_type=net_type
         )
@@ -6111,7 +7745,7 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             "status": "ok",
             "background": True,
             "task": task.to_dict(),
-            "message": f"Фоновое удаление {len(tgs)} групп запущено"
+            "message": _tr("bm.bg_delete_started", lang=_req_lang, fallback="Background deletion of {count} groups started", count=len(tgs))
         }
 
     if net_type == "tgif":
@@ -6157,7 +7791,7 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
                 "status": "ok",
                 "deleted": deleted,
                 "errors": errors,
-                "message": f"Удалено статических групп: {len(deleted)}"
+                "message": _tr("bm.static_deleted_count", lang=_req_lang, fallback="Static talkgroups deleted: {count}", count=len(deleted))
             }
 
         # For TGIF, do NOT schedule reconnect!
@@ -6195,7 +7829,7 @@ async def delete_bm_static_group(payload: dict, request: Request = None):
             "status": "ok",
             "deleted": deleted,
             "errors": errors,
-            "message": f"Удалено статических групп: {len(deleted)}"
+            "message": _tr("bm.static_deleted_count", lang=_req_lang, fallback="Static talkgroups deleted: {count}", count=len(deleted))
         }
 
     res = await asyncio.to_thread(_delete_all)
@@ -6237,9 +7871,10 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
             "device_id": device_id_check or str(cfg_check.dmr_id or ""),
             "dropped_slots": slots_to_drop,
             "dmr_4000_sent": True,
-            "message": f"Динамические группы сброшены для {cfg_check.name} (TGIF)"
+            "message": _tr("bm.dynamic_dropped_net", fallback="Dynamic talkgroups dropped for {name} ({network})", name=cfg_check.name, network="TGIF")
         }
-    elif net_type == "freedmr" and cfg_check:
+    elif net_type in ("freedmr", "adn") and cfg_check:
+        net_label = "ADN Systems" if net_type == "adn" else "FreeDMR"
         for s in slots_to_drop:
             hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=s, user_id=uid)
             hotspot_manager.send_silent_unlink_dmr(cfg_check.id, slot=s, user_id=uid)
@@ -6250,7 +7885,7 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
             "device_id": device_id_check or str(cfg_check.dmr_id or ""),
             "dropped_slots": slots_to_drop,
             "dmr_4000_sent": True,
-            "message": f"Динамические группы сброшены (TG 4000) для {cfg_check.name} (FreeDMR)"
+            "message": _tr("bm.dynamic_dropped_tg4000_net", fallback="Dynamic talkgroups dropped (TG 4000) for {name} ({network})", name=cfg_check.name, network=net_label)
         }
     elif net_type == "xlx" and cfg_check:
         hotspot_manager.clear_dynamic_tgs(cfg_check.id, slot=2, user_id=uid)
@@ -6266,7 +7901,7 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
             "device_id": device_id_check or str(cfg_check.dmr_id or ""),
             "dropped_slots": [2],
             "dmr_4000_sent": True,
-            "message": f"Модуль XLX отключен (TG 4000) для {cfg_check.name}"
+            "message": _tr("xlx.module_disconnected_for", fallback="XLX module disconnected (TG 4000) for {name}", name=cfg_check.name)
         }
     elif net_type != "bm" and cfg_check:
         for s in slots_to_drop:
@@ -6279,7 +7914,7 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
             "device_id": device_id_check or str(cfg_check.dmr_id or ""),
             "dropped_slots": slots_to_drop,
             "dmr_4000_sent": True,
-            "message": f"Динамические группы сброшены (TG 4000) для {cfg_check.name} ({net_type.upper()})"
+            "message": _tr("bm.dynamic_dropped_tg4000_net", fallback="Dynamic talkgroups dropped (TG 4000) for {name} ({network})", name=cfg_check.name, network=net_type.upper())
         }
 
     # For BM network:
@@ -6321,12 +7956,14 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
             "device_id": device_id_check or str(getattr(cfg_check, "dmr_id", "") or device_id or ""),
             "dropped_slots": slots_to_drop,
             "dmr_4000_sent": True,
-            "message": f"Отправлен посыл TG 4000 ({', '.join(f'TS{s}' for s in slots_to_drop)}) для {(cfg_check.name if cfg_check else '')}"
+            "message": _tr("bm.tg4000_sent", fallback="Sent TG 4000 burst ({slots}) for {name}", slots=', '.join(f'TS{s}' for s in slots_to_drop), name=(cfg_check.name if cfg_check else ''))
         }
 
     # Standard drop via BM API (when called from modal / UI button)
     if err:
         return {"status": "error", "detail": err}
+
+    _req_lang = get_lang(user_id=uid)
 
     def _drop():
         import urllib.request, urllib.error
@@ -6359,7 +7996,7 @@ async def drop_bm_dynamic_groups(payload: Optional[dict] = None, request: Reques
             "hotspot_name": cfg.name,
             "device_id": device_id,
             "dropped_slots": dropped,
-            "message": f"Динамические группы сброшены для {cfg.name} ({device_id}), слоты: {', '.join(f'TS{s}' for s in dropped)}"
+            "message": _tr("bm.dynamic_dropped_slots", lang=_req_lang, fallback="Dynamic talkgroups dropped for {name} ({device_id}), slots: {slots}", name=cfg.name, device_id=device_id, slots=', '.join(f'TS{s}' for s in dropped))
         }
 
     res = await asyncio.to_thread(_drop)
@@ -6561,7 +8198,8 @@ async def get_bm_summary(
                 break
 
         local_name = tg_resolver.get_name(target_tg_num, network_type=net_type) if target_tg_num > 0 else ""
-        if local_name and local_name in (f"TG {target_tg_num}", "Группа BrandMeister", "Группа BM"):
+        generic_bm_group = _tr("tg_catalog.bm_group", fallback="BrandMeister Group")
+        if local_name and local_name in (f"TG {target_tg_num}", "Группа BrandMeister", "Группа BM", "BrandMeister Group", generic_bm_group):
             local_name = ""
         tg_display_name = (tg_data.get("Name") if is_bm else "") or local_name or ""
 
@@ -6586,28 +8224,40 @@ async def get_bm_summary(
 
         if has_operator and len(clean_id) == 7:
             detected_type = "operator"
-            detected_label = "DMR ID радиолюбителя / оператора"
+            detected_label = _tr("bm.type_operator", fallback="Amateur Radio Operator DMR ID")
         elif is_repeater:
             detected_type = "repeater"
-            detected_label = "Репитер DMR" if not is_bm else "Репитер DMR BrandMeister"
+            detected_label = _tr("bm.type_repeater", fallback="DMR Repeater") if not is_bm else _tr("bm.type_repeater_bm", fallback="BrandMeister DMR Repeater")
         elif has_device and not has_operator:
             detected_type = "hotspot"
-            detected_label = "Персональный хотспот MMDVM"
+            detected_label = _tr("bm.type_hotspot", fallback="MMDVM Personal Hotspot")
         elif has_operator:
             detected_type = "operator"
-            detected_label = "DMR ID радиолюбителя / оператора"
+            detected_label = _tr("bm.type_operator", fallback="Amateur Radio Operator DMR ID")
         elif has_tg:
             detected_type = "talkgroup"
-            detected_label = "Разговорная группа (TalkGroup)"
+            detected_label = _tr("bm.type_talkgroup", fallback="TalkGroup")
         else:
             detected_type = "talkgroup" if t_type == "TG" else "unknown"
-            detected_label = "Пользовательская группа / ID"
+            detected_label = _tr("bm.type_custom_group_id", fallback="Custom Group / ID")
 
         cross_info_note = ""
         if t_type == "TG" and has_operator:
-            cross_info_note = f"Идентификатор {clean_id} (входящий как TG) принадлежит радиолюбителю {res_call or 'DMR'}{f' ({full_name})' if full_name else ''}. В DMR-сетях такие персональные ID могут использоваться как тактические разговорные группы или для прямого вызова."
+            name_suffix = f" ({full_name})" if full_name else ""
+            cross_info_note = _tr(
+                "bm.cross_info_personal_id",
+                fallback="Identifier {id} (incoming as TG) belongs to amateur radio operator {callsign}{name_suffix}. In DMR networks, such personal IDs can be used as tactical talkgroups or for private calls.",
+                id=clean_id,
+                callsign=res_call or "DMR",
+                name_suffix=name_suffix,
+            )
         elif t_type == "ID" and has_tg and not has_operator:
-            cross_info_note = f"Идентификатор {clean_id} зарегистрирован в сети как TalkGroup ({tg_display_name})."
+            cross_info_note = _tr(
+                "bm.cross_info_talkgroup",
+                fallback="Identifier {id} is registered on the network as TalkGroup ({tg_name}).",
+                id=clean_id,
+                tg_name=tg_display_name,
+            )
 
         return {
             "status": "ok",
@@ -6696,7 +8346,7 @@ async def get_bm_summary(
             },
             "hotspot": {
                 "id": cfg.id if cfg else "",
-                "name": cfg.name if cfg else "Хотспот",
+                "name": cfg.name if cfg else _tr("bm.hotspot_default_name", fallback="Hotspot"),
                 "device_id": hs_device_id or "",
                 "has_api_key": bool(hs_api_key)
             },
@@ -6706,7 +8356,8 @@ async def get_bm_summary(
             }
         }
 
-    return await asyncio.to_thread(_process)
+    _ctx = contextvars.copy_context()
+    return await asyncio.to_thread(_ctx.run, _process)
 
 @app.get("/api/bm/info")
 async def get_bm_info(
@@ -6749,6 +8400,8 @@ async def get_bm_info(
         except Exception:
             pass
 
+    _req_lang = get_lang(user_id=uid)
+
     def _query():
         import urllib.request, urllib.error, urllib.parse
         headers = {
@@ -6763,7 +8416,7 @@ async def get_bm_info(
 
         if q_type == "profile":
             if not clean_id:
-                return {"status": "error", "detail": "Не указан ID устройства"}
+                return {"status": "error", "detail": _tr("bm.no_device_id", lang=_req_lang, fallback="Device ID is not specified")}
             url = f"https://api.brandmeister.network/v2/device/{clean_id}/profile"
 
         elif q_type == "device_talkgroup":
@@ -6771,13 +8424,13 @@ async def get_bm_info(
             if not target_device and clean_id and clean_id.isdigit() and len(clean_id) >= 6:
                 target_device = clean_id
             if not target_device:
-                return {"status": "error", "detail": "Не удалось определить ID хотспота на BM"}
+                return {"status": "error", "detail": _tr("bm.cannot_resolve_hotspot_id", lang=_req_lang, fallback="Failed to determine BM hotspot ID")}
             url = f"https://api.brandmeister.network/v2/device/{target_device}/talkgroup"
-            target_name = f"{cfg.name or 'Хотспот'} ({target_device})" if cfg else str(target_device)
+            target_name = f"{cfg.name or _tr('bm.hotspot_default_name', lang=_req_lang, fallback='Hotspot')} ({target_device})" if cfg else str(target_device)
 
         elif q_type == "talkgroup_info":
             if not clean_id:
-                return {"status": "error", "detail": "Не указан номер TalkGroup"}
+                return {"status": "error", "detail": _tr("bm.no_tg_number", lang=_req_lang, fallback="TalkGroup number is not specified")}
             url = f"https://api.brandmeister.network/v2/talkgroup/{clean_id}"
             target_name = f"TG {clean_id}"
 
@@ -6796,7 +8449,7 @@ async def get_bm_info(
                     pass
 
             if not resolved_call:
-                return {"status": "error", "detail": f"Не удалось определить позывной для ID {clean_id}"}
+                return {"status": "error", "detail": _tr("bm.cannot_resolve_callsign", lang=_req_lang, fallback="Failed to resolve callsign for ID {id}", id=clean_id)}
             url = f"https://api.brandmeister.network/v2/device/byCall?callsign={urllib.parse.quote(resolved_call)}"
             target_name = resolved_call
 
@@ -6808,10 +8461,10 @@ async def get_bm_info(
                 url = f"https://api.brandmeister.network/v2/registry/{clean_id}"
                 target_name = clean_id
             else:
-                return {"status": "error", "detail": "Не указан ID или позывной для поиска в реестре"}
+                return {"status": "error", "detail": _tr("bm.no_id_or_callsign", lang=_req_lang, fallback="ID or callsign is not specified for registry lookup")}
 
         else:
-            return {"status": "error", "detail": f"Неизвестный тип запроса: {q_type}"}
+            return {"status": "error", "detail": _tr("bm.unknown_query_type", lang=_req_lang, fallback="Unknown query type: {query_type}", query_type=q_type)}
 
         req = urllib.request.Request(url, headers=headers)
         try:
@@ -6846,7 +8499,7 @@ async def get_bm_info(
             if e.code == 404:
                 return {
                     "status": "not_found",
-                    "detail": f"Данные не найдены в BM (HTTP 404). {err_body}".strip(),
+                    "detail": _tr("bm.data_not_found_404", lang=_req_lang, fallback="Data not found in BM (HTTP 404). {error}", error=err_body).strip(),
                     "query_type": query_type,
                     "target_id": clean_id,
                     "callsign": clean_call,
@@ -6855,7 +8508,7 @@ async def get_bm_info(
             elif e.code in (401, 403):
                 return {
                     "status": "unauthorized",
-                    "detail": f"Требуется авторизованный API Key BM (HTTP {e.code}). {err_body}".strip(),
+                    "detail": _tr("bm.auth_key_required_http", lang=_req_lang, fallback="Authorized BM API Key required (HTTP {code}). {error}", code=e.code, error=err_body).strip(),
                     "query_type": query_type,
                     "target_id": clean_id,
                     "callsign": clean_call,
@@ -6863,7 +8516,7 @@ async def get_bm_info(
                 }
             return {
                 "status": "error",
-                "detail": f"Ошибка BM API: HTTP {e.code}. {err_body}".strip(),
+                "detail": _tr("bm.api_http_err_detail", lang=_req_lang, fallback="BM API error: HTTP {code}. {error}", code=e.code, error=err_body).strip(),
                 "query_type": query_type,
                 "target_id": clean_id,
                 "callsign": clean_call,
@@ -6872,7 +8525,7 @@ async def get_bm_info(
         except Exception as ex:
             return {
                 "status": "error",
-                "detail": f"Ошибка соединения с BM: {str(ex)}",
+                "detail": _tr("bm.connection_err_detail", lang=_req_lang, fallback="BM connection error: {error}", error=str(ex)),
                 "query_type": query_type,
                 "target_id": clean_id,
                 "callsign": clean_call,
@@ -6947,7 +8600,7 @@ async def get_status(request: Request = None):
         "loopback_mode": getattr(user_sett, "loopback_mode", app_settings.loopback_mode),
         "active_hotspot": (mask_hotspot_dict_for_demo(active_hs.to_dict()) if (user and user.get("is_demo") and active_hs) else (active_hs.to_dict() if active_hs else None)),
         "bm_status": active_hs.status.value if active_hs else "OFFLINE",
-        "bm_detail": active_hs.detail if active_hs else "Отключен",
+        "bm_detail": active_hs.detail if active_hs else _tr("common.disconnected", fallback="Disconnected"),
         "bm_master": f"{cfg.bm_master_host}:{cfg.bm_master_port}" if cfg else "---",
     }
 
@@ -6958,7 +8611,7 @@ async def restart_system(request: Request):
     try:
         await broadcast_json({
             "type": "server_restart",
-            "message": "Сервер перезагружается..."
+            "message": _tr("system.restarting", fallback="Server is restarting...")
         })
     except Exception as e:
         logger.error(f"[SYSTEM] Error broadcasting restart: {e}")
@@ -6978,7 +8631,7 @@ async def restart_system(request: Request):
         os._exit(0)
 
     asyncio.create_task(_do_restart())
-    return {"status": "ok", "message": "Сервер перезагружается..."}
+    return {"status": "ok", "message": _tr("system.restarting", fallback="Server is restarting...")}
 
 class ApplyUpdateRequest(BaseModel):
     tarball_url: Optional[str] = None
@@ -7030,7 +8683,7 @@ async def apply_update_endpoint(request: Request, payload: Optional[ApplyUpdateR
     try:
         await broadcast_json({
             "type": "server_updating",
-            "message": "Установка обновления и перезагрузка сервера..."
+            "message": _tr("system.updating_restarting", fallback="Installing update and restarting server...")
         })
     except Exception as e:
         logger.error(f"[SYSTEM] Error broadcasting update status: {e}")
@@ -7140,7 +8793,7 @@ async def lookup_callsign_hamqth(query: str, request: Request):
                 "status": "not_found",
                 "found": False,
                 "callsign": query.strip(),
-                "message": f"DMR ID {query.strip()} не найден в базе RadioID, невозможно определить позывной для запроса к HamQTH.com"
+                "message": _tr("hamqth.id_not_found_radioid", fallback="DMR ID {id} not found in RadioID database, cannot resolve callsign for HamQTH.com lookup", id=query.strip())
             }
 
     res = await hamqth_service.lookup_callsign_multi(target, creds)
@@ -7280,7 +8933,7 @@ async def api_get_recordings(
     uid = user["user_id"] if user else 1
     recordings, total = await get_recordings(
         user_id=uid,
-        limit=min(200, max(1, limit)),
+        limit=min(500, max(1, limit)),
         offset=max(0, offset),
         call_type=call_type,
         search=search,
@@ -7306,6 +8959,7 @@ async def api_get_recordings_stats(request: Request):
     stats["quota_percent"] = min(100.0, round((total_bytes / max_bytes) * 100.0, 1)) if max_bytes > 0 else 0
     stats["session_active"] = hotspot_manager.recorder.is_session_active(uid) if hasattr(hotspot_manager, "recorder") else False
     stats["recording_active"] = hotspot_manager.recorder.is_recording(uid) if hasattr(hotspot_manager, "recorder") else False
+    stats["auto_record"] = bool(hotspot_manager.recorder.auto_rx_enabled or hotspot_manager.recorder.auto_tx_enabled) if hasattr(hotspot_manager, "recorder") and hotspot_manager.recorder else True
     return stats
 
 
@@ -7461,7 +9115,7 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
     if not text:
         file_path = Path(rec.get("file_path", ""))
         if not file_path.exists() or file_path.stat().st_size < 44:
-            raise HTTPException(status_code=400, detail="Аудиофайл записи не найден на диске")
+            raise HTTPException(status_code=400, detail=_tr("recordings.audio_not_found", fallback="Recording audio file not found on disk"))
 
         wav_bytes = await asyncio.to_thread(file_path.read_bytes)
         mime = "audio/mpeg" if file_path.suffix.lower() == ".mp3" else "audio/wav"
@@ -7473,7 +9127,7 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
             mime_type=mime
         )
         if err or not transcribed_text:
-            return JSONResponse({"status": "error", "message": err or "Не удалось распознать речь в записи"}, status_code=400)
+            return JSONResponse({"status": "error", "message": err or _tr("recordings.asr_failed", fallback="Failed to recognize speech in recording")}, status_code=400)
 
         text = transcribed_text
         detected_lang = det_lang or "---"
@@ -7527,7 +9181,7 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
         style=req.tts_style
     )
     if err or not wav_bytes:
-        return JSONResponse({"status": "error", "message": err or "Ошибка синтеза речи"}, status_code=400)
+        return JSONResponse({"status": "error", "message": err or _tr("transcriber.tts_synth_error", fallback="Speech synthesis error")}, status_code=400)
 
     b64 = base64.b64encode(wav_bytes).decode("ascii")
     return {
@@ -7537,6 +9191,200 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
         "target_lang": target_lang,
         "recording_id": rec["id"]
     }
+
+
+# Active server-side recording-to-TX streaming tasks per user_id
+active_rec_tx_tasks: Dict[int, asyncio.Task] = {}
+
+
+async def _stop_active_rec_tx(uid: int):
+    task = active_rec_tx_tasks.pop(uid, None)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+    u_radio_state = get_user_radio_state(uid)
+    if u_radio_state.is_transmitting and str(u_radio_state.transmitting_client_id or "").startswith("rec_tx_"):
+        await hotspot_manager.stop_tx(user_id=uid, roger_beep=False)
+        u_radio_state.is_transmitting = False
+        u_radio_state.transmitting_client_id = None
+        duration = max(0.0, time.time() - (u_radio_state.tx_start_time or time.time()))
+        active_hs = hotspot_manager.get_active_runtime(uid)
+        await broadcast_user_json(uid, {
+            "type": "state_change",
+            "is_tx": False,
+            "client_id": f"rec_tx_{uid}",
+            "hotspot_id": active_hs.config.id if active_hs else "",
+            "duration": duration,
+            "slot": u_radio_state.tx_slot,
+            "active_tg": u_radio_state.active_tg,
+        })
+
+
+@app.post("/api/recordings/{rec_id}/tx/start")
+async def api_recording_tx_start(rec_id: str, payload: dict = None, request: Request = None):
+    user = _get_user_from_request(request) if request else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if user.get("is_swl") or user.get("is_demo"):
+        raise HTTPException(status_code=403, detail="TX not permitted in SWL/Demo mode")
+
+    uid = int(user["user_id"])
+    rec = await get_recording_by_id(rec_id)
+    if not rec:
+        rec = await get_recording_by_call_id(rec_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    file_path = Path(rec.get("file_path", ""))
+    if not file_path.exists() or file_path.stat().st_size <= 44:
+        raise HTTPException(status_code=404, detail="Recording audio file not found on disk")
+
+    data = payload or {}
+    req_hid = str(data.get("hotspot_id") or "").strip()
+    target_rt = (hotspot_manager.get_runtime(uid, req_hid) if req_hid else None) or hotspot_manager.get_active_runtime(uid)
+    if not target_rt:
+        raise HTTPException(status_code=400, detail="Target hotspot not found")
+    if getattr(target_rt, "status", None) != BMState.ONLINE:
+        raise HTTPException(status_code=400, detail="Target hotspot is offline")
+
+    await _stop_active_rec_tx(uid)
+
+    net_type = str(getattr(target_rt.config, "network_type", "bm") or "bm").lower()
+    req_slot = int(data.get("slot") or 2)
+    slot = 1 if req_slot == 1 else 2
+    req_tg = int(data.get("dst_id") or 0)
+
+    if net_type == "allstar":
+        slot = 1
+        conn_node = getattr(target_rt, "connected_node", None)
+        if not conn_node and getattr(target_rt, "asl_links", None):
+            conn_node = target_rt.asl_links[0]
+        if not conn_node:
+            conn_node = getattr(target_rt.config, "allstar_node", 1999)
+        try:
+            tg = int(conn_node)
+        except (ValueError, TypeError):
+            tg = 1999
+    elif net_type == "ysf":
+        slot = 1
+        ysf_rid = str(getattr(target_rt.config, "ysf_room_id", "") or getattr(target_rt.config, "ysf_room", "") or "25000").strip()
+        tg = int(ysf_rid) if ysf_rid.isdigit() else 25000
+    elif net_type == "xlx":
+        slot = 2
+        tg = req_tg if req_tg > 0 else 9
+    else:
+        tg = req_tg if req_tg > 0 else (getattr(target_rt.config, "default_tg", 0) or getattr(target_rt.config, "default_tg_ts2", 9990) or 9990)
+
+    offset_sec = max(0.0, float(data.get("offset_sec") or 0.0))
+    max_dur_sec = min(60.0, max(1.0, float(data.get("max_duration_sec") or 60.0)))
+
+    try:
+        with wave.open(str(file_path), "rb") as wf:
+            sr = wf.getframerate() or 8000
+            start_frame = min(wf.getnframes(), int(offset_sec * sr))
+            max_frames = int(max_dur_sec * sr)
+            wf.setpos(start_frame)
+            pcm_data = wf.readframes(max_frames)
+    except Exception as e:
+        logger.error(f"[REC_TX] Error reading WAV {file_path}: {e}")
+        raise HTTPException(status_code=500, detail="Could not read recording WAV file")
+
+    if not pcm_data:
+        return {"status": "empty"}
+
+    u_radio_state = get_user_radio_state(uid)
+    call_type = "PRIVATE" if (tg == 9990 or tg > 999999) else "GROUP"
+    started = hotspot_manager.start_tx(
+        hotspot_id=target_rt.config.id,
+        slot=slot,
+        dst_id=tg,
+        call_type=call_type,
+        user_id=uid,
+    )
+    if not started:
+        raise HTTPException(status_code=400, detail="Failed to start TX on target hotspot")
+
+    client_tag = f"rec_tx_{uid}"
+    u_radio_state.is_transmitting = True
+    u_radio_state.transmitting_client_id = client_tag
+    u_radio_state.tx_start_time = time.time()
+    u_radio_state.tx_slot = slot
+    u_radio_state.active_tg = tg
+
+    await broadcast_user_json(uid, {
+        "type": "state_change",
+        "is_tx": True,
+        "client_id": client_tag,
+        "hotspot_id": target_rt.config.id,
+        "slot": slot,
+        "active_tg": tg,
+        "callsign": target_rt.config.callsign,
+        "dmr_id": target_rt.config.dmr_id,
+    })
+
+    async def _stream_pcm_to_tx(raw_pcm: bytes, target_hid: str, tx_slot: int, tx_tg: int):
+        chunk_size = 320  # 20ms @ 8000Hz 16-bit mono
+        total_len = len(raw_pcm)
+        idx = 0
+        next_tick = time.monotonic()
+        try:
+            while idx < total_len:
+                if not u_radio_state.is_transmitting or u_radio_state.transmitting_client_id != client_tag:
+                    break
+                chunk = raw_pcm[idx:idx + chunk_size]
+                if len(chunk) < chunk_size:
+                    chunk = chunk + b"\x00" * (chunk_size - len(chunk))
+                hotspot_manager.process_tx_audio(chunk, user_id=uid)
+                idx += chunk_size
+                next_tick += 0.020
+                sleep_dur = next_tick - time.monotonic()
+                if sleep_dur > 0:
+                    await asyncio.sleep(sleep_dur)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            logger.error(f"[REC_TX] Streaming error: {err}")
+        finally:
+            if u_radio_state.is_transmitting and u_radio_state.transmitting_client_id == client_tag:
+                await hotspot_manager.stop_tx(user_id=uid, roger_beep=False)
+                u_radio_state.is_transmitting = False
+                u_radio_state.transmitting_client_id = None
+                dur = max(0.0, time.time() - (u_radio_state.tx_start_time or time.time()))
+                await broadcast_user_json(uid, {
+                    "type": "state_change",
+                    "is_tx": False,
+                    "client_id": client_tag,
+                    "hotspot_id": target_hid,
+                    "duration": dur,
+                    "slot": tx_slot,
+                    "active_tg": tx_tg,
+                })
+            if active_rec_tx_tasks.get(uid) == asyncio.current_task():
+                active_rec_tx_tasks.pop(uid, None)
+
+    active_rec_tx_tasks[uid] = asyncio.create_task(_stream_pcm_to_tx(pcm_data, target_rt.config.id, slot, tg))
+    return {
+        "status": "ok",
+        "hotspot_id": target_rt.config.id,
+        "slot": slot,
+        "dst_id": tg,
+        "max_duration_sec": max_dur_sec,
+    }
+
+
+@app.post("/api/recordings/tx/stop")
+async def api_recording_tx_stop(request: Request = None):
+    user = _get_user_from_request(request) if request else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    uid = int(user["user_id"])
+    await _stop_active_rec_tx(uid)
+    return {"status": "ok"}
 
 
 @app.post("/api/recordings/clear")
@@ -7687,7 +9535,7 @@ async def api_batch_transcribe_calls(payload: dict, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     if not transcriber_service.api_key:
-        return JSONResponse({"status": "error", "detail": "Не указан API ключ Gemini в настройках транскрибации"}, status_code=400)
+        return JSONResponse({"status": "error", "detail": _tr("transcriber.no_gemini_key_settings", fallback="Gemini API key is not configured in transcription settings")}, status_code=400)
 
     call_ids = payload.get("call_ids", [])
     if not isinstance(call_ids, list) or not call_ids:
@@ -7720,7 +9568,7 @@ async def api_batch_transcribe_calls(payload: dict, request: Request):
             logger.warning(f"[BATCH-TRANSCRIBE] Error checking recording for call_id={cid}: {e}")
 
     if not valid_recordings:
-        return {"status": "ok", "queued": 0, "message": "Среди выбранных записей нет аудиофайлов для транскрибации"}
+        return {"status": "ok", "queued": 0, "message": _tr("recordings.batch_no_audio_files", fallback="No audio files to transcribe among selected recordings")}
 
     # Sort recordings chronologically
     valid_recordings.sort(key=lambda r: r.get("created_at", 0))
@@ -7733,7 +9581,7 @@ async def api_batch_transcribe_calls(payload: dict, request: Request):
     if runner.is_running:
         return JSONResponse(
             status_code=409,
-            content={"status": "error", "queued": 0, "detail": "Офлайн-транскрибация для этого хотспота уже выполняется"}
+            content={"status": "error", "queued": 0, "detail": _tr("transcriber.offline_already_running", fallback="Offline transcription for this hotspot is already running")}
         )
 
     started = offline_transcribe_manager.start(
@@ -7745,7 +9593,7 @@ async def api_batch_transcribe_calls(payload: dict, request: Request):
     if not started:
         return JSONResponse(
             status_code=400,
-            content={"status": "error", "queued": 0, "detail": "Не удалось запустить транскрибацию"}
+            content={"status": "error", "queued": 0, "detail": _tr("transcriber.offline_start_failed", fallback="Failed to start transcription")}
         )
 
     return {"status": "ok", "queued": len(valid_recordings)}
@@ -7838,16 +9686,259 @@ async def api_toggle_recording_session(payload: dict = None, request: Request = 
 
 
 # =========================================================================
-# LOCAL PARROT TEST ENGINE (DMR AMBE+2 / ASL G.711)
+# LOCAL PARROT TEST ENGINE (DMR AMBE+2 / ASL G.711) + TEMP 3-STAGE DIAG
 # =========================================================================
+import math
+import struct
+import wave
+from typing import Tuple
 
-def _process_dmr_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> bytes:
-    """Encodes PCM to AMBE+2 frames and decodes back via mbelib-neo with boundary crossfade."""
+PARROT_DIAG_DIR = BASE_DIR / "data" / "parrot_diag"
+PARROT_DIAG_MAX_RUNS = 25
+
+
+def _compute_pcm16_diag_metrics(pcm_bytes: bytes) -> dict:
+    """Computes objective PCM16 @ 8 kHz mono quality metrics for TX speech diagnostics."""
+    valid_len = (len(pcm_bytes) // 2) * 2 if pcm_bytes else 0
+    if valid_len < 2:
+        return {"samples": 0, "duration_sec": 0.0}
+
+    n_samples = valid_len // 2
+    samples = struct.unpack(f"<{n_samples}h", pcm_bytes[:valid_len])
+    duration_sec = round(n_samples / 8000.0, 3)
+
+    total = 0
+    sum_sq = 0
+    peak_abs = 0
+    hard_clip = 0
+    soft_knee = 0
+    zero_count = 0
+    max_delta = 0
+    prev = samples[0]
+
+    for idx, s in enumerate(samples):
+        total += s
+        sum_sq += s * s
+        a = -s if s < 0 else s
+        if a > peak_abs:
+            peak_abs = a
+        if s >= 32760 or s <= -32767:
+            hard_clip += 1
+        if a >= 24576:
+            soft_knee += 1
+        if s == 0:
+            zero_count += 1
+        if idx > 0:
+            d = abs(s - prev)
+            if d > max_delta:
+                max_delta = d
+            prev = s
+
+    rms = math.sqrt(sum_sq / n_samples) if n_samples else 0.0
+    peak_dbfs = round(20.0 * math.log10(peak_abs / 32768.0), 2) if peak_abs > 0 else -120.0
+    rms_dbfs = round(20.0 * math.log10(rms / 32768.0), 2) if rms > 0.0 else -120.0
+    crest_factor_db = round(peak_dbfs - rms_dbfs, 2) if (peak_abs > 0 and rms > 0.0) else 0.0
+
+    frame_size = 160  # 20 ms @ 8 kHz
+    frame_rms_db = []
+    silent_frames = 0
+    total_frames = n_samples // frame_size
+    for f_idx in range(total_frames):
+        base = f_idx * frame_size
+        f_sq = 0
+        f_peak = 0
+        for s in samples[base:base + frame_size]:
+            f_sq += s * s
+            a = -s if s < 0 else s
+            if a > f_peak:
+                f_peak = a
+        if f_peak <= 2:
+            silent_frames += 1
+        f_rms = math.sqrt(f_sq / frame_size)
+        frame_rms_db.append(round(20.0 * math.log10(f_rms / 32768.0), 2) if f_rms > 0.0 else -120.0)
+
+    active_frame_db = sorted(db for db in frame_rms_db if db > -65.0)
+    rms_p95_dbfs = active_frame_db[min(len(active_frame_db) - 1, int(len(active_frame_db) * 0.95))] if active_frame_db else -120.0
+
+    return {
+        "samples": n_samples,
+        "duration_sec": duration_sec,
+        "dc_offset": round(total / n_samples, 2),
+        "peak_abs": peak_abs,
+        "peak_dbfs": peak_dbfs,
+        "rms_dbfs": rms_dbfs,
+        "active_rms_p95_dbfs": rms_p95_dbfs,
+        "crest_factor_db": crest_factor_db,
+        "hard_clip_samples": hard_clip,
+        "hard_clip_pct": round((hard_clip * 100.0) / n_samples, 4),
+        "soft_knee_samples": soft_knee,
+        "soft_knee_pct": round((soft_knee * 100.0) / n_samples, 3),
+        "zero_samples_pct": round((zero_count * 100.0) / n_samples, 2),
+        "silent_20ms_frames": silent_frames,
+        "total_20ms_frames": total_frames,
+        "silent_20ms_frames_pct": round((silent_frames * 100.0) / total_frames, 2) if total_frames else 0.0,
+        "max_sample_delta": max_delta,
+    }
+
+
+def _write_pcm16_wav(filepath: Path, pcm_bytes: bytes, sample_rate: int = 8000) -> str:
+    """Writes mono 16-bit PCM bytes as a standard RIFF WAV file."""
+    valid_len = (len(pcm_bytes) // 2) * 2 if pcm_bytes else 0
+    with wave.open(str(filepath), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_bytes[:valid_len])
+    return str(filepath)
+
+
+def _resolve_parrot_tx_dsp(user_id: int, network: str, hid: Optional[str], client_settings: Optional[dict]) -> Tuple[Any, dict]:
+    """Builds an isolated ServerTxDsp clone calibrated for the requested Parrot network (dmr/allstar)."""
+    is_asl = (str(network or "dmr").strip().lower() == "allstar")
+    rt = hotspot_manager.get_runtime(user_id, hid) if hid else None
+    rt_net = (getattr(getattr(rt, "config", None), "network_type", "") or "").lower() if rt else ""
+    if rt is None or (is_asl and rt_net != "allstar") or (not is_asl and rt_net == "allstar"):
+        rt = None
+        for cand in hotspot_manager.get_user_runtimes(user_id).values():
+            c_net = (getattr(getattr(cand, "config", None), "network_type", "bm") or "bm").lower()
+            if (is_asl and c_net == "allstar") or (not is_asl and c_net != "allstar"):
+                rt = cand
+                break
+
+    tx_dsp = None
+    try:
+        from dmr.tx_dsp import ServerTxDsp
+        tx_dsp = ServerTxDsp()
+        rt_dsp = getattr(rt, "tx_dsp", None)
+        if rt_dsp is not None and hasattr(rt_dsp, "get_settings"):
+            base_cfg = rt_dsp.get_settings()
+            tx_dsp.set_settings(
+                hpf_enabled=base_cfg.get("hpf_enabled"),
+                presence_boost=base_cfg.get("presence_boost"),
+                eq_low=base_cfg.get("eq_low"),
+                eq_mid=base_cfg.get("eq_mid"),
+                eq_high=base_cfg.get("eq_high"),
+                mic_gain=base_cfg.get("mic_gain"),
+                dsp_agc=base_cfg.get("dsp_agc"),
+                agc_profile=base_cfg.get("agc_profile"),
+            )
+        elif is_asl:
+            tx_dsp.set_settings(hpf_enabled=True, dsp_agc=True)
+
+        atx_key = "asl_audio_tx" if is_asl else "audio_tx"
+        atx = client_settings.get(atx_key) if isinstance(client_settings, dict) else None
+        if isinstance(atx, dict) and atx:
+            tx_dsp.set_settings(
+                hpf_enabled=bool(atx["hpf_enabled"]) if "hpf_enabled" in atx else None,
+                presence_boost=float(atx["presence_boost"]) if "presence_boost" in atx else None,
+                eq_low=float(atx["eq_low"]) if "eq_low" in atx else None,
+                eq_mid=float(atx["eq_mid"]) if "eq_mid" in atx else None,
+                eq_high=float(atx["eq_high"]) if "eq_high" in atx else None,
+                mic_gain=float(atx["mic_gain"]) if "mic_gain" in atx else None,
+                dsp_agc=bool(atx["dsp_agc"]) if "dsp_agc" in atx else None,
+                agc_profile=str(atx["agc_profile"]) if "agc_profile" in atx else None,
+            )
+    except Exception as e:
+        logger.warning(f"[PARROT_DIAG] Could not build isolated ServerTxDsp: {e}")
+        tx_dsp = getattr(rt, "tx_dsp", None)
+
+    rt_cfg = getattr(rt, "config", None)
+    hs_meta = {
+        "requested_hotspot_id": hid,
+        "resolved_hotspot_id": getattr(rt_cfg, "id", None),
+        "resolved_hotspot_name": getattr(rt_cfg, "name", None),
+        "resolved_network_type": (getattr(rt_cfg, "network_type", None) or "").lower(),
+    }
+    return tx_dsp, hs_meta
+
+
+def _save_parrot_diag_bundle(
+    raw_pcm: bytes,
+    dsp_pcm: bytes,
+    codec_pcm: bytes,
+    network: str,
+    user_id: int,
+    user_login: str,
+    hs_meta: dict,
+    tx_dsp_settings: dict,
+    client_settings: dict,
+) -> str:
+    """Persists 3 synchronized WAV stages and metadata JSON into src/data/parrot_diag/."""
+    PARROT_DIAG_DIR.mkdir(parents=True, exist_ok=True)
+    now_dt = datetime.now(timezone.utc)
+    net_tag = "asl" if str(network or "dmr").strip().lower() == "allstar" else "dmr"
+    base_id = f"{now_dt.strftime('%Y%m%d_%H%M%S_%f')[:19]}_{net_tag}"
+    run_id = base_id
+    seq = 1
+    while (PARROT_DIAG_DIR / f"{run_id}_meta.json").exists():
+        seq += 1
+        run_id = f"{base_id}_{seq}"
+
+    f_raw = PARROT_DIAG_DIR / f"{run_id}_1_raw_mic.wav"
+    f_dsp = PARROT_DIAG_DIR / f"{run_id}_2_post_tx_dsp.wav"
+    f_cod = PARROT_DIAG_DIR / f"{run_id}_3_post_codec.wav"
+
+    _write_pcm16_wav(f_raw, raw_pcm, 8000)
+    _write_pcm16_wav(f_dsp, dsp_pcm, 8000)
+    _write_pcm16_wav(f_cod, codec_pcm, 8000)
+
+    meta = {
+        "run_id": run_id,
+        "created_at_utc": now_dt.isoformat(),
+        "network_mode": net_tag,
+        "network_requested": network,
+        "user_id": user_id,
+        "user_login": user_login,
+        "hotspot": hs_meta,
+        "tx_dsp_settings": tx_dsp_settings,
+        "client_settings_snapshot": {
+            "audio_tx": (client_settings or {}).get("audio_tx", {}),
+            "asl_audio_tx": (client_settings or {}).get("asl_audio_tx", {}),
+            "ambe_rx": (client_settings or {}).get("ambe_rx", {}),
+        },
+        "audio_metrics": {
+            "stage1_raw_mic": _compute_pcm16_diag_metrics(raw_pcm),
+            "stage2_post_tx_dsp": _compute_pcm16_diag_metrics(dsp_pcm),
+            "stage3_post_codec": _compute_pcm16_diag_metrics(codec_pcm),
+        },
+        "files": {
+            "stage1_raw_mic": f_raw.name,
+            "stage2_post_tx_dsp": f_dsp.name,
+            "stage3_post_codec": f_cod.name,
+        },
+    }
+
+    meta_text = json.dumps(meta, ensure_ascii=False, indent=2)
+    (PARROT_DIAG_DIR / f"{run_id}_meta.json").write_text(meta_text, encoding="utf-8")
+    (PARROT_DIAG_DIR / f"latest_{net_tag}_meta.json").write_text(meta_text, encoding="utf-8")
+    (PARROT_DIAG_DIR / "latest_meta.json").write_text(meta_text, encoding="utf-8")
+
+    # Rotate old diagnostic bundles, keep only PARROT_DIAG_MAX_RUNS most recent
+    meta_files = sorted(
+        (p for p in PARROT_DIAG_DIR.glob("*_meta.json") if not p.name.startswith("latest_")),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    for old_meta in meta_files[PARROT_DIAG_MAX_RUNS:]:
+        old_prefix = old_meta.name[:-10]  # strip _meta.json
+        for suffix in ("_meta.json", "_1_raw_mic.wav", "_2_post_tx_dsp.wav", "_3_post_codec.wav"):
+            old_f = PARROT_DIAG_DIR / f"{old_prefix}{suffix}"
+            if old_f.exists():
+                try:
+                    old_f.unlink()
+                except Exception:
+                    pass
+
+    return run_id
+
+
+def _process_dmr_parrot_audio(pcm_data: bytes, target_hs_or_dsp: Any = None) -> Tuple[bytes, bytes]:
+    """Encodes PCM to AMBE+2 frames and decodes back via mbelib-neo; returns (codec_pcm, post_dsp_pcm)."""
     if not pcm_data:
-        return pcm_data
+        return pcm_data, pcm_data
 
-    # Пропускаем через ServerTxDsp покадрово по 60 мс (960 байт) для точной работы эквалайзера, HPF и АРУ
-    tx_dsp = getattr(target_hs, "tx_dsp", None)
+    # Пропускаем через ServerTxDsp покадрово по 60 мс (960 байт) как в реальном DMR TX
+    tx_dsp = target_hs_or_dsp if hasattr(target_hs_or_dsp, "process_burst") else getattr(target_hs_or_dsp, "tx_dsp", None)
     if tx_dsp is not None:
         try:
             tx_dsp.reset()
@@ -7860,6 +9951,7 @@ def _process_dmr_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> bytes:
         except Exception as e:
             logger.warning(f"[PARROT] TX DSP processing error in DMR parrot: {e}")
 
+    dsp_pcm = pcm_data
     enc = None
     dec = None
     try:
@@ -7869,14 +9961,14 @@ def _process_dmr_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> bytes:
         enc = DMRVocoderEncoder()
         dec = DMRVocoderDecoder()
         if not enc.is_ready or not dec.is_ready:
-            return pcm_data
+            return dsp_pcm, dsp_pcm
 
         out_pcm = bytearray()
         chunk_bytes = 960  # 60ms @ 8000 Hz 16-bit mono = 480 samples = 960 bytes
         offset = 0
 
-        while offset < len(pcm_data):
-            part = pcm_data[offset:offset + chunk_bytes]
+        while offset < len(dsp_pcm):
+            part = dsp_pcm[offset:offset + chunk_bytes]
             offset += chunk_bytes
             if len(part) < chunk_bytes:
                 part = part + b"\x00" * (chunk_bytes - len(part))
@@ -7895,12 +9987,12 @@ def _process_dmr_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> bytes:
             else:
                 out_pcm.extend(part)
 
-        res_bytes = bytes(out_pcm) if out_pcm else pcm_data
-        logger.info(f"[PARROT_DMR] Vocoder roundtrip completed: {len(pcm_data)}B input -> AMBE+2 encode/decode -> {len(res_bytes)}B output")
-        return res_bytes
+        res_bytes = bytes(out_pcm) if out_pcm else dsp_pcm
+        logger.info(f"[PARROT_DMR] Vocoder roundtrip completed: {len(dsp_pcm)}B input -> AMBE+2 encode/decode -> {len(res_bytes)}B output")
+        return res_bytes, dsp_pcm
     except Exception as e:
         logger.warning(f"[PARROT_DMR] Vocoder roundtrip error, fallback to raw PCM: {e}")
-        return pcm_data
+        return dsp_pcm, dsp_pcm
     finally:
         if enc is not None:
             enc.close()
@@ -7908,18 +10000,18 @@ def _process_dmr_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> bytes:
             dec.close()
 
 
-def _process_analog_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> bytes:
-    """Encodes PCM to G.711 u-law and decodes back to simulate analog ASL/IAX2 channel."""
+def _process_analog_parrot_audio(pcm_data: bytes, target_hs_or_dsp: Any = None) -> Tuple[bytes, bytes]:
+    """Encodes PCM to G.711 u-law and decodes back to simulate analog ASL/IAX2 channel; returns (codec_pcm, post_dsp_pcm)."""
     if not pcm_data:
-        return pcm_data
+        return pcm_data, pcm_data
 
-    # Пропускаем через ServerTxDsp покадрово по 60 мс (960 байт) для точной работы эквалайзера, HPF и АРУ
-    tx_dsp = getattr(target_hs, "tx_dsp", None)
+    # Пропускаем через ServerTxDsp покадрово по 20 мс (320 байт) — точное соответствие AllStar TX
+    tx_dsp = target_hs_or_dsp if hasattr(target_hs_or_dsp, "process_burst") else getattr(target_hs_or_dsp, "tx_dsp", None)
     if tx_dsp is not None:
         try:
             tx_dsp.reset()
             dsp_out = bytearray()
-            chunk_bytes = 960
+            chunk_bytes = 320
             for off in range(0, len(pcm_data), chunk_bytes):
                 dsp_out.extend(tx_dsp.process_burst(pcm_data[off:off + chunk_bytes]))
             pcm_data = bytes(dsp_out)
@@ -7927,19 +10019,20 @@ def _process_analog_parrot_audio(pcm_data: bytes, target_hs: Any = None) -> byte
         except Exception as e:
             logger.warning(f"[PARROT] TX DSP processing error in Analog parrot: {e}")
 
+    dsp_pcm = pcm_data
     try:
         from allstar_engine import pcm16_to_ulaw, ulaw_to_pcm16
-        ulaw = pcm16_to_ulaw(pcm_data)
+        ulaw = pcm16_to_ulaw(dsp_pcm)
         res = ulaw_to_pcm16(ulaw)
-        logger.info(f"[PARROT_ANALOG] Analog roundtrip completed: {len(pcm_data)}B PCM -> {len(ulaw)}B G.711 u-law -> {len(res)}B PCM")
-        return res
+        logger.info(f"[PARROT_ANALOG] Analog roundtrip completed: {len(dsp_pcm)}B PCM -> {len(ulaw)}B G.711 u-law -> {len(res)}B PCM")
+        return res, dsp_pcm
     except Exception as e:
         logger.warning(f"[PARROT_ANALOG] Analog roundtrip error: {e}")
-        return pcm_data
+        return dsp_pcm, dsp_pcm
 
 
-async def _run_parrot_playback(websocket, client_id: str, pcm_data: bytes, network: str, user_id: int = 1, hid: str = None):
-    """Streams decoded audio frames back to the client as local parrot test."""
+async def _run_parrot_playback(websocket, client_id: str, pcm_data: bytes, network: str, user_id: int = 1, hid: str = None, user_login: str = ""):
+    """Streams decoded audio frames back to the client and persists 3-stage diagnostic WAV bundle."""
     try:
         await asyncio.sleep(0.40)  # Natural turnaround pause
         if not pcm_data or len(pcm_data) < 320:
@@ -7952,12 +10045,39 @@ async def _run_parrot_playback(websocket, client_id: str, pcm_data: bytes, netwo
             "total_bytes": len(pcm_data)
         }))
 
-        target_hs = (hotspot_manager.get_runtime(user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(user_id)
+        client_settings = {}
+        try:
+            u_settings = await ensure_active_user(user_id, user_login)
+            raw_cs = getattr(u_settings, "client_settings", None)
+            if isinstance(raw_cs, dict):
+                client_settings = dict(raw_cs)
+        except Exception as e:
+            logger.warning(f"[PARROT_DIAG] Could not load user client_settings: {e}")
 
-        if network == "dmr":
-            processed = _process_dmr_parrot_audio(pcm_data, target_hs)
+        tx_dsp, hs_meta = _resolve_parrot_tx_dsp(user_id, network, hid, client_settings)
+        tx_dsp_settings = tx_dsp.get_settings() if hasattr(tx_dsp, "get_settings") else {}
+
+        if str(network or "dmr").strip().lower() == "dmr":
+            processed, dsp_pcm = _process_dmr_parrot_audio(pcm_data, tx_dsp)
         else:
-            processed = _process_analog_parrot_audio(pcm_data, target_hs)
+            processed, dsp_pcm = _process_analog_parrot_audio(pcm_data, tx_dsp)
+
+        try:
+            diag_run_id = await asyncio.to_thread(
+                _save_parrot_diag_bundle,
+                pcm_data,
+                dsp_pcm,
+                processed,
+                network,
+                user_id,
+                user_login,
+                hs_meta,
+                tx_dsp_settings,
+                client_settings,
+            )
+            logger.info(f"[PARROT_DIAG] Saved 3-stage diagnostic bundle '{diag_run_id}' in {PARROT_DIAG_DIR}")
+        except Exception as diag_err:
+            logger.warning(f"[PARROT_DIAG] Failed to save diagnostic bundle: {diag_err}")
 
         chunk_size = 960  # 60ms chunks
         offset = 0
@@ -8195,6 +10315,10 @@ async def websocket_radio_endpoint(websocket: WebSocket):
     ws_is_swl = True if ws_is_demo else await is_user_swl(ws_user_id)
 
     demo_timer_task = None
+    all_ws_cols = await get_all_collections(ws_user_id)
+    if not hasattr(hotspot_manager, "user_ysf_room_types"):
+        hotspot_manager.user_ysf_room_types = {}
+    hotspot_manager.user_ysf_room_types[ws_user_id] = dict(all_ws_cols.get("ysf_room_types", {}) or {})
     try:
         await websocket.send_text(json.dumps({
             "type": "init",
@@ -8222,14 +10346,35 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             "bm_losses": bm_ping_service.cached_losses,
             "bm_host_losses": bm_ping_service.cached_host_losses,
             "bm_ping_history": bm_ping_service.get_history_dict(hours=24.0),
-            "bm_benchmark_results": bm_ping_service.get_benchmark_results(),
+            "bm_benchmark_results": _localize_bm_bench_items(bm_ping_service.get_benchmark_results(), user_id=ws_user_id),
             "bm_benchmark_running": bm_ping_service.is_benchmark_running(),
-            "server_probe_cache": server_probe_service._cache,
+            "server_probe_cache": _localize_server_probe_cache(server_probe_service._cache, user_id=ws_user_id),
             "server_probe_running": server_probe_service.is_probe_running(),
             "client_ping_history": client_ping_service.get_history_list(hours=6.0),
             "client_rtt": client_ping_service.current_rtt,
             "client_packet_loss": client_ping_service.get_packet_loss(),
             "calls": [mask_call_entry_for_demo(e.to_dict()) if ws_is_demo else e.to_dict() for e in hotspot_manager.get_calls_history(user_id=ws_user_id)],
+            "active_call_ids": [
+                str(c.id)
+                for c in hotspot_manager._get_user_active_calls(ws_user_id).values()
+                if getattr(c, "active", False) and getattr(c, "id", None)
+            ],
+            "recording_state": {
+                "active": hotspot_manager.recorder.is_recording(ws_user_id) if (hasattr(hotspot_manager, "recorder") and hotspot_manager.recorder) else False,
+                "session_active": hotspot_manager.recorder.is_session_active(ws_user_id) if (hasattr(hotspot_manager, "recorder") and hotspot_manager.recorder) else False,
+                "rx_active": bool(
+                    hasattr(hotspot_manager, "recorder")
+                    and hotspot_manager.recorder
+                    and any(getattr(b, "user_id", 1) == ws_user_id for b in hotspot_manager.recorder._rx_buffers.values())
+                ),
+                "tx_active": bool(
+                    hasattr(hotspot_manager, "recorder")
+                    and hotspot_manager.recorder
+                    and hotspot_manager.recorder._tx_buffer
+                    and getattr(hotspot_manager.recorder._tx_buffer, "user_id", 1) == ws_user_id
+                ),
+                "recording_hotspots": hotspot_manager.recorder.get_recording_hotspots(user_id=ws_user_id) if (hasattr(hotspot_manager, "recorder") and hotspot_manager.recorder) else [],
+            },
             "app_settings": {
                 "theme": getattr(user_settings, "theme", "dark") or "dark",
                 "bg_type": "color" if getattr(user_settings, "bg_type", "pattern") == "color" else "pattern",
@@ -8254,7 +10399,27 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 "hamqth_username": ("Your CALL" if ws_is_demo else (getattr(user_settings, "hamqth_username", "") or "")),
                 "hamqth_password": ("••••••••••••" if ws_is_demo else (getattr(user_settings, "hamqth_password", "") or "")),
                 "loopback_mode": user_settings.loopback_mode,
-                "quick_mem": user_settings.quick_mem,
+                "quick_mem": all_ws_cols.get("quick_mem", {}),
+                "asl_mem": all_ws_cols.get("asl_mem", {}),
+            },
+            "collections": {
+                "ysf_matrix": all_ws_cols.get("ysf_matrix", {}),
+                "asl_quick_nodes": all_ws_cols.get("asl_quick_nodes", {}),
+                "asl_default_nodes": all_ws_cols.get("asl_default_nodes", {}),
+                "ysf_scan_cfg": all_ws_cols.get("ysf_scan_cfg", {}),
+                "ysf_dice_cfg": all_ws_cols.get("ysf_dice_cfg", {}),
+                "adn_dice_cfg": all_ws_cols.get("adn_dice_cfg", {}),
+                "asl_scan_cfg": all_ws_cols.get("asl_scan_cfg", {}),
+                "asl_dice_cfg": all_ws_cols.get("asl_dice_cfg", {}),
+                "ysf_dash_auto": all_ws_cols.get("ysf_dash_auto", {}),
+                "asl_dash_auto": all_ws_cols.get("asl_dash_auto", {}),
+                "pinned_servers": all_ws_cols.get("pinned_servers", {}),
+                "srv_sort_prefs": all_ws_cols.get("srv_sort_prefs", {}),
+                "quick_mem": all_ws_cols.get("quick_mem", {}),
+                "asl_mem": all_ws_cols.get("asl_mem", {}),
+                "contacts": all_ws_cols.get("contacts", {}),
+                "ysf_room_types": all_ws_cols.get("ysf_room_types", {}),
+                "ysf_favorites": (getattr(user_settings, "ysf_favorites", None) or []),
             },
             "client_settings": getattr(user_settings, "client_settings", None) or getattr(hotspot_manager.settings, "client_settings", {}) or {},
             "state": {
@@ -8271,7 +10436,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 "haptic_feedback": getattr(user_settings, "haptic_feedback", True),
                 "haptic_duration": getattr(user_settings, "haptic_duration", 45),
                 "bm_status": active_hs.status.value if active_hs else "OFFLINE",
-                "bm_detail": active_hs.detail if active_hs else "Отключен",
+                "bm_detail": active_hs.detail if active_hs else _tr("common.disconnected", user_id=ws_user_id, fallback="Disconnected"),
                 "agc": hotspot_manager.get_agc_settings(user_id=ws_user_id),
             }
         }))
@@ -8335,7 +10500,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         try:
                             await websocket.send_text(json.dumps({
                                 "type": "error",
-                                "message": "🎧 Демо-режим: передача отключена (только приём)",
+                                "message": _tr("ptt.demo_rx_only", user_id=ws_user_id, fallback="🎧 Demo mode: transmit disabled (receive only)"),
                                 "code": "DEMO_DENIED"
                             }))
                         except Exception:
@@ -8365,13 +10530,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     continue
                 elif msg_type == "parrot_test_stop":
                     sess = active_parrot_sessions.get(client_id)
-                    if sess and sess.get("recording"):
+                    if sess and not sess.get("task"):
                         sess["recording"] = False
                         pcm_bytes = bytes(sess["buffer"])
                         net = sess.get("network", "dmr")
                         uid = sess.get("user_id", ws_user_id)
                         hid = sess.get("hotspot_id")
-                        sess["task"] = asyncio.create_task(_run_parrot_playback(websocket, client_id, pcm_bytes, net, uid, hid))
+                        sess["task"] = asyncio.create_task(_run_parrot_playback(websocket, client_id, pcm_bytes, net, uid, hid, ws_login))
                     continue
                 elif msg_type == "parrot_test_cancel":
                     sess = active_parrot_sessions.pop(client_id, None)
@@ -8384,7 +10549,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         logger.warning(f"[PTT] Denied for SWL user {ws_login} (id={ws_user_id})")
                         await websocket.send_text(json.dumps({
                             "type": "error",
-                            "message": "Передача запрещена: включен режим SWL (только приём)",
+                            "message": _tr("ptt.denied_swl", user_id=ws_user_id, fallback="Transmit denied: SWL mode enabled (receive only)"),
                             "code": "SWL_DENIED"
                         }))
                         continue
@@ -8397,7 +10562,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         logger.warning(f"[PTT] Denied for user {ws_login}: active hotspot not found")
                         await websocket.send_text(json.dumps({
                             "type": "error",
-                            "message": "Передача заблокирована: хотспот не найден",
+                            "message": _tr("ptt.denied_no_hotspot", user_id=ws_user_id, fallback="Transmit blocked: hotspot not found"),
                             "code": "HOTSPOT_NOT_FOUND"
                         }))
                         continue
@@ -8408,7 +10573,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         logger.warning(f"[PTT] Denied for user {ws_login}: Hotspot {hs_id} is not connected to BM (status={st_val})")
                         await websocket.send_text(json.dumps({
                             "type": "error",
-                            "message": "Передача заблокирована: нет соединения с BrandMeister (BM:OFFLINE)",
+                            "message": _tr("ptt.denied_bm_offline", user_id=ws_user_id, fallback="Transmit blocked: not connected to BrandMeister (BM:OFFLINE)"),
                             "code": "BM_OFFLINE"
                         }))
                         continue
@@ -8416,8 +10581,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     slot = int(data.get("slot", u_radio_state.tx_slot))
                     tg = int(data.get("tg", u_radio_state.active_tg))
 
-                    # If active hotspot is AllStarLink, enforce slot=1 and dst_id=connected_node
-                    if active_hs and getattr(active_hs.config, "network_type", "bm") == "allstar":
+                    # If active hotspot is AllStarLink or YSF, enforce slot=1 and active node/room dst_id
+                    if active_hs and (getattr(active_hs.config, "network_type", "bm") or "").lower() == "allstar":
                         slot = 1
                         conn_node = getattr(active_hs, "connected_node", None)
                         if not conn_node and getattr(active_hs, "asl_links", None):
@@ -8428,6 +10593,18 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                             tg = int(conn_node)
                         except (ValueError, TypeError):
                             tg = 1999
+                    elif active_hs and (getattr(active_hs.config, "network_type", "bm") or "").lower() == "ysf":
+                        slot = 1
+                        ysf_rid = str(getattr(active_hs.config, "ysf_room_id", "") or getattr(active_hs.config, "ysf_room", "") or "25000").strip()
+                        tg = int(ysf_rid) if ysf_rid.isdigit() else 25000
+                        req_tx_dg = data.get("ysf_tx_dg_id", None)
+                        if req_tx_dg is not None and str(req_tx_dg).strip().isdigit():
+                            v_dg = int(req_tx_dg)
+                            if 1 <= v_dg <= 99:
+                                active_hs.config.ysf_tx_dg_id = v_dg
+                                c_obj = getattr(active_hs.client, "client", active_hs.client) if active_hs.client else None
+                                if c_obj:
+                                    c_obj.tx_dg_id = v_dg
 
                     u_radio_state.is_transmitting = True
                     u_radio_state.transmitting_client_id = client_id
@@ -8726,16 +10903,19 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     }, exclude=websocket)
 
                 elif msg_type == "set_language":
-                    lang = str(data.get("language", "ru"))
-                    user_settings.language = lang
-                    await save_user_settings(ws_user_id, user_settings.model_dump())
-                    if ws_user_id == 1:
-                        save_app_settings(user_settings)
-                    logger.info(f"[SETTINGS] Language set to {lang}")
-                    await broadcast_user_json(ws_user_id, {
-                        "type": "language_change",
-                        "language": lang
-                    }, exclude=websocket)
+                    norm_lang = normalize_lang(data.get("language")) or "en"
+                    set_request_lang(norm_lang)
+                    if not ws_is_demo:
+                        set_user_lang(ws_user_id, norm_lang, update_runtime_default=(ws_user_id == 1))
+                        user_settings.language = norm_lang
+                        await save_user_settings(ws_user_id, user_settings.model_dump())
+                        if ws_user_id == 1:
+                            save_app_settings(user_settings)
+                        logger.info(f"[SETTINGS] Language set to {norm_lang}")
+                        await broadcast_user_json(ws_user_id, {
+                            "type": "language_change",
+                            "language": norm_lang
+                        }, exclude=websocket)
 
                 elif msg_type == "set_simultaneous_slots":
                     enabled = bool(data.get("enabled", True))
@@ -8761,30 +10941,62 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         "enabled": enabled
                     }, exclude=websocket)
 
+                elif msg_type == "set_single_hotspot_audio":
+                    enabled = bool(data.get("enabled", False))
+                    user_settings.single_hotspot_audio = enabled
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    logger.info(f"[SETTINGS] Single hotspot audio set to {enabled}")
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "single_hotspot_audio_change",
+                        "enabled": enabled
+                    }, exclude=websocket)
+
                 elif msg_type == "set_quick_mem":
                     key = str(data.get("key", ""))
                     val = data.get("data")
                     if key:
                         if val is None:
                             user_settings.quick_mem.pop(key, None)
+                            await delete_collection_key(ws_user_id, "quick_mem", key)
                         else:
                             user_settings.quick_mem[key] = val
+                            await set_collection_key(ws_user_id, "quick_mem", key, val)
                         await save_user_settings(ws_user_id, user_settings.model_dump())
                         if ws_user_id == 1:
                             save_app_settings(user_settings)
-                        logger.info(f"[SETTINGS] Quick mem updated: {key}")
+                        all_qm = await get_collection(ws_user_id, "quick_mem")
+                        logger.info(f"[SETTINGS] Quick mem updated: {key} for user={ws_user_id}")
                         await broadcast_user_json(ws_user_id, {
                             "type": "quick_mem_change",
                             "key": key,
                             "data": val,
-                            "all_quick_mem": user_settings.quick_mem
+                            "all_quick_mem": all_qm
+                        }, exclude=websocket)
+
+                elif msg_type == "set_asl_mem":
+                    key = str(data.get("key", ""))
+                    val = data.get("data")
+                    if key:
+                        if val is None:
+                            await delete_collection_key(ws_user_id, "asl_mem", key)
+                        else:
+                            await set_collection_key(ws_user_id, "asl_mem", key, str(val))
+                        all_asl = await get_collection(ws_user_id, "asl_mem")
+                        logger.info(f"[SETTINGS] ASL mem updated: {key} for user={ws_user_id}")
+                        await broadcast_user_json(ws_user_id, {
+                            "type": "asl_mem_change",
+                            "key": key,
+                            "data": val,
+                            "all_asl_mem": all_asl
                         }, exclude=websocket)
 
 
                 elif msg_type == "set_vocoder_settings":
                     enh = bool(data.get("spectral_enh", True))
-                    high_band_gain_db = max(0.0, min(6.0, float(data.get("high_band_gain_db", 2.5))))
-                    unvoiced_gain_db = max(-4.0, min(4.0, float(data.get("unvoiced_gain_db", -0.4))))
+                    high_band_gain_db = max(0.0, min(6.0, float(data.get("high_band_gain_db", 0.5))))
+                    unvoiced_gain_db = max(-4.0, min(4.0, float(data.get("unvoiced_gain_db", -1.5))))
                     user_rts = hotspot_manager.get_user_runtimes(ws_user_id)
                     for rt in user_rts.values():
                         if hasattr(rt, "vocoder") and hasattr(rt.vocoder, "set_settings"):
@@ -8793,16 +11005,22 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                 high_band_gain_db=high_band_gain_db,
                                 unvoiced_gain_db=unvoiced_gain_db
                             )
-                    if not hasattr(user_settings, "client_settings") or user_settings.client_settings is None:
-                        user_settings.client_settings = {}
-                    user_settings.client_settings.setdefault("ambe_rx", {}).update({
-                        "spectral_enh": enh,
-                        "high_band_gain_db": high_band_gain_db,
-                        "unvoiced_gain_db": unvoiced_gain_db
-                    })
-                    await save_user_settings(ws_user_id, user_settings.model_dump())
-                    if ws_user_id == 1:
-                        save_app_settings(user_settings)
+                    if not ws_is_demo:
+                        if not hasattr(user_settings, "client_settings") or user_settings.client_settings is None:
+                            user_settings.client_settings = {}
+                        ambe_upd = {
+                            "spectral_enh": enh,
+                            "high_band_gain_db": high_band_gain_db,
+                            "unvoiced_gain_db": unvoiced_gain_db,
+                        }
+                        if data.get("active_preset") is not None:
+                            ambe_upd["active_preset"] = str(data.get("active_preset"))
+                        if isinstance(data.get("presets"), dict):
+                            ambe_upd["presets"] = data.get("presets")
+                        user_settings.client_settings.setdefault("ambe_rx", {}).update(ambe_upd)
+                        await save_user_settings(ws_user_id, user_settings.model_dump())
+                        if ws_user_id == 1:
+                            save_app_settings(user_settings)
                     logger.info(
                         f"[VOCODER] Applied & saved AMBE+2 settings (user {ws_login}): enh={enh}, "
                         f"high_band={high_band_gain_db} dB, unvoiced={unvoiced_gain_db} dB"
@@ -8889,28 +11107,25 @@ async def websocket_radio_endpoint(websocket: WebSocket):
 
                 elif msg_type == "save_client_settings":
                     cs = data.get("client_settings")
-                    if isinstance(cs, dict):
-                        if not hasattr(user_settings, "client_settings") or user_settings.client_settings is None:
-                            user_settings.client_settings = {}
-                        user_settings.client_settings.update(cs)
-                        hotspot_manager.apply_client_settings_to_runtimes(cs, user_id=ws_user_id)
-                        await save_user_settings(ws_user_id, user_settings.model_dump())
-                        if ws_user_id == 1:
-                            save_app_settings(user_settings)
+                    if isinstance(cs, dict) and not ws_is_demo:
+                        await _apply_and_save_client_settings(ws_user_id, user_settings, cs)
 
                 elif msg_type == "set_active_hotspot":
                     hid = data.get("id")
                     if hid and not ws_is_demo:
-                        hotspot_manager.set_active_hotspot(hid, user_id=ws_user_id)
+                        if hotspot_manager.set_active_hotspot(hid, user_id=ws_user_id):
+                            await save_user_settings(ws_user_id, user_settings.model_dump())
 
                 elif msg_type == "bm_connect":
                     hid = data.get("hotspot_id")
                     target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
                     if target_hs:
+                        if target_hs.client and getattr(target_hs.client, "_is_manual_disconnect", False):
+                            continue
                         if ws_is_demo:
                             await _prepare_demo_hotspot_ssid(ws_user_id, target_hs)
                             ws_active_hotspots.setdefault(websocket, set()).add(target_hs.config.id)
-                        await hotspot_manager.connect_hotspot(target_hs.config.id, user_id=ws_user_id, persist=not ws_is_demo)
+                        await hotspot_manager.connect_hotspot(target_hs.config.id, user_id=ws_user_id, persist=not ws_is_demo, force=False)
 
                 elif msg_type == "bm_disconnect":
                     hid = data.get("hotspot_id")
@@ -8938,11 +11153,15 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                 demo_manager.record_admin_collapsed_state(real_hid, bool(getattr(admin_hs_cfg, "collapsed", False)))
                             if not _is_hotspot_open_on_any_client(ws_user_id, real_hid, exclude_ws=websocket):
                                 await hotspot_manager.set_hotspot_collapsed(real_hid, True, user_id=ws_user_id, persist=not ws_is_demo)
+                                if not ws_is_demo:
+                                    await save_user_settings(ws_user_id, user_settings.model_dump())
                         else:
                             if ws_is_demo:
                                 await _prepare_demo_hotspot_ssid(ws_user_id, target_hs)
                             hset.add(real_hid)
                             await hotspot_manager.set_hotspot_collapsed(real_hid, False, user_id=ws_user_id, persist=not ws_is_demo)
+                            if not ws_is_demo:
+                                await save_user_settings(ws_user_id, user_settings.model_dump())
                             try:
                                 await websocket.send_text(json.dumps({
                                     "type": "bm_status",
@@ -8980,10 +11199,24 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     elif net == "tgif":
                         servers = list(KNOWN_TGIF_SERVERS)
                     elif net == "dmrplus":
-                        servers = list(KNOWN_DMRPLUS_SERVERS)
+                        if dmrplus_hosts_mgr._source == "fallback" or dmrplus_hosts_mgr._last_loaded_ts <= 0:
+                            await dmrplus_hosts_mgr.fetch_hosts(force=True)
+                        else:
+                            dmrplus_hosts_mgr.ensure_fresh_background()
+                        servers = dmrplus_hosts_mgr.get_hosts(enriched=False) or list(KNOWN_DMRPLUS_SERVERS)
                     elif net == "xlx":
                         await xlx_hosts_mgr.fetch_hosts(force=False)
                         servers = xlx_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+                    elif net == "adn":
+                        tg_resolver.ensure_adn_fresh_background()
+                        if adn_hosts_mgr._source != "live" or adn_hosts_mgr._last_loaded_ts <= 0:
+                            await adn_hosts_mgr.fetch_hosts(force=True)
+                        else:
+                            adn_hosts_mgr.ensure_fresh_background()
+                        servers = adn_hosts_mgr.get_hosts(enriched=False).get("servers", [])
+                    elif net == "ysf":
+                        await ysf_dir_mgr.fetch_hosts(force=False)
+                        servers = ysf_dir_mgr.get_hosts(enriched=False).get("servers", [])
                     else:
                         servers = []
                     probe_id = 123456799
@@ -9045,6 +11278,39 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                             show_card_effects=show_card_effects
                         ))
 
+                elif msg_type == "ysf_connect_room":
+                    hid = str(data.get("hotspot_id", "")).strip()
+                    room_id = str(data.get("room_id", "")).strip()
+                    room_name = str(data.get("room_name", "")).strip()
+                    host = str(data.get("host", "")).strip()
+                    try:
+                        port = int(data.get("port") or 0)
+                    except (ValueError, TypeError):
+                        port = 0
+                    target_hs = (hotspot_manager.get_runtime(ws_user_id, hid) if hid else None) or hotspot_manager.get_active_runtime(ws_user_id)
+                    if target_hs and room_id:
+                        logger.info(f"[YSF] Connect room #{room_id} ({room_name}) on hotspot {target_hs.config.id} by {ws_login}")
+                        asyncio.create_task(_execute_ysf_connect_flow(
+                            uid=ws_user_id,
+                            target_hs=target_hs,
+                            room_id=room_id,
+                            room_name=room_name,
+                            host=host,
+                            port=port
+                        ))
+                    else:
+                        await websocket.send_json({
+                            "type": "ysf_proc_step",
+                            "hotspot_id": hid or (target_hs.config.id if target_hs else ""),
+                            "proc": "connect",
+                            "state": "failed",
+                            "code": "no_hotspot",
+                            "room_id": room_id,
+                            "tone": "negative",
+                            "text": _tr("ysf.err_no_active_hotspot", fallback="✕ Error # {room_id}: active YSF hotspot not found", room_id=room_id),
+                            "auto_hide_ms": 4000
+                        })
+
                 elif msg_type == "allstar_dtmf":
                     hid = str(data.get("hotspot_id", "")).strip()
                     digit = str(data.get("digit", "")).strip()
@@ -9082,8 +11348,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                 "type": "allstar_proc_step",
                                 "hotspot_id": target_hs.config.id,
                                 "tone": "negative",
-                                "text": "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)",
-                                "auto_hide_ms": 3200
+                                "text": _tr("asl.dtmf_requires_tx", fallback="✕ DTMF transmit unavailable: switch node to TX-RX mode (*3)"),
+                                "auto_hide_ms": 4000
                             }))
                         else:
                             asl_adapter = getattr(target_hs, "client", None) or getattr(target_hs, "allstar_client", None)
@@ -9095,7 +11361,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                                 "type": "allstar_proc_step",
                                                 "hotspot_id": target_hs.config.id,
                                                 "tone": "neutral",
-                                                "text": f"📡 Авто-TX: передача DTMF {d}...",
+                                                "text": _tr("asl.auto_tx_dtmf", fallback="📡 Auto-TX: transmitting DTMF {digits}...", digits=d),
                                                 "auto_hide_ms": 0
                                             }))
                                             await ws.send_text(json.dumps({
@@ -9108,8 +11374,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                                 "type": "allstar_proc_step",
                                                 "hotspot_id": target_hs.config.id,
                                                 "tone": "positive",
-                                                "text": f"✓ DTMF отправлен: {d}",
-                                                "auto_hide_ms": 2000
+                                                "text": _tr("asl.dtmf_sent", fallback="✓ DTMF sent: {digits}", digits=d),
+                                                "auto_hide_ms": 4000
                                             }))
                                             await ws.send_text(json.dumps({
                                                 "type": "allstar_macro_tx_state",
@@ -9121,7 +11387,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                                 "type": "allstar_proc_step",
                                                 "hotspot_id": target_hs.config.id,
                                                 "tone": "neutral",
-                                                "text": f"📡 Передача DTMF {d}...",
+                                                "text": _tr("asl.tx_dtmf", fallback="📡 Transmitting DTMF {digits}...", digits=d),
                                                 "auto_hide_ms": 0
                                             }))
                                         elif event_type == "tx_inject_done":
@@ -9129,8 +11395,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                                                 "type": "allstar_proc_step",
                                                 "hotspot_id": target_hs.config.id,
                                                 "tone": "positive",
-                                                "text": f"✓ DTMF отправлен: {d}",
-                                                "auto_hide_ms": 2000
+                                                "text": _tr("asl.dtmf_sent", fallback="✓ DTMF sent: {digits}", digits=d),
+                                                "auto_hide_ms": 4000
                                             }))
                                     except Exception as err:
                                         logger.debug(f"[ALLSTAR] Macro notify error: {err}")
@@ -9177,10 +11443,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             elif "bytes" in message:
                 audio_bytes = message["bytes"]
                 parrot_sess = active_parrot_sessions.get(client_id)
-                if parrot_sess and parrot_sess.get("recording"):
-                    parrot_sess["buffer"].extend(audio_bytes)
-                    if len(parrot_sess["buffer"]) > 240000:  # 15 sec safety limit
-                        parrot_sess["recording"] = False
+                if parrot_sess and (parrot_sess.get("recording") or not parrot_sess.get("task")):
+                    if parrot_sess.get("recording"):
+                        remaining = 480000 - len(parrot_sess["buffer"])  # 30 sec limit at 8 kHz 16-bit PCM
+                        if remaining > 0:
+                            parrot_sess["buffer"].extend(audio_bytes[:remaining])
+                        if len(parrot_sess["buffer"]) >= 480000:
+                            parrot_sess["recording"] = False
                 elif u_radio_state.is_transmitting and (u_radio_state.transmitting_client_id == client_id or not u_radio_state.transmitting_client_id):
                     hotspot_manager.process_tx_audio(audio_bytes, user_id=ws_user_id)
                 else:

@@ -202,9 +202,10 @@ class DemoModeManager:
         }
 
     def start_session(self, ip: str, existing_sid: Optional[str] = None) -> Tuple[Optional[DemoSession], Optional[dict]]:
+        from i18n_backend import tr as _tr
         self.prune()
         if not self._cfg["enabled"]:
-            return None, {"code": "DEMO_DISABLED", "detail": "Демо-режим отключён администратором"}
+            return None, {"code": "DEMO_DISABLED", "detail": _tr("demo.api_disabled", fallback="Demo mode is disabled by administrator")}
 
         if existing_sid and existing_sid in self.sessions:
             s = self.sessions[existing_sid]
@@ -220,7 +221,7 @@ class DemoModeManager:
             return None, {
                 "code": "DEMO_COOLDOWN",
                 "cooldown_remaining_sec": cd,
-                "detail": f"Повторный демо-вход будет доступен через {cd} сек.",
+                "detail": _tr("demo.api_cooldown", fallback="Demo re-entry will be available in {sec}s", sec=cd),
             }
 
         if len(self.sessions) >= self._cfg["max_sessions"]:
@@ -231,7 +232,7 @@ class DemoModeManager:
                 "nearest_slot_sec": nearest,
                 "active_sessions": len(self.sessions),
                 "max_sessions": self._cfg["max_sessions"],
-                "detail": f"Все демо-слоты сейчас заняты ({len(self.sessions)}/{self._cfg['max_sessions']}). Ближайший освободится через {mm:02d}:{ss:02d}",
+                "detail": _tr("demo.api_slots_full", fallback="All demo slots are currently busy ({active}/{max}). Next slot free in {time}", active=len(self.sessions), max=self._cfg["max_sessions"], time=f"{mm:02d}:{ss:02d}"),
             }
 
         now = time.time()
@@ -277,8 +278,9 @@ DEMO_FAKE_DMR_ID_STR = "1234567"
 
 def mask_hotspot_dict_for_demo(d: dict, index: int = 0) -> dict:
     """Маскирует позывной, DMR ID, Talker Alias, пароли и API-ключи в словаре хотспота для демо-клиента."""
+    from i18n_backend import tr as _tr
     out = dict(d)
-    out["callsign"] = "Ваш позывной"
+    out["callsign"] = _tr("demo.your_callsign", fallback="Your Callsign")
     try:
         raw_ssid = int(out.get("bm_ssid") or out.get("ssid") or 1)
     except Exception:
@@ -327,11 +329,14 @@ def mask_settings_for_demo(settings_data: dict) -> dict:
 
 def mask_call_entry_for_demo(c: dict) -> dict:
     """Маскирует собственные выходы в эфир владельца сервера (is_tx == True) для демо-гостя."""
+    from i18n_backend import tr as _tr
     out = dict(c)
     if bool(out.get("is_tx")):
+        call_lbl = _tr("demo.your_callsign", fallback="Your Callsign")
+        name_lbl = _tr("demo.your_name", fallback="Your Name")
         out["src_id"] = 1234567
-        out["src_callsign"] = "Ваш позывной"
-        out["src_name"] = "Your Name"
-        out["talker_alias"] = "Your Name"
-        out["caller_display"] = "Ваш позывной (Your Name)"
+        out["src_callsign"] = call_lbl
+        out["src_name"] = name_lbl
+        out["talker_alias"] = name_lbl
+        out["caller_display"] = f"{call_lbl} ({name_lbl})"
     return out

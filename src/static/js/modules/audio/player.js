@@ -1,5 +1,5 @@
-import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime } from '../core/formatters.js?v=2.9.547';
-import { showToast } from '../core/toast.js';
+import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, formatHistoryTime, updateFlagElement, getNetworkRawTgName, renderTgTextHtml } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 import {
   DEFAULT_ROGER_BEEP_PATTERN,
   playLocalRogerBeep,
@@ -38,8 +38,6 @@ export   class RecordingsManager {
       this.playPauseBtn = document.getElementById("recPlayPauseBtn");
       this.prevTrackBtn = document.getElementById("recPrevTrackBtn");
       this.nextTrackBtn = document.getElementById("recNextTrackBtn");
-      this.skipBackBtn = document.getElementById("recSkipBackBtn");
-      this.skipFwdBtn = document.getElementById("recSkipFwdBtn");
       this.btnMp3 = document.getElementById("recBtnMp3");
 
       // Scrubber Elements
@@ -77,6 +75,24 @@ export   class RecordingsManager {
       this.offlineTranscribeBtn = document.getElementById("recOfflineTranscribeBtn");
       this.headerOfflineTranscribeBtn = document.getElementById("headerOfflineTranscribeBtn");
       this.recTtsBtn = document.getElementById("recTtsBtn");
+      this.txToggleBtn = document.getElementById("recTxToggleBtn");
+      this.txTargetBtn = document.getElementById("recTxTargetBtn");
+      this.txTargetLabel = document.getElementById("recTxTargetLabel");
+      this.txTargetMenu = document.getElementById("recTxTargetMenu");
+      this.txHotspotList = document.getElementById("recTxHotspotList");
+      this.txSlotRow = document.getElementById("recTxSlotRow");
+      this.isTxArmed = false;
+      this.isTxStreaming = false;
+      this.txTargetHotspotId = null;
+      this.txTargetSlot = null;
+      this._txMaxDurationTimer = null;
+      this._txCountdownInterval = null;
+      this._activeTxVisualState = null;
+      this._recTxAnalyser = null;
+      this._recTxTimeBuf = null;
+      this._recTxByteBuf = null;
+      this._recTxHooked = false;
+
       this.isTtsPlaying = false;
       this._ttsPlayToken = 0;
       this.currentTtsHandle = null;
@@ -90,9 +106,13 @@ export   class RecordingsManager {
       this._targetOfflineHotspotId = null;
 
       // Quota, Speed & Clear
+      this.quotaBar = document.getElementById("recQuotaBar");
       this.quotaBadge = document.getElementById("recordingsQuotaBadge");
       this.quotaBadgeFilled = document.getElementById("recordingsQuotaBadgeFilled");
       this.quotaFill = document.getElementById("recQuotaFill");
+      this.quotaClearMenu = document.getElementById("recQuotaClearMenu");
+      this.btnConfirmQuotaClear = document.getElementById("btnConfirmQuotaClear");
+      this.btnCancelQuotaClear = document.getElementById("btnCancelQuotaClear");
       this.clearAllBtn = document.getElementById("recClearAllBtn");
 
       // Settings Modal Elements
@@ -133,6 +153,7 @@ export   class RecordingsManager {
       this.initEvents();
       this.preloadRecordedCallIds();
       this.loadStats();
+      this.checkOfflineTranscribeStatus();
     }
 
     formatTime(sec) {
@@ -233,28 +254,43 @@ export   class RecordingsManager {
       // Audio Engine Events
       this.audio.addEventListener("timeupdate", () => this.onTimeUpdate());
       this.audio.addEventListener("play", () => {
-        if (this.playbackRate && this.audio && Math.abs(this.audio.playbackRate - this.playbackRate) > 0.05) {
+        if (this.isTxArmed) {
+          this.audio.playbackRate = 1.0;
+          this.startRecordingTxStream();
+        } else if (this.playbackRate && this.audio && Math.abs(this.audio.playbackRate - this.playbackRate) > 0.05) {
           this.audio.playbackRate = this.playbackRate;
         }
         this.updatePlayState(true);
         this.startSmoothProgress();
       });
       this.audio.addEventListener("pause", () => {
+        if (this.isTxStreaming) {
+          this.stopRecordingTxStream();
+        }
         this.updatePlayState(false);
         this.stopSmoothProgress();
       });
       this.audio.addEventListener("ended", () => {
+        if (this.isTxStreaming) {
+          this.stopRecordingTxStream();
+        }
         this.updatePlayState(false);
         this.stopSmoothProgress();
         this._currentPercent = 0;
         this.drawProgressBar(0);
         if (this.scrubberFill) this.scrubberFill.style.width = "0%";
-      const tspan = document.getElementById("recTrackTimeRemaining");
-      if (tspan) tspan.textContent = "-00:00";
+        const tspan = document.getElementById("recTrackTimeRemaining");
+        if (tspan) tspan.textContent = "-00:00";
 
         if (this._autoPlayTimer) {
           clearTimeout(this._autoPlayTimer);
           this._autoPlayTimer = null;
+        }
+
+        // In TX:ON mode only ONE recording may play automatically
+        if (this.isTxArmed) {
+          this.updateActiveRowHighlight();
+          return;
         }
 
         const curCallId = this.currentRecording ? this.currentRecording.call_id : null;
@@ -398,13 +434,6 @@ export   class RecordingsManager {
         this.nextTrackBtn.onclick = () => this.playNext();
       }
 
-      // Transport: -10s / +10s
-      if (this.skipBackBtn) {
-        this.skipBackBtn.onclick = () => this.skip(-10);
-      }
-      if (this.skipFwdBtn) {
-        this.skipFwdBtn.onclick = () => this.skip(10);
-      }
 
       // Transport: Direct MP3 download button
       if (this.btnMp3) {
@@ -681,10 +710,12 @@ export   class RecordingsManager {
         }, true);
       }
 
-      // Clear All Recordings Button
+      // Clear All Recordings Button & Long-Press on Quota Bar
       if (this.clearAllBtn) {
         this.clearAllBtn.onclick = () => this.clearAllRecordings();
       }
+      this.initQuotaLongPressMenu();
+      this.initTxControls();
 
       // Offline Transcribe Modal Events
       if (this.closeOfflineTranscribeBtn) {
@@ -725,6 +756,7 @@ export   class RecordingsManager {
       if (this.playerPanel) {
         this.playerPanel.style.display = "flex";
       }
+      this.updateTxTargetLabel();
       this.updateOpenBtnState(true);
       this.updateActiveRowHighlight();
       requestAnimationFrame(() => this.drawProgressBar());
@@ -741,6 +773,10 @@ export   class RecordingsManager {
     }
 
     closePlayer() {
+      this.resetTxState();
+      if (this.quotaClearMenu) {
+        this.quotaClearMenu.style.display = "none";
+      }
       if (this.isTtsPlaying) {
         this.stopTtsPlayback();
       }
@@ -791,9 +827,13 @@ export   class RecordingsManager {
     }
 
     openOfflineTranscribeModal(targetHotspotId = null) {
+      const logTabHid = (typeof window !== "undefined" && window.currentLogHotspotId && window.currentLogHotspotId !== "all")
+        ? window.currentLogHotspotId
+        : null;
       const curHsId = window.resolveHotspotId(
         targetHotspotId ||
         (this.currentRecording && this.currentRecording.hotspot_id) ||
+        logTabHid ||
         (typeof activeHotspotId !== "undefined" ? activeHotspotId : window.activeHotspotId) ||
         "default"
       );
@@ -816,8 +856,8 @@ export   class RecordingsManager {
           const opt = document.createElement("option");
           opt.value = h.id;
           const isRun = this.isHotspotOfflineTranscribing(h.id);
-          const hsName = h.name || (window.getHotspotDisplayName ? window.getHotspotDisplayName(h.id) : `Хотспот ${h.id}`);
-          opt.textContent = isRun ? (window.t ? window.t("player.hs_running", { name: hsName }, `${hsName} ⏳ (выполняется)`) : `${hsName} ⏳ (выполняется)`) : hsName;
+          const hsName = h.name || (window.getHotspotDisplayName ? window.getHotspotDisplayName(h.id) : `${window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot"} ${h.id}`);
+          opt.textContent = isRun ? (window.t ? window.t("player.hs_running", { name: hsName }, `${hsName} ⏳ (running)`) : `${hsName} ⏳ (running)`) : hsName;
           if (window.resolveHotspotId(h.id) === curHsId || h.id === curHsId) {
             opt.selected = true;
           }
@@ -1048,6 +1088,9 @@ export   class RecordingsManager {
           }
         }
       });
+      if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+        window.refreshToolbarProcessIndicators();
+      }
     }
 
     updateAllHotspotTranscribeUI() {
@@ -1085,6 +1128,9 @@ export   class RecordingsManager {
           }
         }
         this.updateGlobalProgressBar(cur);
+        if (this.isTxStreaming) {
+          this.updateRecTxVuMeter();
+        }
         
         if (!this.audio.paused && !this.audio.ended) {
           this._progressRaf = requestAnimationFrame(step);
@@ -1298,7 +1344,7 @@ export   class RecordingsManager {
         this.sortBtn.classList.toggle('is-asc', isAsc);
         this.sortBtn.classList.toggle('is-desc', !isAsc);
         const titleKey = isAsc ? "log.sort_newest_bottom" : "log.sort_newest_top";
-        const titleDefault = isAsc ? "Сортировка: новые внизу" : "Сортировка: новые вверху";
+        const titleDefault = isAsc ? "Sort: newest at bottom" : "Sort: newest on top";
         const title = (window.t ? window.t(titleKey, {}, titleDefault) : titleDefault);
         this.sortBtn.title = title;
         this.sortBtn.setAttribute("aria-label", title);
@@ -1398,7 +1444,7 @@ export   class RecordingsManager {
         if (!this.isTtsPlaying || token !== this._ttsPlayToken) return;
 
         if (!resp.ok || res.status !== "ok") {
-          const errClean = (res && (res.message || res.detail)) || "Ошибка синтеза речи";
+          const errClean = (res && (res.message || res.detail)) || (window.t ? window.t("player.tts_err", {}, "Speech synthesis error") : "Speech synthesis error");
           showToast(`⚠️ TTS: ${errClean}`, 3500);
           this.stopTtsPlayback();
           return;
@@ -1513,14 +1559,14 @@ export   class RecordingsManager {
 
     playBrowserTts(text, targetLang, speed, onDone) {
       if (!window.speechSynthesis) {
-        showToast("Web Speech API не поддерживается браузером", 3000);
+        showToast(window.t ? window.t("player.speech_not_supported", {}, "Web Speech API is not supported by your browser") : "Web Speech API is not supported by your browser", 3000);
         onDone();
         return;
       }
       window.speechSynthesis.cancel();
       const ut = new SpeechSynthesisUtterance(text);
       ut.rate = speed;
-      const bcpMap = { "ru": "ru-RU", "en": "en-US", "uk": "uk-UA", "de": "de-DE", "es": "es-ES", "fr": "fr-FR", "it": "it-IT" };
+      const bcpMap = { "ru": "ru-RU", "en": "en-US", "uk": "uk-UA", "de": "de-DE", "es": "es-ES", "fr": "fr-FR", "it": "it-IT", "nl": "nl-NL" };
       ut.lang = bcpMap[targetLang] || targetLang;
 
       ut.onend = () => onDone();
@@ -1566,6 +1612,9 @@ export   class RecordingsManager {
     }
 
     pause() {
+      if (this.isTxStreaming) {
+        this.stopRecordingTxStream();
+      }
       if (this.isTtsPlaying) {
         this.stopTtsPlayback();
       }
@@ -1581,6 +1630,9 @@ export   class RecordingsManager {
     }
 
     stop() {
+      if (this.isTxStreaming) {
+        this.stopRecordingTxStream();
+      }
       if (this.isTtsPlaying) {
         this.stopTtsPlayback();
       }
@@ -1785,7 +1837,7 @@ export   class RecordingsManager {
         if (this.audio.volume !== 1.0) {
           try { this.audio.volume = 1.0; } catch (_) {}
         }
-        const targetGain = isMuted ? 0.0 : Math.max(0, Math.min(2.5, vol / 100.0));
+        const targetGain = isMuted ? 0.0 : Math.max(0, Math.min(2.5, (vol / 100.0) * 1.40));
         const now = (ap && ap.audioCtx) ? ap.audioCtx.currentTime : 0;
         try {
           attached.gainNode.gain.cancelScheduledValues(now);
@@ -1794,9 +1846,8 @@ export   class RecordingsManager {
           attached.gainNode.gain.value = targetGain;
         }
       } else {
-        // Fallback for standalone / non-WebAudio environment (aligned with -9 dB master attenuation)
-        const masterAtten = window.MASTER_GAIN_9DB_ATTENUATION || 0.354813;
-        const targetVolFloat = isMuted ? 0.0 : Math.max(0, Math.min(1.0, (vol / 100.0) * masterAtten));
+        // Fallback for standalone / non-WebAudio environment
+        const targetVolFloat = isMuted ? 0.0 : Math.max(0, Math.min(1.0, vol / 100.0));
         if (this.audio.volume !== targetVolFloat) {
           try { this.audio.volume = targetVolFloat; } catch (_) {}
         }
@@ -1853,8 +1904,31 @@ export   class RecordingsManager {
         else if (rec.call_type === "SESSION") this.badgeTypeEl.classList.add("rec-badge-session");
         else this.badgeTypeEl.classList.add("rec-badge-rx");
       }
-      if (this.tgBadgeEl) this.tgBadgeEl.textContent = rec.dst_id ? `TG ${rec.dst_id}` : "TG --";
-      if (this.slotBadgeEl) this.slotBadgeEl.textContent = rec.slot ? `TS${rec.slot}` : "TS--";
+      const recLive = (window.lastHeardList || []).find(c => c && (c.id === rec.call_id || c.call_id === rec.call_id || c.id === rec.id));
+      const recNet = String(
+        rec.network_type ||
+        (recLive && recLive.network_type) ||
+        ((String(rec.call_id || rec.id || "").startsWith("ysf_") || String(rec.dst_name || (recLive && recLive.dst_name) || "").startsWith("YSF #")) ? "ysf" : (String(rec.call_id || rec.id || "").startsWith("asl_") ? "allstar" : "")) ||
+        (rec.hotspot_id && typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(rec.hotspot_id) : "")
+      ).toLowerCase();
+      if (this.tgBadgeEl) {
+        if (recNet === "ysf") {
+          this.tgBadgeEl.textContent = rec.dst_id ? `#${rec.dst_id}` : "#--";
+        } else if (recNet === "allstar") {
+          this.tgBadgeEl.textContent = rec.dst_id ? `Node ${rec.dst_id}` : "Node --";
+        } else {
+          this.tgBadgeEl.textContent = rec.dst_id ? `TG ${rec.dst_id}` : "TG --";
+        }
+      }
+      if (this.slotBadgeEl) {
+        if (recNet === "ysf") {
+          this.slotBadgeEl.textContent = "YSF";
+        } else if (recNet === "allstar") {
+          this.slotBadgeEl.textContent = "ASL";
+        } else {
+          this.slotBadgeEl.textContent = rec.slot ? `TS${rec.slot}` : "TS--";
+        }
+      }
       if (this.timeBadgeEl) {
         this.updateTimeBadge();
         this.timeBadgeEl.title = window.t ? window.t("player.time_badge_hint", {}, "Время записи: нажмите для смены LOC ↔ UTC") : "Время записи: нажмите для смены LOC ↔ UTC";
@@ -1963,7 +2037,7 @@ export   class RecordingsManager {
       }
 
       // Standard desktop / browser download
-      showToast(`✓ Сохранение ${mp3Filename} в папку Загрузки`, 2500);
+      showToast(window.t ? window.t("player.saving_to_downloads", { filename: mp3Filename }, `Saving ${mp3Filename} to Downloads`) : `Saving ${mp3Filename} to Downloads`, 2500);
       const link = document.createElement("a");
       link.href = downloadUrl;
       link.download = mp3Filename;
@@ -1977,17 +2051,17 @@ export   class RecordingsManager {
       try {
         if (typeof window.AndroidBridge.downloadFile === "function") {
           window.AndroidBridge.downloadFile(downloadUrl, mp3Filename);
-          showToast(`✓ Файл ${mp3Filename} сохранен в «Download»`, 3000);
+          showToast(window.t ? window.t("player.saved_download", { filename: mp3Filename }, `✓ Saved ${mp3Filename} to Downloads`) : `✓ Saved ${mp3Filename} to Downloads`, 3000);
         } else if (typeof window.AndroidBridge.saveMp3ToDownloads === "function") {
           window.AndroidBridge.saveMp3ToDownloads(downloadUrl, mp3Filename);
-          showToast(`✓ Файл ${mp3Filename} сохранен в «Download»`, 3000);
+          showToast(window.t ? window.t("player.saved_download", { filename: mp3Filename }, `✓ Saved ${mp3Filename} to Downloads`) : `✓ Saved ${mp3Filename} to Downloads`, 3000);
         } else if (typeof window.AndroidBridge.downloadApkWithFilename === "function") {
           window.AndroidBridge.downloadApkWithFilename(downloadUrl, mp3Filename);
-          showToast(`✓ Файл ${mp3Filename} сохранен в «Download»`, 3000);
+          showToast(window.t ? window.t("player.saved_download", { filename: mp3Filename }, `✓ Saved ${mp3Filename} to Downloads`) : `✓ Saved ${mp3Filename} to Downloads`, 3000);
         }
       } catch (err) {
         console.error("[RECORDINGS] Bridge fallback download failed:", err);
-        showToast("Ошибка сохранения файла через AndroidBridge", 3000);
+        showToast(window.t ? window.t("player.bridge_save_err", {}, "Error saving file via AndroidBridge") : "Error saving file via AndroidBridge", 3000);
       }
     }
 
@@ -2001,14 +2075,14 @@ export   class RecordingsManager {
         this.stopTtsPlayback();
       }
       const rec = this.currentRecording;
-      const name = rec.src_callsign || rec.src_id || "эту запись";
+      const name = rec.src_callsign || rec.src_id || (window.t ? window.t("player.this_record", {}, "this recording") : "this recording");
       const ok = await (window.showAppConfirm ? window.showAppConfirm({
-        title: window.t ? window.t("player.del_record_title", {}, "Удаление записи") : "Удаление записи",
+        title: window.t ? window.t("player.del_record_title", {}, "Delete recording") : "Delete recording",
         icon: "🗑️",
-        message: window.t ? window.t("player.del_record_confirm", { name: name }, `Удалить запись ${name}?`) : `Удалить запись ${name}?`,
-        confirmText: window.t ? window.t("buttons.delete", {}, "Удалить") : "Удалить",
+        message: window.t ? window.t("player.del_record_confirm", { name: name }, `Delete recording ${name}?`) : `Delete recording ${name}?`,
+        confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
         confirmStyle: "danger"
-      }) : Promise.resolve(confirm(`Удалить запись ${name}?`)));
+      }) : Promise.resolve(confirm(window.t ? window.t("player.del_record_confirm", { name: name }, `Delete recording ${name}?`) : `Delete recording ${name}?`)));
       if (!ok) return;
 
       try {
@@ -2032,22 +2106,22 @@ export   class RecordingsManager {
           }
           this.loadStats();
         } else {
-          showToast(window.t ? window.t("player.del_record_err", {}, "⚠️ Ошибка удаления записи") : "⚠️ Ошибка удаления записи", 3000);
+          showToast(window.t ? window.t("player.del_record_err", {}, "⚠️ Error deleting recording") : "⚠️ Error deleting recording", 3000);
         }
       } catch (err) {
         console.error(err);
-        showToast("⚠️ Ошибка удаления записи", 3000);
+        showToast(window.t ? window.t("player.del_record_err", {}, "⚠️ Error deleting recording") : "⚠️ Error deleting recording", 3000);
       }
     }
 
     async clearAllRecordings() {
       const ok = await (window.showAppConfirm ? window.showAppConfirm({
-        title: window.t ? window.t("player.clear_all_title", {}, "Очистка аудиозаписей") : "Очистка аудиозаписей",
+        title: window.t ? window.t("player.clear_all_title", {}, "Clear Audio Recordings") : "Clear Audio Recordings",
         icon: "🗑️",
-        message: window.t ? window.t("player.clear_all_confirm", {}, "Удалить ВСЕ аудиозаписи?\n\nВсе сохранённые вызовы будут стёрты с сервера. Это действие нельзя отменить.") : "Удалить ВСЕ аудиозаписи?\n\nВсе сохранённые вызовы будут стёрты с сервера. Это действие нельзя отменить.",
-        confirmText: window.t ? window.t("buttons.delete_all", {}, "Удалить всё") : "Удалить всё",
+        message: window.t ? window.t("player.clear_all_confirm", {}, "Delete ALL audio recordings?\n\nAll saved calls will be erased from the server. This action cannot be undone.") : "Delete ALL audio recordings?\n\nAll saved calls will be erased from the server. This action cannot be undone.",
+        confirmText: window.t ? window.t("buttons.delete_all", {}, "Delete All") : "Delete All",
         confirmStyle: "danger"
-      }) : Promise.resolve(confirm(window.t ? window.t("player.clear_all_confirm", {}, "Удалить ВСЕ аудиозаписи? Это действие нельзя отменить.") : "Удалить ВСЕ аудиозаписи? Это действие нельзя отменить.")));
+      }) : Promise.resolve(confirm(window.t ? window.t("player.clear_all_confirm", {}, "Delete ALL audio recordings? This action cannot be undone.") : "Delete ALL audio recordings? This action cannot be undone.")));
       if (!ok) return;
 
       try {
@@ -2059,14 +2133,14 @@ export   class RecordingsManager {
         });
         const data = await resp.json();
         if (data.status === "ok") {
-          showToast(window.t ? window.t("player.clear_all_success", { count: data.deleted_count || 0 }, `✓ Все аудиозаписи удалены (${data.deleted_count || 0})`) : `✓ Все аудиозаписи удалены (${data.deleted_count || 0})`, 2500);
+          showToast(window.t ? window.t("player.clear_all_success", { count: data.deleted_count || 0 }, `✓ All audio recordings deleted (${data.deleted_count || 0})`) : `✓ All audio recordings deleted (${data.deleted_count || 0})`, 2500);
           this.onRecordingsCleared();
         } else {
-          showToast(window.t ? window.t("player.clear_all_err", {}, "⚠️ Ошибка при удалении аудиозаписей") : "⚠️ Ошибка при удалении аудиозаписей", 3000);
+          showToast(window.t ? window.t("player.clear_all_err", {}, "⚠️ Error clearing audio recordings") : "⚠️ Error clearing audio recordings", 3000);
         }
       } catch (err) {
         console.error("[RECORDINGS] Error clearing recordings:", err);
-        showToast("⚠️ Ошибка при удалении аудиозаписей", 3000);
+        showToast(window.t ? window.t("player.clear_all_err", {}, "⚠️ Error clearing audio recordings") : "⚠️ Error clearing audio recordings", 3000);
       }
     }
 
@@ -2179,15 +2253,753 @@ export   class RecordingsManager {
       } catch (_) {}
     }
 
+    initQuotaLongPressMenu() {
+      if (!this.quotaBar) return;
+      let pressTimer = null;
+      const startHold = (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        if (pressTimer) clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          pressTimer = null;
+          if (this.quotaClearMenu) {
+            this.quotaClearMenu.style.display = "flex";
+          }
+        }, 550);
+      };
+      const cancelHold = () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      };
+      this.quotaBar.addEventListener("pointerdown", startHold);
+      this.quotaBar.addEventListener("pointerup", cancelHold);
+      this.quotaBar.addEventListener("pointerleave", cancelHold);
+      this.quotaBar.addEventListener("pointercancel", cancelHold);
+      this.quotaBar.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        cancelHold();
+        if (this.quotaClearMenu) {
+          this.quotaClearMenu.style.display = "flex";
+        }
+      });
+      if (this.btnCancelQuotaClear) {
+        this.btnCancelQuotaClear.onclick = (e) => {
+          e.stopPropagation();
+          if (this.quotaClearMenu) this.quotaClearMenu.style.display = "none";
+        };
+      }
+      if (this.btnConfirmQuotaClear) {
+        this.btnConfirmQuotaClear.onclick = async (e) => {
+          e.stopPropagation();
+          if (this.quotaClearMenu) this.quotaClearMenu.style.display = "none";
+          await this.executeClearAllAudioOnly();
+        };
+      }
+      document.addEventListener("click", (e) => {
+        if (this.quotaClearMenu && this.quotaClearMenu.style.display !== "none") {
+          if (!this.quotaClearMenu.contains(e.target) && (!this.quotaBar || !this.quotaBar.contains(e.target))) {
+            this.quotaClearMenu.style.display = "none";
+          }
+        }
+      });
+    }
+
+    async executeClearAllAudioOnly() {
+      try {
+        const resp = await fetch("/api/recordings/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({}),
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          showToast(window.t ? window.t("player.clear_all_success", { count: data.deleted_count || 0 }, `✓ Удалены все аудиозаписи (${data.deleted_count || 0})`) : `✓ Удалены все аудиозаписи (${data.deleted_count || 0})`, 2500);
+          this.onRecordingsCleared();
+        } else {
+          showToast(window.t ? window.t("player.clear_all_err", {}, "⚠️ Ошибка очистки аудиозаписей") : "⚠️ Ошибка очистки аудиозаписей", 3000);
+        }
+      } catch (err) {
+        console.error("[RECORDINGS] Error clearing audio files:", err);
+        showToast(window.t ? window.t("player.clear_all_err", {}, "⚠️ Ошибка очистки аудиозаписей") : "⚠️ Ошибка очистки аудиозаписей", 3000);
+      }
+    }
+
+    _resolveHsId(hid) {
+      if (!hid) return "default";
+      if (typeof window !== "undefined" && typeof window.resolveHotspotId === "function") {
+        return window.resolveHotspotId(hid);
+      }
+      return String(hid);
+    }
+
+    findHotspotCard(hid) {
+      if (typeof document === "undefined" || !hid) return null;
+      const cid = this._resolveHsId(hid);
+      const exact = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`)
+        || document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+      if (exact) return exact;
+      const rc = document.getElementById("radioContainer");
+      const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+      const firstHs = hsList[0];
+      if (rc && firstHs && this._resolveHsId(firstHs.id) === cid && (!rc.dataset.hotspotId || rc.dataset.hotspotId === "default" || this._resolveHsId(rc.dataset.hotspotId) === cid)) {
+        return rc;
+      }
+      return null;
+    }
+
+    isHotspotTxAvailable(h) {
+      if (!h || h.hidden) return false;
+      const cid = this._resolveHsId(h.id);
+      const isCol = Boolean(
+        (typeof window !== "undefined" && typeof window.isHotspotCollapsed === "function" && window.isHotspotCollapsed(cid)) ||
+        h.collapsed === true
+      );
+      const isLive = Boolean(
+        typeof window !== "undefined" && typeof window.isHotspotLiveCollapsed === "function" && window.isHotspotLiveCollapsed(cid)
+      );
+      if (isCol && !isLive) return false;
+      const card = this.findHotspotCard(cid);
+      if (card && card.classList.contains("collapsed") && !card.classList.contains("live-collapsed")) {
+        return false;
+      }
+      const statusUp = String(h.status || "").trim().toUpperCase();
+      const netLower = String(h.network_type || "bm").trim().toLowerCase();
+      if (netLower === "ysf") {
+        return Boolean(statusUp && !["OFFLINE", "DISCONNECTED", "STANDBY", "ERROR", "AUTH_FAILED"].includes(statusUp));
+      }
+      return statusUp === "ONLINE";
+    }
+
+    getEffectiveTxTarget() {
+      const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots))
+        ? window.currentHotspots.filter(h => h && !h.hidden)
+        : [];
+      const availList = hsList.filter(h => this.isHotspotTxAvailable(h));
+      const pool = availList.length > 0 ? availList : hsList;
+
+      const defaultHid = (window.currentLogHotspotId && window.currentLogHotspotId !== "all")
+        ? window.currentLogHotspotId
+        : (window.activeHotspotId || (pool[0] && pool[0].id) || "default");
+
+      let hid = null;
+      if (this.txTargetHotspotId && availList.some(h => String(h.id) === String(this.txTargetHotspotId))) {
+        hid = String(this.txTargetHotspotId);
+      } else if (availList.some(h => String(h.id) === String(defaultHid))) {
+        hid = String(defaultHid);
+      } else if (availList.length > 0) {
+        hid = String(availList[0].id);
+      } else {
+        hid = String(defaultHid);
+      }
+
+      const hsObj = hsList.find(h => String(h.id) === hid) || hsList[0] || { id: hid, network_type: "bm" };
+      const available = availList.length > 0 && this.isHotspotTxAvailable(hsObj);
+      const net = String(hsObj.network_type || "bm").toLowerCase();
+      const isSingleSlot = (net === "allstar" || net === "ysf" || net === "xlx");
+      let slot = 2;
+      if (net === "allstar" || net === "ysf") {
+        slot = 1;
+      } else if (net === "xlx") {
+        slot = 2;
+      } else if (this.txTargetSlot === 1 || this.txTargetSlot === 2) {
+        slot = this.txTargetSlot;
+      } else if (typeof window.getHotspotSlot === "function") {
+        slot = window.getHotspotSlot(hid) || 2;
+      }
+      const tg = (typeof window.getHotspotTg === "function") ? (window.getHotspotTg(hid, slot) || 0) : 0;
+      return { hid, hsObj, net, isSingleSlot, slot, tg, available };
+    }
+
+    updateTxTargetLabel() {
+      if (!this.txTargetLabel) return;
+      const { hid, net, isSingleSlot, slot, available } = this.getEffectiveTxTarget();
+      const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots))
+        ? window.currentHotspots.filter(h => h && !h.hidden)
+        : [];
+      const idx = hsList.findIndex(h => String(h.id) === String(hid));
+      const numTag = idx >= 0 ? `#${idx + 1}` : `#1`;
+      if (!available && hsList.length > 0) {
+        this.txTargetLabel.textContent = `--`;
+      } else if (isSingleSlot) {
+        const netLabel = net === "allstar" ? "ASL" : (net === "ysf" ? "YSF" : "XLX");
+        this.txTargetLabel.textContent = `${numTag}•${netLabel}`;
+      } else {
+        this.txTargetLabel.textContent = `${numTag}•TS${slot}`;
+      }
+      if (this.txToggleBtn) {
+        this.txToggleBtn.classList.toggle("active", Boolean(this.isTxArmed));
+        this.txToggleBtn.classList.toggle("transmitting", Boolean(this.isTxStreaming));
+      }
+    }
+
+    renderTxTargetMenu() {
+      if (!this.txHotspotList) return;
+      const { hid, isSingleSlot, slot, available } = this.getEffectiveTxTarget();
+      const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots))
+        ? window.currentHotspots.filter(h => h && !h.hidden)
+        : [];
+      const disabledHint = window.t
+        ? window.t("player.tx_hs_disabled_hint", {}, "Будет доступен только после подключения хотспота")
+        : "Будет доступен только после подключения хотспота";
+      this.txHotspotList.innerHTML = "";
+      hsList.forEach((h, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const canTx = this.isHotspotTxAvailable(h);
+        const isAct = canTx && available && String(h.id) === String(hid);
+        btn.className = "rec-tx-hs-item" + (isAct ? " active" : "") + (canTx ? "" : " disabled");
+        const netUp = String(h.network_type || "bm").toUpperCase();
+        const nameStr = h.name || `Hotspot #${i + 1}`;
+        if (!canTx) {
+          btn.setAttribute("aria-disabled", "true");
+          btn.title = disabledHint;
+          btn.innerHTML = `<span>#${i + 1} ${nameStr}</span><span style="opacity:0.7;font-size:0.64rem;">🔒 ${netUp}</span>`;
+        } else {
+          btn.innerHTML = `<span>#${i + 1} ${nameStr}</span><span style="opacity:0.75;font-size:0.66rem;">${netUp}</span>`;
+        }
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          if (!canTx) {
+            showToast(`ℹ️ ${nameStr}: ${disabledHint}`, 2600);
+            return;
+          }
+          if (this.isTxStreaming) {
+            this.pause();
+            this.stopRecordingTxStream();
+          }
+          this.txTargetHotspotId = String(h.id);
+          this.txTargetSlot = null;
+          this.updateTxTargetLabel();
+          this.renderTxTargetMenu();
+        };
+        this.txHotspotList.appendChild(btn);
+      });
+      if (this.txSlotRow) {
+        this.txSlotRow.style.display = (isSingleSlot || !available) ? "none" : "flex";
+        this.txSlotRow.querySelectorAll(".rec-tx-slot-btn").forEach(b => {
+          const s = parseInt(b.dataset.slot, 10);
+          b.classList.toggle("active", s === slot);
+          b.onclick = (e) => {
+            e.stopPropagation();
+            if (this.isTxStreaming) {
+              this.pause();
+              this.stopRecordingTxStream();
+            }
+            this.txTargetSlot = s;
+            this.updateTxTargetLabel();
+            this.renderTxTargetMenu();
+          };
+        });
+      }
+    }
+
+    initTxControls() {
+      if (this.txToggleBtn) {
+        this.txToggleBtn.onclick = (e) => {
+          e.stopPropagation();
+          if (!this.isTxArmed) {
+            const { available } = this.getEffectiveTxTarget();
+            if (!available) {
+              showToast(window.t ? window.t("player.tx_no_active_hotspot", {}, "⚠️ Нет подключённого активного хотспота для передачи") : "⚠️ Нет подключённого активного хотспота для передачи", 2800);
+              return;
+            }
+          }
+          this.isTxArmed = !this.isTxArmed;
+          this.updateTxTargetLabel();
+          if (this.isTxArmed && this.isPlaying()) {
+            this.audio.playbackRate = 1.0;
+            this.startRecordingTxStream();
+          } else if (!this.isTxArmed && this.isTxStreaming) {
+            this.stopRecordingTxStream();
+          }
+        };
+      }
+      if (this.txTargetBtn) {
+        this.txTargetBtn.onclick = (e) => {
+          e.stopPropagation();
+          if (!this.txTargetMenu) return;
+          const isOpen = this.txTargetMenu.style.display !== "none";
+          if (isOpen) {
+            this.txTargetMenu.style.display = "none";
+          } else {
+            this.renderTxTargetMenu();
+            this.txTargetMenu.style.display = "flex";
+          }
+        };
+      }
+      document.addEventListener("click", (e) => {
+        if (this.txTargetMenu && this.txTargetMenu.style.display !== "none") {
+          if (!this.txTargetMenu.contains(e.target) && (!this.txTargetBtn || !this.txTargetBtn.contains(e.target))) {
+            this.txTargetMenu.style.display = "none";
+          }
+        }
+      });
+      if (!this._recTxHooked && typeof window !== "undefined") {
+        this._recTxHooked = true;
+        const prevOnServerTxEnded = window.onServerTxEnded;
+        window.onServerTxEnded = (msg) => {
+          if (typeof prevOnServerTxEnded === "function") {
+            prevOnServerTxEnded(msg);
+          }
+          if (msg && String(msg.client_id || "").startsWith("rec_tx_")) {
+            this.onServerRecTxEnded(msg);
+          }
+        };
+      }
+      const liveMonitorPanel = document.getElementById("liveMonitorPanel");
+      if (liveMonitorPanel && typeof MutationObserver !== "undefined") {
+        const obs = new MutationObserver(() => {
+          if (liveMonitorPanel.classList.contains("hidden") || liveMonitorPanel.style.display === "none") {
+            this.resetTxState();
+          }
+        });
+        obs.observe(liveMonitorPanel, { attributes: true, attributeFilter: ["class", "style"] });
+      }
+    }
+
+    onServerRecTxEnded(msg) {
+      if (!this.isTxStreaming && !this._activeTxVisualState) return;
+      if (this._txMaxDurationTimer) {
+        clearTimeout(this._txMaxDurationTimer);
+        this._txMaxDurationTimer = null;
+      }
+      this.isTxStreaming = false;
+      this.clearRecTxCardVisuals();
+      this.updateTxTargetLabel();
+    }
+
+    _updateRecTxBadgeCountdown(sec) {
+      const st = this._activeTxVisualState;
+      if (!st) return;
+      const rem = Math.max(0, Math.round(sec));
+      if (typeof window !== "undefined") {
+        window.activeRecTxRemSec = rem;
+      }
+      const targetCard = this.findHotspotCard(st.hid);
+      const mb = targetCard ? targetCard.querySelector(".mode-badge") : null;
+      if (mb) {
+        let extraCls = "";
+        if (rem <= 10) {
+          extraCls = " mode-tx-critical";
+        } else if (rem <= 30) {
+          extraCls = " mode-tx-warn";
+        }
+        mb.className = `mode-badge mode-tx${extraCls}`;
+        mb.textContent = st.isSingleChannel ? `TX ${rem}s` : `TX TS${st.slot} ${rem}s`;
+      }
+      if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+        window.refreshToolbarProcessIndicators();
+      }
+    }
+
+    applyRecTxCardVisuals(hid, slot, tg, maxDurSec = 60) {
+      this.clearRecTxCardVisuals();
+      const cid = this._resolveHsId(hid);
+      const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+      const hs = hsList.find(h => this._resolveHsId(h.id) === cid || String(h.id) === String(hid)) || null;
+      const targetCard = this.findHotspotCard(cid);
+      const net = String((hs && hs.network_type) || (targetCard && targetCard.dataset.networkType) || "bm").toLowerCase();
+      const isAsl = Boolean(net === "allstar" || (targetCard && targetCard.classList.contains("card-net-allstar")));
+      const isYsf = Boolean(net === "ysf" || (targetCard && targetCard.classList.contains("card-net-ysf")));
+      const isSingleChannel = isAsl || isYsf;
+      const remInit = Math.max(1, Math.round(maxDurSec || 60));
+
+      this._activeTxVisualState = { hid: cid, rawHid: hid, slot, tg, net, isAsl, isYsf, isSingleChannel };
+      if (typeof window !== "undefined") {
+        window.activeRecTxHotspotId = cid;
+        window.activeRecTxSlot = slot;
+        window.activeRecTxRemSec = remInit;
+      }
+
+      if (targetCard) {
+        const pttBtn = targetCard.querySelector(".ptt-button");
+        if (pttBtn) {
+          pttBtn.classList.add("active");
+          pttBtn.classList.remove("tx-slot-1", "tx-slot-2");
+          pttBtn.classList.add(`tx-slot-${slot}`);
+        }
+        if (typeof window !== "undefined" && typeof window.updateCardPttHintForSlot === "function") {
+          window.updateCardPttHintForSlot(targetCard, slot);
+        }
+
+        this._updateRecTxBadgeCountdown(remInit);
+
+        if (isAsl) {
+          if (hs) hs._aslUserTxActive = true;
+          if (typeof window !== "undefined" && typeof window.renderAslNodeDashboard === "function") {
+            window.renderAslNodeDashboard(cid);
+          }
+          const badge = document.getElementById(`allstarStatusBadge_${cid}`) || document.getElementById(`allstarStatusBadge_${hid}`);
+          if (badge) {
+            badge.className = "allstar-status-badge status-tx";
+            badge.textContent = "TX";
+          }
+        } else {
+          if (isYsf) {
+            const ysfRow = targetCard.querySelector(".vfo-ysf-row");
+            if (ysfRow) ysfRow.classList.add("vfo-tx-active");
+            if (hs && typeof window !== "undefined" && typeof window.updateYsfVfoHeader === "function") {
+              window.updateYsfVfoHeader(targetCard, hs);
+            }
+          }
+          const txRow = targetCard.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+          if (txRow) {
+            txRow.classList.remove("vfo-rx-active", "vfo-last-caller-dimmed");
+            txRow.classList.add("vfo-tx-active");
+            const callerFlag = txRow.querySelector(".ts-caller-flag");
+            const callerCall = txRow.querySelector(".ts-caller-call");
+            const callerId = txRow.querySelector(".ts-caller-id");
+            const callerCountry = txRow.querySelector(".ts-caller-country");
+            const callerMapBtn = txRow.querySelector(".btn-caller-map");
+            const tgFlagEl = txRow.querySelector(".ts-tg-flag");
+            const tgTextEl = txRow.querySelector(".ts-tg-text");
+
+            const myCall = (hs && hs.callsign) || "N0CALL";
+            const myId = (hs && (hs.effective_id || hs.dmr_id)) || 0;
+            const myCountry = getCountryInfo(myId, myCall);
+
+            if (callerFlag) {
+              updateFlagElement(callerFlag, myCountry);
+              callerFlag.style.filter = "none";
+            }
+            if (callerCall) {
+              delete callerCall.dataset.standby;
+              callerCall.style.filter = "none";
+              callerCall.classList.add("caller-active");
+              callerCall.textContent = `${myCall} (TX)`;
+            }
+            if (callerMapBtn) callerMapBtn.style.display = "none";
+            if (callerId) {
+              callerId.style.filter = "none";
+              callerId.textContent = myId ? `(${myId})` : "";
+            }
+            if (callerCountry) {
+              callerCountry.style.filter = "none";
+              callerCountry.textContent = (myCountry && (myCountry.name || myCountry.name_en)) || "";
+            }
+            if (tg > 0 && tgTextEl) {
+              const rawTgName = isYsf
+                ? ((hs && (hs.ysf_room_name || hs.ysf_name)) || `YSF #${tg}`)
+                : (getNetworkRawTgName(tg, net) || (tg === 9990 ? "Parrot / Echo" : ""));
+              if (tgFlagEl) {
+                const isNonMcc = (net === "tgif" || net === "xlx");
+                const tgCInfo = isYsf
+                  ? { name: "YSF", name_en: "YSF", flag: "🌐" }
+                  : (isNonMcc ? { name: net.toUpperCase(), name_en: net.toUpperCase(), flag: "🌐" } : getCountryInfo(tg));
+                updateFlagElement(tgFlagEl, tgCInfo, !isYsf && tg === 9990);
+                tgFlagEl.style.filter = "none";
+              }
+              const tgPrefix = isYsf ? "#" : ((tg === 9990 || tg > 999999) ? "Call" : "TG");
+              tgTextEl.innerHTML = renderTgTextHtml(tg, tgPrefix, rawTgName, "", isYsf ? "ysf" : net);
+              tgTextEl.style.filter = "none";
+            }
+          }
+          const rxTag = targetCard.querySelector(slot === 1 ? ".vfo-ts1-rx" : ".vfo-ts2-rx");
+          if (rxTag) rxTag.classList.remove("active");
+          const txTag = targetCard.querySelector(slot === 1 ? ".vfo-ts1-tx" : ".vfo-ts2-tx");
+          if (txTag) txTag.classList.add("active");
+        }
+      }
+
+      if (typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function") {
+        try {
+          const myCall = (hs && hs.callsign) || "ProxDMR";
+          if (isYsf) {
+            window.AndroidBridge.updateRadioStatus(tg ? `TX: ${myCall} -> #${tg}` : `TX: ${myCall}`);
+          } else if (isAsl) {
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall}`);
+          } else {
+            const isPriv = (tg === 9990 || tg > 999999);
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall} (TS${slot} -> ${isPriv ? "ID" : "TG"}${tg})`);
+          }
+        } catch (_) {}
+      }
+
+      if (typeof window !== "undefined" && typeof window.updateAllHotspotRecUI === "function") {
+        try { window.updateAllHotspotRecUI(); } catch (_) {}
+      }
+
+      if (this._txCountdownInterval) {
+        clearInterval(this._txCountdownInterval);
+      }
+      let rem = remInit;
+      this._txCountdownInterval = setInterval(() => {
+        if (!this.isTxStreaming || !this._activeTxVisualState) {
+          clearInterval(this._txCountdownInterval);
+          this._txCountdownInterval = null;
+          return;
+        }
+        rem = Math.max(0, rem - 1);
+        this._updateRecTxBadgeCountdown(rem);
+      }, 1000);
+    }
+
+    updateRecTxVuMeter() {
+      const stInfo = this._activeTxVisualState;
+      if (!stInfo || !this.audio || typeof window === "undefined" || typeof window.getVuState !== "function") return;
+      const ap = window.audioPlayer || window.dmrAudioPlayer;
+      if (!ap || typeof ap.attachRecordingsAudio !== "function") return;
+      const attached = this.audio._webaudioAttachedNode || ap.attachRecordingsAudio(this.audio);
+      if (!attached || !attached.sourceNode || !ap.audioCtx) return;
+
+      if (!this._recTxAnalyser || this._recTxAnalyserCtx !== ap.audioCtx) {
+        try {
+          const an = ap.audioCtx.createAnalyser();
+          an.fftSize = 512;
+          attached.sourceNode.connect(an);
+          this._recTxAnalyser = an;
+          this._recTxAnalyserCtx = ap.audioCtx;
+          this._recTxTimeBuf = (typeof an.getFloatTimeDomainData === "function") ? new Float32Array(an.fftSize) : null;
+          this._recTxByteBuf = this._recTxTimeBuf ? null : new Uint8Array(an.fftSize);
+        } catch (_) {
+          return;
+        }
+      }
+
+      let sumSq = 0;
+      let len = 0;
+      if (this._recTxTimeBuf && typeof this._recTxAnalyser.getFloatTimeDomainData === "function") {
+        this._recTxAnalyser.getFloatTimeDomainData(this._recTxTimeBuf);
+        len = this._recTxTimeBuf.length;
+        for (let i = 0; i < len; i++) {
+          const s = this._recTxTimeBuf[i];
+          sumSq += s * s;
+        }
+      } else if (this._recTxByteBuf) {
+        this._recTxAnalyser.getByteTimeDomainData(this._recTxByteBuf);
+        len = this._recTxByteBuf.length;
+        for (let i = 0; i < len; i++) {
+          const s = (this._recTxByteBuf[i] - 128) / 128.0;
+          sumSq += s * s;
+        }
+      }
+      const rawRms = len > 0 ? Math.sqrt(sumSq / len) : 0;
+      const pct = Math.min(100, Math.round(Math.pow(rawRms * 2.5, 0.75) * 100));
+
+      const vuSlot = stInfo.isSingleChannel ? 1 : (stInfo.slot === 2 ? 2 : 1);
+      const vuKey = stInfo.rawHid || stInfo.hid || "default";
+      const vuSt = window.getVuState(vuKey, vuSlot);
+      if (vuSt) {
+        vuSt.mode = "TX";
+        vuSt.target = pct;
+        if (pct > vuSt.current) vuSt.current = pct;
+        if (pct >= vuSt.peak) {
+          vuSt.peak = pct;
+          vuSt.peakHoldUntil = performance.now() + 650;
+        }
+      }
+      if (stInfo.hid && stInfo.hid !== vuKey) {
+        const vuStAlias = window.getVuState(stInfo.hid, vuSlot);
+        if (vuStAlias) {
+          vuStAlias.mode = "TX";
+          vuStAlias.target = pct;
+          if (pct > vuStAlias.current) vuStAlias.current = pct;
+          if (pct >= vuStAlias.peak) {
+            vuStAlias.peak = pct;
+            vuStAlias.peakHoldUntil = performance.now() + 650;
+          }
+        }
+      }
+      if (typeof window.ensureVuMeterLoop === "function") {
+        window.ensureVuMeterLoop();
+      }
+    }
+
+    clearRecTxCardVisuals() {
+      if (this._txCountdownInterval) {
+        clearInterval(this._txCountdownInterval);
+        this._txCountdownInterval = null;
+      }
+      const stInfo = this._activeTxVisualState;
+      this._activeTxVisualState = null;
+
+      if (typeof window !== "undefined") {
+        window.activeRecTxHotspotId = null;
+        window.activeRecTxSlot = null;
+        window.activeRecTxRemSec = null;
+      }
+      if (!stInfo) return;
+
+      const { hid, rawHid, slot, isAsl, isSingleChannel } = stInfo;
+      const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+      const hs = hsList.find(h => this._resolveHsId(h.id) === hid || String(h.id) === String(rawHid)) || null;
+      if (hs && hs._aslUserTxActive) {
+        hs._aslUserTxActive = false;
+        if (typeof window !== "undefined" && typeof window.renderAslNodeDashboard === "function") {
+          window.renderAslNodeDashboard(hid);
+        }
+      }
+      const aslBadge = document.getElementById(`allstarStatusBadge_${hid}`) || document.getElementById(`allstarStatusBadge_${rawHid}`);
+      const targetCard = this.findHotspotCard(hid) || this.findHotspotCard(rawHid);
+      if (aslBadge) {
+        const isOnline = targetCard && (targetCard.dataset.status === "online" || targetCard.dataset.status === "ONLINE");
+        aslBadge.className = isOnline ? "allstar-status-badge status-online" : "allstar-status-badge status-idle";
+        aslBadge.textContent = isOnline ? "CONNECTED" : "IDLE";
+      }
+
+      if (targetCard) {
+        const pttBtn = targetCard.querySelector(".ptt-button");
+        if (pttBtn && !(typeof window !== "undefined" && window.isPttPressed)) {
+          pttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2");
+        }
+        targetCard.querySelectorAll(".vfo-row").forEach(r => r.classList.remove("vfo-tx-active"));
+        targetCard.querySelectorAll(".vfo-tx-tag").forEach(t => t.classList.remove("active"));
+        if (typeof window !== "undefined" && typeof window.updateCardPttHint === "function") {
+          window.updateCardPttHint(targetCard);
+        }
+        if (typeof window !== "undefined" && typeof window.updateCardTgDisplay === "function") {
+          window.updateCardTgDisplay(targetCard);
+        }
+        if (typeof window !== "undefined" && typeof window.updateCardModeBadge === "function") {
+          window.updateCardModeBadge(targetCard);
+        }
+      }
+
+      if (typeof window !== "undefined" && typeof window.getVuState === "function") {
+        const vuSlot = isSingleChannel ? 1 : (slot === 2 ? 2 : 1);
+        [rawHid, hid].filter(Boolean).forEach(k => {
+          const vuSt = window.getVuState(k, vuSlot);
+          if (vuSt) {
+            vuSt.mode = "IDLE";
+            vuSt.target = 0;
+          }
+        });
+        if (typeof window.ensureVuMeterLoop === "function") {
+          window.ensureVuMeterLoop();
+        }
+      }
+
+      if (typeof window !== "undefined" && typeof window.updateAllHotspotRecUI === "function") {
+        try { window.updateAllHotspotRecUI(); } catch (_) {}
+      }
+      if (typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function" && !(window.isPttPressed)) {
+        try {
+          window.AndroidBridge.updateRadioStatus(window.t ? window.t("gw.standby_status", {}, "Дежурный прием (Standby)") : "Дежурный прием (Standby)");
+        } catch (_) {}
+      }
+    }
+
+    async startRecordingTxStream() {
+      if (!this.isTxArmed || !this.currentRecording) return;
+      const recId = this.currentRecording.id || this.currentRecording.call_id;
+      if (!recId) return;
+      const target = this.getEffectiveTxTarget();
+      if (!target.available) {
+        this.isTxStreaming = false;
+        this.clearRecTxCardVisuals();
+        this.updateTxTargetLabel();
+        showToast(window.t ? window.t("player.tx_no_active_hotspot", {}, "⚠️ Нет подключённого активного хотспота для передачи") : "⚠️ Нет подключённого активного хотспота для передачи", 2800);
+        return;
+      }
+      if (this._txMaxDurationTimer) {
+        clearTimeout(this._txMaxDurationTimer);
+        this._txMaxDurationTimer = null;
+      }
+      const { hid, slot, tg } = target;
+      const offsetSec = (this.audio && this.audio.currentTime) ? this.audio.currentTime : 0;
+      this.isTxStreaming = true;
+      this.applyRecTxCardVisuals(hid, slot, tg, 60);
+      this.updateTxTargetLabel();
+
+      // 60-second anti-trash continuous TX limit
+      this._txMaxDurationTimer = setTimeout(() => {
+        this._txMaxDurationTimer = null;
+        if (this.isTxStreaming) {
+          this.pause();
+          this.stopRecordingTxStream();
+          showToast(window.t ? window.t("player.tx_limit_60s", {}, "⏱️ Защита эфира: передача записи ограничена 1 минутой") : "⏱️ Защита эфира: передача записи ограничена 1 минутой", 3500);
+        }
+      }, 60000);
+
+      try {
+        const resp = await fetch(`/api/recordings/${encodeURIComponent(recId)}/tx/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            hotspot_id: hid,
+            slot: slot,
+            dst_id: tg,
+            offset_sec: offsetSec,
+            max_duration_sec: 60.0
+          })
+        });
+        if (!resp.ok) {
+          let errMsg = window.t ? window.t("player.tx_start_err", {}, "⚠️ Не удалось запустить передачу записи") : "⚠️ Не удалось запустить передачу записи";
+          try {
+            const errData = await resp.json();
+            if (errData && errData.detail) errMsg = `⚠️ ${errData.detail}`;
+          } catch (_) {}
+          this.isTxStreaming = false;
+          this.clearRecTxCardVisuals();
+          this.updateTxTargetLabel();
+          showToast(errMsg, 3000);
+        } else {
+          try {
+            const okData = await resp.json();
+            if (okData && okData.status === "ok" && okData.dst_id && this._activeTxVisualState && okData.dst_id !== tg) {
+              this.applyRecTxCardVisuals(okData.hotspot_id || hid, okData.slot || slot, okData.dst_id, okData.max_duration_sec || 60);
+            }
+          } catch (_) {}
+        }
+      } catch (err) {
+        console.error("[REC_TX] Start error:", err);
+        this.isTxStreaming = false;
+        this.clearRecTxCardVisuals();
+        this.updateTxTargetLabel();
+      }
+    }
+
+    async stopRecordingTxStream() {
+      if (this._txMaxDurationTimer) {
+        clearTimeout(this._txMaxDurationTimer);
+        this._txMaxDurationTimer = null;
+      }
+      const wasStreaming = this.isTxStreaming;
+      this.isTxStreaming = false;
+      this.clearRecTxCardVisuals();
+      this.updateTxTargetLabel();
+      if (!wasStreaming) return;
+      try {
+        await fetch("/api/recordings/tx/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin"
+        });
+      } catch (_) {}
+    }
+
+    resetTxState() {
+      if (this.isTxStreaming) {
+        this.stopRecordingTxStream();
+      } else {
+        this.clearRecTxCardVisuals();
+      }
+      if (this._txMaxDurationTimer) {
+        clearTimeout(this._txMaxDurationTimer);
+        this._txMaxDurationTimer = null;
+      }
+      this.isTxArmed = false;
+      this.txTargetHotspotId = null;
+      this.txTargetSlot = null;
+      if (this.txTargetMenu) {
+        this.txTargetMenu.style.display = "none";
+      }
+      this.updateTxTargetLabel();
+    }
+
     async loadStats() {
       try {
         const resp = await fetch("/api/recordings/stats", { credentials: "same-origin" });
         const stats = await resp.json();
         if (this.quotaBadge) {
-          const used = typeof stats.used_mb === "number" ? stats.used_mb.toFixed(2) : (stats.used_mb || 0);
-          const max = stats.max_storage_mb || 2048;
-          const pct = Math.max(0, Math.min(100, (typeof stats.quota_percent === "number" ? stats.quota_percent : parseFloat(stats.quota_percent)) || 0));
-          const text = `${used} MB / ${max} MB (${pct}%)`;
+          const rawUsed = typeof stats.used_mb === "number" ? stats.used_mb : (parseFloat(stats.used_mb) || 0);
+          const used = rawUsed >= 10 ? Math.round(rawUsed) : Number(rawUsed.toFixed(1));
+          const rawPct = (typeof stats.quota_percent === "number" ? stats.quota_percent : parseFloat(stats.quota_percent)) || 0;
+          const pct = Math.round(Math.max(0, Math.min(100, rawPct)));
+          const text = `${used} MB (${pct}%)`;
           this.quotaBadge.textContent = text;
           if (this.quotaBadgeFilled) {
             this.quotaBadgeFilled.textContent = text;
@@ -2197,6 +3009,10 @@ export   class RecordingsManager {
           }
         }
 
+        if (typeof stats.auto_record === "boolean" && typeof window !== "undefined") {
+          window.__proxdmrGlobalAutoRecord = stats.auto_record;
+          window.__proxdmrRecSettingsLoaded = true;
+        }
         if (typeof stats.session_active === "boolean") {
           this.isSessionActive = stats.session_active;
         }
@@ -2214,6 +3030,10 @@ export   class RecordingsManager {
 
     _populateSettingsForm(s) {
       if (!s) return;
+      if (s.auto_record !== undefined && typeof window !== "undefined") {
+        window.__proxdmrGlobalAutoRecord = Boolean(s.auto_record);
+        window.__proxdmrRecSettingsLoaded = true;
+      }
       if (this.optAutoRecord && s.auto_record !== undefined) this.optAutoRecord.checked = Boolean(s.auto_record);
       if (this.optSeamBeep && s.seam_beep !== undefined) this.optSeamBeep.checked = Boolean(s.seam_beep);
       if (this.inputSeamBeepPattern && s.seam_beep_pattern !== undefined) {
@@ -2276,9 +3096,14 @@ export   class RecordingsManager {
         max_storage_gb: this.inputQuotaGb ? (parseFloat(this.inputQuotaGb.value) || 2.0) : 2.0,
       };
 
+      if (typeof window !== "undefined") {
+        window.__proxdmrGlobalAutoRecord = Boolean(payload.auto_record);
+        window.__proxdmrRecSettingsLoaded = true;
+      }
       try {
         localStorage.setItem("proxdmr_rec_settings", JSON.stringify(payload));
       } catch (_) {}
+      this.updateMasterRecIndicator();
 
       try {
         const resp = await fetch("/api/recordings/settings", {
@@ -2289,15 +3114,15 @@ export   class RecordingsManager {
         });
         const res = await resp.json();
         if (res.status === "ok") {
-          showToast(window.t ? window.t("player.settings_saved", {}, "✓ Параметры записи сохранены") : "✓ Параметры записи сохранены", 2500);
+          showToast(window.t ? window.t("player.settings_saved", {}, "✓ Recording settings saved") : "✓ Recording settings saved", 2500);
           this.closeSettingsModal();
           this.loadStats();
         } else {
-          showToast(window.t ? window.t("player.settings_save_err", {}, "⚠️ Ошибка сохранения параметров") : "⚠️ Ошибка сохранения параметров", 3000);
+          showToast(window.t ? window.t("player.settings_save_err", {}, "⚠️ Error saving settings") : "⚠️ Error saving settings", 3000);
         }
       } catch (err) {
         console.error("[RECORDINGS] Error saving settings:", err);
-        showToast("⚠️ Ошибка сохранения параметров", 3000);
+        showToast(window.t ? window.t("player.settings_save_err", {}, "⚠️ Error saving settings") : "⚠️ Error saving settings", 3000);
       }
     }
 
@@ -2305,6 +3130,9 @@ export   class RecordingsManager {
     updateMasterRecIndicator() {
       if (typeof updateAllHotspotRecUI === "function") {
         updateAllHotspotRecUI();
+      }
+      if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+        window.refreshToolbarProcessIndicators();
       }
     }
 

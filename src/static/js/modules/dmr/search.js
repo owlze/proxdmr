@@ -5,8 +5,8 @@
  * and database statistics.
  */
 
-import { safeEscapeHtml, getCleanTgDesc, getLocalizedCountryName, DMR_MCC_MAP, emojiToIso } from '../core/formatters.js?v=2.9.380';
-import { showToast } from '../core/toast.js';
+import { safeEscapeHtml, getCleanTgDesc, getLocalizedCountryName, DMR_MCC_MAP, emojiToIso } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
 
 // Safe window helper bridges
@@ -129,10 +129,19 @@ let currentModalSlot = 2;
 let currentSearchModalTab = "tg";
 let isSearchManagerInitialized = false;
 
+function getSearchNumberLocale() {
+  if (typeof window !== "undefined") {
+    const l = (window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang))
+      || (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang));
+    if (l) return l;
+  }
+  return undefined;
+}
+
 export function updateTgDbStatsDisplay(stats) {
     if (!stats) return;
     if (tgDbCount && stats.count !== undefined) {
-      tgDbCount.textContent = Number(stats.count).toLocaleString("ru-RU");
+      tgDbCount.textContent = Number(stats.count).toLocaleString(getSearchNumberLocale());
     }
     if (tgDbUpdated && stats.updated_str) {
       tgDbUpdated.textContent = stats.updated_str;
@@ -157,8 +166,9 @@ export async function loadTgDbStats() {
 export function updateCallDbStatsDisplay(stats) {
     if (!stats) return;
     ensureElements();
+    const numLoc = getSearchNumberLocale();
     if (callDbCount && stats.count !== undefined) {
-      callDbCount.textContent = Number(stats.count).toLocaleString("ru-RU");
+      callDbCount.textContent = Number(stats.count).toLocaleString(numLoc);
     }
     if (callDbUpdated && stats.updated_str) {
       callDbUpdated.textContent = stats.updated_str;
@@ -168,17 +178,17 @@ export function updateCallDbStatsDisplay(stats) {
         const deltaNum = Number(stats.delta);
         callDbDelta.classList.remove("delta-positive", "delta-negative", "delta-neutral");
         if (deltaNum > 0) {
-          callDbDelta.textContent = `(+${deltaNum.toLocaleString("ru-RU")})`;
+          callDbDelta.textContent = `(+${deltaNum.toLocaleString(numLoc)})`;
           callDbDelta.classList.add("delta-positive");
-          callDbDelta.title = window.t ? window.t("callid.stat_delta_pos", { delta: `+${deltaNum}` }) : `+${deltaNum} с последнего обновления`;
+          callDbDelta.title = window.t ? window.t("callid.stat_delta_pos", { delta: `+${deltaNum}` }) : `+${deltaNum} since last update`;
         } else if (deltaNum < 0) {
-          callDbDelta.textContent = `(-${Math.abs(deltaNum).toLocaleString("ru-RU")})`;
+          callDbDelta.textContent = `(-${Math.abs(deltaNum).toLocaleString(numLoc)})`;
           callDbDelta.classList.add("delta-negative");
-          callDbDelta.title = window.t ? window.t("callid.stat_delta_neg", { delta: `${deltaNum}` }) : `${deltaNum} с последнего обновления`;
+          callDbDelta.title = window.t ? window.t("callid.stat_delta_neg", { delta: `${deltaNum}` }) : `${deltaNum} since last update`;
         } else {
           callDbDelta.textContent = `(0)`;
           callDbDelta.classList.add("delta-neutral");
-          callDbDelta.title = window.t ? window.t("callid.stat_delta_zero") : "Без изменений с последнего обновления";
+          callDbDelta.title = window.t ? window.t("callid.stat_delta_zero") : "No changes since last update";
         }
         callDbDelta.style.display = "inline";
       } else {
@@ -438,7 +448,7 @@ async function handleTgAddTs2(tg, name, btnEl) {
     } else {
       btnEl.textContent = origText;
       btnEl.disabled = false;
-      const err = data?.detail || data?.errors?.join("; ") || "Ошибка добавления";
+      const err = data?.detail || data?.errors?.join("; ") || (window.t ? window.t("tgtx.err_add_static", {}, "Failed to add") : "Failed to add");
       showToast(`⚠️ [${hsName}] TS2: ${err}`, 4500);
     }
   } catch (err) {
@@ -449,6 +459,7 @@ async function handleTgAddTs2(tg, name, btnEl) {
 }
 
 let _lastTgSearchItems = [];
+let _lastCallSearchItems = [];
 
 function localizeTgSearchCountry(tg, rawCountry, curLang) {
   const sTg = String(tg || "").trim();
@@ -463,6 +474,7 @@ function localizeTgSearchCountry(tg, rawCountry, curLang) {
       es: "Internacional (Global)",
       fr: "International (Global)",
       it: "Internazionale (Global)",
+      nl: "Internationaal (Global)",
       en: "International (Global)"
     };
     return mapGlobal[curLang] || mapGlobal.en;
@@ -475,6 +487,7 @@ function localizeTgSearchCountry(tg, rawCountry, curLang) {
       es: "Servicio (Audio Test)",
       fr: "Service (Audio Test)",
       it: "Servizio (Audio Test)",
+      nl: "Service (Audio Test)",
       en: "Service (Audio Test)"
     };
     return mapSrv[curLang] || mapSrv.en;
@@ -487,6 +500,7 @@ function localizeTgSearchCountry(tg, rawCountry, curLang) {
       es: "Rusia (General / CEI)",
       fr: "Russie (Général / CEI)",
       it: "Russia (Generale / CSI)",
+      nl: "Rusland (Algemeen / CIS)",
       en: "Russia (General / CIS)"
     };
     return mapRu[curLang] || mapRu.en;
@@ -518,7 +532,8 @@ function localizeTgSearchName(tg, rawName, curLang, netType) {
   const cleaned = getCleanTgDesc(sTg, raw, curLang, netType);
   if (cleaned) {
     if (raw.startsWith("Россия / ") && cleaned === raw) {
-      return raw.replace(/^Россия\s*\/\s*/, "Russia / ");
+      const ruPrefix = getLocalizedCountryName("RU", "Russia", curLang) || "Russia";
+      return raw.replace(/^Россия\s*\/\s*/, `${ruPrefix} / `);
     }
     return cleaned;
   }
@@ -560,8 +575,8 @@ export function renderTgSearchResults(items) {
         </div>
         <div class="card-actions-group">
           ${!isXlx ? `
-            <button type="button" class="btn-tg-slot-add btn-tg-add-ts1" data-slot="1" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}" title="${window.t ? window.t('tgtx.title_add_ts1', { tg: item.tg }, `Установить TG ${item.tg} на TS1 хотспота`) : `Установить TG ${item.tg} на TS1 хотспота`}">+ in TS1</button>
-            <button type="button" class="btn-tg-slot-add btn-tg-add-ts2" data-slot="2" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}" title="${window.t ? window.t('tgtx.title_add_ts2', { tg: item.tg }, `Добавить TG ${item.tg} в статические группы TS2`) : `Добавить TG ${item.tg} в статические группы TS2`}">+ in TS2</button>
+            <button type="button" class="btn-tg-slot-add btn-tg-add-ts1" data-slot="1" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}" title="${window.t ? window.t('tgtx.title_add_ts1', { tg: item.tg }, `Set TG ${item.tg} on hotspot TS1`) : `Set TG ${item.tg} on hotspot TS1`}">${window.t ? window.t("tgtx.btn_add_ts1", {}, "+ in TS1") : "+ in TS1"}</button>
+            <button type="button" class="btn-tg-slot-add btn-tg-add-ts2" data-slot="2" data-tg="${safeEscapeHtml(String(item.tg))}" data-name="${safeEscapeHtml(dispName)}" title="${window.t ? window.t('tgtx.title_add_ts2', { tg: item.tg }, `Add TG ${item.tg} to TS2 static talkgroups`) : `Add TG ${item.tg} to TS2 static talkgroups`}">${window.t ? window.t("tgtx.btn_add_ts2", {}, "+ in TS2") : "+ in TS2"}</button>
           ` : ''}
           <div class="card-select-action">
             <span>${window.t ? window.t("tgtx.btn_select") : "Выбрать"}</span> ➔
@@ -610,6 +625,7 @@ export function renderTgSearchResults(items) {
           value: tg,
           name: name || `TG ${tg}`,
           hotspotId: currentModalHotspotId,
+          network_type: netType,
           slot: currentModalSlot
         });
       });
@@ -661,11 +677,14 @@ export async function performCallIdSearch(query) {
 export function renderCallIdSearchResults(items) {
     ensureElements();
     if (!callIdSearchResultsList) return;
+    _lastCallSearchItems = Array.isArray(items) ? items : [];
     if (!items || items.length === 0) {
-      const noCallRes = window.t ? window.t("callid.no_results") : "Позывной или корреспондент не найден в базе RadioID.";
+      const noCallRes = window.t ? window.t("callid.no_results") : "Callsign or contact not found in RadioID database.";
       callIdSearchResultsList.innerHTML = `<div style="padding: 24px; text-align: center; color: #8b949e; font-size: 0.88rem;">${noCallRes}</div>`;
       return;
     }
+
+    const stationFallback = window.t ? window.t("callid.amateur_radio_station", {}, "Amateur Radio Station") : "Amateur Radio Station";
 
     callIdSearchResultsList.innerHTML = items.map(user => {
       const locParts = [user.city, user.state, user.country].filter(Boolean);
@@ -675,18 +694,18 @@ export function renderCallIdSearchResults(items) {
       const safeCountry = safeEscapeHtml(user.country || '');
       const safeCity = safeEscapeHtml(user.city || '');
       const trInfo = window.t ? window.t("callid.btn_bm_info") : null;
-      const btnInfoLabel = (trInfo && trInfo !== "callid.btn_bm_info") ? trInfo : "Инфо";
+      const btnInfoLabel = (trInfo && trInfo !== "callid.btn_bm_info") ? trInfo : "Info";
       const trTitle = window.t ? window.t("callid.btn_bm_info_title") : null;
-      const btnInfoTitle = (trTitle && trTitle !== "callid.btn_bm_info_title") ? trTitle : "Информация BrandMeister";
+      const btnInfoTitle = (trTitle && trTitle !== "callid.btn_bm_info_title") ? trTitle : "BrandMeister Info";
       const trSelect = window.t ? window.t("callid.btn_select_call") : null;
-      const btnSelectLabel = (trSelect && trSelect !== "callid.btn_select_call") ? trSelect : "Вызов";
+      const btnSelectLabel = (trSelect && trSelect !== "callid.btn_select_call") ? trSelect : "Call";
 
       return `
         <div class="search-result-card" data-radio-id="${user.radio_id}" data-callsign="${safeCall}" data-name="${safeName}" data-country="${safeCountry}" data-city="${safeCity}">
           <div class="search-result-left">
             <div class="card-info-col">
               <span class="card-primary-title"><span class="card-callsign-highlight">${safeCall}</span>${user.name ? ` — ${safeName}` : ''} <span class="card-id-wrapper">(ID: <span class="dmr-id-text">${user.radio_id}</span>)</span></span>
-              <span class="card-secondary-details">${locStr ? safeEscapeHtml(locStr) : 'Amateur Radio Station'}</span>
+              <span class="card-secondary-details">${locStr ? safeEscapeHtml(locStr) : safeEscapeHtml(stationFallback)}</span>
             </div>
           </div>
           <div class="card-actions-group">
@@ -710,13 +729,19 @@ export function renderCallIdSearchResults(items) {
         const name = btn.dataset.name;
         const country = btn.dataset.country;
         const city = btn.dataset.city;
+        const searchNet = (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+          ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+          : "bm";
         openBmInfoModal("contact_info", {
           value: rid,
           callsign: callsign,
           name: name,
           country: country,
           city: city,
-          type: "ID"
+          type: "ID",
+          hotspotId: currentModalHotspotId || window.activeHotspotId,
+          network_type: searchNet,
+          slot: currentModalSlot
         });
       });
     });
@@ -738,6 +763,9 @@ export function renderCallIdSearchResults(items) {
           localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify(window.USER_CALLSIGNS));
         } catch (e) {}
 
+        const searchNet = (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+          ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+          : "bm";
         openTgIdActionMenu({
           type: "ID",
           value: rid,
@@ -746,6 +774,7 @@ export function renderCallIdSearchResults(items) {
           country: country,
           city: city,
           hotspotId: currentModalHotspotId,
+          network_type: searchNet,
           slot: currentModalSlot
         });
       });
@@ -874,11 +903,15 @@ export function initSearchManager() {
     btnApplyCustomTg.addEventListener("click", () => {
       const val = parseInt(tgCustomNumber.textContent, 10);
       if (val > 0 && val <= 9999999) {
+        const searchNet = (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+          ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+          : "bm";
         openTgIdActionMenu({
           type: "TG",
           value: val,
           name: `TG ${val}`,
           hotspotId: currentModalHotspotId,
+          network_type: searchNet,
           slot: currentModalSlot
         });
       }
@@ -890,12 +923,16 @@ export function initSearchManager() {
     btnApplyCustomCallId.addEventListener("click", () => {
       const val = parseInt(callCustomNumber.textContent, 10);
       if (val > 0 && val <= 9999999) {
+        const searchNet = (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function")
+          ? window.getHotspotNetworkType(currentModalHotspotId || window.activeHotspotId)
+          : "bm";
         openTgIdActionMenu({
           type: "ID",
           value: val,
           callsign: `ID ${val}`,
           name: "",
           hotspotId: currentModalHotspotId,
+          network_type: searchNet,
           slot: currentModalSlot
         });
       }
@@ -955,6 +992,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("languageChanged", () => {
     if (_lastTgSearchItems && _lastTgSearchItems.length > 0) {
       renderTgSearchResults(_lastTgSearchItems);
+    }
+    if (_lastCallSearchItems && _lastCallSearchItems.length > 0) {
+      renderCallIdSearchResults(_lastCallSearchItems);
+    }
+    if (callSearchStats && !callIdSearchInput?.value) {
+      callSearchStats.textContent = window.t ? window.t("callid.search_prompt") : "RadioID database (312,000+ hams). Enter text to search...";
     }
   });
 }

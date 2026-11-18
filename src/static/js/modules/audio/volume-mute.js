@@ -4,10 +4,10 @@
  * volume controls, AGC toggles, audio loopback, and hotspot collapse/expand lifecycle.
  */
 
-import { showCenterHudToast, showToast } from "../core/toast.js";
-import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.625";
-import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.628";
+import { showCenterHudToast, showToast } from "../core/toast.js?v=2.9.699";
+import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.737";
+import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js?v=2.9.729";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.741";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;
@@ -95,6 +95,41 @@ export function setMuteOnPttEnabled(enabled, syncServer = true) {
     }
   }
 }
+
+export function isSingleHotspotAudioEnabled() {
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid && localStorage.getItem(`proxdmr_u${uid}_single_hotspot_audio`) !== null) {
+    return localStorage.getItem(`proxdmr_u${uid}_single_hotspot_audio`) === "true";
+  }
+  return localStorage.getItem("proxdmr_single_hotspot_audio") === "true";
+}
+
+export function setSingleHotspotAudioEnabled(enabled, syncServer = true) {
+  const boolVal = Boolean(enabled);
+  localStorage.setItem("proxdmr_single_hotspot_audio", boolVal ? "true" : "false");
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid) localStorage.setItem(`proxdmr_u${uid}_single_hotspot_audio`, boolVal ? "true" : "false");
+  const chk = document.getElementById("optSingleHotspotAudio");
+  if (chk) chk.checked = boolVal;
+  if (typeof window !== "undefined") {
+    window.isSingleHotspotAudioEnabled = () => boolVal;
+  }
+  if (syncServer) {
+    const ws = (typeof window !== "undefined" && window.ws) || null;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_single_hotspot_audio", enabled: boolVal }));
+      } catch (_) {}
+    }
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ single_hotspot_audio: boolVal })
+    }).catch(() => {});
+  }
+}
+window.isSingleHotspotAudioEnabled = isSingleHotspotAudioEnabled;
+window.setSingleHotspotAudioEnabled = setSingleHotspotAudioEnabled;
 
 export function isPttAudioMuted() {
   return isPttMuteActive;
@@ -187,11 +222,25 @@ export function resolveHotspotId(hid) {
     return (currentHotspots && currentHotspots[0] && currentHotspots[0].id) || "default";
   }
   const sHid = String(hid);
+  if (Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === sHid)) {
+    return sHid;
+  }
   if (sHid === "default" || sHid === "1") {
     return (currentHotspots && currentHotspots[0] && currentHotspots[0].id) || "default";
   }
   return sHid;
 }
+
+export function isPrimaryDefaultAlias(cid, currentHotspots = null) {
+  const sCid = String(cid || "");
+  if (sCid === "default") return true;
+  const list = Array.isArray(currentHotspots) ? currentHotspots : getCurrentHotspots();
+  if (Array.isArray(list) && list.some(h => h && String(h.id) === "default")) {
+    return false;
+  }
+  return Boolean(list && list[0] && String(list[0].id) === sCid);
+}
+if (typeof window !== "undefined") window.isPrimaryDefaultAlias = isPrimaryDefaultAlias;
 
 export function getHotspotDisplayName(hid) {
   const currentHotspots = getCurrentHotspots();
@@ -199,14 +248,15 @@ export function getHotspotDisplayName(hid) {
     return "Main 📻";
   }
   const resolved = resolveHotspotId(hid);
-  let hs = currentHotspots.find(h => String(h.id) === String(hid) || resolveHotspotId(h.id) === resolved);
+  let hs = currentHotspots.find(h => String(h.id) === String(hid)) ||
+           currentHotspots.find(h => String(h.id) === String(resolved));
   if (!hs) {
     hs = currentHotspots[0];
   }
   if (!hs) return "Main 📻";
   if (hs.name && hs.name.trim()) return hs.name;
   const idx = currentHotspots.indexOf(hs);
-  return idx === 0 ? "Main 📻" : `Хотспот #${idx + 1}`;
+  return idx === 0 ? "Main 📻" : (window.t ? window.t("hotspots.default_hs_name", { idx: idx + 1 }, `Hotspot #${idx + 1}`) : `Hotspot #${idx + 1}`);
 }
 
 export function isHotspotAudioMuted(hid) {
@@ -214,26 +264,33 @@ export function isHotspotAudioMuted(hid) {
   const v = localStorage.getItem(`proxdmr_mute_hs_${cid}`);
   if (v !== null) return v === "true";
   const currentHotspots = getCurrentHotspots();
-  const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
-  if (isPrimary) {
+  if (isPrimaryDefaultAlias(cid, currentHotspots)) {
     const vDef = localStorage.getItem("proxdmr_mute_hs_default");
     if (vDef !== null) return vDef === "true";
   }
   return false;
 }
 
-export function setHotspotAudioMute(hid, muted) {
+export function setHotspotAudioMute(hid, muted, isInternalSoloOp = false) {
   const currentHotspots = getCurrentHotspots();
   const cid = resolveHotspotId(hid);
+  if (!muted && !isInternalSoloOp && _activeSoloHotspotId && cid !== _activeSoloHotspotId) {
+    _activeSoloHotspotId = null;
+    _preSoloMuteStates = null;
+    try {
+      sessionStorage.removeItem("proxdmr_pre_solo_mutes");
+      sessionStorage.removeItem("proxdmr_active_solo_hs");
+    } catch (_) {}
+  }
   localStorage.setItem(`proxdmr_mute_hs_${cid}`, muted ? "true" : "false");
-  const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
-  if (isPrimary) {
+  const isDefaultAlias = isPrimaryDefaultAlias(cid, currentHotspots);
+  if (isDefaultAlias) {
     localStorage.setItem("proxdmr_mute_hs_default", muted ? "true" : "false");
   }
   const ap = getAudioPlayer();
   if (ap && ap.setHotspotMute) {
     ap.setHotspotMute(cid, muted);
-    if (isPrimary) {
+    if (isDefaultAlias && cid !== "default") {
       ap.setHotspotMute("default", muted);
     }
   }
@@ -270,20 +327,128 @@ export function toggleHotspotAudioBoost(hid) {
   setHotspotAudioBoost(cid, nextVal);
   const hsList = (Array.isArray(window.currentHotspots) ? window.currentHotspots : []);
   const hsObj = hsList.find(h => resolveHotspotId(h.id) === cid) || null;
-  const hsName = hsObj ? (hsObj.name || hsObj.id) : (cid === "default" ? "Основной хотспот" : cid);
+  const hsName = hsObj ? (hsObj.name || hsObj.id) : (cid === "default" ? (window.t ? window.t("hotspots.primary_hs_name", {}, "Main hotspot") : "Main hotspot") : cid);
 
   if (nextVal) {
-    if (window.showToast) window.showToast(`⚡ [${hsName}] Boost громкости ВКЛЮЧЕН`, 2500);
+    if (window.showToast) window.showToast(window.t ? window.t("audio.boost_on_toast", { name: hsName }, `⚡ [${hsName}] Volume Boost ON`) : `⚡ [${hsName}] Volume Boost ON`, 2500);
     if (navigator.vibrate) { try { navigator.vibrate([40, 60, 40]); } catch (_) {} }
   } else {
-    if (window.showToast) window.showToast(`[${hsName}] Boost громкости ВЫКЛЮЧЕН`, 2000);
+    if (window.showToast) window.showToast(window.t ? window.t("audio.boost_off_toast", { name: hsName }, `[${hsName}] Volume Boost OFF`) : `[${hsName}] Volume Boost OFF`, 2000);
     if (navigator.vibrate) { try { navigator.vibrate(30); } catch (_) {} }
   }
 }
 
+let _activeSoloHotspotId = null;
+let _preSoloMuteStates = null;
+
+try {
+  const savedSolo = sessionStorage.getItem("proxdmr_active_solo_hs");
+  const savedMutes = sessionStorage.getItem("proxdmr_pre_solo_mutes");
+  if (savedSolo && savedMutes) {
+    _activeSoloHotspotId = savedSolo;
+    _preSoloMuteStates = JSON.parse(savedMutes);
+  }
+} catch (_) {}
+
+export function isHotspotSoloActive(hid = null) {
+  if (hid) {
+    const cid = resolveHotspotId(hid);
+    return _activeSoloHotspotId === cid;
+  }
+  return Boolean(_activeSoloHotspotId);
+}
+
+export function getActiveSoloHotspotId() {
+  return _activeSoloHotspotId;
+}
+
+export function toggleHotspotSoloAudio(hid) {
+  const cid = resolveHotspotId(hid);
+  const currentHotspots = getCurrentHotspots();
+  const hsName = getHotspotDisplayName(cid);
+
+  // If this hotspot is ALREADY solo, repeat long press exits solo and restores previous mute states
+  if (_activeSoloHotspotId === cid) {
+    exitSoloAudio(true);
+    return;
+  }
+
+  // If no solo was active, save snapshot of all current mute states
+  if (!_activeSoloHotspotId || !_preSoloMuteStates) {
+    _preSoloMuteStates = {};
+    (currentHotspots || []).forEach(h => {
+      const hcid = resolveHotspotId(h.id);
+      _preSoloMuteStates[hcid] = isHotspotAudioMuted(hcid);
+    });
+    try {
+      sessionStorage.setItem("proxdmr_pre_solo_mutes", JSON.stringify(_preSoloMuteStates));
+      sessionStorage.setItem("proxdmr_active_solo_hs", cid);
+    } catch (_) {}
+  }
+
+  _activeSoloHotspotId = cid;
+
+  // Unmute target solo hotspot
+  setHotspotAudioMute(cid, false, true);
+
+  // Mute all OTHER active hotspots
+  (currentHotspots || []).forEach(h => {
+    const hcid = resolveHotspotId(h.id);
+    if (hcid !== cid) {
+      setHotspotAudioMute(hcid, true, true);
+    }
+  });
+
+  updateAllVolumeAndMuteUI();
+
+  if (window.showToast) {
+    window.showToast(window.t ? window.t("audio.solo_on_toast", { name: hsName }, `🎯 [${hsName}] SOLO mode ON (other hotspots muted)`) : `🎯 [${hsName}] SOLO mode ON`, 2500);
+  }
+  if (navigator.vibrate) {
+    try { navigator.vibrate([60, 40, 60]); } catch (_) {}
+  }
+}
+
+export function exitSoloAudio(showNotification = true) {
+  if (!_activeSoloHotspotId && !_preSoloMuteStates) return;
+
+  const soloCid = _activeSoloHotspotId;
+  const hsName = soloCid ? getHotspotDisplayName(soloCid) : (window.t ? window.t("hotspots.generic_name", {}, "hotspot") : "hotspot");
+
+  let snapshot = _preSoloMuteStates;
+  if (!snapshot) {
+    try {
+      const saved = sessionStorage.getItem("proxdmr_pre_solo_mutes");
+      if (saved) snapshot = JSON.parse(saved);
+    } catch (_) {}
+  }
+
+  if (snapshot) {
+    Object.keys(snapshot).forEach(hcid => {
+      setHotspotAudioMute(hcid, Boolean(snapshot[hcid]), true);
+    });
+  }
+
+  _activeSoloHotspotId = null;
+  _preSoloMuteStates = null;
+  try {
+    sessionStorage.removeItem("proxdmr_pre_solo_mutes");
+    sessionStorage.removeItem("proxdmr_active_solo_hs");
+  } catch (_) {}
+
+  updateAllVolumeAndMuteUI();
+
+  if (showNotification && window.showToast) {
+    window.showToast(window.t ? window.t("audio.solo_off_toast", { name: hsName }, `[${hsName}] SOLO mode OFF (original audio settings restored)`) : `[${hsName}] SOLO mode OFF`, 2000);
+  }
+  if (navigator.vibrate) {
+    try { navigator.vibrate(40); } catch (_) {}
+  }
+}
+
 export function bindMuteButtonLongPress(btn, getCid) {
-  if (!btn || btn._hasBoostLongPress) return;
-  btn._hasBoostLongPress = true;
+  if (!btn || btn._hasMuteLongPress) return;
+  btn._hasMuteLongPress = true;
 
   let pressTimer = null;
   let isLongPressTriggered = false;
@@ -299,8 +464,8 @@ export function bindMuteButtonLongPress(btn, getCid) {
       pressTimer = null;
       isLongPressTriggered = true;
       const cid = typeof getCid === "function" ? getCid() : getCid;
-      toggleHotspotAudioBoost(cid);
-    }, 700);
+      toggleHotspotSoloAudio(cid);
+    }, 600);
   };
 
   const cancelPress = () => {
@@ -366,7 +531,7 @@ export function handleMuteButtonClick(e, hid) {
     return;
   }
 
-  // Check for double click/tap (within 350ms on the same hotspot button)
+  // Check for double click/tap (within 350ms on the same hotspot button) -> TOGGLE BOOST!
   if (lastMuteClickHid === cid && (now - lastMuteClickTime) < 350) {
     if (muteClickTimer) {
       clearTimeout(muteClickTimer);
@@ -377,7 +542,7 @@ export function handleMuteButtonClick(e, hid) {
     justDoubleClicked = true;
     setTimeout(() => { justDoubleClicked = false; }, 500);
 
-    toggleGlobalAudioMute();
+    toggleHotspotAudioBoost(cid);
     return;
   }
 
@@ -413,7 +578,8 @@ export function handleMuteButtonDblClick(e, hid) {
   }
   lastMuteClickTime = 0;
   lastMuteClickHid = null;
-  toggleGlobalAudioMute();
+  const cid = resolveHotspotId(hid);
+  toggleHotspotAudioBoost(cid);
 }
 
 let lastSystemVolSentTime = 0;
@@ -538,7 +704,7 @@ export function getHotspotVolume(hid) {
       const p = parseInt(v, 10);
       val = isNaN(p) ? 80 : p;
     } else {
-      const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
+      const isPrimary = isPrimaryDefaultAlias(cid, currentHotspots);
       if (isPrimary) {
         const vDef = localStorage.getItem("proxdmr_vol_default");
         if (vDef !== null) {
@@ -583,20 +749,20 @@ export function setHotspotVolume(hid, vol, syncToSystem = true) {
       ap.setHotspotVolume("default", num / 100.0);
     }
     if (ap && ap.setVolume) {
-      ap.setVolume(num / 100.0);
+      ap.setVolume(1.0);
     }
 
     updateHotspotVolumeAndMuteUI(null);
   } else {
     localStorage.setItem(`proxdmr_vol_${cid}`, num.toString());
-    const isPrimary = (currentHotspots && currentHotspots[0] && String(currentHotspots[0].id) === cid) || (cid === "default");
+    const isPrimary = isPrimaryDefaultAlias(cid, currentHotspots);
     if (isPrimary) {
       localStorage.setItem("proxdmr_vol_default", num.toString());
       localStorage.setItem("proxdmr_volume", num.toString());
     }
     if (ap && ap.setHotspotVolume) {
       ap.setHotspotVolume(cid, num / 100.0);
-      if (isPrimary) {
+      if (isPrimary && cid !== "default") {
         ap.setHotspotVolume("default", num / 100.0);
       }
     }
@@ -649,13 +815,19 @@ export function setHotspotAgc(hid, enabled) {
     ws.send(JSON.stringify({ type: "set_agc_enabled", enabled: boolVal }));
   }
 
-  // Sync all UI checkboxes
+  // Sync all UI checkboxes and live client RX AGC engine
   document.querySelectorAll(".agc-toggle").forEach(chk => {
     chk.checked = boolVal;
   });
   const mainAgc = document.getElementById("agcToggle");
   if (mainAgc) mainAgc.checked = boolVal;
-  scheduleSyncClientSettings();
+  const rxAgcChk = document.getElementById("chkAgcEnable");
+  if (rxAgcChk) rxAgcChk.checked = boolVal;
+  const ap = getAudioPlayer();
+  if (ap && typeof ap.setRxAgcConfig === "function") {
+    ap.setRxAgcConfig({ enabled: boolVal });
+  }
+  scheduleSyncClientSettings(0);
 }
 
 export function getHotspotLoop(hid) {
@@ -670,21 +842,19 @@ export function isHotspotCollapsed(hid) {
   if (!hid) return false;
   const currentHotspots = getCurrentHotspots();
   const cid = resolveHotspotId(hid);
+  const hs = (currentHotspots || []).find(h => String(h.id) === cid || String(h.id) === String(hid));
+  const visibleHotspots = (currentHotspots || []).filter(h => !h.hidden);
+  const visibleIdx = visibleHotspots.findIndex(h => String(h.id) === cid || String(h.id) === String(hid));
+  if (hs) {
+    if (typeof hs.collapsed === "boolean") return hs.collapsed;
+    return visibleIdx >= 0 ? (visibleIdx > 0) : true;
+  }
   const local = localStorage.getItem(`proxdmr_collapsed_${cid}`);
   if (local !== null) {
     return local === "true";
   }
-  if (cid === resolveHotspotId("default") || cid === "default" || cid === "1") {
-    const defLocal = localStorage.getItem("proxdmr_collapsed_default");
-    if (defLocal !== null) return defLocal === "true";
-  }
-  const hsIdx = (currentHotspots || []).findIndex(h => resolveHotspotId(h.id) === cid || h.id === cid || h.id === hid);
-  if (hsIdx >= 0) {
-    const hs = currentHotspots[hsIdx];
-    if (typeof hs.collapsed === "boolean") return hs.collapsed;
-    return hsIdx > 0;
-  }
-  return cid !== "default" && cid !== "1";
+  const active = (currentHotspots || []).filter(h => !h.hidden);
+  return !(active[0] && (String(active[0].id) === cid || String(active[0].id) === String(hid)));
 }
 
 export function isHotspotLiveCollapsed(hid) {
@@ -693,20 +863,74 @@ export function isHotspotLiveCollapsed(hid) {
   return localStorage.getItem(`proxdmr_live_collapsed_${cid}`) === "true";
 }
 
+export function closeLogIfOpenForHotspot(hid, options = {}) {
+  if (typeof window === "undefined" || !window.isLogVisible) {
+    return false;
+  }
+  const currentHotspots = getCurrentHotspots();
+  const cid = resolveHotspotId(hid);
+  const isDefaultAlias = isPrimaryDefaultAlias(cid, currentHotspots);
+  let card = options.card || null;
+  if (!card && typeof document !== "undefined") {
+    const rc = document.getElementById("radioContainer");
+    const rcMatch = rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === cid || (isDefaultAlias && rc.dataset.hotspotId === "default")) ? rc : null;
+    card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
+  }
+
+  const curLogHid = window.currentLogHotspotId;
+  const isMobile = typeof window.innerWidth === "number" && window.innerWidth <= 768;
+  const isAllDesktop = !isMobile && curLogHid === "all";
+  const fallbackActiveHid = options.previousActiveHotspotId !== undefined ? options.previousActiveHotspotId : getActiveHotspotId();
+  const effectiveLogHid = (isMobile && (!curLogHid || curLogHid === "all"))
+    ? (fallbackActiveHid || ((currentHotspots || []).find(h => !h.hidden) || {}).id || "default")
+    : curLogHid;
+
+  const remainingOpen = (currentHotspots || []).filter(h => !h.hidden && resolveHotspotId(h.id) !== cid && !isHotspotCollapsed(h.id));
+  const isCardLogActive = Boolean(!isAllDesktop && card && card.querySelector(".btn-log-drawer.active"));
+  const isLogForThisHotspot = !isAllDesktop && (
+    Boolean(curLogHid && curLogHid !== "all" && resolveHotspotId(curLogHid) === cid) ||
+    Boolean(effectiveLogHid && effectiveLogHid !== "all" && resolveHotspotId(effectiveLogHid) === cid) ||
+    isCardLogActive
+  );
+
+  if (isLogForThisHotspot || remainingOpen.length === 0) {
+    window.isLogVisible = false;
+    if (typeof window.updateLogVisibility === "function") {
+      window.updateLogVisibility(true);
+    }
+    if (window.recordingsManager) {
+      if (typeof window.recordingsManager.stop === "function") {
+        window.recordingsManager.stop();
+      }
+      if (typeof window.recordingsManager.closePlayer === "function") {
+        window.recordingsManager.closePlayer();
+      }
+    }
+    return true;
+  }
+
+  if (!options.skipRefreshIfKeptOpen && typeof window.updateLogVisibility === "function") {
+    window.updateLogVisibility(false);
+  }
+  return false;
+}
+
 export async function collapseHotspot(hid, options = {}) {
   const isLive = Boolean(options && options.isLive);
   const currentHotspots = getCurrentHotspots();
   const activeHotspotId = getActiveHotspotId();
   const cid = resolveHotspotId(hid);
-  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`)
-    || (cid === resolveHotspotId("default") ? document.getElementById("radioContainer") : null);
+  const isDefaultAlias = isPrimaryDefaultAlias(cid, currentHotspots);
+  const rc = document.getElementById("radioContainer");
+  const rcMatch = rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === cid || (isDefaultAlias && rc.dataset.hotspotId === "default")) ? rc : null;
+  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
   if (!card) return;
 
   const now = Date.now();
   if (typeof window !== "undefined") {
     window._lastHotspotCollapseActionTimes = window._lastHotspotCollapseActionTimes || {};
     window._lastHotspotCollapseActionTimes[cid] = now;
-    if (cid === resolveHotspotId("default") || cid === "default") {
+    if (isDefaultAlias) {
       window._lastHotspotCollapseActionTimes["default"] = now;
     }
   }
@@ -718,23 +942,24 @@ export async function collapseHotspot(hid, options = {}) {
     // ═══════════════════════════════════════════════════════════════════
     // ОСОБЫЙ РЕЖИМ (LIVE COLLAPSE - удержание кнопки сворачивания):
     // Само окно сворачивается, но хотспот полноценно работает:
-    // - BM не отключается
-    // - звук не глушится
-    // - лог НЕ закрывается
-    // - плеер НЕ останавливается
+    // - BM/YSF/ASL не отключается
+    // - живой звук эфира (audioPlayer) не глушится
+    // - если у этого хотспота была открыта История (#liveMonitorPanel), она закрывается
     // ═══════════════════════════════════════════════════════════════════
     card.classList.add("collapsed", "live-collapsed");
     localStorage.setItem(`proxdmr_collapsed_${cid}`, "true");
-    if (cid === resolveHotspotId("default") || cid === "default" || cid === "1") {
+    if (isDefaultAlias) {
       localStorage.setItem("proxdmr_collapsed_default", "true");
+      localStorage.setItem("proxdmr_live_collapsed_default", "true");
     }
     localStorage.setItem(`proxdmr_live_collapsed_${cid}`, "true");
 
     const btn = card.querySelector(".hotspot-collapse-btn");
     if (btn) btn.title = window.t ? window.t("hotspots.expand_bg_title", {}, "Развернуть этот хотспот (работает в фоне)") : "Развернуть этот хотспот (работает в фоне)";
 
-    const hs = (currentHotspots || []).find(h => resolveHotspotId(h.id) === cid || h.id === cid);
+    const hs = (currentHotspots || []).find(h => resolveHotspotId(h.id) === cid || String(h.id) === cid || (isDefaultAlias && h.id === "default"));
     if (hs) {
+      hs.collapsed = true;
       hs.isLiveCollapsed = true;
     }
 
@@ -745,8 +970,19 @@ export async function collapseHotspot(hid, options = {}) {
 
     renderHotspotsList();
     renderHotspotSelect();
+    closeLogIfOpenForHotspot(cid, {
+      card,
+      previousActiveHotspotId: activeHotspotId,
+      skipRefreshIfKeptOpen: true
+    });
     if (typeof window !== "undefined" && typeof window.syncCollapsedHotspotStacks === "function") {
       window.syncCollapsedHotspotStacks();
+    }
+    if (typeof window !== "undefined" && typeof window.renderToolbarHotspotSlots === "function") {
+      window.renderToolbarHotspotSlots();
+    }
+    if (typeof window !== "undefined" && window.isLogVisible && typeof window.updateLogVisibility === "function") {
+      window.updateLogVisibility(false);
     }
 
     const hsName = hs ? (hs.name || cid) : cid;
@@ -783,12 +1019,17 @@ export async function collapseHotspot(hid, options = {}) {
   card.classList.add("collapsed");
   card.classList.remove("live-collapsed");
   localStorage.setItem(`proxdmr_collapsed_${cid}`, "true");
-  if (cid === resolveHotspotId("default") || cid === "default" || cid === "1") {
+  if (isDefaultAlias) {
     localStorage.setItem("proxdmr_collapsed_default", "true");
+    localStorage.setItem("proxdmr_live_collapsed_default", "false");
   }
   localStorage.setItem(`proxdmr_live_collapsed_${cid}`, "false");
   const btn = card.querySelector(".hotspot-collapse-btn");
-  if (btn) btn.title = (typeof window !== "undefined" && window.t) ? window.t("vfo.hotspot_expand_title", {}, "Развернуть этот хотспот (удержание: отключить из списка)") : "Развернуть этот хотспот (удержание: отключить из списка)";
+  if (btn) {
+    btn.title = (typeof window !== "undefined" && window.t)
+      ? window.t("vfo.hotspot_expand_title", {}, "Развернуть этот хотспот (удержание: отправить в архив)")
+      : "Развернуть этот хотспот (удержание: отправить в архив)";
+  }
 
   const nameBadge = card.querySelector(".hotspot-name-badge");
   if (nameBadge) {
@@ -796,19 +1037,27 @@ export async function collapseHotspot(hid, options = {}) {
   }
 
   // 4. Update local hotspot state to DISCONNECTED
+  const collapsedTxt = (typeof window !== "undefined" && window.t)
+    ? window.t("status.bm_collapsed_detail", {}, "Collapsed / disconnected")
+    : "Collapsed / disconnected";
   const hs = (currentHotspots || []).find(h => resolveHotspotId(h.id) === cid || h.id === cid);
   if (hs) {
     hs.collapsed = true;
     hs.isLiveCollapsed = false;
     hs.isManualBmDisconnect = true;
     hs.status = "DISCONNECTED";
-    hs.detail = "Свернут / отключен";
+    hs.detail = collapsedTxt;
   }
   if (typeof window !== "undefined" && typeof window.updateBmStatus === "function") {
-    window.updateBmStatus("DISCONNECTED", "Свернут / отключен", cid);
+    window.updateBmStatus("DISCONNECTED", collapsedTxt, cid);
   }
   renderHotspotsList();
   renderHotspotSelect();
+  closeLogIfOpenForHotspot(cid, {
+    card,
+    previousActiveHotspotId: activeHotspotId,
+    skipRefreshIfKeptOpen: true
+  });
   if (typeof window !== "undefined" && typeof window.syncCollapsedHotspotStacks === "function") {
     window.syncCollapsedHotspotStacks();
   }
@@ -828,50 +1077,23 @@ export async function collapseHotspot(hid, options = {}) {
     }
   }
 
-  // If active hotspot was collapsed, switch active to another open hotspot
+  // If active hotspot was collapsed, switch active to another open non-archived hotspot
   if (cid === activeHotspotId) {
-    const nextOpen = (currentHotspots || []).find(h => resolveHotspotId(h.id) !== cid && !isHotspotCollapsed(h.id));
+    const nextOpen = (currentHotspots || []).find(h => !h.hidden && resolveHotspotId(h.id) !== cid && !isHotspotCollapsed(h.id));
     if (nextOpen) {
       switchActiveHotspot(nextOpen.id);
     }
   }
 
-  // 6. Лог автоматически сворачивается ТОЛЬКО если он открыт именно для этого хотспота (или если больше нет открытых хотспотов).
-  // Если лог открыт для ДРУГОГО хотспота — он не должен закрываться при сворачивании текущего хотспота.
+  // 6. Если История осталась открыта (принадлежит другому HS или это режим «Все хотспоты» на ПК), обновляем геометрию после переключения активного HS.
   if (typeof window !== "undefined" && window.isLogVisible) {
-    const curLogHid = window.currentLogHotspotId;
-    const isMobile = typeof window.innerWidth === "number" && window.innerWidth <= 768;
-    const effectiveLogHid = (isMobile && (!curLogHid || curLogHid === "all"))
-      ? (activeHotspotId || ((currentHotspots || [])[0] && (currentHotspots || [])[0].id) || "default")
-      : curLogHid;
-
-    const remainingOpen = (currentHotspots || []).filter(h => resolveHotspotId(h.id) !== cid && !isHotspotCollapsed(h.id));
-    const isCardLogActive = Boolean(card && card.querySelector(".btn-log-drawer.active"));
-    const isLogForThisHotspot = (curLogHid !== "all") && (
-      (curLogHid && resolveHotspotId(curLogHid) === cid) ||
-      (effectiveLogHid && resolveHotspotId(effectiveLogHid) === cid) ||
-      isCardLogActive
-    );
-
-    if (isLogForThisHotspot || remainingOpen.length === 0) {
-      window.isLogVisible = false;
-      if (typeof window.updateLogVisibility === "function") {
-        window.updateLogVisibility(true);
-      }
-      if (window.recordingsManager) {
-        if (typeof window.recordingsManager.stop === "function") {
-          window.recordingsManager.stop();
-        }
-        if (typeof window.recordingsManager.closePlayer === "function") {
-          window.recordingsManager.closePlayer();
-        }
-      }
-    } else {
-      // Лог открыт для другого хотспота — сохраняем открытым и актуализируем высоту / позицию
-      if (typeof window.updateLogVisibility === "function") {
-        window.updateLogVisibility(false);
-      }
-    }
+    closeLogIfOpenForHotspot(cid, {
+      card,
+      previousActiveHotspotId: activeHotspotId
+    });
+  }
+  if (typeof window !== "undefined" && typeof window.renderToolbarHotspotSlots === "function") {
+    window.renderToolbarHotspotSlots();
   }
   scheduleSyncClientSettings();
 }
@@ -879,12 +1101,14 @@ export async function collapseHotspot(hid, options = {}) {
 export async function expandHotspot(hid, options = {}) {
   const currentHotspots = getCurrentHotspots();
   const cid = resolveHotspotId(hid);
-  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`)
-    || (cid === resolveHotspotId("default") ? document.getElementById("radioContainer") : null);
+  const isDefaultAlias = isPrimaryDefaultAlias(cid, currentHotspots);
+  const rc = document.getElementById("radioContainer");
+  const rcMatch = rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === cid || (isDefaultAlias && rc.dataset.hotspotId === "default")) ? rc : null;
+  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
   if (!card) return;
 
   const force = Boolean(options && options.force);
-  const lastAction = (!force && typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || window._lastHotspotCollapseActionTimes["default"])) || 0;
+  const lastAction = (!force && typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || (isDefaultAlias ? window._lastHotspotCollapseActionTimes["default"] : 0))) || 0;
   if (!force && (Date.now() - lastAction < 600)) {
     console.warn(`[COLLAPSE] Prevented rapid auto-expand for ${cid} (${Date.now() - lastAction}ms since last action)`);
     return;
@@ -894,7 +1118,7 @@ export async function expandHotspot(hid, options = {}) {
   if (typeof window !== "undefined") {
     window._lastHotspotCollapseActionTimes = window._lastHotspotCollapseActionTimes || {};
     window._lastHotspotCollapseActionTimes[cid] = now;
-    if (cid === resolveHotspotId("default") || cid === "default") {
+    if (isDefaultAlias) {
       window._lastHotspotCollapseActionTimes["default"] = now;
     }
   }
@@ -907,24 +1131,34 @@ export async function expandHotspot(hid, options = {}) {
   // 1. Visual expand
   card.classList.remove("collapsed", "live-collapsed");
   localStorage.setItem(`proxdmr_collapsed_${cid}`, "false");
-  if (cid === resolveHotspotId("default") || cid === "default" || cid === "1") {
+  if (isDefaultAlias) {
     localStorage.setItem("proxdmr_collapsed_default", "false");
+    localStorage.setItem("proxdmr_live_collapsed_default", "false");
   }
   localStorage.setItem(`proxdmr_live_collapsed_${cid}`, "false");
   const btn = card.querySelector(".hotspot-collapse-btn");
   if (btn) btn.title = (typeof window !== "undefined" && window.t) ? window.t("vfo.hotspot_collapse_title") : "Свернуть этот хотспот (удержание: свернуть без отключения)";
 
-  const hs = (currentHotspots || []).find(h => resolveHotspotId(h.id) === cid || h.id === cid);
+  const hs = (currentHotspots || []).find(h => String(h.id) === cid) || (isDefaultAlias ? (currentHotspots || [])[0] : null);
   if (hs) {
     hs.collapsed = false;
     hs.isLiveCollapsed = false;
     hs.isManualBmDisconnect = false;
+    const expNet = (hs.network_type || "").toLowerCase();
+    if (expNet === "adn" && typeof window !== "undefined" && typeof window.refreshAdnServers === "function") {
+      window.refreshAdnServers(false);
+    } else if (expNet === "dmrplus" && typeof window !== "undefined" && typeof window.refreshDmrPlusServers === "function") {
+      window.refreshDmrPlusServers(false);
+    }
   }
   switchActiveHotspot(cid);
   renderHotspotsList();
   renderHotspotSelect();
   if (typeof window !== "undefined" && typeof window.syncCollapsedHotspotStacks === "function") {
     window.syncCollapsedHotspotStacks();
+  }
+  if (typeof window !== "undefined" && typeof window.renderToolbarHotspotSlots === "function") {
+    window.renderToolbarHotspotSlots();
   }
 
   if (wasLive) {
@@ -938,6 +1172,9 @@ export async function expandHotspot(hid, options = {}) {
     updateHotspotVolumeAndMuteUI(cid);
     if (typeof window !== "undefined" && typeof window.updateHotspotCardMuteUI === "function") {
       window.updateHotspotCardMuteUI(cid, card);
+    }
+    if (typeof window !== "undefined" && typeof window.renderToolbarHotspotSlots === "function") {
+      window.renderToolbarHotspotSlots();
     }
     scheduleSyncClientSettings();
     return;
@@ -994,8 +1231,9 @@ let isCollapseToggleBusy = false;
 
 export async function toggleHotspotCollapse(hid) {
   const cid = resolveHotspotId(hid);
+  const isDefaultAlias = isPrimaryDefaultAlias(cid);
   const now = Date.now();
-  const lastAction = (typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || window._lastHotspotCollapseActionTimes["default"])) || 0;
+  const lastAction = (typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || (isDefaultAlias ? window._lastHotspotCollapseActionTimes["default"] : 0))) || 0;
   if (now - lastAction < 600 || now - lastCollapseToggleTime < 600 || isCollapseToggleBusy) {
     console.log(`[COLLAPSE] Ignored rapid toggle for ${hid} (throttled)`);
     return;
@@ -1003,7 +1241,7 @@ export async function toggleHotspotCollapse(hid) {
   if (typeof window !== "undefined") {
     window._lastHotspotCollapseActionTimes = window._lastHotspotCollapseActionTimes || {};
     window._lastHotspotCollapseActionTimes[cid] = now;
-    if (cid === resolveHotspotId("default") || cid === "default") {
+    if (isDefaultAlias) {
       window._lastHotspotCollapseActionTimes["default"] = now;
     }
   }
@@ -1031,9 +1269,11 @@ export function updateHotspotVolumeAndMuteUI(hid) {
   let cards = targetCid 
     ? document.querySelectorAll(`.radio-container[data-hotspot-id="${targetCid}"]`)
     : document.querySelectorAll(".radio-container");
-  if ((!cards || cards.length === 0) && (targetCid === "default" || targetCid === resolveHotspotId("default"))) {
+  if ((!cards || cards.length === 0) && targetCid && isPrimaryDefaultAlias(targetCid)) {
     const rc = document.getElementById("radioContainer");
-    if (rc) cards = [rc];
+    if (rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === targetCid || rc.dataset.hotspotId === "default")) {
+      cards = [rc];
+    }
   }
 
   const globalMuted = isGlobalAudioMuted();
@@ -1048,9 +1288,11 @@ export function updateHotspotVolumeAndMuteUI(hid) {
     const hsMuted = isHotspotAudioMuted(cid);
     const curVol = getHotspotVolume(cid);
 
-    if (slider && document.activeElement !== slider) {
+    if (slider) {
       slider.max = 100;
-      slider.value = curVol;
+      if (String(slider.value) !== String(curVol)) {
+        slider.value = curVol;
+      }
     }
     if (valText) {
       valText.textContent = `${curVol}%`;
@@ -1071,24 +1313,38 @@ export function updateHotspotVolumeAndMuteUI(hid) {
     }
 
     if (muteBtn) {
-      muteBtn.classList.remove("muted-channel", "muted-global", "muted-ptt");
+      muteBtn.classList.remove("muted-channel", "muted-global", "muted-ptt", "is-solo-active");
+      const isSolo = isHotspotSoloActive(cid);
+      if (isSolo) {
+        muteBtn.classList.add("is-solo-active");
+      }
+
       if (globalMuted) {
         muteBtn.innerHTML = SVG_SPEAKER_MUTED;
         muteBtn.classList.add("muted-global");
-        muteBtn.title = ((typeof window !== "undefined" && window.t) ? window.t("vfo.mute_all_active", {}, "ОБЩИЙ MUTE АКТИВЕН для всех хотспотов (двойной клик для снятия)") : "ОБЩИЙ MUTE АКТИВЕН для всех хотспотов (двойной клик для снятия)");
+        muteBtn.title = ((typeof window !== "undefined" && window.t) ? window.t("vfo.mute_all_active", {}, "ОБЩИЙ MUTE АКТИВЕН для всех хотспотов (клик для снятия)") : "ОБЩИЙ MUTE АКТИВЕН для всех хотспотов (клик для снятия)");
       } else if (pttMuted) {
         muteBtn.innerHTML = SVG_SPEAKER_MUTED;
         muteBtn.classList.add("muted-ptt");
         muteBtn.title = ((typeof window !== "undefined" && window.t) ? window.t("vfo.mute_tx_active", {}, "Общий MUTE активен на время передачи (PTT + 1с)") : "Общий MUTE активен на время передачи (PTT + 1с)");
+      } else if (isSolo) {
+        muteBtn.innerHTML = curVol < 30 ? SVG_SPEAKER_LOW : SVG_SPEAKER_HIGH;
+        muteBtn.title = (typeof window !== "undefined" && window.t)
+          ? window.t("audio.mute_solo_active_title", {}, "🎯 SOLO ACTIVE (hold: exit SOLO, double-click: Boost, click: Mute)")
+          : "🎯 SOLO ACTIVE (hold: exit SOLO, double-click: Boost, click: Mute)";
       } else if (hsMuted || curVol === 0) {
         muteBtn.innerHTML = SVG_SPEAKER_MUTED;
         muteBtn.classList.add("muted-channel");
         muteBtn.title = curVol === 0
-          ? ((typeof window !== "undefined" && window.t) ? window.t("audio.vol_zero_tooltip", {}, "Громкость на нуле (клик: включить, двойной клик: полный общий Mute)") : "Громкость на нуле (клик: включить, двойной клик: полный общий Mute)")
-          : ((typeof window !== "undefined" && window.t) ? window.t("audio.vol_muted_tooltip", {}, "Звук этого хотспота ОТКЛЮЧЕН (клик: включить, двойной клик: полный общий Mute)") : "Звук этого хотспота ОТКЛЮЧЕН (клик: включить, двойной клик: полный общий Mute)");
+          ? ((typeof window !== "undefined" && window.t) ? window.t("audio.mute_vol_zero_title", {}, "Volume at zero (click: unmute, double-click: Boost, hold: Solo)") : "Volume at zero (click: unmute, double-click: Boost, hold: Solo)")
+          : (_activeSoloHotspotId
+              ? ((typeof window !== "undefined" && window.t) ? window.t("audio.mute_solo_muted_title", { name: getHotspotDisplayName(_activeSoloHotspotId) }, `Muted by SOLO [${getHotspotDisplayName(_activeSoloHotspotId)}] (click: unmute, hold: make Solo)`) : `Muted by SOLO [${getHotspotDisplayName(_activeSoloHotspotId)}]`)
+              : ((typeof window !== "undefined" && window.t) ? window.t("audio.mute_off_title", {}, "Hotspot audio MUTED (click: unmute, double-click: Boost, hold: Solo)") : "Hotspot audio MUTED"));
       } else {
         muteBtn.innerHTML = curVol < 30 ? SVG_SPEAKER_LOW : SVG_SPEAKER_HIGH;
-        muteBtn.title = ((typeof window !== "undefined" && window.t) ? window.t("vfo.mute_hs_title", {}, "Mute этого хотспота (двойной клик: полный общий Mute)") : "Mute этого хотспота (двойной клик: полный общий Mute)");
+        muteBtn.title = (typeof window !== "undefined" && window.t)
+          ? window.t("audio.mute_on_title", {}, "Mute this hotspot (click: Mute, double-click: Boost, hold: Solo)")
+          : "Mute this hotspot (click: Mute, double-click: Boost, hold: Solo)";
       }
     }
   });
@@ -1176,6 +1432,37 @@ export function initVolumeMute() {
     };
   }
 
+  // Desktop mouse-wheel volume adjustment over any hotspot volume strip with full scroll interception
+  if (typeof document !== "undefined" && typeof window !== "undefined" && !window._hasVolumeStripWheelListener) {
+    window._hasVolumeStripWheelListener = true;
+    document.addEventListener("wheel", (e) => {
+      const targetEl = e.target && e.target.nodeType === 3 ? e.target.parentElement : e.target;
+      const strip = targetEl && typeof targetEl.closest === "function"
+        ? targetEl.closest(".vertical-volume-strip, .volume-slider-v-wrap, .volume-slider")
+        : null;
+      if (!strip) return;
+
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === "function") {
+        e.stopImmediatePropagation();
+      }
+
+      const dy = Number(e.deltaY) || 0;
+      if (dy === 0) return;
+
+      const step = e.shiftKey ? 1 : 2;
+      const delta = dy < 0 ? step : -step;
+      const card = strip.closest(".radio-container");
+      const cid = resolveHotspotId((card && card.dataset && card.dataset.hotspotId) || getActiveHotspotId() || "default");
+      const curVol = getHotspotVolume(cid);
+      const nextVol = Math.max(0, Math.min(100, curVol + delta));
+      if (nextVol !== curVol) {
+        setHotspotVolume(cid, nextVol);
+      }
+    }, { passive: false, capture: true });
+  }
+
   // Volume Down -> PTT option block visibility (APK only)
   const groupVolumeDownPtt = document.getElementById("groupVolumeDownPtt");
   if (groupVolumeDownPtt) {
@@ -1256,6 +1543,7 @@ if (typeof window !== "undefined") {
   window.setGlobalAudioMute = setGlobalAudioMute;
   window.toggleGlobalAudioMute = toggleGlobalAudioMute;
   window.resolveHotspotId = resolveHotspotId;
+  window.isPrimaryDefaultAlias = isPrimaryDefaultAlias;
   window.getHotspotDisplayName = getHotspotDisplayName;
   window.isHotspotAudioMuted = isHotspotAudioMuted;
   window.setHotspotAudioMute = setHotspotAudioMute;
@@ -1270,6 +1558,7 @@ if (typeof window !== "undefined") {
   window.setHotspotLoop = setHotspotLoop;
   window.isHotspotCollapsed = isHotspotCollapsed;
   window.isHotspotLiveCollapsed = isHotspotLiveCollapsed;
+  window.closeLogIfOpenForHotspot = closeLogIfOpenForHotspot;
   window.collapseHotspot = collapseHotspot;
   window.expandHotspot = expandHotspot;
   window.toggleHotspotCollapse = toggleHotspotCollapse;
@@ -1299,6 +1588,7 @@ if (typeof window !== "undefined") {
     setGlobalAudioMute,
     toggleGlobalAudioMute,
     resolveHotspotId,
+    isPrimaryDefaultAlias,
     getHotspotDisplayName,
     isHotspotAudioMuted,
     setHotspotAudioMute,
@@ -1313,6 +1603,7 @@ if (typeof window !== "undefined") {
     setHotspotLoop,
     isHotspotCollapsed,
     isHotspotLiveCollapsed,
+    closeLogIfOpenForHotspot,
     collapseHotspot,
     expandHotspot,
     toggleHotspotCollapse,
@@ -1327,11 +1618,20 @@ if (typeof window !== "undefined") {
     isHotspotAudioBoosted,
     setHotspotAudioBoost,
     toggleHotspotAudioBoost,
+    isHotspotSoloActive,
+    getActiveSoloHotspotId,
+    toggleHotspotSoloAudio,
+    exitSoloAudio,
     bindMuteButtonLongPress
   });
 
   window.isHotspotAudioBoosted = isHotspotAudioBoosted;
   window.setHotspotAudioBoost = setHotspotAudioBoost;
   window.toggleHotspotAudioBoost = toggleHotspotAudioBoost;
+  window.isHotspotSoloActive = isHotspotSoloActive;
+  window.getActiveSoloHotspotId = getActiveSoloHotspotId;
+  window.toggleHotspotSoloAudio = toggleHotspotSoloAudio;
+  window.exitSoloAudio = exitSoloAudio;
   window.bindMuteButtonLongPress = bindMuteButtonLongPress;
+  window.updateAllVolumeAndMuteUI = updateAllVolumeAndMuteUI;
 }

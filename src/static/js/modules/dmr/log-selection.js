@@ -4,7 +4,7 @@
  * selection action toolbar, mini context menu, and batch delete/download/transcribe actions.
  */
 
-import { showToast } from '../core/toast.js';
+import { showToast } from '../core/toast.js?v=2.9.699';
 
 class LogSelectionManager {
   constructor() {
@@ -293,7 +293,7 @@ class LogSelectionManager {
           const allSelected = allIds.length > 0 && allIds.every(id => this.selectedIds.has(id));
           this.btnAll.textContent = allSelected
             ? (window.t ? window.t("log_sel.unselect_btn", {}, "Снять") : "Снять")
-            : "All";
+            : (window.t ? window.t("log_sel.all_btn", {}, "All") : "All");
         }
       } else {
         this.toolbar.style.display = "none";
@@ -437,6 +437,9 @@ class LogSelectionManager {
           ? window.extractTgOrIdFromElement(targetEl)
           : null;
 
+        const tuneEl = row.querySelector(".btn-quick-tune-tg");
+        const rowHid = row.dataset.hid || (tuneEl && tuneEl.dataset.hid) || window.activeHotspotId || "default";
+        const rowNet = row.dataset.net || (typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(rowHid) : "bm");
         if (!tgOrIdInfo) {
           const stationEl = row.querySelector(".cell-station");
           const radioId = (stationEl && stationEl.dataset.radioId) || row.dataset.radioId;
@@ -446,11 +449,16 @@ class LogSelectionManager {
             tgOrIdInfo = {
               type: "ID",
               value: parseInt(radioId, 10),
+              callsign: callsign,
               name: [callsign, name].filter(Boolean).join(" "),
               element: targetEl,
-              hotspotId: window.activeHotspotId || "default"
+              hotspotId: rowHid,
+              network_type: rowNet
             };
           }
+        } else {
+          tgOrIdInfo.hotspotId = rowHid;
+          tgOrIdInfo.network_type = rowNet;
         }
 
         if (tgOrIdInfo && typeof window.openQuickAssignModal === "function") {
@@ -513,6 +521,9 @@ class LogSelectionManager {
         ? window.extractTgOrIdFromElement(e.target)
         : null;
 
+      const tuneEl = row.querySelector(".btn-quick-tune-tg");
+      const rowHid = row.dataset.hid || (tuneEl && tuneEl.dataset.hid) || window.activeHotspotId || "default";
+      const rowNet = row.dataset.net || (typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(rowHid) : "bm");
       if (!tgOrIdInfo) {
         const stationEl = row.querySelector(".cell-station");
         const radioId = (stationEl && stationEl.dataset.radioId) || row.dataset.radioId;
@@ -522,11 +533,16 @@ class LogSelectionManager {
           tgOrIdInfo = {
             type: "ID",
             value: parseInt(radioId, 10),
+            callsign: callsign,
             name: [callsign, name].filter(Boolean).join(" "),
             element: e.target,
-            hotspotId: window.activeHotspotId || "default"
+            hotspotId: rowHid,
+            network_type: rowNet
           };
         }
+      } else {
+        tgOrIdInfo.hotspotId = rowHid;
+        tgOrIdInfo.network_type = rowNet;
       }
 
       if (tgOrIdInfo && typeof window.openQuickAssignModal === "function") {
@@ -714,7 +730,7 @@ class LogSelectionManager {
         showToast(data.detail || data.message || (window.t ? window.t("log_sel.err_transcribe_start", {}, "Не удалось запустить транскрибацию") : "Не удалось запустить транскрибацию"), 3000);
       }
     } catch (err) {
-      showToast(`Ошибка: ${err.message}`, 3000);
+      showToast(window.t ? window.t("log_sel.err_generic", { error: err.message }, `Ошибка: ${err.message}`) : `Ошибка: ${err.message}`, 3000);
     }
   }
 }

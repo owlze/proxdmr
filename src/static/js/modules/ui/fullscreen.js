@@ -1,4 +1,4 @@
-import { showToast } from '../core/toast.js';
+import { showToast } from '../core/toast.js?v=2.9.699';
 
   // --- Fullscreen Toggle Support for Mobile & Desktop ---
   export function isFullscreenActive() {

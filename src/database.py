@@ -89,6 +89,20 @@ async def init_db():
         # Clean up any orphaned user_settings rows
         await db.execute("DELETE FROM user_settings WHERE user_id NOT IN (SELECT id FROM users)")
 
+        # --- user_collections: structured per-user keyed data (pinned servers, sort prefs, etc.) ---
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_collections (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                category    TEXT NOT NULL,
+                key         TEXT NOT NULL,
+                value_json  TEXT NOT NULL DEFAULT '[]',
+                updated_at  REAL NOT NULL,
+                UNIQUE(user_id, category, key)
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ucoll_user_cat ON user_collections(user_id, category)")
+
         # Ensure at least one superadmin exists (migration for existing databases)
         cursor = await db.execute("SELECT COUNT(*) FROM users WHERE role = 'superadmin'")
         sa_count = (await cursor.fetchone())[0]
@@ -186,6 +200,7 @@ def get_default_settings(login: str = "") -> dict:
         "haptic_duration": 45,
         "simultaneous_slots": False,
         "check_mic_on_tx": False,
+        "single_hotspot_audio": False,
         "theme": "dark",
         "bg_type": "pattern",
         "bg_color": "#0f1115",
@@ -235,52 +250,77 @@ def get_default_settings(login: str = "") -> dict:
         },
         "client_settings": {
             "audio_rx": {
-                "pre_gain_db": 0,
                 "agc_enabled": True,
-                "agc_profile": "standard",
-                "agc_boost": 12,
-                "agc_atten": -12,
-                "agc_hang": 0.35,
-                "eq_low": 0,
-                "eq_mid": 0,
-                "eq_high": 0,
-                "deemphasis": False,
+                "boost_pct": 50,
+                "jitter_buffer_ms": 1080,
                 "active_preset": "1",
                 "presets": {
-                    "1": { "name": "Стандарт", "preGain": 0, "agcProfile": "standard", "agcBoost": 12, "agcAtten": -12, "agcHang": 0.35, "eqLow": 0, "eqMid": 0, "eqHigh": 0, "deemphasis": False },
-                    "2": { "name": "Мягкий эфир", "preGain": 2, "agcProfile": "soft", "agcBoost": 8, "agcAtten": -8, "agcHang": 0.30, "eqLow": 2, "eqMid": 0, "eqHigh": -3, "deemphasis": True },
-                    "3": { "name": "Разборчивость", "preGain": 4, "agcProfile": "deep", "agcBoost": 18, "agcAtten": -18, "agcHang": 0.40, "eqLow": -4, "eqMid": 4, "eqHigh": 2, "deemphasis": False }
+                    "1": { "name": "Standard", "eq10Enable": True, "eq10Linked": True, "eq10Gains": [-7, -83, -11, 4, 2, 103, 118, 131, 25, -200], "agcEnable": True, "agcDepth": 22, "agcGain": 50, "limiterEnable": True, "jitterBuffer": 1080, "boostPct": 50 },
+                    "2": { "name": "Soft Audio", "eq10Enable": True, "eq10Linked": True, "eq10Gains": [15, 10, -20, -30, 0, -15, -10, -15, -10, 0], "agcEnable": True, "agcDepth": 12, "agcGain": 35, "limiterEnable": True, "jitterBuffer": 140, "boostPct": 50 },
+                    "3": { "name": "Clarity (DX)", "eq10Enable": True, "eq10Linked": True, "eq10Gains": [-40, -30, -20, 0, 20, 30, 25, 15, 0, -20], "agcEnable": True, "agcDepth": 24, "agcGain": 55, "limiterEnable": True, "jitterBuffer": 180, "boostPct": 50 }
+                }
+            },
+            "asl_audio_rx": {
+                "boost_pct": 50,
+                "jitter_buffer_ms": 1100,
+                "active_preset": "1",
+                "presets": {
+                    "1": { "name": "Standard (Linear)", "eq10Enable": True, "eq10Linked": True, "eq10Gains": [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132], "agcEnable": True, "agcDepth": 19, "agcGain": 10, "limiterEnable": True, "jitterBuffer": 1100, "boostPct": 50 },
+                    "2": { "name": "Soft Audio", "eq10Enable": False, "eq10Linked": True, "eq10Gains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "agcEnable": False, "agcDepth": 12, "agcGain": 15, "limiterEnable": True, "jitterBuffer": 280, "boostPct": 50 },
+                    "3": { "name": "Clear", "eq10Enable": False, "eq10Linked": True, "eq10Gains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "agcEnable": False, "agcDepth": 20, "agcGain": 30, "limiterEnable": True, "jitterBuffer": 320, "boostPct": 50 }
                 }
             },
             "ambe_rx": {
-                "uvquality": 3,
                 "spectral_enh": True,
-                "float_mode": True,
-                "max_repeats": 3,
-                "repeat_decay": 75,
-                "fec_tolerance": 1,
-                "audio_gain": 7.0,
+                "high_band_gain_db": 0.5,
+                "unvoiced_gain_db": -1.5,
                 "active_preset": "1",
                 "presets": {
-                    "1": { "uvquality": 3, "spectral_enh": True, "float_mode": True, "max_repeats": 3, "repeat_decay": 75, "fec_tolerance": 1, "audio_gain": 7.0 },
-                    "2": { "uvquality": 4, "spectral_enh": True, "float_mode": True, "max_repeats": 4, "repeat_decay": 70, "fec_tolerance": 1, "audio_gain": 6.5 },
-                    "3": { "uvquality": 6, "spectral_enh": True, "float_mode": True, "max_repeats": 5, "repeat_decay": 85, "fec_tolerance": 2, "audio_gain": 8.0 }
+                    "1": { "spectral_enh": True, "high_band_gain_db": 0.5, "unvoiced_gain_db": -1.5 },
+                    "2": { "spectral_enh": True, "high_band_gain_db": 4.5, "unvoiced_gain_db": 1.0 },
+                    "3": { "spectral_enh": True, "high_band_gain_db": 0.0, "unvoiced_gain_db": -1.5 }
                 }
             },
             "audio_tx": {
                 "mic_gain": 0,
-                "noise_suppression": True,
+                "noise_suppression": False,
                 "browser_agc": False,
-                "echo_cancellation": True,
+                "dsp_agc": False,
+                "echo_cancellation": False,
                 "gate_enabled": True,
                 "gate_threshold": -45,
                 "hpf_enabled": True,
-                "presence_boost": 3,
+                "presence_boost": 0,
+                "eq_low": 0,
+                "eq_mid": 0,
+                "eq_high": 0,
+                "eq_preset": "standard",
                 "active_preset": "1",
                 "presets": {
-                    "1": { "name": "Стандарт", "txMicGain": 0, "txNoiseSuppression": True, "txBrowserAgc": False, "txEchoCancellation": True, "txGateEnabled": True, "txGateThreshold": -45, "txHpfEnabled": True, "txPresenceBoost": 3 },
-                    "2": { "name": "Мягкий голос", "txMicGain": 2, "txNoiseSuppression": True, "txBrowserAgc": False, "txEchoCancellation": True, "txGateEnabled": False, "txGateThreshold": -45, "txHpfEnabled": False, "txPresenceBoost": 0 },
-                    "3": { "name": "Пробивной / DX", "txMicGain": 3, "txNoiseSuppression": True, "txBrowserAgc": False, "txEchoCancellation": True, "txGateEnabled": True, "txGateThreshold": -40, "txHpfEnabled": True, "txPresenceBoost": 6 }
+                    "1": { "name": "Standard", "txBtMicEnabled": False, "txMicGain": 0, "txNoiseSuppression": False, "txBrowserAgc": False, "txDspAgc": False, "txEchoCancellation": False, "txGateEnabled": True, "txGateThreshold": -45, "txHpfEnabled": True, "txPresenceBoost": 0, "txEqLow": 0, "txEqMid": 0, "txEqHigh": 0, "txEqPreset": "standard" },
+                    "2": { "name": "Soft Voice", "txBtMicEnabled": False, "txMicGain": 2, "txNoiseSuppression": False, "txBrowserAgc": False, "txDspAgc": False, "txEchoCancellation": False, "txGateEnabled": False, "txGateThreshold": -45, "txHpfEnabled": False, "txPresenceBoost": 0, "txEqLow": -6, "txEqMid": 0, "txEqHigh": -4, "txEqPreset": "bright" },
+                    "3": { "name": "Punchy / DX", "txBtMicEnabled": False, "txMicGain": 3, "txNoiseSuppression": False, "txBrowserAgc": False, "txDspAgc": False, "txEchoCancellation": False, "txGateEnabled": True, "txGateThreshold": -40, "txHpfEnabled": True, "txPresenceBoost": 6, "txEqLow": -15, "txEqMid": 7, "txEqHigh": 2, "txEqPreset": "dx" }
+                }
+            },
+            "asl_audio_tx": {
+                "mic_gain": 0,
+                "noise_suppression": False,
+                "browser_agc": False,
+                "dsp_agc": True,
+                "echo_cancellation": False,
+                "gate_enabled": True,
+                "gate_threshold": -45,
+                "hpf_enabled": True,
+                "presence_boost": 0,
+                "eq_low": 0,
+                "eq_mid": 0,
+                "eq_high": 0,
+                "eq_preset": "standard",
+                "active_preset": "1",
+                "presets": {
+                    "1": { "txBtMicEnabled": False, "txMicGain": 0, "txNoiseSuppression": False, "txBrowserAgc": False, "txDspAgc": True, "txEchoCancellation": False, "txGateEnabled": True, "txGateThreshold": -45, "txHpfEnabled": True, "txPresenceBoost": 0, "txEqLow": 0, "txEqMid": 0, "txEqHigh": 0, "txEqPreset": "standard" },
+                    "2": { "txBtMicEnabled": False, "txMicGain": 2, "txNoiseSuppression": False, "txBrowserAgc": False, "txDspAgc": True, "txEchoCancellation": False, "txGateEnabled": True, "txGateThreshold": -42, "txHpfEnabled": True, "txPresenceBoost": 2, "txEqLow": 3, "txEqMid": -1, "txEqHigh": 2, "txEqPreset": "custom" },
+                    "3": { "txBtMicEnabled": False, "txMicGain": 3, "txNoiseSuppression": False, "txBrowserAgc": False, "txDspAgc": True, "txEchoCancellation": False, "txGateEnabled": True, "txGateThreshold": -40, "txHpfEnabled": True, "txPresenceBoost": 4, "txEqLow": -2, "txEqMid": 1, "txEqHigh": 4, "txEqPreset": "custom" }
                 }
             },
             "hotspots_ui": {},
@@ -293,7 +333,7 @@ def get_default_settings(login: str = "") -> dict:
         "hotspots": [
             {
                 "id": "default",
-                "name": "Основной хотспот",
+                "name": "Main Hotspot",
                 "callsign": callsign,
                 "dmr_id": 0,
                 "bm_ssid": 1,
@@ -395,6 +435,232 @@ async def save_user_settings(user_id: int, settings: dict):
         await db.commit()
 
 
+# ── user_collections CRUD ──────────────────────────────────────────────
+async def get_collection(user_id: int, category: str) -> dict:
+    """Return {key: value_json_parsed, ...} for a given category."""
+    async with aiosqlite.connect(str(DB_FILE)) as db:
+        cursor = await db.execute(
+            "SELECT key, value_json FROM user_collections WHERE user_id = ? AND category = ?",
+            (user_id, category)
+        )
+        rows = await cursor.fetchall()
+        result = {}
+        for k, v in rows:
+            try:
+                result[k] = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                result[k] = v
+        return result
+
+
+async def set_collection_key(user_id: int, category: str, key: str, value) -> None:
+    """Upsert a single key inside a collection category."""
+    async with aiosqlite.connect(str(DB_FILE)) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        value_json = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+        await db.execute(
+            """INSERT INTO user_collections (user_id, category, key, value_json, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, category, key) DO UPDATE
+               SET value_json = excluded.value_json,
+                   updated_at = excluded.updated_at""",
+            (user_id, category, key, value_json, time.time())
+        )
+        await db.commit()
+
+
+async def delete_collection_key(user_id: int, category: str, key: str) -> None:
+    """Remove a single key from a collection category."""
+    async with aiosqlite.connect(str(DB_FILE)) as db:
+        await db.execute(
+            "DELETE FROM user_collections WHERE user_id = ? AND category = ? AND key = ?",
+            (user_id, category, key)
+        )
+        await db.commit()
+
+
+async def get_all_collections(user_id: int) -> dict:
+    """Return {category: {key: value_json_parsed, ...}, ...} for all categories of a user."""
+    async with aiosqlite.connect(str(DB_FILE)) as db:
+        cursor = await db.execute(
+            "SELECT category, key, value_json FROM user_collections WHERE user_id = ?",
+            (user_id,)
+        )
+        rows = await cursor.fetchall()
+        result = {}
+        for cat, k, v in rows:
+            cat_map = result.setdefault(cat, {})
+            try:
+                cat_map[k] = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                cat_map[k] = v
+        return result
+
+
+COLLECTION_STORAGE_PREFIXES = (
+    "pinnedServers_",
+    "srvSortMode_",
+    "srvSortDir_",
+    "proxdmr_asl_mem_",
+    "proxdmr_quick_mem",
+    "proxdmr_ysf_matrix_",
+    "proxdmr_asl_quick_nodes_",
+    "proxdmr_asl_default_nodes_",
+    "proxdmr_ysf_scan_cfg_",
+    "proxdmr_ysf_dice_cfg_",
+    "proxdmr_adn_dice_cfg_",
+    "proxdmr_asl_scan_cfg_",
+    "proxdmr_asl_dice_cfg_",
+    "proxdmr_ysf_dash_auto_",
+    "proxdmr_asl_dash_auto_",
+    "proxdmr_collapsed_",
+    "proxdmr_live_collapsed_",
+    "proxdmr_pre_collapse_mute_",
+    "proxdmr_autorec_",
+    "proxdmr_ysf_favorites",
+)
+
+COLLECTION_STORAGE_EXACT = {
+    "proxdmr_active_hotspot_id",
+    "proxdmr_my_contacts_tree",
+    "proxdmr_contacts_gw",
+    "proxdmr_ysf_bookmarks",
+}
+
+
+def is_excluded_from_storage_dump(key: str) -> bool:
+    if not isinstance(key, str):
+        return True
+    if key in COLLECTION_STORAGE_EXACT:
+        return True
+    if any(key.startswith(p) for p in COLLECTION_STORAGE_PREFIXES):
+        return True
+    if key.startswith("proxdmr_u") and "_quick_mem" in key:
+        return True
+    return False
+
+
+async def replace_collection(user_id: int, category: str, data: dict) -> None:
+    """Replace the entire collection category atomically."""
+    async with aiosqlite.connect(str(DB_FILE)) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute(
+            "DELETE FROM user_collections WHERE user_id = ? AND category = ?",
+            (user_id, category)
+        )
+        now = time.time()
+        for k, v in data.items():
+            value_json = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
+            await db.execute(
+                "INSERT INTO user_collections (user_id, category, key, value_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, category, k, value_json, now)
+            )
+        await db.commit()
+
+
+async def migrate_storage_dump_to_collections(user_id: int, storage_dump: dict) -> bool:
+    """One-time migration: extract collections from legacy storage_dump into user_collections without overwriting newer structured data."""
+    if not storage_dump or not isinstance(storage_dump, dict):
+        return False
+    existing_all = await get_all_collections(user_id)
+    migrated = False
+    buckets = {
+        "pinned_servers": {},
+        "srv_sort_prefs": {},
+        "asl_mem": {},
+        "ysf_matrix": {},
+        "asl_quick_nodes": {},
+        "asl_default_nodes": {},
+        "ysf_scan_cfg": {},
+        "ysf_dice_cfg": {},
+        "adn_dice_cfg": {},
+        "asl_scan_cfg": {},
+        "asl_dice_cfg": {},
+        "ysf_dash_auto": {},
+        "asl_dash_auto": {},
+    }
+    json_prefixes = (
+        ("pinnedServers_", "pinned_servers"),
+        ("proxdmr_ysf_matrix_", "ysf_matrix"),
+        ("proxdmr_asl_quick_nodes_", "asl_quick_nodes"),
+        ("proxdmr_asl_default_nodes_", "asl_default_nodes"),
+        ("proxdmr_ysf_scan_cfg_", "ysf_scan_cfg"),
+        ("proxdmr_ysf_dice_cfg_", "ysf_dice_cfg"),
+        ("proxdmr_adn_dice_cfg_", "adn_dice_cfg"),
+        ("proxdmr_asl_scan_cfg_", "asl_scan_cfg"),
+        ("proxdmr_asl_dice_cfg_", "asl_dice_cfg"),
+    )
+    str_prefixes = (
+        ("proxdmr_asl_mem_", "asl_mem"),
+        ("proxdmr_ysf_dash_auto_", "ysf_dash_auto"),
+        ("proxdmr_asl_dash_auto_", "asl_dash_auto"),
+    )
+    for k, v in list(storage_dump.items()):
+        if not isinstance(k, str):
+            continue
+        if k.startswith("srvSortMode_") or k.startswith("srvSortDir_"):
+            buckets["srv_sort_prefs"][k] = v
+            migrated = True
+            continue
+        matched = False
+        for pref, cat in json_prefixes:
+            if k.startswith(pref):
+                sub_k = k[len(pref):]
+                try:
+                    buckets[cat][sub_k] = json.loads(v) if isinstance(v, str) else v
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                migrated = True
+                matched = True
+                break
+        if matched:
+            continue
+        for pref, cat in str_prefixes:
+            if k.startswith(pref):
+                sub_k = k[len(pref):]
+                buckets[cat][sub_k] = str(v)
+                migrated = True
+                break
+
+    for cat, payload in buckets.items():
+        if not payload:
+            continue
+        existing_cat = existing_all.get(cat, {})
+        for sub_k, sub_v in payload.items():
+            if sub_k not in existing_cat:
+                await set_collection_key(user_id, cat, sub_k, sub_v)
+    return migrated
+
+
+async def migrate_user_settings_collections(user_id: int, settings_dict: dict) -> bool:
+    """One-time migration of quick_mem and contacts from root user_settings into user_collections."""
+    if not isinstance(settings_dict, dict):
+        return False
+    existing_meta = await get_collection(user_id, "sys_meta")
+    if existing_meta.get("collections_migrated_v2"):
+        return False
+
+    migrated = False
+    existing_qm = await get_collection(user_id, "quick_mem")
+    raw_qm = settings_dict.get("quick_mem")
+    if not existing_qm and isinstance(raw_qm, dict) and raw_qm:
+        await replace_collection(user_id, "quick_mem", raw_qm)
+        migrated = True
+
+    existing_contacts = await get_collection(user_id, "contacts")
+    raw_contacts = settings_dict.get("contacts")
+    raw_gw = settings_dict.get("contacts_gateway")
+    if "tree" not in existing_contacts and isinstance(raw_contacts, list) and raw_contacts:
+        await set_collection_key(user_id, "contacts", "tree", raw_contacts)
+        migrated = True
+    if "gateway" not in existing_contacts and isinstance(raw_gw, dict) and raw_gw:
+        await set_collection_key(user_id, "contacts", "gateway", raw_gw)
+        migrated = True
+
+    await set_collection_key(user_id, "sys_meta", "collections_migrated_v2", True)
+    return migrated
+
+
 async def load_user_settings(user_id: int) -> dict:
     """Load user settings JSON. Returns default settings if not found or empty."""
     async with aiosqlite.connect(str(DB_FILE)) as db:
@@ -412,6 +678,30 @@ async def load_user_settings(user_id: int) -> dict:
                         user_row = await user_cursor.fetchone()
                         login = user_row[0] if user_row else ""
                         data["client_settings"] = get_default_settings(login)["client_settings"]
+                    cs = data.get("client_settings")
+                    needs_db_save = False
+                    if isinstance(cs, dict):
+                        sd = cs.get("storage_dump")
+                        if isinstance(sd, dict):
+                            stale_keys = [k for k in sd.keys() if is_excluded_from_storage_dump(k)]
+                            if stale_keys:
+                                await migrate_storage_dump_to_collections(user_id, sd)
+                                for k in stale_keys:
+                                    sd.pop(k, None)
+                                data["client_settings"]["storage_dump"] = sd
+                                needs_db_save = True
+                                logger.info(f"[DB] Cleaned {len(stale_keys)} collection/transient keys from storage_dump for user {user_id}")
+
+                    await migrate_user_settings_collections(user_id, data)
+
+                    if needs_db_save:
+                        settings_json = json.dumps(data, ensure_ascii=False)
+                        await db.execute(
+                            """UPDATE user_settings SET settings_json = ?, updated_at = ?
+                               WHERE user_id = ?""",
+                            (settings_json, time.time(), user_id)
+                        )
+                        await db.commit()
                     return data
             except (json.JSONDecodeError, TypeError):
                 pass

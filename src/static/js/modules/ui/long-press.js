@@ -1,4 +1,4 @@
-  import { triggerHaptic } from '../core/haptic.js';
+  import { triggerHaptic } from '../core/haptic.js?v=2.9.711';
 
   // --- Long Press & Visual Feedback Subsystem ---
   export function showLongPressEffect(x, y) {

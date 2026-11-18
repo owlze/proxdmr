@@ -22,7 +22,7 @@
   ];
 
   // Cache-busting version — bump when locales JSON changes
-  const LOCALES_VER = "2.9.628";
+  const LOCALES_VER = "2.9.755";
   const LOCALES_BASE = "/static/locales/";
   const FALLBACK_LANG = "en";
 
@@ -45,9 +45,26 @@
         const saved = localStorage.getItem("proxdmr_language");
         if (saved && this.supportedLanguages.some(l => l.code === saved)) return saved;
       } catch(e) {}
+      try {
+        const m = document.cookie.match(/(?:^|;\s*)proxdmr_lang=([a-z]{2})/i);
+        if (m && this.supportedLanguages.some(l => l.code === m[1].toLowerCase())) {
+          return m[1].toLowerCase();
+        }
+      } catch(e) {}
       const nav = (navigator.language || navigator.userLanguage || "").slice(0, 2).toLowerCase();
       if (this.supportedLanguages.some(l => l.code === nav)) return nav;
       return "ru";
+    }
+
+    _syncDomAndCookie(langCode) {
+      try {
+        if (document && document.documentElement) {
+          document.documentElement.lang = langCode;
+        }
+      } catch(_) {}
+      try {
+        document.cookie = `proxdmr_lang=${encodeURIComponent(langCode)}; path=/; max-age=31536000; SameSite=Lax`;
+      } catch(_) {}
     }
 
     // ── Fetch single language JSON ────────────────────────────────────────────
@@ -81,6 +98,7 @@
 
     // ── Init: load current language + fallback in parallel ───────────────────
     async init() {
+      this._syncDomAndCookie(this.currentLang);
       const toLoad = [this._fetchLang(this.currentLang)];
       if (this.currentLang !== FALLBACK_LANG) toLoad.push(this._fetchLang(FALLBACK_LANG));
       await Promise.all(toLoad);
@@ -103,10 +121,23 @@
       let str = dict[key] ?? fallDict[key] ?? fallback ?? key;
       if (params && typeof params === "object") {
         for (const [k, v] of Object.entries(params)) {
-          str = str.replace(new RegExp(`\\{${k}\\}`, "g"), v);
+          const valStr = (v === null || v === undefined) ? "" : String(v);
+          str = str.replace(new RegExp(`\\{${k}\\}`, "g"), () => valStr);
         }
       }
       return str;
+    }
+
+    isTranslationOf(key, text) {
+      if (!key || text === null || text === undefined) return false;
+      const needle = String(text).trim();
+      if (!needle) return false;
+      for (const dict of Object.values(this.translations)) {
+        if (dict && dict[key] && String(dict[key]).trim() === needle) {
+          return true;
+        }
+      }
+      return false;
     }
 
     // ── Apply translations to DOM ─────────────────────────────────────────────
@@ -155,6 +186,20 @@
         if (val && val !== key) el.setAttribute("label", val);
       });
 
+      root.querySelectorAll("[data-i18n-alt]").forEach(el => {
+        const key = el.getAttribute("data-i18n-alt");
+        if (!key) return;
+        const val = this.t(key);
+        if (val && val !== key) el.setAttribute("alt", val);
+      });
+
+      root.querySelectorAll("[data-i18n-empty]").forEach(el => {
+        const key = el.getAttribute("data-i18n-empty");
+        if (!key) return;
+        const val = this.t(key);
+        if (val && val !== key) el.setAttribute("data-empty-text", val);
+      });
+
       if (typeof root.querySelectorAll === "function") {
         root.querySelectorAll("template").forEach(tpl => {
           if (tpl.content) this.apply(tpl.content);
@@ -170,6 +215,7 @@
       }
       this.currentLang = langCode;
       try { localStorage.setItem("proxdmr_language", langCode); } catch(e) {}
+      this._syncDomAndCookie(langCode);
 
       await this._fetchLang(langCode);
       this.apply();

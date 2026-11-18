@@ -44,46 +44,51 @@ class ServerTxDsp:
         # Internal multipliers
         self._linear_gain: float = 1.0
 
-        # DSP Filter nodes
+        # DSP Filter nodes (4th-order cascaded Butterworth HPF + 4-band parametric EQ)
         self.hpf_filter = BiquadFilter()
+        self.hpf_filter2 = BiquadFilter()
         self.low_filter = BiquadFilter()
         self.mid_filter = BiquadFilter()
         self.presence_filter = BiquadFilter()
         self.high_filter = BiquadFilter()
 
-        # Dedicated Server AGC instance for microphone audio
+        # Dedicated Server AGC instance for microphone audio (calibrated for TX crest factor)
         self.agc = ServerAudioAgc()
         self.agc.enabled = False
         self.agc.set_profile("standard")
+        self.agc.target_rms = 3200.0
+        self.agc.peak_ceiling = 23500.0
 
         self._update_dsp_nodes()
 
     def _update_dsp_nodes(self) -> None:
         """Update biquad filter coefficients and linear gains."""
         if self.hpf_enabled:
-            # 160 Hz gentle Butterworth low-cut: removes breath pops & <150 Hz rumble
-            # while keeping natural chest voice fundamentals (160-300 Hz) intact
-            self.hpf_filter.setup_highpass(160.0, 0.7071, FS)
+            # 4th-order Butterworth HPF @ 180 Hz (Q1=0.5411961, Q2=1.3065630):
+            # Attenuates <120 Hz proximity boom and plosives by 20-28 dB while keeping >=200 Hz voice warm
+            self.hpf_filter.setup_highpass(180.0, 0.5411961, FS)
+            self.hpf_filter2.setup_highpass(180.0, 1.3065630, FS)
         else:
             self.hpf_filter.active = False
+            self.hpf_filter2.active = False
 
         if abs(self.eq_low) > 0.05:
-            self.low_filter.setup_lowshelf(240.0, self.eq_low, FS)
+            self.low_filter.setup_lowshelf(250.0, self.eq_low, FS)
         else:
             self.low_filter.active = False
 
         if abs(self.eq_mid) > 0.05:
-            self.mid_filter.setup_peaking(1100.0, 1.0, self.eq_mid, FS)
+            self.mid_filter.setup_peaking(1000.0, 0.85, self.eq_mid, FS)
         else:
             self.mid_filter.active = False
 
         if abs(self.presence_boost) > 0.05:
-            self.presence_filter.setup_peaking(2400.0, 1.2, self.presence_boost, FS)
+            self.presence_filter.setup_peaking(2300.0, 1.0, self.presence_boost, FS)
         else:
             self.presence_filter.active = False
 
         if abs(self.eq_high) > 0.05:
-            self.high_filter.setup_highshelf(3200.0, self.eq_high, FS)
+            self.high_filter.setup_highshelf(3000.0, self.eq_high, FS)
         else:
             self.high_filter.active = False
 
@@ -147,6 +152,7 @@ class ServerTxDsp:
     def reset(self) -> None:
         """Reset internal filter states and AGC when starting or ending transmission."""
         self.hpf_filter.reset()
+        self.hpf_filter2.reset()
         self.low_filter.reset()
         self.mid_filter.reset()
         self.presence_filter.reset()
@@ -171,8 +177,8 @@ class ServerTxDsp:
         Process a PCM burst (16-bit signed LE, 8000 Hz).
 
         Chain:
-        HPF 160 Hz -> Low-shelf 240 Hz -> Mid Peaking 1100 Hz -> Presence 2400 Hz
-        -> High-shelf 3200 Hz -> Mic Gain -> C1 Soft Limiter -> TX DSP AGC
+        4th-order HPF 180 Hz -> Low-shelf 250 Hz -> Mid Peaking 1000 Hz -> Presence 2300 Hz
+        -> High-shelf 3000 Hz -> Mic Gain -> Peak-Guarded Float TX AGC -> Final C1 Soft Limiter
         """
         num_samples = len(pcm_bytes) // 2
         if num_samples == 0:
@@ -190,9 +196,11 @@ class ServerTxDsp:
         ):
             return pcm_bytes
 
-        samples = list(struct.unpack(f"<{num_samples}h", pcm_bytes))
+        raw_samples = struct.unpack(f"<{num_samples}h", pcm_bytes)
+        float_samples: list[float] = [0.0] * num_samples
 
-        hpf = self.hpf_filter
+        hpf1 = self.hpf_filter
+        hpf2 = self.hpf_filter2
         low = self.low_filter
         mid = self.mid_filter
         pres = self.presence_filter
@@ -201,25 +209,27 @@ class ServerTxDsp:
         apply_gain = abs(gain - 1.0) > 0.005
 
         for i in range(num_samples):
-            s = float(samples[i])
+            s = float(raw_samples[i])
 
-            # 1. High-Pass Filter (160 Hz)
-            if hpf.active:
-                s = hpf.process_sample(s)
+            # 1. 4th-order Butterworth High-Pass Filter (180 Hz)
+            if hpf1.active:
+                s = hpf1.process_sample(s)
+            if hpf2.active:
+                s = hpf2.process_sample(s)
 
-            # 2. Low-shelf 240 Hz
+            # 2. Low-shelf 250 Hz
             if low.active:
                 s = low.process_sample(s)
 
-            # 3. Mid Peaking 1100 Hz
+            # 3. Mid Peaking 1000 Hz (Q=0.85)
             if mid.active:
                 s = mid.process_sample(s)
 
-            # 4. Presence Peaking 2400 Hz
+            # 4. Presence Peaking 2300 Hz (Q=1.0)
             if pres.active:
                 s = pres.process_sample(s)
 
-            # 5. High-shelf 3200 Hz
+            # 5. High-shelf 3000 Hz
             if high.active:
                 s = high.process_sample(s)
 
@@ -227,7 +237,16 @@ class ServerTxDsp:
             if apply_gain:
                 s *= gain
 
-            # 7. C1-continuous Soft Limiter (smooth tanh knee starting at 24576)
+            float_samples[i] = s
+
+        # 7. Peak-Guarded Float TX AGC BEFORE final soft limiter
+        if self.dsp_agc_enabled:
+            self.agc.process_float_samples(float_samples, slot=1, apply_soft_clip=False)
+
+        # 8. Single Final C1-continuous Soft Limiter (smooth tanh knee starting at 24576)
+        out_samples: list[int] = [0] * num_samples
+        for i in range(num_samples):
+            s = float_samples[i]
             if s > TX_SOFT_KNEE:
                 over = s - TX_SOFT_KNEE
                 s = TX_SOFT_KNEE + TX_SOFT_HEADROOM * math.tanh(over / TX_SOFT_HEADROOM)
@@ -240,12 +259,6 @@ class ServerTxDsp:
             elif s < INT16_MIN:
                 s = INT16_MIN
 
-            samples[i] = int(s)
+            out_samples[i] = int(s)
 
-        out_pcm = struct.pack(f"<{num_samples}h", *samples)
-
-        # 8. TX AGC (automatic leveling with pause freeze)
-        if self.dsp_agc_enabled:
-            out_pcm = self.agc.process_burst(out_pcm, slot=1)
-
-        return out_pcm
+        return struct.pack(f"<{num_samples}h", *out_samples)

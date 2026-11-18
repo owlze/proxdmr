@@ -4,12 +4,11 @@
  * hotspot switching, BrandMeister master server dropdowns, and hotspot settings forms.
  */
 
-import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName, getCountryInfo, getFlagBadgeHtml, getCleanTgDesc } from '../core/formatters.js?v=2.9.380';
-import { initGridDragReorder } from '../ui/grid-drag-reorder.js?v=2.9.469';
-import { showToast } from '../core/toast.js';
+import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName, getCountryInfo, getFlagBadgeHtml, getCleanTgDesc, getHotspotNetworkType } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
-import { openBmBenchmarkModal } from './bm-benchmark.js';
-import { openBmTgStaticModal, dropDynamicTGs } from './bm-static-manager.js?v=2.9.372';
+import { openBmBenchmarkModal } from './bm-benchmark.js?v=2.9.741';
+import { openBmTgStaticModal, dropDynamicTGs } from './bm-static-manager.js?v=2.9.739';
 import {
   cycleHotspotPan,
   toggleHotspotMute,
@@ -20,7 +19,7 @@ import {
   updateCardTsAudioModeUI,
   updateCardRecUI,
   updateAllHotspotRecUI
-} from '../audio/routing.js';
+} from '../audio/routing.js?v=2.9.729';
 import {
   setupSlotLongPress,
   setupSlotTranscribeClick,
@@ -32,9 +31,10 @@ import {
   syncCardSlotTranscribeUI,
   syncAllTranscribeSlotsToServer,
   disableHotspotTranscribe,
+  setupCaptionBoxLongPress,
   ensureCaptionFontControls,
   setupCaptionBoxPinchZoom
-} from './transcriber.js?v=2.9.628';
+} from './transcriber.js?v=2.9.729';
 import {
   startTransmission,
   stopTransmission,
@@ -46,11 +46,17 @@ import {
   getHotspotPttMode,
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
-} from '../ptt/engine.js?v=2.9.628';
-import { wireCardStatusInteractions, renderHotspotAuxStatusBadge, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js';
-import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.590';
-import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.367';
-import { showLongPressEffect } from '../ui/long-press.js';
+} from '../ptt/engine.js?v=2.9.733';
+import { wireCardStatusInteractions, renderHotspotAuxStatusBadge, checkBmApiStatus, updateHotspotGwStatus, triggerHotspotGwAction, isHotspotGwDisconnected } from '../network/watchdog.js?v=2.9.712';
+
+const isYsfOnlineStatus = (status) => {
+  const u = String(status || "").trim().toUpperCase();
+  return Boolean(u && u !== "STANDBY" && u !== "DISCONNECTED" && u !== "OFFLINE" && u !== "ERROR" && u !== "AUTH_FAILED");
+};
+import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.737';
+import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.737';
+import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.711';
+import { showLongPressEffect } from '../ui/long-press.js?v=2.9.711';
 
 // Accessors for app functions and state
 const resolveHotspotId = (id) => (window.resolveHotspotId ? window.resolveHotspotId(id) : id);
@@ -99,6 +105,50 @@ const isApkClient = () => (window.isApkClient ? window.isApkClient() : false);
 const isHotspotFullyOnline = (h) => (window.isHotspotFullyOnline ? window.isHotspotFullyOnline(h) : false);
 const initQuickAssign = () => { if (window.initQuickAssign) window.initQuickAssign(); };
 const t = (key, fallback) => (window.t ? window.t(key, fallback) : (fallback || key));
+
+export const DEFAULT_NETWORK_BRAND_COLORS = {
+  bm: { dark: "#c45c2e", light: "#ea580c" },
+  tgif: { dark: "#22d3ee", light: "#0891b2" },
+  freedmr: { dark: "#34d399", light: "#059669" },
+  adn: { dark: "#00b4d8", light: "#0077b6" },
+  ysf: { dark: "#c084fc", light: "#7c3aed" },
+  dmrplus: { dark: "#c4b5fd", light: "#7c3aed" },
+  xlx: { dark: "#fbbf24", light: "#d97706" },
+  allstar: { dark: "#e2e8f0", light: "#0284c7" },
+  custom: { dark: "#cbd5e1", light: "#475569" }
+};
+
+export function getNetworkBrandColor(netType, theme = "dark") {
+  const clean = (netType || "bm").toLowerCase();
+  const customColors = window.__networkBrandColors || {};
+  if (customColors[clean] && customColors[clean][theme]) {
+    return customColors[clean][theme];
+  }
+  const def = DEFAULT_NETWORK_BRAND_COLORS[clean] || DEFAULT_NETWORK_BRAND_COLORS.custom;
+  return def[theme] || def.dark;
+}
+
+export function isNetworkColorEnabled() {
+  return window.__enableNetworkColors !== false;
+}
+
+export function applyCardBrandColors(card, netType) {
+  if (!card) return;
+  const isEnabled = isNetworkColorEnabled();
+  card.classList.toggle("is-neutral-gray", !isEnabled);
+  if (!isEnabled) {
+    card.style.removeProperty("--card-net-accent");
+    card.style.removeProperty("--card-net-border-solid");
+    card.style.removeProperty("--card-net-glow");
+    return;
+  }
+  const isLight = document.documentElement.getAttribute("data-theme") === "light" || document.body.getAttribute("data-theme") === "light";
+  const theme = isLight ? "light" : "dark";
+  const accent = getNetworkBrandColor(netType, theme);
+  card.style.setProperty("--card-net-accent", accent);
+  card.style.setProperty("--card-net-border-solid", accent);
+  card.style.setProperty("--card-net-glow", `${accent}33`);
+}
 
 // State
 export let bmMastersList = window.bmMastersList || [];
@@ -160,11 +210,34 @@ export async function loadHotspots() {
     try {
       const res = await fetch("/api/hotspots");
       const data = await res.json();
-      const rawHotspots = data.hotspots || [];
+      const prevById = new Map((Array.isArray(currentHotspots) ? currentHotspots : []).map(h => [String(h.id), h]));
+      const rawHotspots = (data.hotspots || []).map(h => {
+        const prev = prevById.get(String(h.id));
+        if (prev) {
+          if (prev._aslCarrierRx !== undefined && (!h.ts1 || !h.ts1.active)) {
+            h._aslCarrierRx = prev._aslCarrierRx;
+            h._aslLastRxAudioMs = prev._aslLastRxAudioMs;
+            h._aslRxActiveNode = prev._aslRxActiveNode;
+            h._aslKeyedNodes = prev._aslKeyedNodes;
+          }
+          if (prev._ysfCarrierRx !== undefined && (!h.ts1 || !h.ts1.active)) {
+            h._ysfCarrierRx = prev._ysfCarrierRx;
+            h._ysfRxActiveRoom = prev._ysfRxActiveRoom;
+            h._ysfLastRxDgId = prev._ysfLastRxDgId;
+            h._ysfLastRxCaller = prev._ysfLastRxCaller;
+            h._ysfLastRxAudioMs = prev._ysfLastRxAudioMs;
+          }
+        }
+        return h;
+      });
       setCurrentHotspots(rawHotspots);
       _hotspotsLoadedOnce = true;
       const curHs = currentHotspots;
-      const targetActive = data.active_hotspot_id || (curHs[0] && curHs[0].id) || "default";
+      const firstVisibleHs = curHs.find(h => !h.hidden) || curHs[0] || null;
+      const rawTargetActive = data.active_hotspot_id;
+      const targetActive = (rawTargetActive && curHs.some(h => h.id === rawTargetActive && !h.hidden))
+        ? rawTargetActive
+        : ((firstVisibleHs && firstVisibleHs.id) || "default");
       setActiveHotspotId(targetActive);
 
       curHs.forEach(hs => {
@@ -176,65 +249,46 @@ export async function loadHotspots() {
         }
       });
 
-      // Restore last combination of open/collapsed hotspots from localStorage
-      curHs.forEach((hs, idx) => {
+      // Сервер (hs.collapsed) — эталон, с сохранением клиентского live-collapsed состояния пока сервер держит хотспот активным
+      let visibleOrderIdx = 0;
+      curHs.forEach((hs) => {
         const cid = resolveHotspotId(hs.id);
-        const saved = localStorage.getItem(`proxdmr_collapsed_${cid}`);
-        let isCollapsed;
-        if (saved !== null) {
-          isCollapsed = (saved === "true");
-        } else if (typeof hs.collapsed === "boolean") {
-          isCollapsed = hs.collapsed;
-        } else {
-          // If never set before (clean initial run), default 1st open, others collapsed
-          isCollapsed = (idx > 0);
-        }
+        const vIdx = !hs.hidden ? visibleOrderIdx++ : -1;
+        const serverCollapsed = (typeof hs.collapsed === "boolean") ? hs.collapsed : (vIdx > 0);
+        const isLive = !hs.hidden && !serverCollapsed && isHotspotLiveCollapsed(cid);
+        const isCollapsed = serverCollapsed || isLive;
         try {
           localStorage.setItem(`proxdmr_collapsed_${cid}`, isCollapsed ? "true" : "false");
+          if (hs.hidden || serverCollapsed) {
+            localStorage.setItem(`proxdmr_live_collapsed_${cid}`, "false");
+          }
         } catch (_) {}
 
-        const isLive = isHotspotLiveCollapsed(cid);
+        hs.collapsed = isCollapsed;
+        hs.isLiveCollapsed = Boolean(isCollapsed && isLive);
         if (isCollapsed && !isLive) {
-          hs.collapsed = true;
-          hs.isLiveCollapsed = false;
-          if (hs.status !== "DISCONNECTED" && hs.status !== "OFFLINE") {
-            fetch(`/api/hotspots/${hs.id}/collapse`, { method: "POST" }).catch(() => {});
-          }
           hs.status = "DISCONNECTED";
-          hs.detail = "Свернут / отключен";
-        } else if (isCollapsed && isLive) {
-          hs.collapsed = true;
-          hs.isLiveCollapsed = true;
-          // Keep live! Do not collapse backend, expand instead to ensure backend is running!
-          fetch(`/api/hotspots/${hs.id}/expand`, { method: "POST" }).catch(() => {});
-        } else {
-          hs.collapsed = false;
-          hs.isLiveCollapsed = false;
-          fetch(`/api/hotspots/${hs.id}/expand`, { method: "POST" }).catch(() => {});
+          hs.detail = window.t ? window.t("status.bm_collapsed_detail", {}, "Collapsed / disconnected") : "Collapsed / disconnected";
         }
       });
 
-      // Restore active hotspot from localStorage or pick the first open hotspot
-      let activeCandidate = null;
-      try {
-        activeCandidate = localStorage.getItem("proxdmr_active_hotspot_id");
-      } catch (_) {}
-
-      if (activeCandidate && curHs.some(h => h.id === activeCandidate && (!isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id)))) {
-        setActiveHotspotId(activeCandidate);
-      } else if (isHotspotCollapsed(activeHotspotId) && !isHotspotLiveCollapsed(activeHotspotId)) {
-        const firstOpen = curHs.find(h => !isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id));
+      if (targetActive && curHs.some(h => h.id === targetActive && !h.hidden && (!isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id)))) {
+        setActiveHotspotId(targetActive);
+      } else if (!curHs.some(h => h.id === activeHotspotId && !h.hidden) || (isHotspotCollapsed(activeHotspotId) && !isHotspotLiveCollapsed(activeHotspotId))) {
+        const firstOpen = curHs.find(h => !h.hidden && (!isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id)));
         if (firstOpen) {
           setActiveHotspotId(firstOpen.id);
-        } else if (curHs[0]) {
-          setActiveHotspotId(curHs[0].id);
+        } else if (firstVisibleHs) {
+          setActiveHotspotId(firstVisibleHs.id);
         }
       }
+      try { localStorage.setItem("proxdmr_active_hotspot_id", activeHotspotId); } catch (_) {}
 
       renderHotspotSelect();
       renderHotspotsList();
       renderRadiosGrid();
       applyActiveHotspotToUI();
+      renderToolbarHotspotSlots();
       if (typeof window !== "undefined") {
         if (typeof window.syncActiveAudioRxPreset === "function") {
           try { window.syncActiveAudioRxPreset(activeHotspotId); } catch (_) {}
@@ -286,7 +340,9 @@ export function renderHotspotSelect() {
       const isLive = isHotspotLiveCollapsed(hs.id);
       const isOnline = (!isCollapsed || isLive) && hs.status === "ONLINE";
       const statusIcon = isOnline ? "🟢" : "⚪";
-      const suffix = isCollapsed ? (isLive ? " (в фоне)" : " (свернут)") : "";
+      const bgSuffix = window.t ? window.t("hotspots.suffix_collapsed_bg", {}, " (in background)") : " (in background)";
+      const colSuffix = window.t ? window.t("hotspots.suffix_collapsed", {}, " (collapsed)") : " (collapsed)";
+      const suffix = isCollapsed ? (isLive ? bgSuffix : colSuffix) : "";
       opt.textContent = `${statusIcon} ${hs.name} (${hs.effective_id || hs.dmr_id})${suffix}`;
       if (hs.id === activeHotspotId) opt.selected = true;
       headerHotspotSelect.appendChild(opt);
@@ -308,7 +364,8 @@ export function switchActiveHotspot(newId) {
     const curHs = (typeof window !== "undefined" && window.currentHotspots) || [];
     const targetHs = curHs.find(h => h.id === newId);
     if (targetHs) {
-      const isXlx = ((targetHs.network_type || "").toLowerCase() === "xlx");
+      const targetNet = (targetHs.network_type || "").toLowerCase();
+      const isXlx = (targetNet === "xlx");
       const t1 = targetHs.default_tg_ts1 || 91;
       const t2 = isXlx ? 9 : (targetHs.default_tg_ts2 || 2501);
       if (typeof window !== "undefined") {
@@ -354,9 +411,10 @@ export function triggerAddNewHotspot() {
     const callsignDisplay = document.getElementById("callsignDisplay");
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
     if (currentHotspots.length >= 30) {
-      const msg30 = window.t ? window.t("hotspots.limit_reached_30", {}, "Максимальное общее количество виртуальных хотспотов — 30 штук.") : "Максимальное общее количество виртуальных хотспотов — 30 штук.";
+      const msg30 = window.t ? window.t("hotspots.limit_reached_30", {}, "Maximum total number of virtual hotspots is 30.") : "Maximum total number of virtual hotspots is 30.";
       if (window.showAppAlert) {
-        window.showAppAlert(msg30, { title: "Лимит хотспотов", icon: "⚠️" });
+        const limTitle = window.t ? window.t("hotspots.limit_title", {}, "Hotspot Limit") : "Hotspot Limit";
+        window.showAppAlert(msg30, { title: limTitle, icon: "⚠️" });
       } else {
         alert(msg30);
       }
@@ -390,7 +448,7 @@ export function triggerAddNewHotspot() {
     const baseHs = currentHotspots[0] || {};
     openEditHotspotForm({
       id: "",
-      name: `Хотспот #${nextNum}`,
+      name: window.t ? window.t("hotspots.name_prefix", { num: nextNum }, `Hotspot #${nextNum}`) : `Hotspot #${nextNum}`,
       callsign: baseHs.callsign || (callsignDisplay && callsignDisplay.textContent !== "N0CALL" ? callsignDisplay.textContent : ""),
       talker_alias: "",
       send_talker_alias: true,
@@ -609,9 +667,17 @@ function setupCollapseButtonLongPress(btn, cid) {
     startX = coords.x;
     startY = coords.y;
 
-    const isCollapsed = isHotspotCollapsed(cid);
+    const card = btn.closest(".radio-container");
+    const rawCid = cid || (card && card.dataset.hotspotId) || (card && card.id === "radioContainer" ? "default" : null);
+    const resolvedCid = typeof resolveHotspotId === "function" ? resolveHotspotId(rawCid) : rawCid;
+    const isCollapsed = Boolean(
+      (card && card.classList.contains("collapsed")) ||
+      (typeof isHotspotCollapsed === "function" && (isHotspotCollapsed(resolvedCid) || isHotspotCollapsed(rawCid))) ||
+      (typeof window.isHotspotCollapsed === "function" && (window.isHotspotCollapsed(resolvedCid) || window.isHotspotCollapsed(rawCid)))
+    );
+
     if (isCollapsed) {
-      // Длинное удержание на стрелке свернутого хотспота: отправка в архив (hidden: true) с подтверждением
+      // Длинное удержание на свёрнутом хотспоте: отправка в архив (hidden: true) — равноправно для любого хотспота, включая №1
       timer = setTimeout(async () => {
         timer = null;
         didLongPress = true;
@@ -623,17 +689,26 @@ function setupCollapseButtonLongPress(btn, cid) {
           }
         } catch (_) {}
 
-        const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
-        const existing = currentHotspots.find(h => (typeof resolveHotspotId === "function" ? resolveHotspotId(h.id) === resolveHotspotId(cid) : h.id === cid) || h.id === cid);
-        if (!existing) return;
+        const currentHotspots = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || [])) || [];
+        const existingIndex = currentHotspots.findIndex(h =>
+          (typeof resolveHotspotId === "function" ? resolveHotspotId(h.id) === resolvedCid : h.id === resolvedCid) ||
+          h.id === rawCid ||
+          h.id === resolvedCid
+        );
+        const existing = existingIndex >= 0 ? currentHotspots[existingIndex] : null;
 
-        const hsName = existing.name || existing.callsign || "Хотспот";
-        const titleText = window.t ? window.t("hotspots.archive_confirm_title", {}, "Отправка в архив") : "Отправка в архив";
+        if (!existing) {
+          console.warn("[HOTSPOTS] Target hotspot not found to disable:", resolvedCid);
+          return;
+        }
+
+        const hsName = existing.name || existing.callsign || (window.t ? window.t("hotspots.name_prefix", { num: existingIndex + 1 }, `Hotspot #${existingIndex + 1}`) : `Hotspot #${existingIndex + 1}`);
+        const titleText = window.t ? window.t("hotspots.archive_confirm_title", {}, "Archive hotspot") : "Archive hotspot";
         const confirmMsg = window.t
-          ? window.t("hotspots.archive_confirm_msg", { name: hsName }, `Вы уверены, что хотите отправить хотспот «${hsName}» в архив?`)
-          : `Вы уверены, что хотите отправить хотспот «${hsName}» в архив?`;
-        const confirmBtnText = window.t ? window.t("hotspots.btn_to_archive", {}, "В архив") : "В архив";
-        const cancelBtnText = window.t ? window.t("buttons.cancel", {}, "Отмена") : "Отмена";
+          ? window.t("hotspots.archive_confirm_msg", { name: hsName }, `Are you sure you want to archive hotspot "${hsName}"?`)
+          : `Are you sure you want to archive hotspot "${hsName}"?`;
+        const confirmBtnText = window.t ? window.t("hotspots.btn_to_archive", {}, "Archive") : "Archive";
+        const cancelBtnText = window.t ? window.t("buttons.cancel", {}, "Cancel") : "Cancel";
 
         const confirmed = typeof window.showAppConfirm === "function"
           ? await window.showAppConfirm({
@@ -644,13 +719,12 @@ function setupCollapseButtonLongPress(btn, cid) {
               cancelText: cancelBtnText,
               confirmStyle: "primary"
             })
-          : true;
+          : (typeof confirm === "function" ? confirm(confirmMsg) : true);
 
         if (!confirmed) {
           return;
         }
 
-        const card = btn.closest(".radio-container");
         if (card) {
           card.style.transition = "opacity 0.25s ease, transform 0.25s ease";
           card.style.opacity = "0.35";
@@ -658,6 +732,34 @@ function setupCollapseButtonLongPress(btn, cid) {
         }
 
         try {
+          if (typeof disableHotspotTranscribe === "function") {
+            disableHotspotTranscribe(existing.id, true);
+          }
+          if (typeof setHotspotAudioMute === "function") {
+            setHotspotAudioMute(existing.id, true);
+          }
+          const ap = typeof getAudioPlayer === "function" ? getAudioPlayer() : (window.audioPlayer || null);
+          if (ap && ap.resetHotspot) {
+            ap.resetHotspot(existing.id);
+          }
+
+          const preArchiveActiveId = typeof getActiveHotspotId === "function"
+            ? getActiveHotspotId()
+            : (typeof window !== "undefined" ? window.activeHotspotId : null);
+          if (typeof window !== "undefined" && typeof window.closeLogIfOpenForHotspot === "function") {
+            window.closeLogIfOpenForHotspot(existing.id, {
+              previousActiveHotspotId: preArchiveActiveId,
+              skipRefreshIfKeptOpen: true
+            });
+          }
+
+          if (preArchiveActiveId === existing.id) {
+            const nextOpen = (currentHotspots || []).find(h => !h.hidden && h.id !== existing.id);
+            if (nextOpen && typeof switchActiveHotspot === "function") {
+              switchActiveHotspot(nextOpen.id);
+            }
+          }
+
           const resp = await fetch(`/api/hotspots/${encodeURIComponent(existing.id)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -668,23 +770,26 @@ function setupCollapseButtonLongPress(btn, cid) {
             throw new Error(errData.detail || resp.statusText);
           }
           existing.hidden = true;
-          const msg = window.t
+
+          const archivedMsg = (typeof window.t === "function")
             ? window.t("hotspots.hs_archived_toast", { name: hsName }, `Хотспот «${hsName}» отправлен в архив`)
             : `Хотспот «${hsName}» отправлен в архив`;
           if (typeof showToast === "function") {
-            showToast(msg, "info", 3000);
+            showToast(archivedMsg, "info", 3000);
           }
+
           if (typeof loadHotspots === "function") {
             await loadHotspots();
           }
         } catch (err) {
-          console.error("[HOTSPOTS] Failed to exclude collapsed hotspot on long-press:", err);
+          console.error("[HOTSPOTS] Failed to turn off collapsed hotspot on long-press:", err);
           if (card) {
             card.style.opacity = "";
             card.style.transform = "";
           }
           if (typeof showToast === "function") {
-            showToast(err.message || "Ошибка отправки в архив", "error", 4000);
+            const turnOffErr = window.t ? window.t("hotspots.turn_off_err", {}, "Error turning off hotspot") : "Error turning off hotspot";
+            showToast(err.message || turnOffErr, "error", 4000);
           }
         }
       }, 500);
@@ -704,9 +809,9 @@ function setupCollapseButtonLongPress(btn, cid) {
 
       // Trigger LIVE COLLAPSE (keep running in background, keep audio, keep log)
       if (typeof window.collapseHotspot === "function") {
-        window.collapseHotspot(cid, { isLive: true });
-      } else {
-        collapseHotspot(cid, { isLive: true });
+        window.collapseHotspot(resolvedCid || cid, { isLive: true });
+      } else if (typeof collapseHotspot === "function") {
+        collapseHotspot(resolvedCid || cid, { isLive: true });
       }
     }, 450);
   });
@@ -716,7 +821,7 @@ function setupCollapseButtonLongPress(btn, cid) {
     const coords = getCoords(e);
     const dx = Math.abs(coords.x - startX);
     const dy = Math.abs(coords.y - startY);
-    if (dx > 12 || dy > 12) {
+    if (dx > 20 || dy > 20) {
       cancelTimer();
     }
   });
@@ -743,27 +848,39 @@ function setupCollapseButtonLongPress(btn, cid) {
       didLongPress = false;
       return;
     }
-    const lastAction = (typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[cid] || window._lastHotspotCollapseActionTimes["default"])) || 0;
+    const card = btn.closest(".radio-container");
+    const rawCid = cid || (card && card.dataset.hotspotId) || (card && card.id === "radioContainer" ? "default" : null);
+    const resolvedCid = typeof resolveHotspotId === "function" ? resolveHotspotId(rawCid) : rawCid;
+    const isDefAlias = (typeof window !== "undefined" && typeof window.isPrimaryDefaultAlias === "function")
+      ? window.isPrimaryDefaultAlias(resolvedCid)
+      : (resolvedCid === "default");
+
+    const lastAction = (typeof window !== "undefined" && window._lastHotspotCollapseActionTimes && (window._lastHotspotCollapseActionTimes[resolvedCid] || window._lastHotspotCollapseActionTimes[rawCid] || (isDefAlias ? window._lastHotspotCollapseActionTimes["default"] : 0))) || 0;
     if (Date.now() - lastAction < 600) {
       return;
     }
-    const targetHsForCol = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => resolveHotspotId(h.id) === cid || h.id === cid);
+    const curHotspots = typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || []);
+    const targetHsForCol = curHotspots.find(h => (typeof resolveHotspotId === "function" ? resolveHotspotId(h.id) === resolvedCid : h.id === resolvedCid) || h.id === rawCid);
     if (targetHsForCol && targetHsForCol._aslDynamicMatrixMode) {
       targetHsForCol._aslDynamicMatrixMode = false;
       targetHsForCol._aslDismissedUnlisted = new Set((targetHsForCol.asl_unlisted_links || []).map(l => String(l.node).trim()));
     }
-    const isCollapsed = isHotspotCollapsed(cid);
+    const isCollapsed = Boolean(
+      (card && card.classList.contains("collapsed")) ||
+      (typeof isHotspotCollapsed === "function" && (isHotspotCollapsed(resolvedCid) || isHotspotCollapsed(rawCid))) ||
+      (typeof window.isHotspotCollapsed === "function" && (window.isHotspotCollapsed(resolvedCid) || window.isHotspotCollapsed(rawCid)))
+    );
     if (isCollapsed) {
       if (typeof window.expandHotspot === "function") {
-        window.expandHotspot(cid);
-      } else {
-        expandHotspot(cid);
+        window.expandHotspot(resolvedCid || rawCid);
+      } else if (typeof expandHotspot === "function") {
+        expandHotspot(resolvedCid || rawCid);
       }
     } else {
       if (typeof window.collapseHotspot === "function") {
-        window.collapseHotspot(cid, { isLive: false });
-      } else {
-        toggleHotspotCollapse(cid);
+        window.collapseHotspot(resolvedCid || rawCid, { isLive: false });
+      } else if (typeof toggleHotspotCollapse === "function") {
+        toggleHotspotCollapse(resolvedCid || rawCid);
       }
     }
   });
@@ -772,6 +889,266 @@ function setupCollapseButtonLongPress(btn, cid) {
     e.preventDefault();
     e.stopPropagation();
   });
+}
+
+let _pcHotspotAlignRaf = 0;
+let _isSyncingPcHotspotAlign = false;
+const _observedPcAlignTargets = typeof WeakSet === "function" ? new WeakSet() : null;
+
+function resolveDesktopLogOwnerCardInGrid(radiosGrid) {
+  if (!radiosGrid) return null;
+  const effectiveHid = (!window.currentLogHotspotId || window.currentLogHotspotId === "all")
+    ? (window.activeHotspotId || ((window.currentHotspots || []).find(h => !h.hidden) || {}).id || "default")
+    : window.currentLogHotspotId;
+
+  if (effectiveHid && effectiveHid !== "all") {
+    const resolvedId = resolveHotspotId(effectiveHid);
+    const direct =
+      radiosGrid.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]:not(.collapsed)`) ||
+      (resolvedId && resolvedId !== effectiveHid
+        ? radiosGrid.querySelector(`.radio-container[data-hotspot-id="${resolvedId}"]:not(.collapsed)`)
+        : null);
+    if (direct) return direct;
+  }
+  return radiosGrid.querySelector(".radio-container:not(.collapsed)") || null;
+}
+
+function setDesktopLogPanelHeightPx(logPanel, px) {
+  if (!logPanel || !(px > 100)) return;
+  const roundedH = `${Math.round(px)}px`;
+  if (logPanel.style.height !== roundedH) {
+    logPanel.style.setProperty("--desktop-log-height", roundedH);
+    logPanel.style.height = roundedH;
+    logPanel.style.maxHeight = roundedH;
+  }
+}
+
+export function syncDesktopHotspotsTopAlignment() {
+  if (_isSyncingPcHotspotAlign) return;
+  const radiosGrid = document.getElementById("radiosGrid");
+  if (!radiosGrid) return;
+
+  _isSyncingPcHotspotAlign = true;
+  try {
+    radiosGrid.querySelectorAll(".radio-container, .live-monitor-container").forEach((el) => {
+      el.classList.remove("is-pc-top-row-lifted", "is-pc-col-lifted");
+      el.style.removeProperty("--pc-toolbar-lift");
+      el.style.removeProperty("--pc-col-lift");
+    });
+
+    if (typeof window === "undefined" || window.innerWidth <= 768) return;
+
+    const toolbar = document.getElementById("proxdmrTopToolbar");
+    if (!toolbar) return;
+
+    const toolbarRect = toolbar.getBoundingClientRect();
+    if (!toolbarRect || toolbarRect.width <= 0 || toolbarRect.height <= 0) return;
+
+    const visibleItems = Array.from(radiosGrid.children).filter((el) => {
+      if (!el || !el.classList) return false;
+      if (el.classList.contains("radio-container")) {
+        return !el.classList.contains("collapsed");
+      }
+      if (el.id === "liveMonitorPanel" || el.classList.contains("live-monitor-container")) {
+        return !el.classList.contains("hidden");
+      }
+      return false;
+    });
+
+    const logPanel = document.getElementById("liveMonitorPanel");
+    const isHotspotHeightLog = Boolean(
+      logPanel &&
+      !logPanel.classList.contains("hidden") &&
+      logPanel.classList.contains("pc-height-hotspot")
+    );
+    const logOwnerCard = isHotspotHeightLog ? resolveDesktopLogOwnerCardInGrid(radiosGrid) : null;
+
+    if (visibleItems.length < 2) {
+      if (isHotspotHeightLog && logOwnerCard && logPanel.parentElement === radiosGrid) {
+        const ownerH = Math.round(logOwnerCard.getBoundingClientRect().height || logOwnerCard.offsetHeight || 0);
+        setDesktopLogPanelHeightPx(logPanel, ownerH);
+      }
+      return;
+    }
+
+    // Group un-lifted items into natural Flexbox rows
+    const rows = [];
+    for (const item of visibleItems) {
+      const rect = item.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+      const lastRow = rows.length ? rows[rows.length - 1] : null;
+      if (!lastRow || Math.abs(rect.top - lastRow.naturalTop) > 6) {
+        rows.push({ naturalTop: rect.top, entries: [{ el: item, rect }] });
+      } else {
+        lastRow.entries.push({ el: item, rect });
+      }
+    }
+    if (!rows.length) return;
+
+    const colCount = rows[0].entries.length;
+    if (colCount < 2) {
+      // Single-column narrow desktop: restore History card-height match to owner card
+      if (isHotspotHeightLog && logOwnerCard && logPanel.parentElement === radiosGrid) {
+        const ownerH = Math.round(logOwnerCard.getBoundingClientRect().height || logOwnerCard.offsetHeight || 0);
+        setDesktopLogPanelHeightPx(logPanel, ownerH);
+      }
+      return;
+    }
+
+    const gridStyle = (typeof window.getComputedStyle === "function") ? window.getComputedStyle(radiosGrid) : null;
+    const parsedGap = gridStyle ? parseFloat(gridStyle.rowGap || gridStyle.gap || "16") : 16;
+    const rowGap = (!Number.isNaN(parsedGap) && parsedGap >= 0) ? parsedGap : 16;
+
+    const apkBanner = document.getElementById("androidApkBanner");
+    const bannerRect = (apkBanner && apkBanner.offsetParent !== null && apkBanner.style.display !== "none")
+      ? apkBanner.getBoundingClientRect()
+      : null;
+    const hasVisibleBanner = Boolean(bannerRect && bannerRect.width > 0 && bannerRect.height > 0);
+
+    const firstRect = rows[0].entries[0].rect;
+    const toolbarLiftPx = Math.max(0, Number((firstRect.top - toolbarRect.top).toFixed(2)));
+    const colLefts = rows[0].entries.map((entry) => entry.rect.left);
+    const colBottoms = new Array(colCount).fill(firstRect.top);
+    const placements = new Map();
+
+    for (let r = 0; r < rows.length; r++) {
+      const rowEntries = rows[r].entries;
+      const rowBaseTop = (r === 0)
+        ? firstRect.top
+        : rowEntries[0].el.getBoundingClientRect().top;
+
+      const resolvedInRow = [];
+      for (let c = 0; c < rowEntries.length; c++) {
+        const entry = rowEntries[c];
+        const el = entry.el;
+
+        // Match column index by horizontal position to stay resilient across wraps
+        let colIdx = (c < colCount) ? c : (c % colCount);
+        let bestDist = Infinity;
+        for (let k = 0; k < colLefts.length; k++) {
+          const dist = Math.abs(entry.rect.left - colLefts[k]);
+          if (dist < bestDist) {
+            bestDist = dist;
+            colIdx = k;
+          }
+        }
+
+        let desiredTop = rowBaseTop;
+        if (r === 0) {
+          const blockedByBanner = hasVisibleBanner &&
+            bannerRect.right > entry.rect.left + 10 &&
+            bannerRect.left < entry.rect.right - 10;
+          if (colIdx > 0 && toolbarLiftPx > 0.5 && !blockedByBanner && entry.rect.left > firstRect.left + 10) {
+            el.style.setProperty("--pc-toolbar-lift", `${toolbarLiftPx}px`);
+            el.classList.add("is-pc-top-row-lifted");
+            desiredTop = rowBaseTop - toolbarLiftPx;
+          }
+        } else {
+          const targetTop = colBottoms[colIdx] + rowGap;
+          const colLiftPx = Number((rowBaseTop - targetTop).toFixed(2));
+          if (colLiftPx > 0.5) {
+            el.style.setProperty("--pc-col-lift", `${colLiftPx}px`);
+            el.classList.add("is-pc-col-lifted");
+            desiredTop = rowBaseTop - colLiftPx;
+          }
+        }
+
+        resolvedInRow.push({ el, colIdx, desiredTop });
+      }
+
+      // First finalize all non-log items in Row r so same-row owner floor is known
+      let logItemInfo = null;
+      for (const itemInfo of resolvedInRow) {
+        if (isHotspotHeightLog && itemInfo.el === logPanel) {
+          logItemInfo = itemInfo;
+          continue;
+        }
+        const finalRect = itemInfo.el.getBoundingClientRect();
+        colBottoms[itemInfo.colIdx] = finalRect.bottom;
+        placements.set(itemInfo.el, {
+          top: finalRect.top,
+          bottom: finalRect.bottom,
+          height: finalRect.height,
+          rowIdx: r,
+          colIdx: itemInfo.colIdx
+        });
+      }
+
+      // Then align pc-height-hotspot History bottom to its owner card's floor ("родительский пол")
+      if (logItemInfo) {
+        if (logOwnerCard) {
+          const ownerInfo = placements.get(logOwnerCard);
+          const ownerRect = logOwnerCard.getBoundingClientRect();
+          const ownerHeight = Math.round((ownerInfo ? ownerInfo.height : 0) || ownerRect.height || logOwnerCard.offsetHeight || 0);
+          const ownerTop = ownerInfo ? ownerInfo.top : ownerRect.top;
+          const ownerBottom = ownerInfo ? ownerInfo.bottom : ownerRect.bottom;
+          const sameRowAsOwner = Boolean(ownerInfo && ownerInfo.rowIdx === r);
+
+          let desiredLogH = ownerHeight;
+          if (sameRowAsOwner && logItemInfo.desiredTop < ownerTop - 0.5 && ownerBottom > logItemInfo.desiredTop) {
+            desiredLogH = Math.max(ownerHeight, Math.round(ownerBottom - logItemInfo.desiredTop));
+          }
+          setDesktopLogPanelHeightPx(logPanel, desiredLogH);
+        }
+        const finalLogRect = logItemInfo.el.getBoundingClientRect();
+        colBottoms[logItemInfo.colIdx] = finalLogRect.bottom;
+        placements.set(logItemInfo.el, {
+          top: finalLogRect.top,
+          bottom: finalLogRect.bottom,
+          height: finalLogRect.height,
+          rowIdx: r,
+          colIdx: logItemInfo.colIdx
+        });
+      }
+    }
+  } finally {
+    _isSyncingPcHotspotAlign = false;
+  }
+}
+
+export function scheduleDesktopHotspotsTopAlignment() {
+  if (typeof window === "undefined") return;
+  if (_pcHotspotAlignRaf && typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(_pcHotspotAlignRaf);
+  }
+  if (typeof window.requestAnimationFrame === "function") {
+    _pcHotspotAlignRaf = window.requestAnimationFrame(() => {
+      _pcHotspotAlignRaf = 0;
+      syncDesktopHotspotsTopAlignment();
+    });
+  } else {
+    syncDesktopHotspotsTopAlignment();
+  }
+}
+
+function ensureDesktopHotspotsAlignmentObserver() {
+  if (typeof window === "undefined") return;
+  if (!window._pcHotspotAlignObserverWired) {
+    window._pcHotspotAlignObserverWired = true;
+    window.addEventListener("resize", scheduleDesktopHotspotsTopAlignment);
+    if (typeof window.ResizeObserver === "function") {
+      const ro = new window.ResizeObserver(() => {
+        if (_isSyncingPcHotspotAlign) return;
+        scheduleDesktopHotspotsTopAlignment();
+      });
+      window._pcHotspotAlignResizeObserver = ro;
+    }
+  }
+  const ro = window._pcHotspotAlignResizeObserver;
+  if (!ro) return;
+  const observeOnce = (el) => {
+    if (!el) return;
+    if (_observedPcAlignTargets && _observedPcAlignTargets.has(el)) return;
+    if (_observedPcAlignTargets) _observedPcAlignTargets.add(el);
+    ro.observe(el);
+  };
+  observeOnce(document.getElementById("proxdmrTopToolbar"));
+  const radiosGrid = document.getElementById("radiosGrid");
+  observeOnce(radiosGrid);
+  observeOnce(document.getElementById("androidApkBanner"));
+  if (radiosGrid) {
+    radiosGrid.querySelectorAll(":scope > .radio-container, :scope > .live-monitor-container").forEach(observeOnce);
+  }
 }
 
 let _isSyncingCollapsedStacks = false;
@@ -783,7 +1160,7 @@ export function syncCollapsedHotspotStacks() {
 
   _isSyncingCollapsedStacks = true;
   try {
-    // 1. Unwrap any existing .collapsed-hotspots-stack wrappers back into radiosGrid
+    // 1. Ensure no legacy .collapsed-hotspots-stack wrappers remain
     radiosGrid.querySelectorAll(".collapsed-hotspots-stack").forEach(stack => {
       while (stack.firstChild) {
         radiosGrid.insertBefore(stack.firstChild, stack);
@@ -791,59 +1168,37 @@ export function syncCollapsedHotspotStacks() {
       stack.remove();
     });
 
-    // 2. Ensure all .radio-container cards are in currentHotspots order
+    // 2. Keep all mounted .radio-container cards strictly in displayHotspots order
     const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
       ? window.currentHotspots
       : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
-    const displayHotspots = allHs.slice(0, 7);
-    displayHotspots.forEach(hs => {
+    const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
+    displayHotspots.forEach((hs) => {
       const card = radiosGrid.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`);
       if (card) {
         radiosGrid.appendChild(card);
       }
     });
 
-    // 3. Group runs of 2 or more consecutive .radio-container.collapsed cards into a vertical .collapsed-hotspots-stack
-    const cards = Array.from(radiosGrid.querySelectorAll(":scope > .radio-container"));
-    let currentRun = [];
-
-    const flushRun = () => {
-      if (currentRun.length >= 2) {
-        const stack = document.createElement("div");
-        stack.className = "collapsed-hotspots-stack";
-        radiosGrid.insertBefore(stack, currentRun[0]);
-        currentRun.forEach(c => stack.appendChild(c));
-      }
-      currentRun = [];
-    };
-
-    cards.forEach(card => {
-      if (card.classList.contains("collapsed")) {
-        currentRun.push(card);
-      } else {
-        flushRun();
-      }
-    });
-    flushRun();
-
-    // 4. Reposition liveMonitorPanel if visible so it stays right after its target card (or stack)
-    const liveMonitorPanel = document.getElementById("liveMonitorPanel");
-    const isLogVis = Boolean(typeof window.isLogVisible !== "undefined" ? window.isLogVisible : (liveMonitorPanel && !liveMonitorPanel.classList.contains("hidden")));
-    if (isLogVis && liveMonitorPanel) {
-      const isMobile = window.innerWidth <= 768;
-      const effectiveHid = (isMobile && (!window.currentLogHotspotId || window.currentLogHotspotId === "all"))
-        ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
-        : window.currentLogHotspotId;
-
-      const targetCard = (effectiveHid && effectiveHid !== "all")
-        ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
-        : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
-
-      const anchorEl = (targetCard && targetCard.closest(".collapsed-hotspots-stack")) || targetCard;
-      if (anchorEl && anchorEl.nextElementSibling !== liveMonitorPanel) {
-        anchorEl.after(liveMonitorPanel);
-      }
+    // 3. Toggle empty workspace hint if all hotspots are archived
+    const emptyHint = document.getElementById("archivedWorkspaceEmptyHint");
+    if (emptyHint) {
+      emptyHint.style.display = (_hotspotsLoadedOnce && displayHotspots.length === 0) ? "flex" : "none";
     }
+
+    // 4. Both desktop & mobile dock visible #liveMonitorPanel immediately after its owner hotspot card inside #radiosGrid
+    if (typeof window !== "undefined" && typeof window.syncLiveMonitorPlacement === "function") {
+      window.syncLiveMonitorPlacement();
+    }
+
+    // 5. Keep top toolbar slots & 1s process cycle synchronized
+    if (typeof renderToolbarHotspotSlots === "function") {
+      renderToolbarHotspotSlots();
+    }
+
+    // 6. Keep Desktop cards #2+ on Row 1 aligned flush to top toolbar top edge
+    ensureDesktopHotspotsAlignmentObserver();
+    syncDesktopHotspotsTopAlignment();
 
     if (!radiosGrid._collapsedStackObserver && typeof window.MutationObserver !== "undefined") {
       radiosGrid._collapsedStackObserver = new MutationObserver((mutations) => {
@@ -903,16 +1258,19 @@ export async function linkHotspotXlxModule(cid, moduleLetter) {
       if (data.status === "ok") {
         if (hs) hs.xlx_module = "";
         const toastMsg = window.t
-          ? window.t("quick_assign.xlx_module_unlinked", { name: hsName }, `✅ [${hsName}] TS2: Модуль XLX отключен (TG 4000)`)
-          : `✅ [${hsName}] TS2: Модуль XLX отключен (TG 4000)`;
+          ? window.t("quick_assign.xlx_module_unlinked", { name: hsName }, `✅ [${hsName}] TS2: XLX module unlinked (TG 4000)`)
+          : `✅ [${hsName}] TS2: XLX module unlinked (TG 4000)`;
         showToast(toastMsg, 2500);
         renderRadiosGrid();
       } else {
-        showToast(data.detail || data.message || "Ошибка отключения модуля", 3000);
+        showToast(
+          data.detail || data.message || (window.t ? window.t("xlx.unlink_err", {}, "Module unlink error") : "Module unlink error"),
+          3000
+        );
       }
     } catch (e) {
       console.error("[XLX] Unlink failed:", e);
-      showToast("Ошибка сети при отключении модуля", 2500);
+      showToast(window.t ? window.t("xlx.net_unlink_err", {}, "Network error while unlinking module") : "Network error while unlinking module", 2500);
     }
     return;
   }
@@ -942,11 +1300,11 @@ export async function linkHotspotXlxModule(cid, moduleLetter) {
       showToast(toastMsg, 2500);
       renderRadiosGrid();
     } else {
-      showToast(data.detail || data.message || "Ошибка подключения модуля", 3000);
+      showToast(data.detail || data.message || (window.t ? window.t("xlx.link_err", {}, "Error linking module") : "Error linking module"), 3000);
     }
   } catch (e) {
     console.error("[XLX] Link module failed:", e);
-    showToast("Ошибка сети при переключении модуля", 2500);
+    showToast(window.t ? window.t("xlx.net_switch_err", {}, "Network error switching module") : "Network error switching module", 2500);
   }
 }
 
@@ -961,7 +1319,8 @@ export function openXlxAllModulesPopover(cid, anchorEl, currentMod = "") {
     tile.type = "button";
     tile.className = `xlx-popover-tile ${letter === currentMod ? "active" : ""}`;
     tile.textContent = letter;
-    tile.title = `Модуль ${letter} (TG ${4001 + (letter.charCodeAt(0) - 65)})`;
+    const tgNum = 4001 + (letter.charCodeAt(0) - 65);
+    tile.title = window.t ? window.t("xlx.mod_tile_title", { mod: letter, tg: tgNum }, `Module ${letter} (TG ${tgNum})`) : `Module ${letter} (TG ${tgNum})`;
     tile.onclick = (e) => {
       e.stopPropagation();
       popover.remove();
@@ -1053,9 +1412,11 @@ export function updateCardXlxPanel(card, hs) {
       </div>
       <div class="xlx-main-controls">
         <div class="xlx-modules-grid">
-          ${commonMods.map(m => `
-            <button type="button" class="btn-xlx-mod ${m === curMod ? 'active-xlx-mod' : ''}" data-module="${m}" title="Модуль ${m} (TG ${4001 + (m.charCodeAt(0) - 65)})">${m}</button>
-          `).join("")}
+          ${commonMods.map(m => {
+            const mTg = 4001 + (m.charCodeAt(0) - 65);
+            const mTitle = window.t ? window.t("xlx.mod_tile_title", { mod: m, tg: mTg }, `Module ${m} (TG ${mTg})`) : `Module ${m} (TG ${mTg})`;
+            return `<button type="button" class="btn-xlx-mod ${m === curMod ? 'active-xlx-mod' : ''}" data-module="${m}" title="${safeEscapeHtml(mTitle)}">${m}</button>`;
+          }).join("")}
         </div>
         <div class="xlx-controls-col">
           <div class="xlx-active-mod-pill ${isExtendedMod ? 'active-xlx-mod' : ''}" role="button" tabindex="0" title="${window.t ? window.t("xlx.current_mod_title", { mod: curMod }, `Текущий модуль: ${curMod}. Кликните для выбора любого модуля A–Z`) : `Текущий модуль: ${curMod}. Кликните для выбора любого модуля A–Z`}">${modLabel} <strong>${curMod}</strong></div>
@@ -1128,15 +1489,20 @@ export async function linkHotspotDmrPlusReflector(cid, reflectorNum) {
       const data = await resp.json().catch(() => ({}));
       if (data.status === "ok") {
         if (hs) hs.dmrplus_reflector = "";
-        const unlinkedText = window.t ? window.t("dmrplus.ref_unlinked", {}, "Отключен") : "Отключен";
-        showToast(`✅ [${hsName}] TS2: Рефлектор DMR+ ${unlinkedText} (4000 Unlink)`, 2500);
+        const unlinkedText = window.t ? window.t("dmrplus.ref_unlinked", {}, "Unlinked") : "Unlinked";
+        showToast(
+          window.t
+            ? window.t("dmrplus.ref_unlinked_toast", { name: hsName, status: unlinkedText }, `✅ [${hsName}] TS2: DMR+ Reflector ${unlinkedText} (4000 Unlink)`)
+            : `✅ [${hsName}] TS2: DMR+ Reflector ${unlinkedText} (4000 Unlink)`,
+          2500
+        );
         renderRadiosGrid();
       } else {
-        showToast(data.detail || data.message || "Ошибка отключения рефлектора", 3000);
+        showToast(data.detail || data.message || (window.t ? window.t("dmrplus.unlink_err", {}, "Error unlinking reflector") : "Error unlinking reflector"), 3000);
       }
     } catch (e) {
       console.error("[DMR+] Unlink failed:", e);
-      showToast("Ошибка сети при отключении рефлектора", 2500);
+      showToast(window.t ? window.t("dmrplus.net_unlink_err", {}, "Network error unlinking reflector") : "Network error unlinking reflector", 2500);
     }
     return;
   }
@@ -1155,13 +1521,18 @@ export async function linkHotspotDmrPlusReflector(cid, reflectorNum) {
       });
       const data = await resp.json().catch(() => ({}));
       if (data.status === "ok") {
-        showToast(`ℹ️ [${hsName}] TS2: Запрос статуса рефлектора (5000 Status)`, 2500);
+        showToast(
+          window.t
+            ? window.t("dmrplus.status_req_toast", { name: hsName }, `ℹ️ [${hsName}] TS2: Reflector status requested (5000 Status)`)
+            : `ℹ️ [${hsName}] TS2: Reflector status requested (5000 Status)`,
+          2500
+        );
       } else {
-        showToast(data.detail || data.message || "Ошибка запроса статуса", 3000);
+        showToast(data.detail || data.message || (window.t ? window.t("dmrplus.status_err", {}, "Error requesting status") : "Error requesting status"), 3000);
       }
     } catch (e) {
       console.error("[DMR+] Status request failed:", e);
-      showToast("Ошибка сети при запросе статуса", 2500);
+      showToast(window.t ? window.t("dmrplus.net_status_err", {}, "Network error requesting status") : "Network error requesting status", 2500);
     }
     return;
   }
@@ -1181,16 +1552,16 @@ export async function linkHotspotDmrPlusReflector(cid, reflectorNum) {
     if (data.status === "ok") {
       if (hs) hs.dmrplus_reflector = String(num);
       const toastMsg = window.t
-        ? window.t("dmrplus.ref_linked_toast", { ref: num }, `Подключен рефлектор ${num} (Голос в TG 9)`)
-        : `Подключен рефлектор ${num} (Голос в TG 9)`;
+        ? window.t("dmrplus.ref_linked_toast", { ref: num }, `Linked to reflector ${num} (Voice on TG 9)`)
+        : `Linked to reflector ${num} (Voice on TG 9)`;
       showToast(`✅ [${hsName}] TS2: ${toastMsg}`, 2500);
       renderRadiosGrid();
     } else {
-      showToast(data.detail || data.message || "Ошибка подключения рефлектора", 3000);
+      showToast(data.detail || data.message || (window.t ? window.t("dmrplus.link_err", {}, "Error linking reflector") : "Error linking reflector"), 3000);
     }
   } catch (e) {
     console.error("[DMR+] Link reflector failed:", e);
-    showToast("Ошибка сети при переключении рефлектора", 2500);
+    showToast(window.t ? window.t("dmrplus.net_switch_err", {}, "Network error switching reflector") : "Network error switching reflector", 2500);
   }
 }
 
@@ -1244,7 +1615,7 @@ export function updateCardDmrPlusPanel(card, hs) {
 
   dmrPlusBar.innerHTML = `
     <div class="dmrplus-ref-header">
-      <div class="dmrplus-ref-current" title="${window.t ? window.t("dmrplus.ref_current_title", {}, `Текущий рефлектор TS2 (Голос в TG 9)`) : `Текущий рефлектор TS2 (Голос в TG 9)`}">
+      <div class="dmrplus-ref-current" title="${window.t ? window.t("dmrplus.ref_current_title", {}, `Current TS2 reflector (Voice on TG 9)`) : `Current TS2 reflector (Voice on TG 9)`}">
         <span class="dmrplus-ref-icon">📡</span>
         <span class="dmrplus-ref-label">${refLabel}</span>
         <span class="dmrplus-ref-badge ${curRef ? 'active' : 'unlinked'}">${curRefDisplay}</span>
@@ -1252,18 +1623,18 @@ export function updateCardDmrPlusPanel(card, hs) {
       <div class="dmrplus-ref-actions">
         <button type="button" class="btn-dmrplus-action btn-dmrplus-unlink" title="${unlinkTitle}">🔌 4000</button>
         <button type="button" class="btn-dmrplus-action btn-dmrplus-status" title="${statusTitle}">ℹ️ 5000</button>
-        <button type="button" class="btn-dmrplus-action btn-dmrplus-custom" title="${window.t ? window.t("dmrplus.ref_custom_title", {}, `Ввести номер рефлектора (4001–4999)`) : `Ввести номер рефлектора (4001–4999)`}">🔢 4xxx</button>
+        <button type="button" class="btn-dmrplus-action btn-dmrplus-custom" title="${window.t ? window.t("dmrplus.ref_custom_title", {}, `Enter reflector number (4001–4999)`) : `Enter reflector number (4001–4999)`}">🔢 4xxx</button>
       </div>
     </div>
     <div class="dmrplus-ref-quick-row">
       <span class="dmrplus-quick-label" title="${quickTitle}">⚡</span>
       <div class="dmrplus-quick-btns">
-        <button type="button" class="btn-dmrplus-quick ${curRef === '4530' ? 'active' : ''}" data-ref="4530" title="4530 RU (Россия / СНГ)">🇷🇺 4530</button>
-        <button type="button" class="btn-dmrplus-quick ${curRef === '4001' ? 'active' : ''}" data-ref="4001" title="4001 DL (Германия общий)">🇩🇪 4001</button>
-        <button type="button" class="btn-dmrplus-quick ${curRef === '4030' ? 'active' : ''}" data-ref="4030" title="4030 OE (Австрия)">🇦🇹 4030</button>
-        <button type="button" class="btn-dmrplus-quick ${curRef === '4400' ? 'active' : ''}" data-ref="4400" title="4400 UK (Великобритания)">🇬🇧 4400</button>
-        <button type="button" class="btn-dmrplus-quick ${curRef === '4700' ? 'active' : ''}" data-ref="4700" title="4700 US (Северная Америка)">🇺🇸 4700</button>
-        <button type="button" class="btn-dmrplus-quick ${curRef === '4800' ? 'active' : ''}" data-ref="4800" title="4800 PT (Бразилия)">🇧🇷 4800</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4530' ? 'active' : ''}" data-ref="4530" title="${safeEscapeHtml(window.t ? window.t("dmrplus.quick_4530_title", {}, "4530 RU (Russia / CIS)") : "4530 RU (Russia / CIS)")}">🇷🇺 4530</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4001' ? 'active' : ''}" data-ref="4001" title="${safeEscapeHtml(window.t ? window.t("dmrplus.quick_4001_title", {}, "4001 DL (Germany general)") : "4001 DL (Germany general)")}">🇩🇪 4001</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4030' ? 'active' : ''}" data-ref="4030" title="${safeEscapeHtml(window.t ? window.t("dmrplus.quick_4030_title", {}, "4030 OE (Austria)") : "4030 OE (Austria)")}">🇦🇹 4030</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4400' ? 'active' : ''}" data-ref="4400" title="${safeEscapeHtml(window.t ? window.t("dmrplus.quick_4400_title", {}, "4400 UK (United Kingdom)") : "4400 UK (United Kingdom)")}">🇬🇧 4400</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4700' ? 'active' : ''}" data-ref="4700" title="${safeEscapeHtml(window.t ? window.t("dmrplus.quick_4700_title", {}, "4700 US (North America)") : "4700 US (North America)")}">🇺🇸 4700</button>
+        <button type="button" class="btn-dmrplus-quick ${curRef === '4800' ? 'active' : ''}" data-ref="4800" title="${safeEscapeHtml(window.t ? window.t("dmrplus.quick_4800_title", {}, "4800 PT (Brazil)") : "4800 PT (Brazil)")}">🇧🇷 4800</button>
       </div>
     </div>
   `;
@@ -1410,23 +1781,24 @@ function renderActiveLinkChipsHtml(targetHs, cid) {
     const isConnecting = (lk.connecting === true || lk.status === "connecting");
     const isTx = (lk.mode === "*3");
     let chipClass = "asl-chip-mode-monitor";
-    let modeLabel = "*2 Monitor (Зеленый)";
+    let modeLabel = window.t ? window.t("asl.chip_mode_monitor", {}, "*2 Monitor (Green)") : "*2 Monitor (Green)";
     if (isConnecting) {
       chipClass = "asl-chip-mode-connecting";
-      modeLabel = "Подключение (до 9с)...";
+      modeLabel = window.t ? window.t("asl.chip_mode_connecting", {}, "Connecting (up to 9s)...") : "Connecting (up to 9s)...";
     } else if (isTx) {
       chipClass = "asl-chip-mode-tx";
-      modeLabel = "*3 RX/TX (Алый)";
+      modeLabel = window.t ? window.t("asl.chip_mode_tx", {}, "*3 RX/TX (Red)") : "*3 RX/TX (Red)";
     }
+    const cleanNode = safeEscapeHtml(lk.node);
     const titleText = isConnecting
-      ? `Узел #${safeEscapeHtml(lk.node)}: Подключение (ожидание ответа до 9с)... Клик по ✕: отменить`
-      : `Узел #${safeEscapeHtml(lk.node)}: ${modeLabel}. Клик: переключить режим, Клик по ✕: отключить`;
+      ? (window.t ? window.t("asl.chip_title_connecting", { node: cleanNode }, `Node #${cleanNode}: Connecting (waiting up to 9s)... Click ✕: cancel`) : `Node #${cleanNode}: Connecting (waiting up to 9s)... Click ✕: cancel`)
+      : (window.t ? window.t("asl.chip_title_linked", { node: cleanNode, mode: modeLabel }, `Node #${cleanNode}: ${modeLabel}. Click: switch mode, Click ✕: disconnect`) : `Node #${cleanNode}: ${modeLabel}. Click: switch mode, Click ✕: disconnect`);
     const clientCountStr = (!isConnecting && lk.clients !== undefined) ? ` (${lk.clients})` : "";
     return `
-      <div class="asl-link-chip ${chipClass}" data-node="${safeEscapeHtml(lk.node)}" data-mode="${safeEscapeHtml(lk.mode || "*2")}" data-connecting="${isConnecting ? "1" : "0"}" title="${titleText}">
+      <div class="asl-link-chip ${chipClass}" data-node="${cleanNode}" data-mode="${safeEscapeHtml(lk.mode || "*2")}" data-connecting="${isConnecting ? "1" : "0"}" title="${safeEscapeHtml(titleText)}">
         <span class="chip-flag">${safeEscapeHtml(lk.flag || "🌐")}</span>
-        <span class="chip-text">${safeEscapeHtml(lk.node)}${clientCountStr}</span>
-        <span class="chip-del" data-del-node="${safeEscapeHtml(lk.node)}" title="${window.t ? window.t("asl.unlink_chip_title", { node: safeEscapeHtml(lk.node) }, `Отключить узел #${safeEscapeHtml(lk.node)}`) : `Отключить узел #${safeEscapeHtml(lk.node)}`}">✕</span>
+        <span class="chip-text">${cleanNode}${clientCountStr}</span>
+        <span class="chip-del" data-del-node="${cleanNode}" title="${safeEscapeHtml(window.t ? window.t("asl.unlink_chip_title", { node: cleanNode }, `Disconnect node #${cleanNode}`) : `Disconnect node #${cleanNode}`)}">✕</span>
       </div>
     `;
   }).join("");
@@ -1448,7 +1820,7 @@ function setupActiveLinkChipHandlers(linksBar, cid, targetHs, card) {
       .then(r => r.json())
       .then(() => {
         if (typeof showToast === "function") {
-          showToast(`Узел #${nodeToDel} отключен`, "info", 1500);
+          showToast(window.t ? window.t("asl.node_disconnected_toast", { node: nodeToDel }, `Node #${nodeToDel} disconnected`) : `Node #${nodeToDel} disconnected`, "info", 1500);
         }
         if (targetHs && targetHs.asl_links) {
           targetHs.asl_links = targetHs.asl_links.filter(x => String(x.node) !== String(nodeToDel));
@@ -1460,7 +1832,8 @@ function setupActiveLinkChipHandlers(linksBar, cid, targetHs, card) {
             if (typeof updateBmStatus === "function") updateBmStatus("ONLINE", `Node ${targetHs.connected_node}`, cid);
           } else {
             targetHs.status = "ONLINE";
-            if (typeof updateBmStatus === "function") updateBmStatus("ONLINE", targetHs.allstar_node ? `Node ${targetHs.allstar_node}` : "AllStarLink активен", cid);
+            const aslActiveMsg = window.t ? window.t("asl.status_active", {}, "AllStarLink active") : "AllStarLink active";
+            if (typeof updateBmStatus === "function") updateBmStatus("ONLINE", targetHs.allstar_node ? `Node ${targetHs.allstar_node}` : aslActiveMsg, cid);
           }
         }
         if (typeof window.updateCardAllStarPanel === "function") {
@@ -1479,14 +1852,17 @@ function setupActiveLinkChipHandlers(linksBar, cid, targetHs, card) {
       e.stopPropagation();
       if (chip.classList.contains("asl-chip-mode-connecting")) {
         if (typeof showToast === "function") {
-          showToast(`Узел #${chip.dataset.node || ""} еще подключается (таймаут 9с)...`, "info", 1500);
+          const cNode = chip.dataset.node || "";
+          showToast(window.t ? window.t("asl.node_still_connecting_toast", { node: cNode }, `Node #${cNode} is still connecting (9s timeout)...`) : `Node #${cNode} is still connecting (9s timeout)...`, "info", 1500);
         }
         return;
       }
       const nodeNum = chip.dataset.node;
       const curMode = chip.dataset.mode || "*2";
       const nextMode = (curMode === "*2") ? "*3" : "*2";
-      const nextName = (nextMode === "*3") ? "RX/TX (*3, Алый)" : "Monitor (*2, Зеленый)";
+      const nextName = (nextMode === "*3")
+        ? (window.t ? window.t("asl.chip_mode_tx_short", {}, "RX/TX (*3, Red)") : "RX/TX (*3, Red)")
+        : (window.t ? window.t("asl.chip_mode_monitor_short", {}, "Monitor (*2, Green)") : "Monitor (*2, Green)");
 
       if (targetHs) {
         targetHs._aslConnectingNodes = targetHs._aslConnectingNodes || new Map();
@@ -1528,7 +1904,7 @@ function setupActiveLinkChipHandlers(linksBar, cid, targetHs, card) {
       .then(r => r.json())
       .then(() => {
         if (typeof showToast === "function") {
-          showToast(`Узел #${nodeNum}: переход в ${nextName}...`, "info", 1800);
+          showToast(window.t ? window.t("asl.node_switching_mode_toast", { node: nodeNum, mode: nextName }, `Node #${nodeNum}: switching to ${nextName}...`) : `Node #${nodeNum}: switching to ${nextName}...`, "info", 1800);
         }
         setTimeout(() => { if (typeof fetchAslLinks === "function") fetchAslLinks(); }, 400);
       })
@@ -1717,20 +2093,20 @@ if (typeof window !== "undefined" && !window._aslMatrixProbeInterval) {
 // =========================================================================
 
 const ASL_PROC_FALLBACK_TEXTS = {
-  disc_init: "Отключение #{node}: отправка сброса...",
-  disc_all_init: "Сброс линков (*73): отправка команды...",
-  disc_closing: "Отключение #{node}: закрытие IAX2-канала...",
-  disc_ok: "✓ Узел #{node} отключён (канал закрыт)",
-  disc_all_ok: "✓ Все узлы отключены (канал чист)",
-  disc_timeout: "✕ Сбой отключения #{node}: таймаут канала",
-  conn_dns: "Узел #{node}: поиск адреса в базе ASL...",
-  conn_dns_fail: "✕ Отказ #{node}: узел не найден в DNS ASL",
-  conn_calling: "Узел #{node} ({ip}): запрос IAX2 ({mode})...",
-  conn_token: "Узел #{node}: проверка токена (CTOKEN)...",
-  conn_verifying: "Узел #{node}: ответ получен, допуск хаба...",
-  conn_ok: "✓ Узел #{node}: принят и подключён ({mode})",
-  conn_rejected: "✕ Отказ #{node}: сброс вызова хабом (HANGUP)",
-  conn_timeout: "✕ Недоступен #{node} ({ip}): нет ответа (таймаут)"
+  disc_init: "Disconnecting #{node}: sending reset...",
+  disc_all_init: "Resetting links (*73): sending command...",
+  disc_closing: "Disconnecting #{node}: closing IAX2 channel...",
+  disc_ok: "✓ Node #{node} disconnected (channel closed)",
+  disc_all_ok: "✓ All nodes disconnected (channel clear)",
+  disc_timeout: "✕ Disconnect failed #{node}: channel timeout",
+  conn_dns: "Node #{node}: resolving address in ASL database...",
+  conn_dns_fail: "✕ Connection failed #{node}: node not found in ASL DNS",
+  conn_calling: "Node #{node} ({ip}): requesting IAX2 ({mode})...",
+  conn_token: "Node #{node}: verifying token (CTOKEN)...",
+  conn_verifying: "Node #{node}: answer received, awaiting hub admission...",
+  conn_ok: "✓ Node #{node}: accepted and connected ({mode})",
+  conn_rejected: "✕ Rejected #{node}: call reset by remote hub (HANGUP)",
+  conn_timeout: "✕ Unreachable #{node} ({ip}): no answer (timeout)"
 };
 
 export function formatAslProcMessage(data) {
@@ -1740,14 +2116,15 @@ export function formatAslProcMessage(data) {
   const mode = data.mode || "*2";
   const ip = data.ip || "";
   const key = "asl_proc." + code;
-  
+  const fb = (ASL_PROC_FALLBACK_TEXTS[code] || data.text || "")
+    .replace(/\{node\}/g, node).replace(/\{mode\}/g, mode).replace(/\{ip\}/g, ip);
+
   let text = "";
   if (code && typeof window.t === "function") {
-    text = window.t(key, { node, mode, ip });
+    text = window.t(key, { node, mode, ip }, fb);
   }
   if (!text || text === key) {
-    text = ASL_PROC_FALLBACK_TEXTS[code] || data.text || "";
-    text = text.replace(/\{node\}/g, node).replace(/\{mode\}/g, mode).replace(/\{ip\}/g, ip);
+    text = fb;
   }
   return text || data.text || code;
 }
@@ -1756,41 +2133,96 @@ export function setAslProcBannerState(card, {
   active = true,
   text = "",
   tone = "neutral",
-  autoHideMs = 0
+  autoHideMs = 0,
+  fadeOutMs = 2000
 } = {}) {
   if (!card) return;
-  const screenTopBar = card.querySelector(".screen-top-bar");
-  const modeBadge = card.querySelector(".mode-badge");
-  if (!screenTopBar || !modeBadge) return;
+  const clockBar = card.querySelector(".screen-clock-bar");
+  if (!clockBar) return;
+
+  let bannerEl = clockBar.querySelector(".asl-proc-clock-banner");
+  if (!bannerEl) {
+    bannerEl = document.createElement("div");
+    bannerEl.className = "asl-proc-clock-banner";
+    bannerEl.setAttribute("aria-live", "polite");
+    bannerEl.setAttribute("aria-hidden", "true");
+    const span = document.createElement("span");
+    span.className = "asl-proc-clock-text";
+    bannerEl.appendChild(span);
+    clockBar.appendChild(bannerEl);
+  }
+  let textEl = bannerEl.querySelector(".asl-proc-clock-text");
+  if (!textEl) {
+    textEl = document.createElement("span");
+    textEl.className = "asl-proc-clock-text";
+    bannerEl.textContent = "";
+    bannerEl.appendChild(textEl);
+  }
 
   if (card._aslBannerHideTimer) {
     clearTimeout(card._aslBannerHideTimer);
     card._aslBannerHideTimer = null;
   }
+  if (card._aslBannerFadeTimer) {
+    clearTimeout(card._aslBannerFadeTimer);
+    card._aslBannerFadeTimer = null;
+  }
+
+  // На случай вызова после устаревших состояний в .screen-top-bar снимаем старые классы
+  const screenTopBar = card.querySelector(".screen-top-bar");
+  const modeBadge = card.querySelector(".mode-badge");
+  if (screenTopBar) {
+    screenTopBar.classList.remove("asl-proc-banner-active");
+  }
+  if (modeBadge) {
+    modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
+  }
 
   if (!active) {
-    screenTopBar.classList.remove("asl-proc-banner-active");
-    modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
-    if (typeof window.updateCardModeBadge === "function") {
-      window.updateCardModeBadge(card);
-    }
+    clockBar.classList.remove("asl-proc-clock-active");
+    bannerEl.classList.remove(
+      "asl-proc-banner-active",
+      "asl-proc-banner-fading",
+      "asl-tone-neutral",
+      "asl-tone-positive",
+      "asl-tone-negative"
+    );
+    bannerEl.style.removeProperty("--asl-fade-ms");
+    bannerEl.setAttribute("aria-hidden", "true");
     return;
   }
 
-  screenTopBar.classList.add("asl-proc-banner-active");
-  modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
-  modeBadge.classList.add(`asl-tone-${tone}`);
-  modeBadge.textContent = text;
-  modeBadge.title = text;
+  const safeFadeMs = (typeof fadeOutMs === "number" && fadeOutMs > 0) ? fadeOutMs : 2000;
+  clockBar.classList.add("asl-proc-clock-active");
+  bannerEl.classList.remove(
+    "asl-proc-banner-fading",
+    "asl-tone-neutral",
+    "asl-tone-positive",
+    "asl-tone-negative"
+  );
+  bannerEl.style.setProperty("--asl-fade-ms", `${safeFadeMs}ms`);
+  bannerEl.classList.add("asl-proc-banner-active", `asl-tone-${tone}`);
+  bannerEl.setAttribute("aria-hidden", "false");
+  textEl.textContent = text;
+  bannerEl.title = text;
 
   if (autoHideMs > 0) {
     card._aslBannerHideTimer = setTimeout(() => {
       card._aslBannerHideTimer = null;
-      screenTopBar.classList.remove("asl-proc-banner-active");
-      modeBadge.classList.remove("asl-tone-neutral", "asl-tone-positive", "asl-tone-negative");
-      if (typeof window.updateCardModeBadge === "function") {
-        window.updateCardModeBadge(card);
-      }
+      bannerEl.classList.add("asl-proc-banner-fading");
+      card._aslBannerFadeTimer = setTimeout(() => {
+        card._aslBannerFadeTimer = null;
+        clockBar.classList.remove("asl-proc-clock-active");
+        bannerEl.classList.remove(
+          "asl-proc-banner-active",
+          "asl-proc-banner-fading",
+          "asl-tone-neutral",
+          "asl-tone-positive",
+          "asl-tone-negative"
+        );
+        bannerEl.style.removeProperty("--asl-fade-ms");
+        bannerEl.setAttribute("aria-hidden", "true");
+      }, safeFadeMs);
     }, autoHideMs);
   }
 }
@@ -1857,11 +2289,15 @@ export function aslDisconnectNodeProcedure(cid, targetNode = "all", {
 
 export function aslConnectNodeProcedure(cid, targetNode, mode = "*2", {
   showStatusBanner = true,
-  showCardEffects = true
+  showCardEffects = true,
+  fromDice = false
 } = {}) {
   const card = document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.querySelector(".dmr-card");
   const hsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || []));
   const targetHs = hsList.find(h => String(h.id) === String(cid)) || hsList[0] || null;
+  if (!fromDice && targetHs && targetHs._aslDiceRolling) {
+    stopAslDiceSearch(cid, card, targetHs, { immediateAbort: true, silent: true });
+  }
   const cleanN = String(targetNode || "").trim();
   const isEchoNode = (cleanN === "1999" || cleanN === "9999");
   const cleanMode = (isEchoNode || mode === "*3" || mode === "perm" || mode === "transceive") ? "*3" : "*2";
@@ -2025,7 +2461,9 @@ export function syncAslMatrixButtonsState(card, targetHs) {
     btn.classList.remove("asl-node-rx-talking");
 
     const descEl = btn.querySelector(".asl-btn-desc");
-    const label = (descEl && descEl.textContent && descEl.textContent !== "[настроить]") ? descEl.textContent : "";
+    const descTxt = descEl ? (descEl.textContent || "").trim() : "";
+    const isSetupPlaceholder = !descTxt || descTxt === "[настроить]" || descTxt === "[setup]" || Boolean(window.i18n && window.i18n.isTranslationOf("asl.configure_node_btn", descTxt));
+    const label = !isSetupPlaceholder ? descEl.textContent : "";
 
     const connsEl = btn.querySelector(".asl-btn-conns");
     const probe = n ? probeMap[n] : null;
@@ -2034,12 +2472,12 @@ export function syncAslMatrixButtonsState(card, targetHs) {
       if (isDisconnecting) {
         connsEl.className = "asl-btn-conns asl-conns-connecting";
         connsEl.textContent = "...";
-        connsEl.title = window.t ? window.t("asl.conns_disconnecting", { node: n }, `Отключение узла #${n}...`) : `Отключение узла #${n}...`;
+        connsEl.title = window.t ? window.t("asl.conns_disconnecting", { node: n }, `Disconnecting node #${n}...`) : `Disconnecting node #${n}...`;
         btn.classList.remove("asl-node-offline");
       } else if (isConnecting) {
         connsEl.className = "asl-btn-conns asl-conns-connecting";
         connsEl.textContent = "...";
-        connsEl.title = window.t ? window.t("asl.conns_connecting", { node: n }, `Подключение к узлу #${n}...`) : `Подключение к узлу #${n}...`;
+        connsEl.title = window.t ? window.t("asl.conns_connecting", { node: n }, `Connecting to node #${n}...`) : `Connecting to node #${n}...`;
         btn.classList.remove("asl-node-offline");
       } else if (!n || !probe) {
         connsEl.className = "asl-btn-conns asl-conns-hidden";
@@ -2049,7 +2487,7 @@ export function syncAslMatrixButtonsState(card, targetHs) {
         btn.classList.add("asl-node-offline");
         connsEl.className = "asl-btn-conns asl-conns-offline";
         connsEl.textContent = "OFF";
-        connsEl.title = window.t ? window.t("asl.probe_offline", {}, "Узел недоступен / Офлайн") : "Узел недоступен / Офлайн";
+        connsEl.title = window.t ? window.t("asl.probe_offline", {}, "Node unavailable / Offline") : "Node unavailable / Offline";
       } else {
         btn.classList.remove("asl-node-offline");
         const isLoc = (n === "1999" || n === "9998" || n === "9999");
@@ -2057,12 +2495,12 @@ export function syncAslMatrixButtonsState(card, targetHs) {
         const isStale = Boolean(probe.is_stale && !isLoc);
         let connsClass = "asl-conns-zero";
         let connsText = String(linksNum);
-        let connsTitle = window.t ? window.t("asl.conns_count", { count: linksNum }, `Активных подключений: ${linksNum}`) : `Активных подключений: ${linksNum}`;
+        let connsTitle = window.t ? window.t("asl.conns_count", { count: linksNum }, `Active connections: ${linksNum}`) : `Active connections: ${linksNum}`;
 
         if (isLoc) {
           connsClass = "asl-conns-zero";
           connsText = "LOC";
-          connsTitle = window.t ? window.t("asl.conns_echo", {}, "Локальное эхо / Parrot") : "Локальное эхо / Parrot";
+          connsTitle = window.t ? window.t("asl.conns_echo", {}, "Local Echo / Parrot") : "Local Echo / Parrot";
         } else if (isStale) {
           connsClass = "asl-conns-stale";
           connsText = String(linksNum);
@@ -2072,21 +2510,21 @@ export function syncAslMatrixButtonsState(card, targetHs) {
             const h = Math.floor(m / 60);
             ageStr = h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
           }
-          connsTitle = window.t ? window.t("asl.conns_high_activity", { count: linksNum }, `Высокая активность: ${linksNum} подключений`) : `Высокая активность: ${linksNum} подключений`;
+          connsTitle = window.t ? window.t("asl.conns_high_activity", { count: linksNum }, `High activity: ${linksNum} connections`) : `High activity: ${linksNum} connections`;
         } else if (probe.keyed) {
           connsClass = "asl-conns-hot";
           connsText = `• ${linksNum}`;
-          connsTitle = window.t ? window.t("asl.conns_live_now", {}, "В эфире прямо сейчас 🔥") : "В эфире прямо сейчас 🔥";
+          connsTitle = window.t ? window.t("asl.conns_live_now", {}, "On the air right now 🔥") : "On the air right now 🔥";
         } else if (probe.traffic_level === "high" || (typeof linksNum === "number" && linksNum >= 10)) {
           connsClass = "asl-conns-hot";
-          connsTitle = window.t ? window.t("asl.conns_high_activity", { count: linksNum }, `Высокая активность: ${linksNum} подключений`) : `Высокая активность: ${linksNum} подключений`;
+          connsTitle = window.t ? window.t("asl.conns_high_activity", { count: linksNum }, `High activity: ${linksNum} connections`) : `High activity: ${linksNum} connections`;
         } else if (probe.traffic_level === "medium" || (typeof linksNum === "number" && linksNum > 0)) {
           connsClass = "asl-conns-active";
-          connsTitle = window.t ? window.t("asl.conns_count", { count: linksNum }, `Активных подключений: ${linksNum}`) : `Активных подключений: ${linksNum}`;
+          connsTitle = window.t ? window.t("asl.conns_count", { count: linksNum }, `Active connections: ${linksNum}`) : `Active connections: ${linksNum}`;
         } else {
           connsClass = "asl-conns-zero";
           connsText = "0";
-          connsTitle = window.t ? window.t("asl.conns_count", { count: 0 }, "Подключений: 0") : "Подключений: 0";
+          connsTitle = window.t ? window.t("asl.conns_count", { count: 0 }, "Active connections: 0") : "Active connections: 0";
         }
 
         connsEl.className = `asl-btn-conns ${connsClass}`;
@@ -2099,27 +2537,28 @@ export function syncAslMatrixButtonsState(card, targetHs) {
       let probeSuffix = "";
       if (probe) {
         if (!probe.online && linkMode !== "*2" && linkMode !== "*3") {
-          probeSuffix = " · [⚠️ Узел недоступен / Офлайн]";
+          const offLbl = window.t ? window.t("asl.probe_offline", {}, "Node unavailable / Offline") : "Node unavailable / Offline";
+          probeSuffix = ` · [⚠️ ${offLbl}]`;
         } else {
           const pInfo = [];
-          const connCountStr = window.t ? window.t("asl.conns_count", { count: probe.links_count || 0 }, `Коннектов: ${probe.links_count || 0}`) : `Коннектов: ${probe.links_count || 0}`;
+          const connCountStr = window.t ? window.t("asl.conns_count", { count: probe.links_count || 0 }, `Active connections: ${probe.links_count || 0}`) : `Active connections: ${probe.links_count || 0}`;
           pInfo.push(connCountStr);
           if (probe.rtt_ms) pInfo.push(`${probe.rtt_ms}ms`);
           if (probe.tx_duty_pct) {
-            const airStr = window.t ? window.t("asl.probe_air", { pct: probe.tx_duty_pct }, `Эфир: ${probe.tx_duty_pct}%`) : `Эфир: ${probe.tx_duty_pct}%`;
+            const airStr = window.t ? window.t("asl.probe_air", { pct: probe.tx_duty_pct }, `Air: ${probe.tx_duty_pct}%`) : `Air: ${probe.tx_duty_pct}%`;
             pInfo.push(airStr);
           }
-          const onlineWord = window.t ? window.t("asl.probe_online", {}, "Онлайн") : "Онлайн";
+          const onlineWord = window.t ? window.t("asl.probe_online", {}, "Online") : "Online";
           probeSuffix = ` · [${onlineWord} · ${pInfo.join(" · ")}]`;
         }
       }
       const lblPrefix = label ? label + " " : "";
       if (linkMode === "*2") {
-        btn.title = window.t ? window.t("asl.node_tooltip_monitor", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) [Монитор *2] — Клик: отключить узел (*1), Удержание: меню действий${probeSuffix}`) : `${lblPrefix}(#${n}) [Монитор *2] — Клик: отключить узел (*1), Удержание: меню действий${probeSuffix}`;
+        btn.title = window.t ? window.t("asl.node_tooltip_monitor", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) [Monitor *2] — Click: disconnect node (*1), Hold: action menu${probeSuffix}`) : `${lblPrefix}(#${n}) [Monitor *2] — Click: disconnect node (*1), Hold: action menu${probeSuffix}`;
       } else if (linkMode === "*3") {
-        btn.title = window.t ? window.t("asl.node_tooltip_tx", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) [Передача *3] — Клик: отключить узел (*1), Удержание: меню действий${probeSuffix}`) : `${lblPrefix}(#${n}) [Передача *3] — Клик: отключить узел (*1), Удержание: меню действий${probeSuffix}`;
+        btn.title = window.t ? window.t("asl.node_tooltip_tx", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) [Transceive *3] — Click: disconnect node (*1), Hold: action menu${probeSuffix}`) : `${lblPrefix}(#${n}) [Transceive *3] — Click: disconnect node (*1), Hold: action menu${probeSuffix}`;
       } else {
-        btn.title = window.t ? window.t("asl.node_tooltip_idle", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) - Клик: подключить, Удержание: изменить${probeSuffix}`) : `${lblPrefix}(#${n}) - Клик: подключить, Удержание: изменить${probeSuffix}`;
+        btn.title = window.t ? window.t("asl.node_tooltip_idle", { label: lblPrefix, node: n, probe: probeSuffix }, `${lblPrefix}(#${n}) - Click: connect, Hold: edit${probeSuffix}`) : `${lblPrefix}(#${n}) - Click: connect, Hold: edit${probeSuffix}`;
       }
     }
   });
@@ -2173,11 +2612,29 @@ export function closeAslCardContextMenu(card, targetHs = null) {
   }
 }
 
+export function getAslStoredNodes(cid) {
+  let raw = null;
+  if (hasServerCollectionKey("asl_quick_nodes", cid)) {
+    raw = getServerCollectionValue("asl_quick_nodes", cid);
+  } else if (hasServerCollectionKey("asl_quick_nodes", "global")) {
+    raw = getServerCollectionValue("asl_quick_nodes", "global");
+  }
+  if (Array.isArray(raw)) return raw;
+  try {
+    const lsRaw = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
+    if (lsRaw) {
+      const parsed = JSON.parse(lsRaw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
 export function saveAslUserNodes(cid, userNodes) {
   try {
-    const serialized = JSON.stringify(userNodes);
-    localStorage.setItem(`proxdmr_asl_quick_nodes_${cid}`, serialized);
-    localStorage.setItem("proxdmr_asl_quick_nodes_global", serialized);
+    const padded = Array.isArray(userNodes) ? userNodes : [];
+    setServerCollectionKey("asl_quick_nodes", cid, padded, "proxdmr_asl_quick_nodes_", true);
+    setServerCollectionKey("asl_quick_nodes", "global", padded, "proxdmr_asl_quick_nodes_", true);
   } catch (e) {
     console.warn("Failed to save ASL quick nodes:", e);
   }
@@ -2478,8 +2935,8 @@ export function openAslCardContextMenu({
   const isDtmf = isAslDtmfCard(item);
   const nextScanActionText = isScanActive ? "OFF" : "ON";
   const scanTitle = isScanActive
-    ? "Выключить участие узла в сканировании (переключить в OFF)"
-    : "Включить участие узла в сканировании (переключить в ON)";
+    ? (window.t ? window.t("asl.scan_exclude_title", {}, "Exclude node from scanning (turn OFF)") : "Exclude node from scanning (turn OFF)")
+    : (window.t ? window.t("asl.scan_include_title", {}, "Include node in scanning (turn ON)") : "Include node in scanning (turn ON)");
 
   const menu = document.createElement("div");
   menu.className = "asl-card-context-menu";
@@ -2634,7 +3091,10 @@ export function openAslCardContextMenu({
       saveAslUserNodes(cid, userNodes);
       updateCardAllStarPanel(card, targetHs);
       if (typeof showToast === "function") {
-        showToast(item.role === "dtmf" ? `Ячейка «${cleanNode}»: роль DTMF-макрос` : `Ячейка #${cleanNode}: роль ХН (вызов узла)`, "info", 2000);
+        const roleMsg = item.role === "dtmf"
+          ? (window.t ? window.t("asl.slot_role_dtmf_toast", { node: cleanNode }, `Slot «${cleanNode}»: role DTMF macro`) : `Slot «${cleanNode}»: role DTMF macro`)
+          : (window.t ? window.t("asl.slot_role_hn_toast", { node: cleanNode }, `Slot #${cleanNode}: role HN (node connect)`) : `Slot #${cleanNode}: role HN (node connect)`);
+        showToast(roleMsg, "info", 2000);
       }
     } else if (action === "edit") {
       closeAslCardContextMenu(card, targetHs);
@@ -2694,7 +3154,13 @@ export function openAslCardContextMenu({
       closeAslCardContextMenu(card, targetHs);
       updateCardAllStarPanel(card, targetHs);
       if (typeof showToast === "function") {
-        showToast(`Scan для #${cleanNode}: ${item.scan ? "ВКЛ" : "ВЫКЛ"}`, "info", 1800);
+        const scanStateLabel = item.scan
+          ? (window.t ? window.t("common.on", {}, "ON") : "ON")
+          : (window.t ? window.t("common.off", {}, "OFF") : "OFF");
+        const scanMsg = window.t
+          ? window.t("asl.slot_scan_toggle_toast", { node: cleanNode, state: scanStateLabel }, `Scan for #${cleanNode}: ${scanStateLabel}`)
+          : `Scan for #${cleanNode}: ${scanStateLabel}`;
+        showToast(scanMsg, "info", 1800);
       }
     }
   };
@@ -2736,7 +3202,7 @@ export function executeAslDtmfMacroAction(cid, card, btn, digits) {
         active: true,
         text: window.t ? window.t("asl.scan_dtmf_tx_unavailable", {}, "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)") : "✕ Передача DTMF недоступна: переведите узел в режим TX-RX (*3)",
         tone: "negative",
-        autoHideMs: 3200
+        autoHideMs: 4000
       });
     }
     if (navigator.vibrate) {
@@ -2768,9 +3234,18 @@ const DEFAULT_ASL_SCAN_CONFIG = {
 
 export function getAslScanConfig(cid) {
   try {
-    const raw = localStorage.getItem(`proxdmr_asl_scan_cfg_${cid}`) || localStorage.getItem("proxdmr_asl_scan_cfg_global");
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    let parsed = null;
+    if (hasServerCollectionKey("asl_scan_cfg", cid)) {
+      parsed = getServerCollectionValue("asl_scan_cfg", cid);
+    } else if (hasServerCollectionKey("asl_scan_cfg", "global")) {
+      parsed = getServerCollectionValue("asl_scan_cfg", "global");
+    }
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (!parsed) {
+      const raw = localStorage.getItem(`proxdmr_asl_scan_cfg_${cid}`) || localStorage.getItem("proxdmr_asl_scan_cfg_global");
+      if (raw) parsed = JSON.parse(raw);
+    }
+    if (parsed && typeof parsed === "object") {
       return {
         mode: (parsed.mode === "wait" || parsed.mode === "timer") ? parsed.mode : "timer",
         timerHoldSec: Math.max(5, Math.min(120, parseInt(parsed.timerHoldSec, 10) || 15)),
@@ -2784,10 +3259,115 @@ export function getAslScanConfig(cid) {
 
 export function saveAslScanConfig(cid, cfg) {
   try {
-    const serialized = JSON.stringify(cfg);
-    localStorage.setItem(`proxdmr_asl_scan_cfg_${cid}`, serialized);
-    localStorage.setItem("proxdmr_asl_scan_cfg_global", serialized);
+    setServerCollectionKey("asl_scan_cfg", cid, cfg, "proxdmr_asl_scan_cfg_", true);
+    setServerCollectionKey("asl_scan_cfg", "global", cfg, "proxdmr_asl_scan_cfg_", true);
   } catch (_) {}
+}
+
+const DEFAULT_ASL_DICE_CONFIG = {
+  continueOnFail: true,
+  continueOnSilence: false,
+  silenceWaitSec: 10
+};
+
+function _normalizeAslDiceConfig(raw) {
+  const src = (raw && typeof raw === "object") ? raw : {};
+  const waitParsed = parseInt(src.silenceWaitSec, 10);
+  const clampedWait = Number.isFinite(waitParsed)
+    ? Math.max(1, Math.min(60, waitParsed))
+    : DEFAULT_ASL_DICE_CONFIG.silenceWaitSec;
+  return {
+    continueOnFail: src.continueOnFail === undefined ? DEFAULT_ASL_DICE_CONFIG.continueOnFail : Boolean(src.continueOnFail),
+    continueOnSilence: src.continueOnSilence === undefined ? DEFAULT_ASL_DICE_CONFIG.continueOnSilence : Boolean(src.continueOnSilence),
+    silenceWaitSec: clampedWait
+  };
+}
+
+export function getAslDiceConfig(cid) {
+  try {
+    let parsed = null;
+    if (hasServerCollectionKey("asl_dice_cfg", cid)) {
+      parsed = getServerCollectionValue("asl_dice_cfg", cid);
+    } else if (hasServerCollectionKey("asl_dice_cfg", "global")) {
+      parsed = getServerCollectionValue("asl_dice_cfg", "global");
+    }
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (!parsed && typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(`proxdmr_asl_dice_cfg_${cid}`) || localStorage.getItem("proxdmr_asl_dice_cfg_global");
+      if (raw) parsed = JSON.parse(raw);
+    }
+    if (parsed && typeof parsed === "object") {
+      return _normalizeAslDiceConfig(parsed);
+    }
+  } catch (_) {}
+  return { ...DEFAULT_ASL_DICE_CONFIG };
+}
+
+export function saveAslDiceConfig(cid, cfg) {
+  const normalized = _normalizeAslDiceConfig(cfg);
+  try {
+    setServerCollectionKey("asl_dice_cfg", cid, normalized, "proxdmr_asl_dice_cfg_", true);
+    setServerCollectionKey("asl_dice_cfg", "global", normalized, "proxdmr_asl_dice_cfg_", true);
+  } catch (_) {}
+  return normalized;
+}
+
+export function syncAslDiceButtonUI(card, targetHs) {
+  const isRolling = Boolean(targetHs && targetHs._aslDiceRolling);
+  const idleTitle = window.t
+    ? window.t("asl.dice_btn_title", {}, "Случайный активный узел ASL (клик — старт/стоп, удержание/ПКМ — настройки)")
+    : "Случайный активный узел ASL (клик — старт/стоп, удержание/ПКМ — настройки)";
+  const stopTitle = window.t
+    ? window.t("asl.dice_btn_stop_title", {}, "Нажмите для остановки поиска случайного узла ASL")
+    : "Нажмите для остановки поиска случайного узла ASL";
+  const root = card || document;
+  root.querySelectorAll(".vfo-allstar-row .btn-allstar-dice:not(.btn-adn-dice)").forEach(btn => {
+    btn.classList.toggle("dice-rolling", isRolling);
+    btn.disabled = false;
+    const tLabel = isRolling ? stopTitle : idleTitle;
+    btn.title = tLabel;
+    btn.setAttribute("aria-label", tLabel);
+  });
+}
+
+export function stopAslDiceSearch(cid, card, targetHs, { immediateAbort = false, finishInnerIteration = false, silent = false } = {}) {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const resolvedHs = targetHs || curHsList.find(h => h && h.id === cid) || curHsList[0] || null;
+  const effCard = card || (resolvedHs ? (document.querySelector(`.dmr-card[data-hotspot-id="${resolvedHs.id}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${resolvedHs.id}"]`)) : null);
+  if (!resolvedHs || !resolvedHs._aslDiceRolling) {
+    if (effCard && resolvedHs) {
+      syncAslDiceButtonUI(effCard, resolvedHs);
+    }
+    return;
+  }
+
+  resolvedHs._aslDiceStopRequested = true;
+
+  if (immediateAbort || !finishInnerIteration) {
+    resolvedHs._aslDiceRunId = (resolvedHs._aslDiceRunId || 0) + 1;
+    resolvedHs._aslDiceRolling = false;
+    if (effCard) {
+      syncAslDiceButtonUI(effCard, resolvedHs);
+      if (!silent) {
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t ? window.t("asl.dice_stopped", {}, "⏹ Поиск случайного узла ASL остановлен") : "⏹ Поиск случайного узла ASL остановлен",
+          tone: "neutral",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+      }
+    }
+  } else {
+    if (effCard && !silent) {
+      setAslProcBannerState(effCard, {
+        active: true,
+        text: window.t ? window.t("asl.dice_stopping", {}, "⏹ Остановка поиска (завершение текущей попытки)...") : "⏹ Остановка поиска (завершение текущей попытки)...",
+        tone: "neutral",
+        autoHideMs: 0
+      });
+    }
+  }
 }
 
 export function isAslNodeRxActive(card, targetHs) {
@@ -2841,7 +3421,7 @@ export function stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink = true,
         active: true,
         text: window.t ? window.t("asl.scan_stopped", {}, "⏹ Сканирование остановлено") : "⏹ Сканирование остановлено",
         tone: "neutral",
-        autoHideMs: 2000
+        autoHideMs: 4000
       });
     }
   }
@@ -2852,6 +3432,9 @@ export function stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink = true,
 
 export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
   if (!card || !targetHs) return;
+  if (targetHs._aslDiceRolling) {
+    stopAslDiceSearch(cid, card, targetHs, { immediateAbort: true, silent: true });
+  }
 
   const scanTargets = (userNodes || []).filter(item => item && item.node && item.scan && !isAslDtmfCard(item));
   if (scanTargets.length === 0) {
@@ -2859,7 +3442,7 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
       active: true,
       text: window.t ? window.t("asl.scan_no_nodes", {}, "✕ Нет узлов для сканирования: включите Scan: ON в меню карточек") : "✕ Нет узлов для сканирования: включите Scan: ON в меню карточек",
       tone: "negative",
-      autoHideMs: 3200
+      autoHideMs: 4000
     });
     if (navigator.vibrate) {
       try { navigator.vibrate([40, 40, 40]); } catch (_) {}
@@ -3034,7 +3617,7 @@ export async function startAslMatrixScan(cid, card, targetHs, userNodes) {
 }
 
 export function openAslScanSettingsPopover(cid, anchorEl, card) {
-  document.querySelectorAll(".asl-scan-settings-popover").forEach(el => el.remove());
+  document.querySelectorAll(".asl-scan-settings-popover, .ysf-scan-settings-popover, .ysf-dice-settings-popover, .adn-dice-settings-popover, .asl-dice-settings-popover, .ysf-scan-backdrop").forEach(el => el.remove());
   if (!anchorEl || !card) return;
 
   const cfg = getAslScanConfig(cid);
@@ -3140,6 +3723,137 @@ export function openAslScanSettingsPopover(cid, anchorEl, card) {
       popover.remove();
     }
   };
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onOutsideClick, true);
+  }, 20);
+}
+
+export function openAslDiceSettingsPopover(arg1, arg2, arg3) {
+  let cid = "";
+  let card = null;
+  let anchorEl = null;
+  if (arg1 && typeof arg1 === "object") {
+    cid = arg1.cid || "default";
+    card = arg1.card || null;
+    anchorEl = arg1.anchorEl || (card ? card.querySelector(".vfo-allstar-row .btn-allstar-dice:not(.btn-adn-dice)") : null);
+  } else {
+    cid = arg1 || "default";
+    anchorEl = arg2 || null;
+    card = arg3 || null;
+    if (!anchorEl && card) anchorEl = card.querySelector(".vfo-allstar-row .btn-allstar-dice:not(.btn-adn-dice)");
+  }
+
+  document.querySelectorAll(".asl-scan-settings-popover, .ysf-scan-settings-popover, .ysf-dice-settings-popover, .adn-dice-settings-popover, .asl-dice-settings-popover, .ysf-scan-backdrop").forEach(el => el.remove());
+  if (!anchorEl || !card) return;
+
+  const cfg = getAslDiceConfig(cid);
+  const secUnit = window.t ? window.t("live.sec", {}, "с") : "с";
+  const titleTxt = window.t ? window.t("asl.dice_settings_title", {}, "🎲 Случайный узел ASL") : "🎲 Случайный узел ASL";
+  const chkFailTxt = window.t ? window.t("asl.dice_continue_on_fail", {}, "Продолжать при неудачном коннекте") : "Продолжать при неудачном коннекте";
+  const getChkSilenceTxt = (sec) => window.t
+    ? window.t("asl.dice_continue_on_silence", { sec: `${sec} ${secUnit}` }, `Продолжать при отсутствии общения в течение ${sec} сек.`)
+    : `Продолжать при отсутствии общения в течение ${sec} сек.`;
+  const sliderLblTxt = window.t ? window.t("asl.dice_silence_wait_label", {}, "Пауза детектирования разговоров:") : "Пауза детектирования разговоров:";
+
+  const popover = document.createElement("div");
+  popover.className = "asl-scan-settings-popover asl-dice-settings-popover";
+  popover.innerHTML = `
+    <div class="scan-popover-title">
+      <span>${safeEscapeHtml(titleTxt)}</span>
+      <span class="scan-popover-close">✕</span>
+    </div>
+    <label class="dice-chk-row">
+      <input type="checkbox" id="aslDiceContinueOnFail"${cfg.continueOnFail ? " checked" : ""}>
+      <span>${safeEscapeHtml(chkFailTxt)}</span>
+    </label>
+    <label class="dice-chk-row">
+      <input type="checkbox" id="aslDiceContinueOnSilence"${cfg.continueOnSilence ? " checked" : ""}>
+      <span id="aslDiceSilenceChkText">${safeEscapeHtml(getChkSilenceTxt(cfg.silenceWaitSec))}</span>
+    </label>
+    <div class="scan-field-group dice-silence-slider-group${cfg.continueOnSilence ? "" : " is-disabled-hint"}">
+      <div class="scan-field-label">
+        <span>${safeEscapeHtml(sliderLblTxt)}</span>
+        <span class="scan-field-val" id="aslDiceSilenceVal">${cfg.silenceWaitSec}${safeEscapeHtml(secUnit)}</span>
+      </div>
+      <input type="range" id="aslDiceSilenceRange" min="1" max="60" step="1" value="${cfg.silenceWaitSec}">
+    </div>
+  `;
+
+  const vfoRow = card.querySelector(".vfo-allstar-row") || card;
+
+  const onOutsideClick = (e) => {
+    if (!popover.isConnected) {
+      document.removeEventListener("pointerdown", onOutsideClick, true);
+      return;
+    }
+    const curVfo = card.querySelector(".vfo-allstar-row") || vfoRow;
+    const curAnchor = (curVfo && curVfo.querySelector(".btn-allstar-dice:not(.btn-adn-dice)")) || anchorEl;
+    if (!popover.contains(e.target) && e.target !== curAnchor && !(curAnchor && curAnchor.contains && curAnchor.contains(e.target))) {
+      closePopover();
+    }
+  };
+
+  const closePopover = () => {
+    document.removeEventListener("pointerdown", onOutsideClick, true);
+    popover.remove();
+  };
+
+  popover.querySelector(".scan-popover-close").onclick = (e) => {
+    e.stopPropagation();
+    closePopover();
+  };
+
+  const chkFail = popover.querySelector("#aslDiceContinueOnFail");
+  const chkSilence = popover.querySelector("#aslDiceContinueOnSilence");
+  const chkSilenceText = popover.querySelector("#aslDiceSilenceChkText");
+  const silenceGroup = popover.querySelector(".dice-silence-slider-group");
+  const silenceRange = popover.querySelector("#aslDiceSilenceRange");
+  const silenceVal = popover.querySelector("#aslDiceSilenceVal");
+
+  if (chkFail) {
+    chkFail.onchange = (e) => {
+      e.stopPropagation();
+      cfg.continueOnFail = Boolean(chkFail.checked);
+      saveAslDiceConfig(cid, cfg);
+    };
+  }
+
+  if (chkSilence) {
+    chkSilence.onchange = (e) => {
+      e.stopPropagation();
+      cfg.continueOnSilence = Boolean(chkSilence.checked);
+      if (silenceGroup) {
+        silenceGroup.classList.toggle("is-disabled-hint", !cfg.continueOnSilence);
+      }
+      saveAslDiceConfig(cid, cfg);
+    };
+  }
+
+  if (silenceRange) {
+    silenceRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.silenceWaitSec = Math.max(1, Math.min(60, parseInt(silenceRange.value, 10) || 10));
+      if (silenceVal) silenceVal.textContent = `${cfg.silenceWaitSec}${secUnit}`;
+      if (chkSilenceText) chkSilenceText.textContent = getChkSilenceTxt(cfg.silenceWaitSec);
+      saveAslDiceConfig(cid, cfg);
+    };
+  }
+
+  const stopProp = (e) => e.stopPropagation();
+  popover.addEventListener("pointerdown", stopProp);
+  popover.addEventListener("mousedown", stopProp);
+  popover.addEventListener("click", stopProp);
+
+  vfoRow.style.position = "relative";
+  vfoRow.appendChild(popover);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const vfoRect = vfoRow.getBoundingClientRect();
+  const popWidth = popover.offsetWidth || 274;
+  const maxLeft = Math.max(4, vfoRect.width - popWidth - 4);
+  popover.style.left = `${Math.max(4, Math.min(maxLeft, rect.left - vfoRect.left))}px`;
+  popover.style.top = `${Math.round(rect.bottom - vfoRect.top + 6)}px`;
+
   setTimeout(() => {
     document.addEventListener("pointerdown", onOutsideClick, true);
   }, 20);
@@ -3259,134 +3973,416 @@ async function fetchActiveKeyedAslNodes() {
 }
 
 async function rollRandomKeyedAslNode(cid, card, targetHs, userNodes, diceBtn) {
-  if (targetHs && targetHs._aslDiceRolling) return;
-  if (targetHs) targetHs._aslDiceRolling = true;
-  if (diceBtn) {
-    diceBtn.classList.add("dice-rolling");
-    diceBtn.disabled = true;
+  if (!card || !targetHs) return;
+  if (targetHs._aslDiceRolling) return;
+
+  if (targetHs._aslScanActive) {
+    stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
   }
 
+  const runId = (targetHs._aslDiceRunId || 0) + 1;
+  targetHs._aslDiceRunId = runId;
+  targetHs._aslDiceRolling = true;
+  targetHs._aslDiceStopRequested = false;
+
+  const getLiveCard = () =>
+    document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) ||
+    document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) ||
+    card;
+
+  syncAslDiceButtonUI(getLiveCard(), targetHs);
+
+  const triedNodes = new Set();
+  const MAX_DICE_ATTEMPTS = 20;
+  const isRunTokenValid = () => Boolean(targetHs && targetHs._aslDiceRunId === runId);
+  const isLoopAlive = () => Boolean(isRunTokenValid() && targetHs._aslDiceRolling && !targetHs._aslDiceStopRequested);
+  const cancellablePause = async (ms) => {
+    const steps = Math.max(1, Math.ceil(ms / 50));
+    for (let i = 0; i < steps; i++) {
+      if (!isLoopAlive()) return false;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return isLoopAlive();
+  };
+
+  let connectedOk = false;
+  let stoppedByUser = false;
+  let stoppedByConfig = false;
+  let lastWasSilenceExhausted = false;
+  let cachedActiveList = null;
+
   try {
-    if (targetHs && targetHs._aslScanActive) {
-      stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
-    }
-
-    const activeListPromise = fetchActiveKeyedAslNodes();
-    const minAnimPromise = new Promise(resolve => setTimeout(resolve, 550));
-    const [activeList] = await Promise.all([activeListPromise, minAnimPromise]);
-    const ownNode = String((targetHs && targetHs.allstar_node) || "").trim();
-
-    const connectedSet = new Set();
-    if (targetHs) {
-      if (targetHs.connected_node) connectedSet.add(String(targetHs.connected_node).trim());
-      if (Array.isArray(targetHs.asl_links)) {
-        targetHs.asl_links.forEach(lk => {
-          if (lk && lk.node) connectedSet.add(String(lk.node).trim());
-        });
+    for (let attempt = 1; attempt <= MAX_DICE_ATTEMPTS; attempt++) {
+      if (!isLoopAlive()) {
+        stoppedByUser = Boolean(targetHs._aslDiceStopRequested);
+        break;
       }
-    }
 
-    const baseCandidates = (activeList || []).filter(item => {
-      const n = String((item && item.node) || "").trim();
-      if (!isValidPublicAslNodeClient(n)) return false;
-      if (ownNode && n === ownNode) return false;
-      return true;
-    });
+      const effCard = getLiveCard();
+      setAslProcBannerState(effCard, {
+        active: true,
+        text: attempt === 1
+          ? (window.t ? window.t("asl.dice_searching", {}, "🎲 Поиск случайного активного узла ASL...") : "🎲 Поиск случайного активного узла ASL...")
+          : (window.t ? window.t("asl.dice_retry", { attempt, max: MAX_DICE_ATTEMPTS }, `🎲 Повторный поиск узла ASL (${attempt}/${MAX_DICE_ATTEMPTS})...`) : `🎲 Повторный поиск узла ASL (${attempt}/${MAX_DICE_ATTEMPTS})...`),
+        tone: "neutral",
+        autoHideMs: 0
+      });
 
-    const nonConnected = baseCandidates.filter(it => !connectedSet.has(String(it.node).trim()));
-    const poolBase = nonConnected.length > 0 ? nonConnected : baseCandidates;
+      if (!cachedActiveList || attempt === 1) {
+        const activeListPromise = fetchActiveKeyedAslNodes();
+        const minAnimPromise = attempt === 1 ? new Promise(resolve => setTimeout(resolve, 450)) : Promise.resolve();
+        const [fetchedList] = await Promise.all([activeListPromise, minAnimPromise]);
+        if (!isRunTokenValid()) break;
+        if (Array.isArray(fetchedList) && fetchedList.length > 0) {
+          cachedActiveList = fetchedList;
+        }
+      }
 
-    if (!poolBase.length) {
-      if (typeof showToast === "function") {
+      if (targetHs._aslDiceStopRequested) {
+        stoppedByUser = true;
+        break;
+      }
+
+      const activeList = Array.isArray(cachedActiveList) ? cachedActiveList : [];
+      const ownNode = String((targetHs && targetHs.allstar_node) || "").trim();
+
+      const connectedSet = new Set();
+      if (targetHs) {
+        if (targetHs.connected_node) connectedSet.add(String(targetHs.connected_node).trim());
+        if (Array.isArray(targetHs.asl_links)) {
+          targetHs.asl_links.forEach(lk => {
+            if (lk && lk.node) connectedSet.add(String(lk.node).trim());
+          });
+        }
+      }
+
+      const baseCandidates = activeList.filter(item => {
+        const n = String((item && item.node) || "").trim();
+        if (!isValidPublicAslNodeClient(n)) return false;
+        if (ownNode && n === ownNode) return false;
+        return true;
+      });
+
+      const untriedCandidates = baseCandidates.filter(it => !triedNodes.has(String(it.node).trim()));
+      const sourceList = untriedCandidates.length > 0 ? untriedCandidates : baseCandidates;
+      const nonConnected = sourceList.filter(it => !connectedSet.has(String(it.node).trim()));
+      const poolBase = nonConnected.length > 0 ? nonConnected : sourceList;
+
+      if (!poolBase.length) {
         const emptyMsg = window.t
           ? window.t("asl.dice_empty_toast", {}, "🎲 Сейчас нет доступных активных узлов на stats.allstarlink.org/stats/keyed")
           : "🎲 Сейчас нет доступных активных узлов на stats.allstarlink.org/stats/keyed";
-        showToast(emptyMsg, "warning", 2800);
+        if (typeof showToast === "function") {
+          showToast(emptyMsg, "warning", 2800, effCard);
+        }
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: emptyMsg,
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+        break;
       }
-      return;
-    }
 
-    if (!window._aslDiceRecentMap) window._aslDiceRecentMap = {};
-    const recentArr = Array.isArray(window._aslDiceRecentMap[cid]) ? window._aslDiceRecentMap[cid] : [];
-    const recentSet = new Set(recentArr);
+      if (!window._aslDiceRecentMap) window._aslDiceRecentMap = {};
+      const recentArr = Array.isArray(window._aslDiceRecentMap[cid]) ? window._aslDiceRecentMap[cid] : [];
+      const recentSet = new Set(recentArr);
 
-    const diceTargetIdx = getAslMatrixPage(cid, targetHs) * ASL_PAGE_SIZE + (ASL_PAGE_SIZE - 1);
-    const preset0to18 = new Set(
-      (Array.isArray(userNodes) ? userNodes.filter((_, i) => i !== diceTargetIdx) : [])
-        .map(u => String((u && u.node) || "").trim())
-        .filter(Boolean)
-    );
+      const diceTargetIdx = getAslMatrixPage(cid, targetHs) * ASL_PAGE_SIZE + (ASL_PAGE_SIZE - 1);
+      const preset0to18 = new Set(
+        (Array.isArray(userNodes) ? userNodes.filter((_, i) => i !== diceTargetIdx) : [])
+          .map(u => String((u && u.node) || "").trim())
+          .filter(Boolean)
+      );
 
-    const tier1 = poolBase.filter(it => (Number(it.public_links_count) || 0) >= 1 && !preset0to18.has(it.node) && !recentSet.has(it.node));
-    const tier2 = poolBase.filter(it => (Number(it.public_links_count) || 0) >= 1 && !preset0to18.has(it.node));
-    const tier3 = poolBase.filter(it => !preset0to18.has(it.node) && !recentSet.has(it.node));
-    const tier4 = poolBase.filter(it => !preset0to18.has(it.node));
-    const tier5 = poolBase.filter(it => !recentSet.has(it.node));
+      const tier1 = poolBase.filter(it => (Number(it.public_links_count) || 0) >= 1 && !preset0to18.has(it.node) && !recentSet.has(it.node));
+      const tier2 = poolBase.filter(it => (Number(it.public_links_count) || 0) >= 1 && !preset0to18.has(it.node));
+      const tier3 = poolBase.filter(it => !preset0to18.has(it.node) && !recentSet.has(it.node));
+      const tier4 = poolBase.filter(it => !preset0to18.has(it.node));
+      const tier5 = poolBase.filter(it => !recentSet.has(it.node));
 
-    const finalPool = tier1.length ? tier1
-      : (tier2.length ? tier2
-      : (tier3.length ? tier3
-      : (tier4.length ? tier4
-      : (tier5.length ? tier5 : poolBase))));
+      const finalPool = tier1.length ? tier1
+        : (tier2.length ? tier2
+        : (tier3.length ? tier3
+        : (tier4.length ? tier4
+        : (tier5.length ? tier5 : poolBase))));
 
-    const chosen = finalPool[Math.floor(Math.random() * finalPool.length)];
-    const chosenNode = String(chosen.node).trim();
-    const chosenFlag = (chosen.flag && chosen.flag !== "➕" && chosen.flag !== "☎️") ? chosen.flag : "🌐";
-    const chosenLabel = String(chosen.label || chosen.callsign || `Node ${chosenNode}`).trim();
+      const chosen = finalPool[Math.floor(Math.random() * finalPool.length)];
+      const chosenNode = String(chosen.node).trim();
+      const chosenFlag = (chosen.flag && chosen.flag !== "➕" && chosen.flag !== "☎️") ? chosen.flag : "🌐";
+      const chosenLabel = String(chosen.label || chosen.callsign || `Node ${chosenNode}`).trim();
+      triedNodes.add(chosenNode);
 
-    const updatedRecent = [chosenNode, ...recentArr.filter(x => x !== chosenNode)].slice(0, 10);
-    window._aslDiceRecentMap[cid] = updatedRecent;
+      const updatedRecent = [chosenNode, ...recentArr.filter(x => x !== chosenNode)].slice(0, 10);
+      window._aslDiceRecentMap[cid] = updatedRecent;
 
-    if (targetHs) {
-      targetHs._aslDynamicMatrixMode = false;
-      targetHs._aslMovingIdx = null;
-      targetHs.asl_unlisted_links = [];
-      if (targetHs._aslDismissedUnlisted) targetHs._aslDismissedUnlisted.clear();
-      // Помечаем текущие активные линки как отключающиеся, чтобы они не детектировались как unlisted
-      if (!targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes = new Set();
-      if (targetHs.connected_node) targetHs._aslDisconnectingNodes.add(String(targetHs.connected_node).trim());
-      if (Array.isArray(targetHs.asl_links)) {
-        targetHs.asl_links.forEach(l => { if (l && l.node) targetHs._aslDisconnectingNodes.add(String(l.node).trim()); });
+      if (targetHs._aslDiceStopRequested) {
+        stoppedByUser = true;
+        break;
+      }
+
+      if (targetHs) {
+        targetHs._aslDynamicMatrixMode = false;
+        targetHs._aslMovingIdx = null;
+        targetHs.asl_unlisted_links = [];
+        if (targetHs._aslDismissedUnlisted) targetHs._aslDismissedUnlisted.clear();
+        if (!targetHs._aslDisconnectingNodes) targetHs._aslDisconnectingNodes = new Set();
+        if (targetHs.connected_node) targetHs._aslDisconnectingNodes.add(String(targetHs.connected_node).trim());
+        if (Array.isArray(targetHs.asl_links)) {
+          targetHs.asl_links.forEach(l => { if (l && l.node) targetHs._aslDisconnectingNodes.add(String(l.node).trim()); });
+        }
+      }
+
+      if (Array.isArray(userNodes) && userNodes.length > diceTargetIdx && !preset0to18.has(chosenNode)) {
+        userNodes[diceTargetIdx] = {
+          node: chosenNode,
+          label: chosenLabel,
+          flag: chosenFlag,
+          role: "node",
+          scan: false
+        };
+        saveAslUserNodes(cid, userNodes);
+      }
+
+      const cardBeforeConn = getLiveCard();
+      updateCardAllStarPanel(cardBeforeConn, targetHs);
+
+      // Сбрасываем старые флаги приёма перед новым подключением
+      targetHs._aslCarrierRx = false;
+      targetHs._aslLastRxAudioMs = 0;
+      targetHs._aslRxActiveNode = "";
+      targetHs._aslKeyedNodes = [];
+      if (cardBeforeConn && cardBeforeConn._lastRx && cardBeforeConn._lastRx[1]) {
+        cardBeforeConn._lastRx[1].active = false;
+        cardBeforeConn._lastRx[1].lastAudioTime = 0;
+      }
+      const vfoRowClean = cardBeforeConn ? cardBeforeConn.querySelector(".vfo-allstar-row") : null;
+      if (vfoRowClean) vfoRowClean.classList.remove("allstar-rx-active");
+
+      // Строго режим Монитора (*2) от кубика
+      aslConnectNodeProcedure(cid, chosenNode, "*2", {
+        showStatusBanner: true,
+        showCardEffects: true,
+        fromDice: true
+      });
+
+      let waitConnMs = 0;
+      let isConnected = false;
+      while (waitConnMs < 8500 && isLoopAlive()) {
+        const linkedInArray = Array.isArray(targetHs.asl_links) && targetHs.asl_links.some(l => String(l.node).trim() === chosenNode && !l.connecting);
+        if (String(targetHs.connected_node || "").trim() === chosenNode || linkedInArray) {
+          isConnected = true;
+          break;
+        }
+        const stillConnecting = Boolean(targetHs._aslConnectingNodes instanceof Map && targetHs._aslConnectingNodes.has(chosenNode));
+        if (waitConnMs >= 300 && !stillConnecting) {
+          break;
+        }
+        await new Promise(r => setTimeout(r, 150));
+        waitConnMs += 150;
+      }
+      if (!isRunTokenValid()) break;
+
+      if (isConnected) {
+        const curCfg = getAslDiceConfig(cid);
+        const liveCard = getLiveCard();
+        if (!curCfg.continueOnSilence) {
+          connectedOk = true;
+          if (typeof showToast === "function") {
+            const toastMsg = window.t
+              ? window.t(
+                  "asl.dice_rolled_toast",
+                  { node: chosenNode, flag: chosenFlag, label: chosenLabel },
+                  `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`
+                )
+              : `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`;
+            showToast(toastMsg, "info", 2800, liveCard);
+          }
+          break;
+        }
+
+        // Режим «Продолжать при отсутствии общения в течение N секунд»
+        let elapsedSilenceMs = 0;
+        let speechDetected = isAslNodeRxActive(liveCard, targetHs);
+        let cfgWaitDisabled = false;
+        const stepMs = 150;
+        while (!speechDetected && isLoopAlive()) {
+          const liveCfg = getAslDiceConfig(cid);
+          if (!liveCfg.continueOnSilence) {
+            cfgWaitDisabled = true;
+            break;
+          }
+          const waitTotalMs = Math.max(1, liveCfg.silenceWaitSec) * 1000;
+          if (elapsedSilenceMs >= waitTotalMs) break;
+
+          if (isAslNodeRxActive(getLiveCard(), targetHs)) {
+            speechDetected = true;
+            break;
+          }
+
+          const remSec = Math.max(1, Math.ceil((waitTotalMs - elapsedSilenceMs) / 1000));
+          setAslProcBannerState(getLiveCard(), {
+            active: true,
+            text: window.t
+              ? window.t("asl.dice_wait_speech", { node: chosenNode, sec: remSec }, `🎲 #${chosenNode} подключён — ожидание речи (${remSec}с)...`)
+              : `🎲 #${chosenNode} подключён — ожидание речи (${remSec}с)...`,
+            tone: "neutral",
+            autoHideMs: 0
+          });
+
+          await new Promise(r => setTimeout(r, stepMs));
+          elapsedSilenceMs += stepMs;
+        }
+        if (!isRunTokenValid()) break;
+
+        const postWaitCard = getLiveCard();
+        if (!speechDetected && isAslNodeRxActive(postWaitCard, targetHs)) {
+          speechDetected = true;
+        }
+
+        if (speechDetected || cfgWaitDisabled) {
+          connectedOk = true;
+          if (speechDetected) {
+            setAslProcBannerState(postWaitCard, {
+              active: true,
+              text: window.t
+                ? window.t("asl.dice_speech_found", { node: chosenNode }, `🔊 #${chosenNode}: обнаружена речь в эфире`)
+                : `🔊 #${chosenNode}: обнаружена речь в эфире`,
+              tone: "positive",
+              autoHideMs: 4000,
+              fadeOutMs: 1800
+            });
+          }
+          if (typeof showToast === "function") {
+            const toastMsg = window.t
+              ? window.t(
+                  "asl.dice_rolled_toast",
+                  { node: chosenNode, flag: chosenFlag, label: chosenLabel },
+                  `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`
+                )
+              : `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`;
+            showToast(toastMsg, speechDetected ? "success" : "info", 3000, postWaitCard);
+          }
+          break;
+        }
+
+        if (targetHs._aslDiceStopRequested || !isLoopAlive()) {
+          stoppedByUser = true;
+          break;
+        }
+
+        const afterWaitCfg = getAslDiceConfig(cid);
+        if (!afterWaitCfg.continueOnSilence) {
+          connectedOk = true;
+          break;
+        }
+
+        if (attempt < MAX_DICE_ATTEMPTS) {
+          setAslProcBannerState(postWaitCard, {
+            active: true,
+            text: window.t
+              ? window.t("asl.dice_silence_retry", { node: chosenNode, sec: afterWaitCfg.silenceWaitSec, attempt: attempt + 1, max: MAX_DICE_ATTEMPTS }, `🔇 #${chosenNode}: тишина (${afterWaitCfg.silenceWaitSec}с) — следующий (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`)
+              : `🔇 #${chosenNode}: тишина (${afterWaitCfg.silenceWaitSec}с) — следующий (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`,
+            tone: "neutral",
+            autoHideMs: 0
+          });
+          const keepGoing = await cancellablePause(250);
+          if (!keepGoing) {
+            stoppedByUser = Boolean(isRunTokenValid() && targetHs._aslDiceStopRequested);
+            break;
+          }
+          continue;
+        }
+
+        lastWasSilenceExhausted = true;
+        setAslProcBannerState(postWaitCard, {
+          active: true,
+          text: window.t
+            ? window.t("asl.dice_silence_exhausted", { max: MAX_DICE_ATTEMPTS }, `🔇 Не найдено активной речи среди ${MAX_DICE_ATTEMPTS} случайных узлов`)
+            : `🔇 Не найдено активной речи среди ${MAX_DICE_ATTEMPTS} случайных узлов`,
+          tone: "negative",
+          autoHideMs: 4500,
+          fadeOutMs: 2000
+        });
+        break;
+      }
+
+      if (targetHs._aslDiceStopRequested) {
+        stoppedByUser = true;
+        break;
+      }
+
+      const liveFailCard = getLiveCard();
+      const failCfg = getAslDiceConfig(cid);
+      if (!failCfg.continueOnFail) {
+        stoppedByConfig = true;
+        const failMsg = window.t
+          ? window.t("asl.dice_fail_stopped", { node: chosenNode }, `✕ #${chosenNode} недоступен — повтор при сбое отключён`)
+          : `✕ #${chosenNode} недоступен — повтор при сбое отключён`;
+        setAslProcBannerState(liveFailCard, {
+          active: true,
+          text: failMsg,
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+        if (typeof showToast === "function") {
+          showToast(failMsg, "warning", 2800, liveFailCard);
+        }
+        break;
+      }
+
+      if (attempt < MAX_DICE_ATTEMPTS) {
+        setAslProcBannerState(liveFailCard, {
+          active: true,
+          text: window.t
+            ? window.t("asl.dice_retry", { attempt: attempt + 1, max: MAX_DICE_ATTEMPTS }, `🎲 Повторный поиск узла ASL (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`)
+            : `🎲 Повторный поиск узла ASL (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+        const keepGoing = await cancellablePause(350);
+        if (!keepGoing) {
+          stoppedByUser = Boolean(isRunTokenValid() && targetHs._aslDiceStopRequested);
+          break;
+        }
+      } else {
+        setAslProcBannerState(liveFailCard, {
+          active: true,
+          text: window.t
+            ? window.t("asl.dice_exhausted", { max: MAX_DICE_ATTEMPTS }, `✕ Не удалось подключиться ни к одному из ${MAX_DICE_ATTEMPTS} случайных узлов`)
+            : `✕ Не удалось подключиться ни к одному из ${MAX_DICE_ATTEMPTS} случайных узлов`,
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
       }
     }
-
-    // Записываем выпавший узел в последнюю (нижнюю правую) ячейку ТЕКУЩЕГО экрана памяти,
-    // если его ещё нет в других ячейках пользователя
-    if (Array.isArray(userNodes) && userNodes.length > diceTargetIdx && !preset0to18.has(chosenNode)) {
-      userNodes[diceTargetIdx] = {
-        node: chosenNode,
-        label: chosenLabel,
-        flag: chosenFlag,
-        role: "node",
-        scan: false
-      };
-      saveAslUserNodes(cid, userNodes);
-    }
-
-    updateCardAllStarPanel(card, targetHs);
-
-    // Строго режим Монитора (*2) с принудительным отключением старых линков на бэкенде
-    aslConnectNodeProcedure(cid, chosenNode, "*2", {
-      showStatusBanner: true,
-      showCardEffects: true
-    });
-
-    if (typeof showToast === "function") {
-      const toastMsg = window.t
-        ? window.t(
-            "asl.dice_rolled_toast",
-            { node: chosenNode, flag: chosenFlag, label: chosenLabel },
-            `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`
-          )
-        : `🎲 Случайный узел: ${chosenFlag} #${chosenNode} (${chosenLabel}) — Монитор *2`;
-      showToast(toastMsg, "info", 2800);
+  } catch (err) {
+    console.warn("[ASL] Dice roll error:", err);
+    if (isRunTokenValid() && !targetHs._aslDiceStopRequested && typeof showToast === "function") {
+      const diceErrMsg = window.t
+        ? window.t("asl.dice_roll_error", { error: err.message || err }, `✕ Ошибка «Кубика» ASL: ${err.message || err}`)
+        : `✕ Ошибка «Кубика» ASL: ${err.message || err}`;
+      showToast(diceErrMsg, "error", 2500, getLiveCard());
     }
   } finally {
-    if (targetHs) targetHs._aslDiceRolling = false;
-    const liveDiceBtn = card ? card.querySelector(".btn-allstar-dice") : diceBtn;
-    if (liveDiceBtn) {
-      liveDiceBtn.classList.remove("dice-rolling");
-      liveDiceBtn.disabled = false;
+    if (isRunTokenValid()) {
+      const wasStopped = stoppedByUser || Boolean(targetHs._aslDiceStopRequested);
+      targetHs._aslDiceRolling = false;
+      targetHs._aslDiceStopRequested = false;
+      const liveCardEnd = getLiveCard();
+      syncAslDiceButtonUI(liveCardEnd, targetHs);
+      if (wasStopped && !connectedOk && !stoppedByConfig && !lastWasSilenceExhausted) {
+        setAslProcBannerState(liveCardEnd, {
+          active: true,
+          text: window.t ? window.t("asl.dice_stopped", {}, "⏹ Поиск случайного узла ASL остановлен") : "⏹ Поиск случайного узла ASL остановлен",
+          tone: "neutral",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+      }
     }
   }
 }
@@ -3402,19 +4398,16 @@ export function getAslNodeShortInfo(nodeStr, targetHs = null, cid = "default") {
 
   // 1. Поиск в пользовательской матрице ячеек памяти
   try {
-    const raw = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const found = parsed.find(u => u && String(u.node).trim() === cleanN);
-        if (found) {
-          const rawLbl = String(found.label || "").trim();
-          if (rawLbl && rawLbl !== "[настроить]" && rawLbl !== "[setup]" && rawLbl !== "Свободно" && rawLbl !== "Empty") {
-            label = rawLbl;
-          }
-          if (found.flag && found.flag !== "➕") {
-            flag = String(found.flag).trim();
-          }
+    const parsed = getAslStoredNodes(cid);
+    if (Array.isArray(parsed)) {
+      const found = parsed.find(u => u && String(u.node).trim() === cleanN);
+      if (found) {
+        const rawLbl = String(found.label || "").trim();
+        if (rawLbl && rawLbl !== "[настроить]" && rawLbl !== "[setup]" && rawLbl !== "Свободно" && rawLbl !== "Empty") {
+          label = rawLbl;
+        }
+        if (found.flag && found.flag !== "➕") {
+          flag = String(found.flag).trim();
         }
       }
     }
@@ -3501,7 +4494,7 @@ export function updateAslVfoHeader(card, hs = null) {
   if (label && label !== connNode) {
     displayTitle = `${label} (${connNode})`;
   } else {
-    displayTitle = `Узел #${connNode}`;
+    displayTitle = window.t ? window.t("asl.node_fallback", { node: connNode }, `Node #${connNode}`) : `Node #${connNode}`;
   }
 
   const flagHtml = flag ? `<span class="asl-vfo-hub-flag">${safeEscapeHtml(flag)}</span> ` : "";
@@ -3527,7 +4520,9 @@ export function updateAslVfoHeader(card, hs = null) {
     const item = callsignEl.querySelector(".asl-vfo-marquee-item");
     if (!track || !inner || !item) return;
 
-    const diff = item.scrollWidth - track.clientWidth;
+    const itemWidth = Math.ceil(item.getBoundingClientRect().width || item.scrollWidth);
+    const trackWidth = Math.floor(track.getBoundingClientRect().width || track.clientWidth);
+    const diff = itemWidth - trackWidth;
     if (diff > 4) {
       const sep = `<span class="asl-vfo-marquee-sep" aria-hidden="true">&nbsp;---&nbsp;</span>`;
       inner.innerHTML = `${itemHtml}${sep}${itemHtml}${sep}`;
@@ -3541,6 +4536,4817 @@ export function updateAslVfoHeader(card, hs = null) {
       track.classList.remove("asl-marquee-active");
       track.style.removeProperty("--asl-marquee-dur");
     }
+  });
+}
+
+// YSF Matrix and Dashboard block for hotspots.js
+export const YSF_PAGE_SIZE = 20;
+export const YSF_PAGE_COUNT = 3;
+export const YSF_MEMORY_SIZE = YSF_PAGE_SIZE * YSF_PAGE_COUNT;
+const YSF_PAGE_LS_PREFIX = "proxdmr_ysf_matrix_page_";
+
+export const DEFAULT_YSF_MATRIX_ROOMS = [
+  { room: "25000", label: "YSF-Russia", flag: "🇷🇺", scan: false },
+  { room: "21080", label: "America-Link", flag: "🇺🇸", scan: false },
+  { room: "20000", label: "Europe-Link", flag: "🇪🇺", scan: false },
+  { room: "26200", label: "DL-Germany", flag: "🇩🇪", scan: false },
+  { room: "23400", label: "UK-YSF", flag: "🇬🇧", scan: false },
+  { room: "20800", label: "France-YSF", flag: "🇫🇷", scan: false },
+  { room: "22200", label: "Italy-YSF", flag: "🇮🇹", scan: false },
+  { room: "28400", label: "Bulgaria-YSF", flag: "🇧🇬", scan: false },
+  { room: "20200", label: "Hellas-YSF", flag: "🇬🇷", scan: false },
+  { room: "72400", label: "Brazil-YSF", flag: "🇧🇷", scan: false },
+  { room: "26800", label: "Portugal-YSF", flag: "🇵🇹", scan: false },
+  { room: "21400", label: "Spain-YSF", flag: "🇪🇸", scan: false },
+  { room: "26000", label: "Poland-YSF", flag: "🇵🇱", scan: false },
+  { room: "20400", label: "Netherlands", flag: "🇳🇱", scan: false },
+  { room: "20600", label: "Belgium-YSF", flag: "🇧🇪", scan: false },
+  { room: "24000", label: "Sweden-YSF", flag: "🇸🇪", scan: false },
+  { room: "24200", label: "Norway-YSF", flag: "🇳🇴", scan: false },
+  { room: "23800", label: "Denmark-YSF", flag: "🇩🇰", scan: false },
+  { room: "24400", label: "Finland-YSF", flag: "🇫🇮", scan: false },
+  { room: "9999", label: "YSF-Parrot", flag: "🦜", scan: false }
+];
+
+export function makeEmptyYsfCell() {
+  return { room: "", label: "", flag: "➕", scan: false };
+}
+
+export function padYsfRooms(list) {
+  const out = Array.isArray(list) ? list.slice(0, YSF_MEMORY_SIZE) : [];
+  while (out.length < YSF_MEMORY_SIZE) out.push(makeEmptyYsfCell());
+  return out;
+}
+
+export function getYsfMatrixPage(cid, hs) {
+  let p = (hs && Number.isInteger(hs._ysfMatrixPage)) ? hs._ysfMatrixPage : null;
+  if (p === null) {
+    try {
+      p = parseInt(localStorage.getItem(YSF_PAGE_LS_PREFIX + cid) || "0", 10);
+    } catch (_) {
+      p = 0;
+    }
+  }
+  if (!Number.isInteger(p) || p < 0 || p >= YSF_PAGE_COUNT) p = 0;
+  if (hs) hs._ysfMatrixPage = p;
+  return p;
+}
+
+export function setYsfMatrixPageValue(cid, hs, page) {
+  const v = ((page % YSF_PAGE_COUNT) + YSF_PAGE_COUNT) % YSF_PAGE_COUNT;
+  if (hs) hs._ysfMatrixPage = v;
+  try {
+    localStorage.setItem(YSF_PAGE_LS_PREFIX + cid, String(v));
+  } catch (_) {}
+  return v;
+}
+
+export function getYsfMatrixRooms(cid) {
+  try {
+    let parsed = null;
+    if (hasServerCollectionKey("ysf_matrix", cid)) {
+      parsed = getServerCollectionValue("ysf_matrix", cid);
+    } else if (hasServerCollectionKey("ysf_matrix", "global")) {
+      parsed = getServerCollectionValue("ysf_matrix", "global");
+    }
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (!parsed) {
+      const raw = localStorage.getItem(`proxdmr_ysf_matrix_${cid}`) || localStorage.getItem("proxdmr_ysf_matrix_global");
+      if (raw) parsed = JSON.parse(raw);
+    }
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return padYsfRooms(parsed.map(item => {
+        const rId = String(item.room || item.node || item.id || "").trim();
+        const rLabel = String(item.label || item.name || "").trim();
+        let rFlag = String(item.flag || "").trim();
+        if (rId && (!rFlag || rFlag === "➕" || rFlag === "🌐" || rFlag === "null")) {
+          const detected = detectYsfCountryFlag(rId, rLabel);
+          if (detected && detected.flag && detected.flag !== "➕") {
+            rFlag = detected.flag;
+          }
+        }
+        if (!rFlag) rFlag = rId ? "🌐" : "➕";
+        const rTypeOvr = String(item.type_override || item.reflector_type_override || "").trim().toLowerCase();
+        return {
+          room: rId,
+          label: rLabel,
+          flag: rFlag,
+          scan: Boolean(item.scan),
+          type_override: (rTypeOvr === "single" || rTypeOvr === "multi_standard" || rTypeOvr === "multi_mutant") ? rTypeOvr : ""
+        };
+      }));
+    }
+  } catch (_) {}
+  return padYsfRooms([...DEFAULT_YSF_MATRIX_ROOMS]);
+}
+
+export function saveYsfMatrixRooms(cid, rooms) {
+  try {
+    const padded = padYsfRooms(rooms);
+    setServerCollectionKey("ysf_matrix", cid, padded, "proxdmr_ysf_matrix_", true);
+    setServerCollectionKey("ysf_matrix", "global", padded, "proxdmr_ysf_matrix_", true);
+  } catch (_) {}
+}
+
+const DEFAULT_YSF_SCAN_CONFIG = {
+  mode: "timer",
+  timerHoldSec: 15,
+  releaseHoldSec: 3,
+  dwellSec: 5
+};
+
+export function getYsfScanConfig(cid) {
+  try {
+    let parsed = null;
+    if (hasServerCollectionKey("ysf_scan_cfg", cid)) {
+      parsed = getServerCollectionValue("ysf_scan_cfg", cid);
+    } else if (hasServerCollectionKey("ysf_scan_cfg", "global")) {
+      parsed = getServerCollectionValue("ysf_scan_cfg", "global");
+    }
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (!parsed && typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(`proxdmr_ysf_scan_cfg_${cid}`) || localStorage.getItem("proxdmr_ysf_scan_cfg_global");
+      if (raw) parsed = JSON.parse(raw);
+    }
+    if (parsed && typeof parsed === "object") {
+      return {
+        mode: (parsed.mode === "wait" || parsed.mode === "timer") ? parsed.mode : "timer",
+        timerHoldSec: Math.max(5, Math.min(120, parseInt(parsed.timerHoldSec, 10) || 15)),
+        releaseHoldSec: Math.max(1, Math.min(45, parseInt(parsed.releaseHoldSec, 10) || 3)),
+        dwellSec: 5
+      };
+    }
+  } catch (_) {}
+  return { ...DEFAULT_YSF_SCAN_CONFIG };
+}
+
+export function saveYsfScanConfig(cid, cfg) {
+  try {
+    setServerCollectionKey("ysf_scan_cfg", cid, cfg, "proxdmr_ysf_scan_cfg_", true);
+    setServerCollectionKey("ysf_scan_cfg", "global", cfg, "proxdmr_ysf_scan_cfg_", true);
+  } catch (_) {}
+}
+
+const DEFAULT_YSF_DICE_CONFIG = {
+  continueOnFail: true,
+  continueOnSilence: false,
+  silenceWaitSec: 10
+};
+
+function _normalizeYsfDiceConfig(raw) {
+  const src = (raw && typeof raw === "object") ? raw : {};
+  const waitParsed = parseInt(src.silenceWaitSec, 10);
+  const clampedWait = Number.isFinite(waitParsed)
+    ? Math.max(1, Math.min(60, waitParsed))
+    : DEFAULT_YSF_DICE_CONFIG.silenceWaitSec;
+  return {
+    continueOnFail: src.continueOnFail === undefined ? DEFAULT_YSF_DICE_CONFIG.continueOnFail : Boolean(src.continueOnFail),
+    continueOnSilence: src.continueOnSilence === undefined ? DEFAULT_YSF_DICE_CONFIG.continueOnSilence : Boolean(src.continueOnSilence),
+    silenceWaitSec: clampedWait
+  };
+}
+
+export function getYsfDiceConfig(cid) {
+  try {
+    let parsed = null;
+    if (hasServerCollectionKey("ysf_dice_cfg", cid)) {
+      parsed = getServerCollectionValue("ysf_dice_cfg", cid);
+    } else if (hasServerCollectionKey("ysf_dice_cfg", "global")) {
+      parsed = getServerCollectionValue("ysf_dice_cfg", "global");
+    }
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (!parsed && typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(`proxdmr_ysf_dice_cfg_${cid}`) || localStorage.getItem("proxdmr_ysf_dice_cfg_global");
+      if (raw) parsed = JSON.parse(raw);
+    }
+    if (parsed && typeof parsed === "object") {
+      return _normalizeYsfDiceConfig(parsed);
+    }
+  } catch (_) {}
+  return { ...DEFAULT_YSF_DICE_CONFIG };
+}
+
+export function saveYsfDiceConfig(cid, cfg) {
+  const normalized = _normalizeYsfDiceConfig(cfg);
+  try {
+    setServerCollectionKey("ysf_dice_cfg", cid, normalized, "proxdmr_ysf_dice_cfg_", true);
+    setServerCollectionKey("ysf_dice_cfg", "global", normalized, "proxdmr_ysf_dice_cfg_", true);
+  } catch (_) {}
+  return normalized;
+}
+
+const DEFAULT_ADN_DICE_CONFIG = {
+  continueOnFail: true,
+  continueOnSilence: false,
+  silenceWaitSec: 10
+};
+
+function _normalizeAdnDiceConfig(raw) {
+  const src = (raw && typeof raw === "object") ? raw : {};
+  const waitParsed = parseInt(src.silenceWaitSec, 10);
+  const clampedWait = Number.isFinite(waitParsed)
+    ? Math.max(1, Math.min(60, waitParsed))
+    : DEFAULT_ADN_DICE_CONFIG.silenceWaitSec;
+  return {
+    continueOnFail: src.continueOnFail === undefined ? DEFAULT_ADN_DICE_CONFIG.continueOnFail : Boolean(src.continueOnFail),
+    continueOnSilence: src.continueOnSilence === undefined ? DEFAULT_ADN_DICE_CONFIG.continueOnSilence : Boolean(src.continueOnSilence),
+    silenceWaitSec: clampedWait
+  };
+}
+
+export function getAdnDiceConfig(cid) {
+  try {
+    let parsed = null;
+    if (hasServerCollectionKey("adn_dice_cfg", cid)) {
+      parsed = getServerCollectionValue("adn_dice_cfg", cid);
+    } else if (hasServerCollectionKey("adn_dice_cfg", "global")) {
+      parsed = getServerCollectionValue("adn_dice_cfg", "global");
+    }
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (!parsed && typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(`proxdmr_adn_dice_cfg_${cid}`) || localStorage.getItem("proxdmr_adn_dice_cfg_global");
+      if (raw) parsed = JSON.parse(raw);
+    }
+    if (parsed && typeof parsed === "object") {
+      return _normalizeAdnDiceConfig(parsed);
+    }
+  } catch (_) {}
+  return { ...DEFAULT_ADN_DICE_CONFIG };
+}
+
+export function saveAdnDiceConfig(cid, cfg) {
+  const normalized = _normalizeAdnDiceConfig(cfg);
+  try {
+    setServerCollectionKey("adn_dice_cfg", cid, normalized, "proxdmr_adn_dice_cfg_", true);
+    setServerCollectionKey("adn_dice_cfg", "global", normalized, "proxdmr_adn_dice_cfg_", true);
+  } catch (_) {}
+  return normalized;
+}
+
+export function isYsfRoomRxActive(card, targetHs) {
+  const nowMs = Date.now();
+  const nowSec = nowMs / 1000;
+
+  // 1. Реальное поступление голосовых PCM-пакетов за последние 950 мс
+  if (card && card._lastRx && card._lastRx[1] && card._lastRx[1].lastAudioTime) {
+    if ((nowSec - card._lastRx[1].lastAudioTime) < 0.95) {
+      return true;
+    }
+  }
+  if (targetHs && targetHs._ysfLastRxAudioMs) {
+    if ((nowMs - targetHs._ysfLastRxAudioMs) < 950) {
+      return true;
+    }
+  }
+
+  // 2. Флаг несущей ysf_carrier / VFO RX / _lastRx[1].active, только если звук не прекратился давно
+  const ts1Row = card ? card.querySelector(".vfo-ts1-row") : null;
+  const domRx = Boolean(ts1Row && ts1Row.classList.contains("vfo-rx-active"));
+  const dsRx = Boolean(card && card.dataset && card.dataset.rxState === "rx");
+  const stateRx = Boolean(targetHs && (targetHs._ysfCarrierRx || targetHs.state === "RX" || targetHs.status === "RX"));
+  const lastRxActive = Boolean(card && card._lastRx && card._lastRx[1] && card._lastRx[1].active);
+  if (stateRx || domRx || dsRx || lastRxActive) {
+    const lastAudioMs = (targetHs && targetHs._ysfLastRxAudioMs) || ((card?._lastRx?.[1]?.lastAudioTime || 0) * 1000);
+    if (!lastAudioMs || (nowMs - lastAudioMs) < 1500) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isAdnSlotRxActive(card, targetHs, slot) {
+  const nowMs = Date.now();
+  const nowSec = nowMs / 1000;
+  const s = Number(slot) === 1 ? 1 : 2;
+
+  if (card && card._lastRx && card._lastRx[s] && card._lastRx[s].lastAudioTime) {
+    if ((nowSec - card._lastRx[s].lastAudioTime) < 0.95) {
+      return true;
+    }
+  }
+  if (targetHs && targetHs._adnLastRxAudioMs) {
+    if ((nowMs - targetHs._adnLastRxAudioMs) < 950) {
+      return true;
+    }
+  }
+
+  const tsRow = card ? card.querySelector(s === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row") : null;
+  const domRx = Boolean(tsRow && tsRow.classList.contains("vfo-rx-active"));
+  const lastRxActive = Boolean(card && card._lastRx && card._lastRx[s] && card._lastRx[s].active);
+  if (domRx || lastRxActive) {
+    const lastAudioTime = card && card._lastRx && card._lastRx[s] ? card._lastRx[s].lastAudioTime : 0;
+    const lastAudioMs = (targetHs && targetHs._adnLastRxAudioMs) || (lastAudioTime ? lastAudioTime * 1000 : 0);
+    if (!lastAudioMs || (nowMs - lastAudioMs) < 1500) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function stopYsfMatrixScan(cid, card, targetHs, { keepCurrentLink = true, silent = false } = {}) {
+  if (targetHs) {
+    targetHs._ysfScanActive = false;
+    targetHs._ysfScanRunId = (targetHs._ysfScanRunId || 0) + 1;
+    targetHs._ysfScanningRoom = "";
+  }
+  if (card) {
+    const btn = card.querySelector(".btn-ysf-scan");
+    if (btn) btn.classList.remove("scan-running");
+    card.querySelectorAll(".btn-ysf-room-cell.ysf-node-scanning-now, .btn-ysf-room-cell.asl-node-scanning-now").forEach(el => {
+      el.classList.remove("ysf-node-scanning-now");
+      el.classList.remove("asl-node-scanning-now");
+    });
+    if (!silent) {
+      setAslProcBannerState(card, {
+        active: true,
+        text: window.t ? window.t("ysf.scan_stopped", {}, "⏹ Сканирование YSF остановлено") : "⏹ Сканирование YSF остановлено",
+        tone: "neutral",
+        autoHideMs: 4000
+      });
+    }
+  }
+  if (!keepCurrentLink && typeof ysfDisconnectProcedure === "function") {
+    ysfDisconnectProcedure(cid, card, { showStatusBanner: false });
+  }
+}
+
+export async function startYsfMatrixScan(cid, card, targetHs, rooms) {
+  if (!card || !targetHs) return;
+  if (targetHs._ysfDiceRolling) {
+    stopYsfDiceSearch(cid, card, targetHs, { immediateAbort: true, silent: true });
+  }
+
+  const initialRooms = Array.isArray(rooms) ? rooms : getYsfMatrixRooms(cid);
+  const scanTargets = (initialRooms || []).filter(item => item && item.room && item.scan);
+  if (scanTargets.length === 0) {
+    setAslProcBannerState(card, {
+      active: true,
+      text: window.t ? window.t("ysf.scan_no_rooms", {}, "✕ Нет комнат для сканирования: включите Scan в свойствах ячеек") : "✕ Нет комнат для сканирования: включите Scan в свойствах ячеек",
+      tone: "negative",
+      autoHideMs: 4000
+    });
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate([40, 40, 40]); } catch (_) {}
+    }
+    return;
+  }
+
+  const runId = (targetHs._ysfScanRunId || 0) + 1;
+  targetHs._ysfScanRunId = runId;
+  targetHs._ysfScanActive = true;
+
+  const scanBtn = card.querySelector(".btn-ysf-scan");
+  if (scanBtn) scanBtn.classList.add("scan-running");
+
+  const isStillRunning = () => Boolean(targetHs._ysfScanActive && targetHs._ysfScanRunId === runId);
+  const sleepMs = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  let cursor = 0;
+
+  while (isStillRunning()) {
+    const hasStoredRooms = hasServerCollectionKey("ysf_matrix", cid) ||
+      (typeof localStorage !== "undefined" && Boolean(localStorage.getItem(`proxdmr_ysf_matrix_${cid}`)));
+    const liveRooms = hasStoredRooms ? getYsfMatrixRooms(cid) : (initialRooms || []);
+    const currentTargets = (liveRooms || []).filter(item => item && item.room && item.scan);
+    if (currentTargets.length === 0) {
+      stopYsfMatrixScan(cid, card, targetHs, { keepCurrentLink: false });
+      return;
+    }
+
+    const targetItem = currentTargets[cursor % currentTargets.length];
+    cursor = (cursor + 1) % currentTargets.length;
+    const roomNum = String(targetItem.room).trim();
+    const roomLabel = String(targetItem.label || "").trim();
+    targetHs._ysfScanningRoom = roomNum;
+
+    card.querySelectorAll(".btn-ysf-room-cell").forEach(b => {
+      const isMatch = String(b.dataset.room || "").trim() === roomNum;
+      b.classList.toggle("ysf-node-scanning-now", isMatch);
+      b.classList.toggle("asl-node-scanning-now", isMatch);
+    });
+
+    // Сбрасываем индикаторы приёма от предыдущей комнаты перед новым подключением
+    const connStartedAt = Date.now();
+    targetHs._ysfCarrierRx = false;
+    targetHs._ysfLastRxAudioMs = 0;
+    targetHs._ysfRxActiveRoom = "";
+    targetHs._ysfKeyedRooms = [];
+    if (card._lastRx && card._lastRx[1]) {
+      card._lastRx[1].active = false;
+      card._lastRx[1].lastAudioTime = 0;
+    }
+    const ts1Clean = card.querySelector(".vfo-ts1-row");
+    if (ts1Clean) ts1Clean.classList.remove("vfo-rx-active");
+
+    // 1. Подключаемся к выбранной комнате YSF
+    ysfConnectRoomProcedure(roomNum, roomLabel, card, "", 42000, { fromScan: true });
+
+    let waitConnMs = 0;
+    let isConnected = false;
+    while (waitConnMs < 6500 && isStillRunning()) {
+      const curRoom = String(targetHs.ysf_room || "").trim();
+      const connectingRoom = String(targetHs._ysfConnectingRoom || "").trim();
+      if (curRoom === roomNum && isYsfOnlineStatus(targetHs.status) && connectingRoom !== roomNum) {
+        isConnected = true;
+        break;
+      }
+      if (waitConnMs >= 1000 && connectingRoom !== roomNum && curRoom !== roomNum) {
+        break;
+      }
+      await sleepMs(200);
+      waitConnMs += 200;
+    }
+
+    if (!isStillRunning()) return;
+
+    if (!isConnected) {
+      await sleepMs(350);
+      continue;
+    }
+
+    const cfg = getYsfScanConfig(cid);
+
+    // РЕЖИМ 1: «⏱ ТАЙМЕР» — фиксированное время на активной комнате
+    if (cfg.mode === "timer") {
+      let elapsedHold = 0;
+      while (isStillRunning()) {
+        const activeCfg = getYsfScanConfig(cid);
+        const totalHoldMs = (activeCfg.timerHoldSec || 15) * 1000;
+        if (elapsedHold >= totalHoldMs) break;
+        const activeNow = isYsfRoomRxActive(card, targetHs);
+        const remSec = Math.ceil((totalHoldMs - elapsedHold) / 1000);
+        setAslProcBannerState(card, {
+          active: true,
+          text: activeNow
+            ? (window.t ? window.t("ysf.scan_timer_air", { room: roomNum, sec: remSec }, `🔍 Скан #${roomNum} [Эфир · Таймер: ${remSec}с]`) : `🔍 Скан #${roomNum} [Эфир · Таймер: ${remSec}с]`)
+            : (window.t ? window.t("ysf.scan_timer_idle", { room: roomNum, sec: remSec }, `🔍 Скан #${roomNum} [Таймер: ${remSec}с]`) : `🔍 Скан #${roomNum} [Таймер: ${remSec}с]`),
+          tone: activeNow ? "positive" : "neutral",
+          autoHideMs: 0
+        });
+        await sleepMs(250);
+        elapsedHold += 250;
+      }
+    } else {
+      // РЕЖИМ 2: «🎙 ОЖИДАНИЕ» — ждёт активность dwellSec (5с), при наличии речи держит до конца передачи + releaseHoldSec
+      const dwellMs = (cfg.dwellSec || 5) * 1000;
+      let elapsedDwell = 0;
+      let activityDetected = Boolean(
+        (targetHs._ysfLastRxAudioMs && targetHs._ysfLastRxAudioMs >= connStartedAt + 250) ||
+        isYsfRoomRxActive(card, targetHs)
+      );
+
+      while (!activityDetected && elapsedDwell < dwellMs && isStillRunning()) {
+        if (isYsfRoomRxActive(card, targetHs)) {
+          activityDetected = true;
+          break;
+        }
+        const remSec = Math.ceil((dwellMs - elapsedDwell) / 1000);
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t ? window.t("ysf.scan_waiting", { room: roomNum, sec: remSec }, `🔍 Скан #${roomNum}: ожидание (${remSec}с)...`) : `🔍 Скан #${roomNum}: ожидание (${remSec}с)...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+        await sleepMs(200);
+        elapsedDwell += 200;
+      }
+
+      if (!isStillRunning()) return;
+
+      if (!activityDetected) {
+        if (currentTargets.length === 1) {
+          await ysfDisconnectProcedure(cid, card, { showStatusBanner: false });
+        }
+        await sleepMs(250);
+        continue;
+      }
+
+      let releaseElapsedMs = 0;
+      while (isStillRunning()) {
+        const activeCfg = getYsfScanConfig(cid);
+        const curReleaseTargetMs = (activeCfg.releaseHoldSec || 3) * 1000;
+        if (releaseElapsedMs >= curReleaseTargetMs) break;
+        if (isYsfRoomRxActive(card, targetHs)) {
+          releaseElapsedMs = 0;
+          setAslProcBannerState(card, {
+            active: true,
+            text: window.t ? window.t("ysf.scan_air_active", { room: roomNum }, `🔍 Скан #${roomNum} [Активность в эфире]`) : `🔍 Скан #${roomNum} [Активность в эфире]`,
+            tone: "positive",
+            autoHideMs: 0
+          });
+        } else {
+          const remRelease = Math.ceil(Math.max(0, curReleaseTargetMs - releaseElapsedMs) / 1000);
+          setAslProcBannerState(card, {
+            active: true,
+            text: window.t ? window.t("ysf.scan_release", { room: roomNum, sec: remRelease }, `🔍 Скан #${roomNum} [Отпускание: ${remRelease}с]`) : `🔍 Скан #${roomNum} [Отпускание: ${remRelease}с]`,
+            tone: "neutral",
+            autoHideMs: 0
+          });
+          releaseElapsedMs += 250;
+          if (releaseElapsedMs >= curReleaseTargetMs) break;
+        }
+        await sleepMs(250);
+      }
+    }
+
+    if (!isStillRunning()) return;
+
+    if (currentTargets.length === 1) {
+      await ysfDisconnectProcedure(cid, card, { showStatusBanner: false });
+    }
+    await sleepMs(250);
+  }
+}
+
+export function openYsfScanSettingsPopover(arg1, arg2, arg3) {
+  let cid = "";
+  let card = null;
+  let anchorEl = null;
+  if (arg1 && typeof arg1 === "object") {
+    cid = arg1.cid || "default";
+    card = arg1.card || null;
+    anchorEl = arg1.anchorEl || (card ? card.querySelector(".btn-ysf-scan") : null);
+  } else {
+    cid = arg1 || "default";
+    anchorEl = arg2 || null;
+    card = arg3 || null;
+    if (!anchorEl && card) anchorEl = card.querySelector(".btn-ysf-scan");
+  }
+
+  document.querySelectorAll(".asl-scan-settings-popover, .ysf-scan-settings-popover, .ysf-scan-backdrop").forEach(el => el.remove());
+  if (!anchorEl || !card) return;
+
+  const cfg = getYsfScanConfig(cid);
+  const secUnit = window.t ? window.t("live.sec", {}, "s") : "s";
+  const titleTxt = window.t ? window.t("ysf.scan_settings_title", {}, "⚙️ Настройки сканирования YSF") : "⚙️ Настройки сканирования YSF";
+  const timerBtnTxt = window.t ? window.t("ysf.scan_mode_timer", {}, "⏱ Таймер") : "⏱ Таймер";
+  const waitBtnTxt = window.t ? window.t("ysf.scan_mode_wait", {}, "🎙 Ожидание") : "🎙 Ожидание";
+  const timerBtnTip = window.t ? window.t("ysf.scan_mode_timer_tip", {}, "Фиксированное время на активной комнате") : "Фиксированное время на активной комнате";
+  const waitBtnTip = window.t ? window.t("ysf.scan_mode_wait_tip", {}, "До окончания передачи + таймер отпускания") : "До окончания передачи + таймер отпускания";
+  const timerLbl = window.t ? window.t("ysf.scan_timer_label", {}, "Таймер активности (сек):") : "Таймер активности (сек):";
+  const releaseLbl = window.t ? window.t("ysf.scan_release_label", {}, "Таймер отпускания (сек):") : "Таймер отпускания (сек):";
+
+  const popover = document.createElement("div");
+  popover.className = "asl-scan-settings-popover";
+  popover.innerHTML = `
+    <div class="scan-popover-title">
+      <span>${safeEscapeHtml(titleTxt)}</span>
+      <span class="scan-popover-close">✕</span>
+    </div>
+    <div class="scan-mode-toggle">
+      <button type="button" class="scan-mode-btn ${cfg.mode === "timer" ? "active" : ""}" data-mode="timer" title="${safeEscapeHtml(timerBtnTip)}">
+        ${safeEscapeHtml(timerBtnTxt)}
+      </button>
+      <button type="button" class="scan-mode-btn ${cfg.mode === "wait" ? "active" : ""}" data-mode="wait" title="${safeEscapeHtml(waitBtnTip)}">
+        ${safeEscapeHtml(waitBtnTxt)}
+      </button>
+    </div>
+    <div class="scan-field-group scan-group-timer" style="display: ${cfg.mode === "timer" ? "block" : "none"};">
+      <div class="scan-field-label">
+        <span>${safeEscapeHtml(timerLbl)}</span>
+        <span class="scan-field-val" id="ysfScanTimerVal">${cfg.timerHoldSec}${safeEscapeHtml(secUnit)}</span>
+      </div>
+      <input type="range" id="ysfScanTimerRange" min="5" max="120" step="5" value="${cfg.timerHoldSec}">
+    </div>
+    <div class="scan-field-group scan-group-wait" style="display: ${cfg.mode === "wait" ? "block" : "none"};">
+      <div class="scan-field-label">
+        <span>${safeEscapeHtml(releaseLbl)}</span>
+        <span class="scan-field-val" id="ysfScanReleaseVal">${cfg.releaseHoldSec}${safeEscapeHtml(secUnit)}</span>
+      </div>
+      <input type="range" id="ysfScanReleaseRange" min="1" max="45" step="1" value="${cfg.releaseHoldSec}">
+    </div>
+  `;
+
+  const vfoRow = card.querySelector(".vfo-ysf-row") || card;
+
+  const onOutsideClick = (e) => {
+    if (!popover.isConnected) {
+      document.removeEventListener("pointerdown", onOutsideClick, true);
+      return;
+    }
+    const curAnchor = (vfoRow && vfoRow.querySelector(".btn-ysf-scan")) || anchorEl;
+    if (!popover.contains(e.target) && e.target !== curAnchor && !(curAnchor && curAnchor.contains && curAnchor.contains(e.target))) {
+      closePopover();
+    }
+  };
+
+  const closePopover = () => {
+    document.removeEventListener("pointerdown", onOutsideClick, true);
+    popover.remove();
+  };
+
+  popover.querySelector(".scan-popover-close").onclick = (e) => {
+    e.stopPropagation();
+    closePopover();
+  };
+
+  const timerGroup = popover.querySelector(".scan-group-timer");
+  const waitGroup = popover.querySelector(".scan-group-wait");
+
+  popover.querySelectorAll(".scan-mode-btn").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      popover.querySelectorAll(".scan-mode-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      cfg.mode = btn.dataset.mode;
+      timerGroup.style.display = (cfg.mode === "timer") ? "block" : "none";
+      waitGroup.style.display = (cfg.mode === "wait") ? "block" : "none";
+      saveYsfScanConfig(cid, cfg);
+    };
+  });
+
+  const timerRange = popover.querySelector("#ysfScanTimerRange");
+  const timerVal = popover.querySelector("#ysfScanTimerVal");
+  if (timerRange) {
+    timerRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.timerHoldSec = parseInt(timerRange.value, 10);
+      if (timerVal) timerVal.textContent = `${cfg.timerHoldSec}${secUnit}`;
+      saveYsfScanConfig(cid, cfg);
+    };
+  }
+
+  const releaseRange = popover.querySelector("#ysfScanReleaseRange");
+  const releaseVal = popover.querySelector("#ysfScanReleaseVal");
+  if (releaseRange) {
+    releaseRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.releaseHoldSec = parseInt(releaseRange.value, 10);
+      if (releaseVal) releaseVal.textContent = `${cfg.releaseHoldSec}${secUnit}`;
+      saveYsfScanConfig(cid, cfg);
+    };
+  }
+
+  const stopProp = (e) => e.stopPropagation();
+  popover.addEventListener("pointerdown", stopProp);
+  popover.addEventListener("mousedown", stopProp);
+  popover.addEventListener("click", stopProp);
+
+  vfoRow.style.position = "relative";
+  vfoRow.appendChild(popover);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const vfoRect = vfoRow.getBoundingClientRect();
+  popover.style.left = `${Math.max(4, Math.min(vfoRect.width - 270, rect.left - vfoRect.left))}px`;
+  popover.style.top = `${Math.round(rect.bottom - vfoRect.top + 6)}px`;
+
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onOutsideClick, true);
+  }, 20);
+}
+
+export function openYsfDiceSettingsPopover(arg1, arg2, arg3) {
+  let cid = "";
+  let card = null;
+  let anchorEl = null;
+  if (arg1 && typeof arg1 === "object") {
+    cid = arg1.cid || "default";
+    card = arg1.card || null;
+    anchorEl = arg1.anchorEl || (card ? card.querySelector(".btn-ysf-dice") : null);
+  } else {
+    cid = arg1 || "default";
+    anchorEl = arg2 || null;
+    card = arg3 || null;
+    if (!anchorEl && card) anchorEl = card.querySelector(".btn-ysf-dice");
+  }
+
+  document.querySelectorAll(".asl-scan-settings-popover, .ysf-scan-settings-popover, .ysf-dice-settings-popover, .adn-dice-settings-popover, .asl-dice-settings-popover, .ysf-scan-backdrop").forEach(el => el.remove());
+  if (!anchorEl || !card) return;
+
+  const cfg = getYsfDiceConfig(cid);
+  const secUnit = window.t ? window.t("live.sec", {}, "с") : "с";
+  const titleTxt = window.t ? window.t("ysf.dice_settings_title", {}, "🎲 Случайный рефлектор YSF") : "🎲 Случайный рефлектор YSF";
+  const chkFailTxt = window.t ? window.t("ysf.dice_continue_on_fail", {}, "Продолжать при неудачном коннекте") : "Продолжать при неудачном коннекте";
+  const getChkSilenceTxt = (sec) => window.t
+    ? window.t("ysf.dice_continue_on_silence", { sec: `${sec} ${secUnit}` }, `Продолжать при отсутствии общения в течение ${sec} сек.`)
+    : `Продолжать при отсутствии общения в течение ${sec} сек.`;
+  const sliderLblTxt = window.t ? window.t("ysf.dice_silence_wait_label", {}, "Пауза детектирования разговоров:") : "Пауза детектирования разговоров:";
+
+  const popover = document.createElement("div");
+  popover.className = "asl-scan-settings-popover ysf-dice-settings-popover";
+  popover.innerHTML = `
+    <div class="scan-popover-title">
+      <span>${safeEscapeHtml(titleTxt)}</span>
+      <span class="scan-popover-close">✕</span>
+    </div>
+    <label class="dice-chk-row">
+      <input type="checkbox" id="ysfDiceContinueOnFail"${cfg.continueOnFail ? " checked" : ""}>
+      <span>${safeEscapeHtml(chkFailTxt)}</span>
+    </label>
+    <label class="dice-chk-row">
+      <input type="checkbox" id="ysfDiceContinueOnSilence"${cfg.continueOnSilence ? " checked" : ""}>
+      <span id="ysfDiceSilenceChkText">${safeEscapeHtml(getChkSilenceTxt(cfg.silenceWaitSec))}</span>
+    </label>
+    <div class="scan-field-group dice-silence-slider-group${cfg.continueOnSilence ? "" : " is-disabled-hint"}">
+      <div class="scan-field-label">
+        <span>${safeEscapeHtml(sliderLblTxt)}</span>
+        <span class="scan-field-val" id="ysfDiceSilenceVal">${cfg.silenceWaitSec}${safeEscapeHtml(secUnit)}</span>
+      </div>
+      <input type="range" id="ysfDiceSilenceRange" min="1" max="60" step="1" value="${cfg.silenceWaitSec}">
+    </div>
+  `;
+
+  const vfoRow = card.querySelector(".vfo-ysf-row") || card;
+
+  const onOutsideClick = (e) => {
+    if (!popover.isConnected) {
+      document.removeEventListener("pointerdown", onOutsideClick, true);
+      return;
+    }
+    const curAnchor = (vfoRow && vfoRow.querySelector(".btn-ysf-dice")) || anchorEl;
+    if (!popover.contains(e.target) && e.target !== curAnchor && !(curAnchor && curAnchor.contains && curAnchor.contains(e.target))) {
+      closePopover();
+    }
+  };
+
+  const closePopover = () => {
+    document.removeEventListener("pointerdown", onOutsideClick, true);
+    popover.remove();
+  };
+
+  popover.querySelector(".scan-popover-close").onclick = (e) => {
+    e.stopPropagation();
+    closePopover();
+  };
+
+  const chkFail = popover.querySelector("#ysfDiceContinueOnFail");
+  const chkSilence = popover.querySelector("#ysfDiceContinueOnSilence");
+  const chkSilenceText = popover.querySelector("#ysfDiceSilenceChkText");
+  const silenceGroup = popover.querySelector(".dice-silence-slider-group");
+  const silenceRange = popover.querySelector("#ysfDiceSilenceRange");
+  const silenceVal = popover.querySelector("#ysfDiceSilenceVal");
+
+  if (chkFail) {
+    chkFail.onchange = (e) => {
+      e.stopPropagation();
+      cfg.continueOnFail = Boolean(chkFail.checked);
+      saveYsfDiceConfig(cid, cfg);
+    };
+  }
+
+  if (chkSilence) {
+    chkSilence.onchange = (e) => {
+      e.stopPropagation();
+      cfg.continueOnSilence = Boolean(chkSilence.checked);
+      if (silenceGroup) {
+        silenceGroup.classList.toggle("is-disabled-hint", !cfg.continueOnSilence);
+      }
+      saveYsfDiceConfig(cid, cfg);
+    };
+  }
+
+  if (silenceRange) {
+    silenceRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.silenceWaitSec = Math.max(1, Math.min(60, parseInt(silenceRange.value, 10) || 10));
+      if (silenceVal) silenceVal.textContent = `${cfg.silenceWaitSec}${secUnit}`;
+      if (chkSilenceText) chkSilenceText.textContent = getChkSilenceTxt(cfg.silenceWaitSec);
+      saveYsfDiceConfig(cid, cfg);
+    };
+  }
+
+  const stopProp = (e) => e.stopPropagation();
+  popover.addEventListener("pointerdown", stopProp);
+  popover.addEventListener("mousedown", stopProp);
+  popover.addEventListener("click", stopProp);
+
+  vfoRow.style.position = "relative";
+  vfoRow.appendChild(popover);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const vfoRect = vfoRow.getBoundingClientRect();
+  const popWidth = popover.offsetWidth || 274;
+  const maxLeft = Math.max(4, vfoRect.width - popWidth - 4);
+  popover.style.left = `${Math.max(4, Math.min(maxLeft, rect.left - vfoRect.left))}px`;
+  popover.style.top = `${Math.round(rect.bottom - vfoRect.top + 6)}px`;
+
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onOutsideClick, true);
+  }, 20);
+}
+
+export function openAdnDiceSettingsPopover(arg1, arg2, arg3) {
+  let cid = "";
+  let card = null;
+  let anchorEl = null;
+  if (arg1 && typeof arg1 === "object") {
+    cid = arg1.cid || "default";
+    card = arg1.card || null;
+    anchorEl = arg1.anchorEl || (card ? card.querySelector(".btn-adn-dice") : null);
+  } else {
+    cid = arg1 || "default";
+    anchorEl = arg2 || null;
+    card = arg3 || null;
+    if (!anchorEl && card) anchorEl = card.querySelector(".btn-adn-dice");
+  }
+
+  document.querySelectorAll(".asl-scan-settings-popover, .ysf-scan-settings-popover, .ysf-dice-settings-popover, .adn-dice-settings-popover, .asl-dice-settings-popover, .ysf-scan-backdrop").forEach(el => el.remove());
+  if (!anchorEl || !card) return;
+
+  const cfg = getAdnDiceConfig(cid);
+  const secUnit = window.t ? window.t("live.sec", {}, "с") : "с";
+  const titleTxt = window.t ? window.t("adn.dice_settings_title", {}, "🎲 Случайная TG ADN") : "🎲 Случайная TG ADN";
+  const chkFailTxt = window.t ? window.t("adn.dice_continue_on_fail", {}, "Продолжать при неудачном коннекте") : "Продолжать при неудачном коннекте";
+  const getChkSilenceTxt = (sec) => window.t
+    ? window.t("adn.dice_continue_on_silence", { sec: `${sec} ${secUnit}` }, `Продолжать при отсутствии общения в течение ${sec} сек.`)
+    : `Продолжать при отсутствии общения в течение ${sec} сек.`;
+  const sliderLblTxt = window.t ? window.t("adn.dice_silence_wait_label", {}, "Пауза детектирования разговоров:") : "Пауза детектирования разговоров:";
+
+  const popover = document.createElement("div");
+  popover.className = "asl-scan-settings-popover ysf-dice-settings-popover adn-dice-settings-popover";
+  popover.innerHTML = `
+    <div class="scan-popover-title">
+      <span>${safeEscapeHtml(titleTxt)}</span>
+      <span class="scan-popover-close">✕</span>
+    </div>
+    <label class="dice-chk-row">
+      <input type="checkbox" id="adnDiceContinueOnFail"${cfg.continueOnFail ? " checked" : ""}>
+      <span>${safeEscapeHtml(chkFailTxt)}</span>
+    </label>
+    <label class="dice-chk-row">
+      <input type="checkbox" id="adnDiceContinueOnSilence"${cfg.continueOnSilence ? " checked" : ""}>
+      <span id="adnDiceSilenceChkText">${safeEscapeHtml(getChkSilenceTxt(cfg.silenceWaitSec))}</span>
+    </label>
+    <div class="scan-field-group dice-silence-slider-group${cfg.continueOnSilence ? "" : " is-disabled-hint"}">
+      <div class="scan-field-label">
+        <span>${safeEscapeHtml(sliderLblTxt)}</span>
+        <span class="scan-field-val" id="adnDiceSilenceVal">${cfg.silenceWaitSec}${safeEscapeHtml(secUnit)}</span>
+      </div>
+      <input type="range" id="adnDiceSilenceRange" min="1" max="60" step="1" value="${cfg.silenceWaitSec}">
+    </div>
+  `;
+
+  const container = card.querySelector(".card-screen") || card;
+
+  const onOutsideClick = (e) => {
+    if (!popover.isConnected) {
+      document.removeEventListener("pointerdown", onOutsideClick, true);
+      return;
+    }
+    const curAnchor = (card && card.querySelector(".btn-adn-dice")) || anchorEl;
+    if (!popover.contains(e.target) && e.target !== curAnchor && !(curAnchor && curAnchor.contains && curAnchor.contains(e.target))) {
+      closePopover();
+    }
+  };
+
+  const closePopover = () => {
+    document.removeEventListener("pointerdown", onOutsideClick, true);
+    popover.remove();
+  };
+
+  popover.querySelector(".scan-popover-close").onclick = (e) => {
+    e.stopPropagation();
+    closePopover();
+  };
+
+  const chkFail = popover.querySelector("#adnDiceContinueOnFail");
+  const chkSilence = popover.querySelector("#adnDiceContinueOnSilence");
+  const chkSilenceText = popover.querySelector("#adnDiceSilenceChkText");
+  const silenceGroup = popover.querySelector(".dice-silence-slider-group");
+  const silenceRange = popover.querySelector("#adnDiceSilenceRange");
+  const silenceVal = popover.querySelector("#adnDiceSilenceVal");
+
+  if (chkFail) {
+    chkFail.onchange = (e) => {
+      e.stopPropagation();
+      cfg.continueOnFail = Boolean(chkFail.checked);
+      saveAdnDiceConfig(cid, cfg);
+    };
+  }
+
+  if (chkSilence) {
+    chkSilence.onchange = (e) => {
+      e.stopPropagation();
+      cfg.continueOnSilence = Boolean(chkSilence.checked);
+      if (silenceGroup) {
+        silenceGroup.classList.toggle("is-disabled-hint", !cfg.continueOnSilence);
+      }
+      saveAdnDiceConfig(cid, cfg);
+    };
+  }
+
+  if (silenceRange) {
+    silenceRange.oninput = (e) => {
+      e.stopPropagation();
+      cfg.silenceWaitSec = Math.max(1, Math.min(60, parseInt(silenceRange.value, 10) || 10));
+      if (silenceVal) silenceVal.textContent = `${cfg.silenceWaitSec}${secUnit}`;
+      if (chkSilenceText) chkSilenceText.textContent = getChkSilenceTxt(cfg.silenceWaitSec);
+      saveAdnDiceConfig(cid, cfg);
+    };
+  }
+
+  const stopProp = (e) => e.stopPropagation();
+  popover.addEventListener("pointerdown", stopProp);
+  popover.addEventListener("mousedown", stopProp);
+  popover.addEventListener("click", stopProp);
+
+  container.style.position = "relative";
+  container.appendChild(popover);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const contRect = container.getBoundingClientRect();
+  const popWidth = popover.offsetWidth || 274;
+  const maxLeft = Math.max(4, contRect.width - popWidth - 4);
+  popover.style.left = `${Math.max(4, Math.min(maxLeft, rect.left - contRect.left))}px`;
+  popover.style.top = `${Math.round(rect.bottom - contRect.top + 6)}px`;
+
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onOutsideClick, true);
+  }, 20);
+}
+
+function _ysfIsoToEmoji(code) {
+  if (!code || code.length !== 2) return "";
+  const c = code.toUpperCase();
+  if (c === "EU") return "🇪🇺";
+  const cp1 = 127397 + c.charCodeAt(0);
+  const cp2 = 127397 + c.charCodeAt(1);
+  return String.fromCodePoint(cp1, cp2);
+}
+
+export function detectYsfCountryFlag(roomId, currentName = "") {
+  const sId = String(roomId || "").trim();
+  const cName = String(currentName || "").trim();
+  if (!sId) return { flag: "➕", name: "", countryCode: "" };
+
+  let found = null;
+  const list = (typeof window !== "undefined" && typeof window.getNetworkServersList === "function"
+    ? window.getNetworkServersList("ysf")
+    : ((window && window._dmrServersCache && window._dmrServersCache["ysf"]) || [])) || [];
+
+  if (Array.isArray(list) && list.length > 0) {
+    found = list.find(r => String(r.id || "").trim() === sId || (sId.length < 5 && String(r.id || "").trim() === sId.padStart(5, "0")));
+  }
+
+  if (!found && typeof window !== "undefined" && Array.isArray(window.DEFAULT_YSF_BOOKMARKS)) {
+    found = window.DEFAULT_YSF_BOOKMARKS.find(r => String(r.id || "").trim() === sId || (sId.length < 5 && String(r.id || "").trim() === sId.padStart(5, "0")));
+  }
+
+  if (found) {
+    if (typeof window !== "undefined" && typeof window.resolveYsfRoomInfo === "function") {
+      const info = window.resolveYsfRoomInfo(found);
+      if (info && info.flag && info.flag !== "🌐") {
+        return {
+          flag: info.flag,
+          name: info.refName || found.reflector_name || found.name || cName || `Room ${sId}`,
+          countryCode: info.cCode || found.country_code || ""
+        };
+      }
+    }
+    const cCode = String(found.country_code || found.country || "").toUpperCase();
+    if (cCode && cCode !== "XX" && cCode !== "GLOBAL") {
+      const em = _ysfIsoToEmoji(cCode);
+      if (em) {
+        return {
+          flag: em,
+          name: found.reflector_name || found.name || cName || `Room ${sId}`,
+          countryCode: cCode
+        };
+      }
+    }
+  }
+
+  // 1. Проверка префикса страны из названия комнаты (например, "AU-AUS REPEATER", "RU-RUSSIA", "US-Texas")
+  const isoPrefixMatch = cName.match(/^([A-Za-z]{2})[-_ ]/);
+  if (isoPrefixMatch) {
+    const iso = isoPrefixMatch[1].toUpperCase();
+    const em = _ysfIsoToEmoji(iso);
+    if (em) {
+      return { flag: em, name: cName, countryCode: iso };
+    }
+  }
+
+  // 2. Ключевые слова в названии комнаты
+  const lowerName = cName.toLowerCase();
+  if (lowerName.includes("aus") || lowerName.includes("australia")) {
+    return { flag: "🇦🇺", name: cName, countryCode: "AU" };
+  }
+  if (lowerName.includes("russia") || lowerName.includes("moscow") || lowerName.includes("россия")) {
+    return { flag: "🇷🇺", name: cName, countryCode: "RU" };
+  }
+  if (lowerName.includes("texas") || lowerName.includes("calnet") || lowerName.includes("america") || lowerName.includes("usa")) {
+    return { flag: "🇺🇸", name: cName, countryCode: "US" };
+  }
+  if (lowerName.includes("fusiontech")) {
+    return { flag: "🇺🇸", name: cName, countryCode: "US" };
+  }
+  if (lowerName.includes("spain") || lowerName.includes("espana")) {
+    return { flag: "🇪🇸", name: cName, countryCode: "ES" };
+  }
+  if (lowerName.includes("germany") || lowerName.includes("deutschland")) {
+    return { flag: "🇩🇪", name: cName, countryCode: "DE" };
+  }
+  if (lowerName.includes("uk") || lowerName.includes("britain") || lowerName.includes("england")) {
+    return { flag: "🇬🇧", name: cName, countryCode: "GB" };
+  }
+  if (lowerName.includes("france")) {
+    return { flag: "🇫🇷", name: cName, countryCode: "FR" };
+  }
+  if (lowerName.includes("italy") || lowerName.includes("italia")) {
+    return { flag: "🇮🇹", name: cName, countryCode: "IT" };
+  }
+  if (lowerName.includes("japan")) {
+    return { flag: "🇯🇵", name: cName, countryCode: "JP" };
+  }
+  if (lowerName.includes("poland") || lowerName.includes("polska")) {
+    return { flag: "🇵🇱", name: cName, countryCode: "PL" };
+  }
+  if (lowerName.includes("brazil") || lowerName.includes("brasil")) {
+    return { flag: "🇧🇷", name: cName, countryCode: "BR" };
+  }
+  if (lowerName.includes("canada")) {
+    return { flag: "🇨🇦", name: cName, countryCode: "CA" };
+  }
+  if (lowerName.includes("parrot")) {
+    return { flag: "🦜", name: cName, countryCode: "" };
+  }
+
+  // 3. Fallback lookup by 3-digit ITU/MCC prefix
+  if (sId.length >= 3) {
+    const pfx = sId.substring(0, 3);
+    const _tr = (k, def) => (window.t ? window.t(k, {}, def) : def);
+    const MCC_FLAGS = {
+      "250": { flag: "🇷🇺", name: _tr("countries.russia", "Russia") },
+      "255": { flag: "🇺🇦", name: _tr("countries.ukraine", "Ukraine") },
+      "262": { flag: "🇩🇪", name: _tr("countries.germany", "Germany") },
+      "208": { flag: "🇫🇷", name: _tr("countries.france", "France") },
+      "222": { flag: "🇮🇹", name: _tr("countries.italy", "Italy") },
+      "234": { flag: "🇬🇧", name: _tr("countries.uk", "United Kingdom") },
+      "235": { flag: "🇬🇧", name: _tr("countries.uk", "United Kingdom") },
+      "214": { flag: "🇪🇸", name: _tr("countries.spain", "Spain") },
+      "268": { flag: "🇵🇹", name: _tr("countries.portugal", "Portugal") },
+      "204": { flag: "🇳🇱", name: _tr("countries.netherlands", "Netherlands") },
+      "206": { flag: "🇧🇪", name: _tr("countries.belgium", "Belgium") },
+      "228": { flag: "🇨🇭", name: _tr("countries.switzerland", "Switzerland") },
+      "232": { flag: "🇦🇹", name: _tr("countries.austria", "Austria") },
+      "260": { flag: "🇵🇱", name: _tr("countries.poland", "Poland") },
+      "284": { flag: "🇧🇬", name: _tr("countries.bulgaria", "Bulgaria") },
+      "286": { flag: "🇹🇷", name: _tr("countries.turkey", "Turkey") },
+      "310": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "311": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "312": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "313": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "314": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "315": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "316": { flag: "🇺🇸", name: _tr("countries.usa", "USA") },
+      "302": { flag: "🇨🇦", name: _tr("countries.canada", "Canada") },
+      "440": { flag: "🇯🇵", name: _tr("countries.japan", "Japan") },
+      "505": { flag: "🇦🇺", name: _tr("countries.australia", "Australia") }
+    };
+    if (MCC_FLAGS[pfx]) {
+      return {
+        flag: MCC_FLAGS[pfx].flag,
+        name: cName || `YSF-${MCC_FLAGS[pfx].name}`,
+        countryCode: pfx
+      };
+    }
+  }
+
+  return {
+    flag: sId ? "🌐" : "➕",
+    name: cName || (sId ? (window.t ? window.t("ysf.room_label", { id: sId }, `Room ${sId}`) : `Room ${sId}`) : ""),
+    countryCode: ""
+  };
+}
+
+let _activeYsfMenuCleanups = new Set();
+let _ysfMoveCancelDocListener = null;
+
+export function clearYsfMoveCancelListener() {
+  if (_ysfMoveCancelDocListener) {
+    document.removeEventListener("click", _ysfMoveCancelDocListener, true);
+    _ysfMoveCancelDocListener = null;
+  }
+}
+
+export function closeYsfCardContextMenu(card, targetHs = null) {
+  _activeYsfMenuCleanups.forEach(fn => {
+    try { fn(); } catch (_) {}
+  });
+  _activeYsfMenuCleanups.clear();
+
+  document.querySelectorAll(".asl-card-context-menu").forEach(el => el.remove());
+
+  if (targetHs) {
+    targetHs._ysfOpenMenuIdx = null;
+  }
+}
+
+export function openYsfCardContextMenu({ btn, idx, cid, card, targetHs, rooms }) {
+  closeYsfCardContextMenu(card, targetHs);
+  clearYsfMoveCancelListener();
+
+  if (targetHs && targetHs._ysfMovingIdx !== null && targetHs._ysfMovingIdx !== undefined) {
+    targetHs._ysfMovingIdx = null;
+    card.querySelectorAll(".asl-node-moving-source, .asl-node-move-target").forEach(el => {
+      el.classList.remove("asl-node-moving-source", "asl-node-move-target");
+    });
+    card.querySelectorAll(".asl-matrix-grid").forEach(gridEl => gridEl.classList.remove("asl-matrix-move-mode"));
+  }
+
+  const matrixContainer = card.querySelector(`#ysfMatrixContainer_${cid}`) || card.querySelector(".ysf-matrix-container") || card.querySelector(".asl-matrix-container");
+  if (!matrixContainer) return;
+  matrixContainer.style.position = "relative";
+
+  const item = rooms[idx];
+  if (!item || !item.room) return;
+  const cleanRoom = String(item.room).trim();
+  if (targetHs) {
+    targetHs._ysfOpenMenuIdx = idx;
+  }
+
+  const isScanActive = Boolean(item.scan);
+  const nextScanActionText = isScanActive ? "OFF" : "ON";
+  const scanTitle = isScanActive
+    ? (window.t ? window.t("ysf.ctx_scan_off", {}, "Exclude room from scan (switch OFF)") : "Exclude room from scan (switch OFF)")
+    : (window.t ? window.t("ysf.ctx_scan_on", {}, "Include room in scan (switch ON)") : "Include room in scan (switch ON)");
+
+  const activeRoom = String((targetHs && targetHs.ysf_room) || (card && card.dataset.ysfRoom) || "").trim();
+  const isCurrentlyConnected = Boolean(activeRoom && cleanRoom === activeRoom && targetHs && isYsfOnlineStatus(targetHs.status));
+
+  const menu = document.createElement("div");
+  menu.className = "asl-card-context-menu";
+
+  const tEdit = window.t ? window.t("ysf.ctx_edit_room", {}, "Edit room ID, name and country flag") : "Edit room ID, name and country flag";
+  const tMove = window.t ? window.t("ysf.ctx_move_room", {}, "Move tile to another cell") : "Move tile to another cell";
+  const tDiscon = window.t ? window.t("ysf.ctx_disconnect", {}, "Disconnect from this YSF room") : "Disconnect from this YSF room";
+  const tDelete = window.t ? window.t("ysf.ctx_delete_cell", {}, "Clear cell") : "Clear cell";
+
+  // СТРОКИ TX-RX И РОЛЬ ИСКЛЮЧЕНЫ СОГЛАСНО ТРЕБОВАНИЮ ПОЛЬЗОВАТЕЛЯ!
+  menu.innerHTML = `
+    <div class="asl-card-context-header">#${safeEscapeHtml(cleanRoom)}</div>
+    <button type="button" class="asl-card-context-btn" data-action="edit" title="${tEdit}">
+      <span class="ctx-btn-label">Edit</span>
+      <span class="ctx-btn-icon">✎</span>
+    </button>
+    <button type="button" class="asl-card-context-btn" data-action="move" title="${tMove}">
+      <span class="ctx-btn-label">Move</span>
+      <span class="ctx-btn-icon">✥</span>
+    </button>
+    <button type="button" class="asl-card-context-btn ${!isScanActive ? "scan-active" : ""}" data-action="scan" title="${scanTitle}">
+      <span class="ctx-btn-label">Scan</span>
+      <span class="ctx-btn-badge">${nextScanActionText}</span>
+    </button>
+    <button type="button" class="asl-card-context-btn" data-action="disconnect" title="${tDiscon}">
+      <span class="ctx-btn-label">Disconnect</span>
+      <span class="ctx-btn-icon">⏏</span>
+    </button>
+    <button type="button" class="asl-card-context-btn" data-action="delete" title="${tDelete}">
+      <span class="ctx-btn-label">Delete</span>
+      <span class="ctx-btn-icon">✕</span>
+    </button>
+  `;
+
+  const stopMenuPointer = (ev) => { ev.stopPropagation(); };
+  menu.addEventListener("pointerdown", stopMenuPointer);
+  menu.addEventListener("mousedown", stopMenuPointer);
+  menu.addEventListener("touchstart", stopMenuPointer, { passive: true });
+
+  matrixContainer.appendChild(menu);
+
+  const contRect = matrixContainer.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+
+  let left = (btnRect.right - contRect.left) + 6;
+  if (left + menuRect.width > contRect.width - 4) {
+    left = (btnRect.left - contRect.left) - menuRect.width - 6;
+  }
+  left = Math.max(4, Math.min(left, contRect.width - menuRect.width - 4));
+
+  const maxTop = Math.max(2, contRect.height - menuRect.height - 14);
+  let top = (btnRect.top - contRect.top) + (btnRect.height / 2) - (menuRect.height / 2) - 12;
+  top = Math.max(2, Math.min(top, maxTop));
+
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(left)}px`;
+
+  const onOutsidePointerDown = (e) => {
+    if (!menu.isConnected) { cleanupThisMenu(); return; }
+    if (!menu.contains(e.target)) { closeYsfCardContextMenu(card, targetHs); }
+  };
+
+  const onKeyDown = (e) => {
+    if (!menu.isConnected) { cleanupThisMenu(); return; }
+    if (e.key === "Escape") {
+      closeYsfCardContextMenu(card, targetHs);
+      if (targetHs && targetHs._ysfMovingIdx !== null && targetHs._ysfMovingIdx !== undefined) {
+        targetHs._ysfMovingIdx = null;
+        updateCardYsfPanel(card, targetHs);
+      }
+    }
+  };
+
+  function cleanupThisMenu() {
+    document.removeEventListener("pointerdown", onOutsidePointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    _activeYsfMenuCleanups.delete(cleanupThisMenu);
+  }
+
+  _activeYsfMenuCleanups.add(cleanupThisMenu);
+  document.addEventListener("pointerdown", onOutsidePointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+
+  let actionHandled = false;
+  const executeMenuAction = (ev) => {
+    const actionBtn = ev.target.closest(".asl-card-context-btn");
+    if (!actionBtn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (actionHandled) return;
+    actionHandled = true;
+
+    const action = actionBtn.dataset.action;
+
+    if (action === "edit") {
+      closeYsfCardContextMenu(card, targetHs);
+      openYsfCardEditPopover({ idx, cid, card, targetHs, rooms });
+    } else if (action === "move") {
+      closeYsfCardContextMenu(card, targetHs);
+      if (targetHs) targetHs._ysfMovingIdx = idx;
+      updateCardYsfPanel(card, targetHs);
+    } else if (action === "scan") {
+      item.scan = !Boolean(item.scan);
+      saveYsfMatrixRooms(cid, rooms);
+      closeYsfCardContextMenu(card, targetHs);
+      updateCardYsfPanel(card, targetHs);
+      if (typeof showToast === "function") {
+        const scanMsg = item.scan
+          ? (window.t ? window.t("ysf.scan_room_on", { room: cleanRoom }, `Room #${cleanRoom}: Scan ON`) : `Room #${cleanRoom}: Scan ON`)
+          : (window.t ? window.t("ysf.scan_room_off", { room: cleanRoom }, `Room #${cleanRoom}: Scan OFF`) : `Room #${cleanRoom}: Scan OFF`);
+        showToast(scanMsg, "info", 1800);
+      }
+    } else if (action === "disconnect") {
+      closeYsfCardContextMenu(card, targetHs);
+      if (typeof window.ysfDisconnectProcedure === "function") {
+        window.ysfDisconnectProcedure(cid, card, { showStatusBanner: true });
+      } else {
+        fetch("/api/ysf/disconnect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hotspot_id: cid })
+        }).catch(() => {});
+      }
+    } else if (action === "delete") {
+      closeYsfCardContextMenu(card, targetHs);
+      if (isCurrentlyConnected) {
+        if (typeof window.ysfDisconnectProcedure === "function") {
+          window.ysfDisconnectProcedure(cid, card, { showStatusBanner: true });
+        }
+      }
+      rooms[idx] = makeEmptyYsfCell();
+      saveYsfMatrixRooms(cid, rooms);
+      updateCardYsfPanel(card, targetHs);
+      if (typeof showToast === "function") {
+        const clrMsg = window.t
+          ? window.t("ysf.slot_cleared_toast", { num: idx + 1 }, `Slot #${idx + 1} cleared`)
+          : `Slot #${idx + 1} cleared`;
+        showToast(clrMsg, "info", 1800);
+      }
+    }
+  };
+
+  menu.addEventListener("click", executeMenuAction);
+}
+
+export function openYsfCardEditPopover({ idx, cid, card, targetHs, rooms }) {
+  document.querySelectorAll(".asl-card-edit-popover, .ysf-card-edit-backdrop").forEach(el => el.remove());
+  const curItem = rooms[idx] || makeEmptyYsfCell();
+  let initialFlag = curItem.flag;
+  if (curItem.room && (!initialFlag || initialFlag === "➕" || initialFlag === "🌐")) {
+    const detected = detectYsfCountryFlag(curItem.room, curItem.label);
+    if (detected && detected.flag && detected.flag !== "➕") {
+      initialFlag = detected.flag;
+    }
+  }
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "asl-matrix-modal-backdrop ysf-card-edit-backdrop is-visible";
+  backdrop.style.zIndex = "99999";
+
+  const pop = document.createElement("div");
+  pop.className = "asl-card-edit-popover ysf-card-edit-popover";
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-modal", "true");
+  pop.style.position = "relative";
+  pop.style.top = "auto";
+  pop.style.left = "auto";
+  pop.style.transform = "none";
+  pop.style.width = "min(320px, calc(100vw - 32px))";
+  pop.style.maxHeight = "calc(100vh - 40px)";
+  pop.style.overflowY = "auto";
+
+  pop.innerHTML = `
+    <div class="asl-edit-header">
+      <span class="asl-edit-title">✎ ${window.t ? window.t("ysf.edit_cell_title", { idx: idx + 1 }, `Ячейка #${idx + 1}`) : `Ячейка #${idx + 1}`}</span>
+      <button type="button" class="asl-edit-close" title="${window.t ? window.t("buttons.close", {}, "Закрыть") : "Закрыть"}">✕</button>
+    </div>
+    <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+      <label style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="opacity: 0.85; font-size: 11px; font-weight: 600;">${window.t ? window.t("ysf.room_id_label", {}, "Номер комнаты (ID):") : "Номер комнаты (ID):"}</span>
+        <input type="text" class="asl-edit-input ysf-edit-room-id" maxlength="5" value="${safeEscapeHtml(curItem.room || "")}" placeholder="25000" style="height: 28px;" autocomplete="off" />
+      </label>
+      <label style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="opacity: 0.85; font-size: 11px; font-weight: 600;">${window.t ? window.t("ysf.room_name_label", {}, "Название комнаты:") : "Название комнаты:"}</span>
+        <input type="text" class="asl-edit-input ysf-edit-room-name" maxlength="24" value="${safeEscapeHtml(curItem.label || "")}" placeholder="YSF-Russia" style="height: 28px;" autocomplete="off" />
+      </label>
+      <label style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="opacity: 0.85; font-size: 11px; font-weight: 600;">${window.t ? window.t("ysf.room_flag_label", {}, "Флаг / Иконка:") : "Флаг / Иконка:"}</span>
+        <input type="text" class="asl-edit-input ysf-edit-room-flag" maxlength="6" value="${safeEscapeHtml(initialFlag || "🌐")}" placeholder="🇷🇺" style="height: 28px; width: 70px; text-align: center;" autocomplete="off" />
+      </label>
+      <label style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="opacity: 0.85; font-size: 11px; font-weight: 600;">${window.t ? window.t("ysf.reflector_type_label", {}, "Тип рефлектора:") : "Тип рефлектора:"}</span>
+        <select class="asl-edit-input ysf-edit-room-type" style="height: 30px;">
+          ${(() => {
+            const curOvr = (curItem.room && typeof window.getYsfRoomTypeOverride === "function" ? window.getYsfRoomTypeOverride(curItem.room) : "") || curItem.type_override || "auto";
+            return `
+              <option value="auto"${curOvr === "auto" || !curOvr ? " selected" : ""}>⚙ ${window.t ? window.t("ysf.type_opt_auto", {}, "Авто (по каталогу / эфиру)") : "Авто (по каталогу / эфиру)"}</option>
+              <option value="single"${curOvr === "single" ? " selected" : ""}>${window.t ? window.t("ysf.type_opt_single", {}, "Однокомнатный (Тип 1 · DG-ID 00)") : "Однокомнатный (Тип 1 · DG-ID 00)"}</option>
+              <option value="multi_standard"${curOvr === "multi_standard" ? " selected" : ""}>🟠 ${window.t ? window.t("ysf.type_opt_standard", {}, "Стандартный хаб (Тип 2 · YCS / FCS)") : "Стандартный хаб (Тип 2 · YCS / FCS)"}</option>
+              <option value="multi_mutant"${curOvr === "multi_mutant" ? " selected" : ""}>🔴 ${window.t ? window.t("ysf.type_opt_mutant", {}, "Мутант (Тип 3 · pYSF3 / DG-ID)") : "Мутант (Тип 3 · pYSF3 / DG-ID)"}</option>
+            `;
+          })()}
+        </select>
+      </label>
+      <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 4px;">
+        <input type="checkbox" class="ysf-edit-scan" ${curItem.scan ? "checked" : ""} />
+        <span>${window.t ? window.t("ysf.include_in_scan", {}, "Включить в сканирование (Scan: ON)") : "Включить в сканирование (Scan: ON)"}</span>
+      </label>
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px;">
+        <button type="button" class="btn-ysf-cell-clear btn-danger" style="padding: 6px 12px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer;">${window.t ? window.t("common.clear", {}, "Очистить") : "Очистить"}</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn-ysf-cell-cancel btn-secondary" style="padding: 6px 12px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer;">${window.t ? window.t("common.cancel", {}, "Отмена") : "Отмена"}</button>
+          <button type="button" class="btn-ysf-cell-save btn-primary" style="padding: 6px 14px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer;">${window.t ? window.t("common.save", {}, "Сохранить") : "Сохранить"}</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const closeDialog = () => backdrop.remove();
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeDialog();
+    }
+  };
+  document.addEventListener("keydown", onKey, { once: true });
+
+  pop.querySelector(".asl-edit-close").onclick = closeDialog;
+  pop.querySelector(".btn-ysf-cell-cancel").onclick = closeDialog;
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeDialog();
+  });
+
+  pop.querySelector(".btn-ysf-cell-clear").onclick = () => {
+    rooms[idx] = makeEmptyYsfCell();
+    saveYsfMatrixRooms(cid, rooms);
+    closeDialog();
+    updateCardYsfPanel(card, targetHs);
+  };
+
+  const saveAction = () => {
+    const rId = pop.querySelector(".ysf-edit-room-id").value.trim();
+    const rName = pop.querySelector(".ysf-edit-room-name").value.trim();
+    let rFlag = pop.querySelector(".ysf-edit-room-flag").value.trim();
+    const rScan = pop.querySelector(".ysf-edit-scan").checked;
+    const typeSel = pop.querySelector(".ysf-edit-room-type");
+    const rTypeVal = typeSel ? String(typeSel.value || "auto").trim().toLowerCase() : "auto";
+    const effOverride = (rTypeVal === "single" || rTypeVal === "multi_standard" || rTypeVal === "multi_mutant") ? rTypeVal : "";
+
+    if (!rFlag) rFlag = rId ? "🌐" : "➕";
+
+    if (rId) {
+      if (typeof window.setYsfRoomTypeOverride === "function") {
+        window.setYsfRoomTypeOverride(rId, effOverride || "auto");
+      } else if (effOverride) {
+        setServerCollectionKey("ysf_room_types", rId, effOverride, null, false);
+      } else {
+        deleteServerCollectionKey("ysf_room_types", rId, null);
+      }
+    }
+
+    rooms[idx] = {
+      room: rId,
+      label: rName || (rId ? `Room ${rId}` : ""),
+      flag: rFlag,
+      scan: Boolean(rScan && rId),
+      type_override: effOverride
+    };
+    saveYsfMatrixRooms(cid, rooms);
+    closeDialog();
+    updateCardYsfPanel(card, targetHs);
+    syncCardYsfDgIdBar(card, targetHs);
+  };
+
+  pop.querySelector(".btn-ysf-cell-save").onclick = saveAction;
+  pop.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveAction();
+      }
+    });
+  });
+
+  backdrop.appendChild(pop);
+  document.body.appendChild(backdrop);
+
+  const idInp = pop.querySelector(".ysf-edit-room-id");
+  const nameInp = pop.querySelector(".ysf-edit-room-name");
+  const flagInp = pop.querySelector(".ysf-edit-room-flag");
+
+  if (idInp && flagInp) {
+    idInp.addEventListener("input", () => {
+      const val = idInp.value.trim();
+      if (!val) {
+        flagInp.value = "➕";
+        return;
+      }
+      const detected = detectYsfCountryFlag(val, nameInp ? nameInp.value.trim() : "");
+      if (detected && detected.flag && detected.flag !== "➕") {
+        flagInp.value = detected.flag;
+      }
+      if (nameInp && (!nameInp.value.trim() || nameInp.value.startsWith("Room ") || nameInp.value.startsWith("YSF-"))) {
+        if (detected && detected.name) {
+          nameInp.value = detected.name;
+        }
+      }
+    });
+  }
+
+  setTimeout(() => {
+    if (idInp) {
+      idInp.focus();
+      idInp.select();
+    }
+  }, 30);
+}
+
+export function openYsfMatrixManageModal(cid, card, targetHs, rooms) {
+  const existing = document.getElementById("ysfMatrixManageModal");
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.id = "ysfMatrixManageModal";
+  modal.className = "asl-matrix-modal-backdrop";
+  const tm = (key, fallback) => (window.t ? window.t(key, {}, fallback) : fallback);
+  modal.innerHTML = `
+    <div class="asl-matrix-modal-card" role="dialog" aria-modal="true">
+      <div class="asl-modal-header">
+        <div class="asl-modal-title-wrap">
+          <span class="asl-modal-icon">⚙️</span>
+          <h3 class="asl-modal-title">${tm("ysf.mem_modal_title", "YSF Room Memory")}</h3>
+        </div>
+        <button type="button" class="asl-modal-close" title="${tm("buttons.close", "Close")}">✕</button>
+      </div>
+      <p class="asl-modal-subtitle">${tm("ysf.mem_modal_subtitle", "Choose an action for the 60-slot room memory (3 pages of 20):")}</p>
+
+      <div class="asl-modal-actions">
+        <button type="button" class="asl-modal-btn asl-btn-reset-zero" data-action="zero">
+          <span class="asl-btn-action-icon">🧹</span>
+          <div class="asl-btn-action-text">
+            <strong>${tm("ysf.mem_zero_title", "Clear All 60 Slots")}</strong>
+            <small>${tm("ysf.mem_zero_desc", "Clear all 3 pages completely (all slots become [+] Empty)")}</small>
+          </div>
+        </button>
+
+        <button type="button" class="asl-modal-btn asl-btn-reset-page" data-action="clear_page">
+          <span class="asl-btn-action-icon">📄</span>
+          <div class="asl-btn-action-text">
+            <strong>${tm("ysf.mem_clear_page_title", "Clear Current Page")}</strong>
+            <small>${tm("ysf.mem_clear_page_desc", "Clear only the 20 slots on the currently viewed page")}</small>
+          </div>
+        </button>
+
+        <button type="button" class="asl-modal-btn asl-btn-reset-default" data-action="default">
+          <span class="asl-btn-action-icon">🔄</span>
+          <div class="asl-btn-action-text">
+            <strong>${tm("ysf.mem_default_title", "Restore Default List")}</strong>
+            <small>${tm("ysf.mem_default_desc", "Reset memory to the default set of popular YSF rooms")}</small>
+          </div>
+        </button>
+      </div>
+
+      <div class="asl-modal-footer">
+        <button type="button" class="asl-modal-cancel-btn">${tm("common.cancel", "Отмена")}</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  requestAnimationFrame(() => modal.classList.add("is-visible"));
+
+  const closeModal = () => {
+    modal.classList.remove("is-visible");
+    setTimeout(() => { modal.remove(); }, 200);
+  };
+
+  modal.querySelector(".asl-modal-close").addEventListener("click", closeModal);
+  modal.querySelector(".asl-modal-cancel-btn").addEventListener("click", closeModal);
+
+  modal.querySelectorAll(".asl-modal-btn").forEach(b => {
+    b.addEventListener("click", () => {
+      const act = b.dataset.action;
+      if (act === "zero") {
+        const cleared = Array.from({ length: YSF_MEMORY_SIZE }, () => makeEmptyYsfCell());
+        saveYsfMatrixRooms(cid, cleared);
+        updateCardYsfPanel(card, targetHs);
+        closeModal();
+      } else if (act === "clear_page") {
+        const curPage = getYsfMatrixPage(cid, targetHs);
+        const updated = [...rooms];
+        for (let i = curPage * YSF_PAGE_SIZE; i < (curPage + 1) * YSF_PAGE_SIZE; i++) {
+          updated[i] = makeEmptyYsfCell();
+        }
+        saveYsfMatrixRooms(cid, updated);
+        updateCardYsfPanel(card, targetHs);
+        closeModal();
+      } else if (act === "default") {
+        const defRooms = padYsfRooms([...DEFAULT_YSF_MATRIX_ROOMS]);
+        saveYsfMatrixRooms(cid, defRooms);
+        updateCardYsfPanel(card, targetHs);
+        closeModal();
+      }
+    });
+  });
+}
+
+export function syncYsfDiceButtonUI(card, targetHs) {
+  const isRolling = Boolean(targetHs && targetHs._ysfDiceRolling);
+  const idleTitle = window.t ? window.t("ysf.dice_btn_title", {}, "Случайная активная комната YSF (Dice). Удержание: настройки") : "Случайная активная комната YSF (Dice). Удержание: настройки";
+  const stopTitle = window.t ? window.t("ysf.dice_btn_stop_title", {}, "Нажмите для остановки поиска случайного рефлектора") : "Нажмите для остановки поиска случайного рефлектора";
+  const root = card || document;
+  root.querySelectorAll(".btn-ysf-dice").forEach(btn => {
+    btn.classList.toggle("dice-rolling", isRolling);
+    btn.disabled = false;
+    const tLabel = isRolling ? stopTitle : idleTitle;
+    btn.title = tLabel;
+    btn.setAttribute("aria-label", tLabel);
+  });
+}
+
+export function stopYsfDiceSearch(cid, card, targetHs, { immediateAbort = false, finishInnerIteration = false, silent = false } = {}) {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const resolvedHs = targetHs || curHsList.find(h => h && h.id === cid) || curHsList[0] || null;
+  const effCard = card || (resolvedHs ? (document.querySelector(`.dmr-card[data-hotspot-id="${resolvedHs.id}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${resolvedHs.id}"]`)) : null);
+  if (!resolvedHs || !resolvedHs._ysfDiceRolling) {
+    if (effCard && resolvedHs) {
+      syncYsfDiceButtonUI(effCard, resolvedHs);
+    }
+    return;
+  }
+
+  resolvedHs._ysfDiceStopRequested = true;
+
+  if (immediateAbort || !finishInnerIteration) {
+    resolvedHs._ysfDiceRunId = (resolvedHs._ysfDiceRunId || 0) + 1;
+    resolvedHs._ysfDiceRolling = false;
+    if (effCard) {
+      syncYsfDiceButtonUI(effCard, resolvedHs);
+      if (!silent) {
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t ? window.t("ysf.dice_stopped", {}, "⏹ Поиск случайного рефлектора остановлен") : "⏹ Поиск случайного рефлектора остановлен",
+          tone: "neutral",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+      }
+    }
+    try {
+      window.dispatchEvent(new CustomEvent("proxdmr:ysf-dice-abort", { detail: { hotspot_id: resolvedHs.id || cid } }));
+    } catch (_) {}
+  } else {
+    // Завершение текущей внутренней итерации перед полной остановкой
+    if (effCard && !silent) {
+      setAslProcBannerState(effCard, {
+        active: true,
+        text: window.t ? window.t("ysf.dice_stopping", {}, "⏹ Остановка поиска (завершение текущей попытки)...") : "⏹ Остановка поиска (завершение текущей попытки)...",
+        tone: "neutral",
+        autoHideMs: 0
+      });
+    }
+  }
+}
+
+export function syncAdnDiceButtonUI(card, targetHs) {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const resolveBtnNet = (btnEl) => {
+    const hostCard = (btnEl && btnEl.closest) ? (btnEl.closest(".radio-container, .dmr-card") || card) : card;
+    const cid = (targetHs && targetHs.id) || (hostCard && hostCard.dataset && hostCard.dataset.hotspotId) || "";
+    const matchedHs = targetHs || (cid ? curHsList.find(h => h && h.id === cid) : null);
+    const rawNet = (matchedHs && matchedHs.network_type)
+      || (hostCard && hostCard.dataset && hostCard.dataset.networkType)
+      || (hostCard && hostCard.classList && hostCard.classList.contains("card-net-adn") ? "adn" : "")
+      || "";
+    return {
+      isAdn: String(rawNet).trim().toLowerCase() === "adn",
+      hs: matchedHs
+    };
+  };
+
+  const idleTitle = window.t ? window.t("adn.dice_btn_title", {}, "Случайная активная TG ADN (клик — старт/стоп, удержание/ПКМ — настройки)") : "Случайная активная TG ADN (клик — старт/стоп, удержание/ПКМ — настройки)";
+  const stopTitle = window.t ? window.t("adn.dice_btn_stop_title", {}, "Остановить поиск активной TG ADN") : "Остановить поиск активной TG ADN";
+  const root = card || document;
+  root.querySelectorAll(".btn-adn-dice").forEach(btn => {
+    const { isAdn, hs: resolvedHs } = resolveBtnNet(btn);
+    if (!isAdn) {
+      if (resolvedHs && resolvedHs._adnDiceRolling) {
+        resolvedHs._adnDiceStopRequested = true;
+        resolvedHs._adnDiceRunId = (resolvedHs._adnDiceRunId || 0) + 1;
+        resolvedHs._adnDiceRolling = false;
+      }
+      btn.classList.remove("dice-rolling");
+      btn.style.setProperty("display", "none", "important");
+      btn.disabled = true;
+      return;
+    }
+    btn.style.removeProperty("display");
+    const isRolling = Boolean(resolvedHs && resolvedHs._adnDiceRolling);
+    btn.classList.toggle("dice-rolling", isRolling);
+    btn.disabled = false;
+    const tLabel = isRolling ? stopTitle : idleTitle;
+    btn.title = tLabel;
+    btn.setAttribute("aria-label", tLabel);
+  });
+}
+
+export function stopAdnDiceSearch(cid, card, targetHs, { immediateAbort = false, silent = false } = {}) {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const resolvedHs = targetHs || curHsList.find(h => h && h.id === cid) || curHsList[0] || null;
+  const effCard = card || (resolvedHs ? (document.querySelector(`.dmr-card[data-hotspot-id="${resolvedHs.id}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${resolvedHs.id}"]`)) : null);
+  if (!resolvedHs || !resolvedHs._adnDiceRolling) {
+    if (effCard && resolvedHs) {
+      syncAdnDiceButtonUI(effCard, resolvedHs);
+    }
+    return;
+  }
+
+  resolvedHs._adnDiceStopRequested = true;
+  resolvedHs._adnDiceRunId = (resolvedHs._adnDiceRunId || 0) + 1;
+  resolvedHs._adnDiceRolling = false;
+  if (effCard) {
+    syncAdnDiceButtonUI(effCard, resolvedHs);
+    if (!silent) {
+      setAslProcBannerState(effCard, {
+        active: true,
+        text: window.t ? window.t("adn.dice_stopped", {}, "⏹ Поиск случайной TG ADN остановлен") : "⏹ Поиск случайной TG ADN остановлен",
+        tone: "neutral",
+        autoHideMs: 4000,
+        fadeOutMs: 2000
+      });
+    }
+  }
+  try {
+    window.dispatchEvent(new CustomEvent("proxdmr:adn-dice-abort", { detail: { hotspot_id: resolvedHs.id || cid } }));
+  } catch (_) {}
+}
+
+export async function ysfConnectRoomProcedure(roomId, roomName = "", card = null, roomHost = "", roomPort = 42000, { fromScan = false, fromDice = false, awaitOutcome = false } = {}) {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const cid = card ? (card.dataset.hotspotId || "default") : (window.activeHotspotId || "default");
+  const targetHs = curHsList.find(h => h && h.id === cid) || curHsList[0];
+  if (!targetHs) return { ok: false, reason: "no_hotspot" };
+
+  const effCard = card || document.querySelector(`.dmr-card[data-hotspot-id="${cid}"]`) || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.getElementById("radioContainer");
+  if (!fromScan && targetHs._ysfScanActive) {
+    stopYsfMatrixScan(cid, effCard, targetHs, { keepCurrentLink: true, silent: true });
+  }
+  if (!fromDice && targetHs._ysfDiceRolling) {
+    stopYsfDiceSearch(cid, effCard, targetHs, { immediateAbort: true, silent: true });
+  }
+  const sRoomId = String(roomId).trim();
+  const ysfList = (typeof window._getYsfServersList === "function" ? window._getYsfServersList() : []) || [];
+  const room = ysfList.find(r => String(r.id).trim() === sRoomId) || { id: sRoomId, host: "", name: roomName };
+  const rName = room.reflector_name || room.name || roomName || `YSF #${sRoomId}`;
+  let hostStr = roomHost || room.host || "";
+  if (hostStr && (/^\d+$/.test(hostStr.trim()) || hostStr.trim() === "ysf.brandmeister.ru")) {
+    hostStr = "";
+  }
+
+  const seqAtStart = (targetHs._ysfActionSeq = (targetHs._ysfActionSeq || 0) + 1);
+  targetHs.isManualBmDisconnect = false;
+  if (typeof window !== "undefined" && (cid === window.activeHotspotId || targetHs.id === window.activeHotspotId)) {
+    window.isManualBmDisconnect = false;
+  }
+  targetHs._ysfConnectingRoom = sRoomId;
+  targetHs._ysfDisconnectingRoom = null;
+  targetHs._ysfConnectingStartedAt = Date.now();
+  if (effCard) {
+    syncYsfMatrixButtonsState(effCard, targetHs);
+  }
+
+  const prevRoom = String(targetHs.ysf_room || "").trim();
+  const prevOnline = String(targetHs.status || "").toUpperCase() === "ONLINE";
+  if (prevOnline && prevRoom && prevRoom !== sRoomId && effCard) {
+    setAslProcBannerState(effCard, {
+      active: true,
+      text: window.t
+        ? window.t("ysf.disconnecting_unlink", { room: prevRoom }, `Disconnecting #${prevRoom}: sending unlink command (YSFU Unlink)...`)
+        : `Disconnecting #${prevRoom}: sending unlink command (YSFU Unlink)...`,
+      tone: "neutral",
+      autoHideMs: 0
+    });
+    await new Promise(r => setTimeout(r, 450));
+  }
+
+  if (effCard) {
+    setAslProcBannerState(effCard, {
+      active: true,
+      text: window.t
+        ? window.t("ysf.searching_registry", { room: sRoomId }, `Reflector #${sRoomId}: looking up address in YSF registry...`)
+        : `Reflector #${sRoomId}: looking up address in YSF registry...`,
+      tone: "neutral",
+      autoHideMs: 0
+    });
+  }
+
+  const ws = (typeof getWs === "function" ? getWs() : window.ws);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    let outcomePromise = null;
+    if (awaitOutcome) {
+      outcomePromise = new Promise(resolve => {
+        let settled = false;
+        let timeoutTimer = null;
+        let wsCheckTimer = null;
+        const cleanup = () => {
+          window.removeEventListener("proxdmr:ysf-proc-result", onResult);
+          window.removeEventListener("proxdmr:ysf-dice-abort", onAbort);
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (wsCheckTimer) clearInterval(wsCheckTimer);
+        };
+        const finish = (res) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(res);
+        };
+        const onResult = (ev) => {
+          const d = ev && ev.detail;
+          if (!d || d.hotspot_id !== cid || d.proc !== "connect") return;
+          if (d.room_id && String(d.room_id).trim() !== sRoomId) return;
+          finish({
+            ok: d.state === "done",
+            code: d.code || "",
+            text: d.text || ""
+          });
+        };
+        const onAbort = (ev) => {
+          const d = ev && ev.detail;
+          if (d && d.hotspot_id && d.hotspot_id !== cid) return;
+          finish({ ok: false, aborted: true });
+        };
+        window.addEventListener("proxdmr:ysf-proc-result", onResult);
+        window.addEventListener("proxdmr:ysf-dice-abort", onAbort);
+        wsCheckTimer = setInterval(() => {
+          const curWs = (typeof getWs === "function" ? getWs() : window.ws);
+          if (!curWs || curWs.readyState !== WebSocket.OPEN) {
+            finish({ ok: false, reason: "ws_closed" });
+          }
+        }, 400);
+        timeoutTimer = setTimeout(() => {
+          finish({ ok: false, reason: "timeout" });
+        }, 12000);
+      });
+    }
+
+    ws.send(JSON.stringify({
+      type: "ysf_connect_room",
+      hotspot_id: cid,
+      room_id: sRoomId,
+      room_name: rName,
+      host: hostStr,
+      port: Number(roomPort) || 42000
+    }));
+
+    if (outcomePromise) {
+      return await outcomePromise;
+    }
+    return { ok: true };
+  } else {
+    // Локальная эмуляция этапов с последующим HTTP PUT
+    let fallbackFinished = false;
+    const stepTimers = [];
+    if (effCard) {
+      stepTimers.push(setTimeout(() => {
+        if (fallbackFinished) return;
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t
+            ? window.t("ysf.proc_dns", { room: sRoomId, host: hostStr }, `Reflector #${sRoomId} (${hostStr}:42000): resolving DNS...`)
+            : `Reflector #${sRoomId} (${hostStr}:42000): resolving DNS...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+      }, 350));
+      stepTimers.push(setTimeout(() => {
+        if (fallbackFinished) return;
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t
+            ? window.t("ysf.proc_ysfp", { room: sRoomId }, `Reflector #${sRoomId}: sending YSFP (Keepalive handshake)...`)
+            : `Reflector #${sRoomId}: sending YSFP (Keepalive handshake)...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+      }, 750));
+      stepTimers.push(setTimeout(() => {
+        if (fallbackFinished) return;
+        const csLabel = targetHs.callsign || "ProxDMR";
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t
+            ? window.t("ysf.proc_ysfi", { room: sRoomId, callsign: csLabel }, `Reflector #${sRoomId}: registering station YSFI (${csLabel})...`)
+            : `Reflector #${sRoomId}: registering station YSFI (${csLabel})...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+      }, 1150));
+      stepTimers.push(setTimeout(() => {
+        if (fallbackFinished) return;
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t
+            ? window.t("ysf.proc_ysfs", { room: sRoomId }, `Reflector #${sRoomId}: requesting participants status YSFS...`)
+            : `Reflector #${sRoomId}: requesting participants status YSFS...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+      }, 1550));
+    }
+
+    try {
+      targetHs.ysf_room = sRoomId;
+      targetHs.ysf_room_id = sRoomId;
+      targetHs.ysf_name = rName;
+      targetHs.ysf_room_name = rName;
+      if (hostStr) {
+        targetHs.bm_master_host = hostStr;
+        targetHs.ysf_host = hostStr;
+      }
+      targetHs.ysf_port = Number(roomPort) || 42000;
+      const resp = await fetch(`/api/hotspots/${encodeURIComponent(targetHs.id)}?reconnect=1`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...targetHs,
+          bm_master_host: hostStr || "",
+          ysf_host: hostStr || "",
+          ysf_port: Number(roomPort) || 42000,
+          ysf_room: sRoomId,
+          ysf_room_id: sRoomId,
+          ysf_name: rName,
+          ysf_room_name: rName
+        })
+      });
+      fallbackFinished = true;
+      stepTimers.forEach(t => clearTimeout(t));
+      if (targetHs._ysfActionSeq !== seqAtStart) {
+        return { ok: false, aborted: true };
+      }
+      targetHs._ysfConnectingRoom = null;
+
+      let putData = null;
+      if (resp.ok) {
+        try { putData = await resp.json(); } catch (_) {}
+      }
+      const hsStatus = String(putData?.hotspot?.status || "").toUpperCase();
+      const connectedOk = resp.ok && hsStatus !== "DISCONNECTED" && hsStatus !== "OFFLINE" && hsStatus !== "ERROR";
+
+      if (connectedOk) {
+        if (putData && putData.hotspot) {
+          Object.assign(targetHs, putData.hotspot);
+        }
+        targetHs.status = "ONLINE";
+        if (effCard) {
+          setAslProcBannerState(effCard, {
+            active: true,
+            text: window.t
+              ? window.t("ysf.proc_connected", { room: sRoomId, name: rName }, `✓ Reflector #${sRoomId} (${rName}): connected`)
+              : `✓ Reflector #${sRoomId} (${rName}): connected`,
+            tone: "positive",
+            autoHideMs: 4000,
+            fadeOutMs: 2000
+          });
+          syncYsfMatrixButtonsState(effCard, targetHs);
+          if (typeof window.updateCardYsfPanel === "function") {
+            window.updateCardYsfPanel(effCard, targetHs);
+          }
+          if (typeof window.updateCardPttHint === "function") {
+            window.updateCardPttHint(effCard);
+          }
+        }
+        return { ok: true };
+      } else {
+        targetHs.status = "DISCONNECTED";
+        if (effCard) {
+          setAslProcBannerState(effCard, {
+            active: true,
+            text: resp.ok
+              ? (window.t
+                  ? window.t("ysf.proc_failed", { room: sRoomId, status: hsStatus || "OFFLINE" }, `✕ Reflector #${sRoomId}: connection failed (${hsStatus || "OFFLINE"})`)
+                  : `✕ Reflector #${sRoomId}: connection failed (${hsStatus || "OFFLINE"})`)
+              : (window.t
+                  ? window.t("ysf.proc_http_err", { room: sRoomId, code: resp.status }, `✕ Error #${sRoomId}: server returned HTTP ${resp.status}`)
+                  : `✕ Error #${sRoomId}: server returned HTTP ${resp.status}`),
+            tone: "negative",
+            autoHideMs: 4000,
+            fadeOutMs: 2000
+          });
+          syncYsfMatrixButtonsState(effCard, targetHs);
+        }
+        return { ok: false, reason: resp.ok ? (hsStatus || "offline") : `http_${resp.status}` };
+      }
+    } catch (e) {
+      fallbackFinished = true;
+      stepTimers.forEach(t => clearTimeout(t));
+      targetHs._ysfConnectingRoom = null;
+      targetHs.status = "DISCONNECTED";
+      if (effCard) {
+        setAslProcBannerState(effCard, {
+          active: true,
+          text: window.t
+            ? window.t("ysf.proc_conn_err", { room: sRoomId, error: e.message || e }, `✕ Error #${sRoomId}: connection failure (${e.message || e})`)
+            : `✕ Error #${sRoomId}: connection failure (${e.message || e})`,
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+        syncYsfMatrixButtonsState(effCard, targetHs);
+      }
+      return { ok: false, reason: e.message || "fetch_error" };
+    }
+  }
+}
+
+export async function ysfDisconnectProcedure(cid, card = null, { showStatusBanner = true } = {}) {
+  const effCard = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.getElementById("radioContainer");
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const targetHs = curHsList.find(h => h && h.id === cid) || curHsList[0];
+  const curRoom = targetHs ? String(targetHs.ysf_room || targetHs._ysfConnectingRoom || "").trim() : "";
+
+  const seqAtDisc = targetHs ? (targetHs._ysfActionSeq = (targetHs._ysfActionSeq || 0) + 1) : 0;
+  if (targetHs) {
+    targetHs.isManualBmDisconnect = true;
+    if (typeof window !== "undefined" && (cid === window.activeHotspotId || targetHs.id === window.activeHotspotId)) {
+      window.isManualBmDisconnect = true;
+    }
+    targetHs._ysfDisconnectingRoom = curRoom || "all";
+    targetHs._ysfConnectingRoom = null;
+    targetHs._ysfDashOpen = false;
+  }
+  if (effCard && targetHs) {
+    syncYsfMatrixButtonsState(effCard, targetHs);
+  }
+
+  if (effCard && showStatusBanner) {
+    setAslProcBannerState(effCard, {
+      active: true,
+      text: curRoom
+        ? (window.t ? window.t("ysf.proc_disconnecting", { room: curRoom }, `Disconnecting #${curRoom}: sending unlink command (YSFU)...`) : `Disconnecting #${curRoom}: sending unlink command (YSFU)...`)
+        : (window.t ? window.t("ysf.proc_disconnecting_all", {}, "Disconnecting YSF: resetting link...") : "Disconnecting YSF: resetting link..."),
+      tone: "neutral",
+      autoHideMs: 0
+    });
+  }
+
+  try {
+    const resp = await fetch("/api/ysf/disconnect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hotspot_id: cid })
+    });
+    const res = await resp.json();
+    if (res && res.status === "ok") {
+      if (targetHs && targetHs._ysfActionSeq !== seqAtDisc) {
+        return;
+      }
+      if (targetHs) {
+        targetHs.status = "DISCONNECTED";
+        targetHs.ysf_room = "";
+        targetHs.ysf_room_id = "";
+        targetHs.ysf_name = "";
+        targetHs.ysf_room_name = "";
+        targetHs.ysf_host = "";
+        targetHs.bm_master_host = "";
+        targetHs._ysfDisconnectingRoom = null;
+        targetHs.isManualBmDisconnect = true;
+        if (typeof window !== "undefined" && (cid === window.activeHotspotId || targetHs.id === window.activeHotspotId)) {
+          window.isManualBmDisconnect = true;
+        }
+      }
+      updateBmStatus("DISCONNECTED", window.t ? window.t("status.disconnected", {}, "Disconnected") : "Disconnected", cid);
+      if (effCard) {
+        effCard.dataset.ysfRoom = "";
+        if (showStatusBanner) {
+          setAslProcBannerState(effCard, {
+            active: true,
+            text: curRoom
+              ? (window.t ? window.t("ysf.proc_disconnected_room", { room: curRoom }, `✓ Reflector #${curRoom} disconnected (channel clear)`) : `✓ Reflector #${curRoom} disconnected (channel clear)`)
+              : (window.t ? window.t("ysf.proc_disconnected_standby", {}, "✓ YSF disconnected (STANDBY)") : "✓ YSF disconnected (STANDBY)"),
+            tone: "positive",
+            autoHideMs: 4000
+          });
+        }
+        if (typeof window.updateCardYsfPanel === "function") {
+          window.updateCardYsfPanel(effCard, targetHs);
+        }
+        syncYsfMatrixButtonsState(effCard, targetHs);
+        updateCardPttHint(effCard);
+      }
+    } else if (targetHs) {
+      targetHs._ysfDisconnectingRoom = null;
+    }
+  } catch (err) {
+    if (targetHs) targetHs._ysfDisconnectingRoom = null;
+    if (effCard && showStatusBanner) {
+      setAslProcBannerState(effCard, {
+        active: true,
+        text: window.t
+          ? window.t("ysf.proc_disconnect_err", { error: err.message || err }, `✕ YSF disconnect error: ${err.message || err}`)
+          : `✕ YSF disconnect error: ${err.message || err}`,
+        tone: "negative",
+        autoHideMs: 4000
+      });
+    }
+  }
+}
+
+export function syncYsfMatrixButtonsState(card, targetHs) {
+  if (!card || !targetHs) return;
+  const buttons = card.querySelectorAll(".btn-ysf-room-cell");
+  if (!buttons.length) return;
+
+  const probeMap = Object.assign({}, window._ysfGlobalRoomProbeCache || {}, targetHs._ysfRoomProbeMap || {});
+  const activeRoom = String(targetHs.ysf_room || (card && card.dataset.ysfRoom) || "").trim();
+  const connectingRoom = String(targetHs._ysfConnectingRoom || "").trim();
+  const disconnectingRoom = String(targetHs._ysfDisconnectingRoom || "").trim();
+  const scanningRoom = (targetHs._ysfScanActive && targetHs._ysfScanningRoom) ? String(targetHs._ysfScanningRoom).trim() : "";
+  const keyedSet = new Set();
+  if (targetHs._ysfRxActiveRoom) keyedSet.add(String(targetHs._ysfRxActiveRoom).trim());
+  if (Array.isArray(targetHs._ysfKeyedRooms)) {
+    targetHs._ysfKeyedRooms.forEach(kr => keyedSet.add(String(kr).trim()));
+  }
+
+  buttons.forEach(btn => {
+    const r = String(btn.dataset.room || "").trim();
+    const connsEl = btn.querySelector(".asl-btn-conns");
+
+    if (!r) {
+      if (connsEl) {
+        connsEl.className = "asl-btn-conns asl-conns-hidden";
+        connsEl.textContent = "";
+      }
+      btn.classList.remove(
+        "asl-node-offline",
+        "asl-node-linked-monitor",
+        "asl-node-connecting",
+        "asl-node-connecting-monitor",
+        "asl-node-disconnecting",
+        "asl-node-scanning-now",
+        "ysf-node-scanning-now",
+        "active-room",
+        "active-asl-node"
+      );
+      return;
+    }
+
+    const isDisconnecting = Boolean(disconnectingRoom && (r === disconnectingRoom || disconnectingRoom === "all"));
+    const isEstablished = !isDisconnecting && Boolean(activeRoom && r === activeRoom && isYsfOnlineStatus(targetHs.status));
+    const isConnecting = !isDisconnecting && !isEstablished && Boolean(connectingRoom && r === connectingRoom);
+    const isScanningNow = Boolean(scanningRoom && r === scanningRoom);
+
+    btn.classList.toggle("asl-node-linked-monitor", isEstablished);
+    btn.classList.toggle("active-room", isEstablished);
+    btn.classList.toggle("active-asl-node", isEstablished);
+
+    btn.classList.toggle("asl-node-connecting", isConnecting);
+    btn.classList.toggle("asl-node-connecting-monitor", isConnecting);
+    btn.classList.toggle("asl-node-disconnecting", isDisconnecting);
+    btn.classList.toggle("asl-node-scanning-now", isScanningNow);
+    btn.classList.toggle("ysf-node-scanning-now", isScanningNow);
+
+    if (!connsEl) return;
+
+    const probe = probeMap[r];
+
+    if (isDisconnecting) {
+      connsEl.className = "asl-btn-conns asl-conns-connecting";
+      connsEl.textContent = "...";
+      connsEl.title = window.t
+        ? window.t("ysf.disconnecting_room", { room: r }, `Disconnecting room #${r}...`)
+        : `Disconnecting room #${r}...`;
+      btn.classList.remove("asl-node-offline");
+    } else if (isConnecting) {
+      connsEl.className = "asl-btn-conns asl-conns-connecting";
+      connsEl.textContent = "...";
+      connsEl.title = window.t
+        ? window.t("ysf.connecting_room", { room: r }, `Connecting to room #${r}...`)
+        : `Connecting to room #${r}...`;
+      btn.classList.remove("asl-node-offline");
+    } else if (!probe) {
+      connsEl.className = "asl-btn-conns asl-conns-hidden";
+      connsEl.textContent = "";
+      btn.classList.remove("asl-node-offline");
+    } else if (!probe.online && r !== activeRoom) {
+      btn.classList.add("asl-node-offline");
+      connsEl.className = "asl-btn-conns asl-conns-offline";
+      connsEl.textContent = "OFF";
+      connsEl.title = window.t
+        ? window.t("ysf.reflector_offline", {}, "Reflector unreachable / Offline")
+        : "Reflector unreachable / Offline";
+    } else {
+      btn.classList.remove("asl-node-offline");
+      const isKeyed = Boolean(probe.keyed || keyedSet.has(r));
+      const linksNum = probe.connections !== undefined ? probe.connections : (probe.online_count || 0);
+
+      let connsClass = "asl-conns-zero";
+      let connsText = String(linksNum);
+      let connsTitle = window.t
+        ? window.t("ysf.connected_nodes", { count: linksNum }, `Connected nodes: ${linksNum}`)
+        : `Connected nodes: ${linksNum}`;
+
+      if (isKeyed) {
+        connsClass = "asl-conns-hot";
+        connsText = `• ${linksNum}`;
+        connsTitle = window.t
+          ? window.t("ysf.on_air_now", { count: linksNum }, `On air right now 🔥 (${linksNum} nodes)`)
+          : `On air right now 🔥 (${linksNum} nodes)`;
+      } else if (typeof linksNum === "number" && linksNum > 0) {
+        connsClass = "asl-conns-active";
+        connsTitle = window.t
+          ? window.t("ysf.connected_waiting", { count: linksNum }, `Connected nodes: ${linksNum} (idle)`)
+          : `Connected nodes: ${linksNum} (idle)`;
+      } else {
+        connsClass = "asl-conns-zero";
+        connsText = "0";
+        connsTitle = window.t
+          ? window.t("ysf.connections_zero", {}, "Connections: 0")
+          : "Connections: 0";
+      }
+
+      connsEl.className = `asl-btn-conns ${connsClass}`;
+      connsEl.textContent = connsText;
+      connsEl.title = connsTitle;
+    }
+  });
+}
+
+export async function probeYsfMatrixRooms(card, targetHs, force = false) {
+  if (!card || !targetHs) return;
+  const probePage = getYsfMatrixPage(targetHs.id || card.dataset.hotspotId || "default", targetHs);
+  let buttons = card.querySelectorAll(`.ysf-page[data-page="${probePage}"] .btn-ysf-room-cell`);
+  if (!buttons.length) buttons = card.querySelectorAll(".btn-ysf-room-cell");
+  if (!buttons.length) return;
+
+  const rooms = [];
+  buttons.forEach(b => {
+    const r = String(b.dataset.room || "").trim();
+    if (r && r !== "0") rooms.push(r);
+  });
+  if (!rooms.length) return;
+
+  const cid = targetHs.id || card.dataset.hotspotId || "default";
+  try {
+    const res = await fetch("/api/ysf/matrix-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hotspot_id: cid, rooms, force: Boolean(force) })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.rooms) {
+        window._ysfGlobalRoomProbeCache = window._ysfGlobalRoomProbeCache || {};
+        Object.assign(window._ysfGlobalRoomProbeCache, data.rooms);
+        targetHs._ysfRoomProbeMap = Object.assign(targetHs._ysfRoomProbeMap || {}, data.rooms);
+        syncYsfMatrixButtonsState(card, targetHs);
+      }
+    }
+  } catch (err) {
+    console.debug("[YSF] Matrix probe error:", err);
+  }
+}
+
+let _ysfDashFastPollTimer = null;
+
+export function isYsfDashAutoOpenEnabled(cid = "default") {
+  try {
+    let v = hasServerCollectionKey("ysf_dash_auto", cid)
+      ? getServerCollectionValue("ysf_dash_auto", cid)
+      : localStorage.getItem(`proxdmr_ysf_dash_auto_${cid}`);
+    if (v === null || v === undefined) return true;
+    return v === true || v === "1" || v === "true";
+  } catch (_) {
+    return true;
+  }
+}
+
+export function setYsfDashAutoOpenEnabled(cid = "default", enabled = true) {
+  try {
+    setServerCollectionKey("ysf_dash_auto", cid, enabled ? "1" : "0", "proxdmr_ysf_dash_auto_", false);
+  } catch (_) {}
+}
+
+export async function renderYsfDashboard(card, targetHs, cid) {
+  if (!card) return;
+  const effCid = cid || (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+  const dashViewport = card.querySelector(`#ysfDashGridViewport_${effCid}`) || card.querySelector(".ysf-dash-grid-viewport");
+  const notchDashBadge = card.querySelector(`#ysfNotchDashBadge_${effCid}`) || card.querySelector(".ysf-notch-dash-badge");
+  const matrixContainer = card.querySelector(".ysf-matrix-container");
+  const sliderContainer = card.querySelector(".ysf-slider-container");
+  const dashPair = card.querySelector(`.ysf-dash-pair`);
+
+  const isDashOpen = Boolean(targetHs && targetHs._ysfDashOpen);
+  if (matrixContainer) matrixContainer.classList.toggle("is-dash-view", isDashOpen);
+  if (sliderContainer) sliderContainer.classList.toggle("is-dash-mode", isDashOpen);
+  if (dashPair) dashPair.classList.toggle("dash-open", isDashOpen);
+
+  if (!isDashOpen) {
+    if (_ysfDashFastPollTimer) {
+      clearInterval(_ysfDashFastPollTimer);
+      _ysfDashFastPollTimer = null;
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/ysf/connected?hotspot_id=${encodeURIComponent(effCid)}`);
+    const data = await res.json();
+    if (data && data.status === "ok") {
+      const onlineCount = data.online_count || 0;
+      const caller = data.caller || "";
+      const lastHeard = Array.isArray(data.last_heard) ? data.last_heard : [];
+      const currentRoom = data.room_id || (targetHs && (targetHs.ysf_room || targetHs.config?.ysf_room)) || "";
+
+      if (notchDashBadge) {
+        if (data.connected && currentRoom) {
+          notchDashBadge.textContent = `ROOM #${currentRoom} · [👥 ${onlineCount}]`;
+        } else {
+          notchDashBadge.textContent = "DASHBOARD 4×5";
+        }
+      }
+
+      if (!dashViewport) return;
+
+      if (!data.connected) {
+        dashViewport.innerHTML = `<div class="asl-dash-grid-empty" style="padding: 24px 12px; text-align: center; opacity: 0.7; font-size: 13px;">${window.t ? window.t("ysf.dash_disconnected", {}, "Хотспот YSF в режиме ожидания. Подключитесь к комнате для просмотра участников") : "Хотспот YSF в режиме ожидания. Подключитесь к комнате для просмотра участников"}</div>`;
+        return;
+      }
+
+      if (lastHeard.length === 0) {
+        dashViewport.innerHTML = `<div class="asl-dash-grid-empty" style="padding: 24px 12px; text-align: center; opacity: 0.7; font-size: 13px;">${window.t ? window.t("ysf.dash_no_participants", {}, `[👥 ${onlineCount} узлов в комнате #${currentRoom}]. Ожидание активности в эфире...`) : `[👥 ${onlineCount} узлов в комнате #${currentRoom}]. Ожидание активности в эфире...`}</div>`;
+        return;
+      }
+
+      dashViewport.innerHTML = lastHeard.map(item => {
+        const cCall = safeEscapeHtml(item.callsign || "");
+        const isTalking = caller && caller.toUpperCase() === cCall.toUpperCase();
+        const countryInfo = (typeof getCountryInfo === "function") ? getCountryInfo(0, cCall) : null;
+        const flag = (countryInfo && countryInfo.flag) ? countryInfo.flag : "🌐";
+        const timeStr = safeEscapeHtml(item.time_str || "");
+
+        const cls = [
+          "btn-allstar-node",
+          "btn-ysf-room-cell",
+          "asl-dash-tile",
+          "participant-card",
+          isTalking ? "asl-dash-tile-talking" : "",
+          "asl-dash-tile-heard"
+        ].filter(Boolean).join(" ");
+
+        return `
+          <button type="button" class="${cls}" data-callsign="${cCall}" title="${cCall} (${timeStr}) — ${isTalking ? (window.t ? window.t("ysf.dash_state_talking", {}, "Talking") : "Talking") : (window.t ? window.t("ysf.dash_state_heard", {}, "Was on air") : "Was on air")}">
+            <div class="asl-btn-header">
+              <span class="asl-btn-flag">${flag}</span>
+              <strong class="asl-btn-num">${cCall}</strong>
+            </div>
+            <div class="asl-btn-footer">
+              <span class="asl-dash-desc-line">${timeStr || (isTalking ? (window.t ? window.t("ysf.dash_talking", {}, "TALKING") : "TALKING") : (window.t ? window.t("ysf.dash_active", {}, "ACTIVE") : "ACTIVE"))}</span>
+            </div>
+          </button>
+        `;
+      }).join("");
+
+      dashViewport.querySelectorAll(".asl-dash-tile").forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const cs = btn.dataset.callsign || "";
+          if (cs && typeof window.openCallIdModal === "function") {
+            window.openCallIdModal(cs);
+          }
+        };
+      });
+
+      if (!_ysfDashFastPollTimer) {
+        _ysfDashFastPollTimer = setInterval(() => {
+          if (!targetHs || !targetHs._ysfDashOpen) {
+            clearInterval(_ysfDashFastPollTimer);
+            _ysfDashFastPollTimer = null;
+            return;
+          }
+          renderYsfDashboard(card, targetHs, effCid);
+        }, 4000);
+      }
+    }
+  } catch (err) {
+    // network error ignore
+  }
+}
+
+export function getYsfRoomShortInfo(roomId, targetHs = null, cid = "default") {
+  const cleanId = String(roomId || "").trim();
+  if (!cleanId) return { label: "", flag: "🌐" };
+
+  // 1. Проверяем сохранённые ячейки матрицы комнат
+  try {
+    const rooms = getYsfMatrixRooms(cid);
+    const matched = rooms.find(r => r && String(r.room).trim() === cleanId && r.room);
+    if (matched) {
+      return {
+        label: matched.label || `YSF #${cleanId}`,
+        flag: (matched.flag && matched.flag !== "➕") ? matched.flag : "🌐"
+      };
+    }
+  } catch (_) {}
+
+  // 2. Проверяем каталог/кэш серверов YSF
+  try {
+    const ysfList = (typeof window !== "undefined" && typeof window.getNetworkServersList === "function" 
+      ? window.getNetworkServersList("ysf") 
+      : ((window._dmrServersCache && window._dmrServersCache["ysf"]) || [])) || [];
+    
+    const found = ysfList.find(r => {
+      const rIdStr = String(r.id || "").trim();
+      return rIdStr === cleanId || (parseInt(rIdStr, 10) === parseInt(cleanId, 10));
+    });
+
+    if (found) {
+      if (typeof window.resolveYsfRoomInfo === "function") {
+        const info = window.resolveYsfRoomInfo(found);
+        return {
+          label: info.refName || found.reflector_name || found.name || `YSF #${cleanId}`,
+          flag: info.flag || "🌐"
+        };
+      }
+      return {
+        label: found.reflector_name || found.name || `YSF #${cleanId}`,
+        flag: "🌐"
+      };
+    }
+  } catch (_) {}
+
+  // 3. Данные из объекта targetHs
+  const hsName = targetHs ? String(targetHs.ysf_name || targetHs.config?.ysf_name || "").trim() : "";
+  if (hsName) {
+    if (typeof window.resolveYsfRoomInfo === "function") {
+      const info = window.resolveYsfRoomInfo({ id: cleanId, name: hsName });
+      return {
+        label: info.refName || hsName,
+        flag: info.flag || "🌐"
+      };
+    }
+    return { label: hsName, flag: "🌐" };
+  }
+
+  return { label: `YSF #${cleanId}`, flag: "🌐" };
+}
+
+export function updateYsfVfoHeader(card, hs = null) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const callsignEl = card.querySelector(".callsign-display");
+  if (!callsignEl) return;
+
+  const isYsfNet = ((targetHs && targetHs.network_type) || card.dataset.networkType || "").toLowerCase() === "ysf";
+  if (!isYsfNet) return;
+
+  const myCall = String((targetHs && targetHs.callsign) || "N0CALL").trim();
+  const cid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+
+  const isDisconnected = Boolean(targetHs && (!isYsfOnlineStatus(targetHs.status) || !targetHs.ysf_room));
+  const connRoom = isDisconnected ? "" : String((targetHs && (targetHs.ysf_room || targetHs.ysf_room_id || targetHs.config?.ysf_room || targetHs.room_id)) || "").trim();
+  const isLinked = Boolean(connRoom && connRoom !== "0");
+
+  // 1. Режим ожидания (Standby): позывной радиостанции
+  if (!isLinked) {
+    const idleKey = `ysf_idle_${myCall}`;
+    if (callsignEl._lastYsfVfoKey === idleKey) return;
+    callsignEl._lastYsfVfoKey = idleKey;
+    callsignEl.classList.remove("has-asl-marquee");
+    callsignEl.innerHTML = `<span class="ysf-vfo-callsign ysf-vfo-standby">${safeEscapeHtml(myCall)}</span>`;
+    callsignEl.removeAttribute("title");
+    return;
+  }
+
+  // 2. Режим подключения: флаг, ID, Имя/название рефлектора
+  const { label, flag } = getYsfRoomShortInfo(connRoom, targetHs, cid);
+  const displayTitle = label ? `${label}` : `YSF #${connRoom}`;
+
+  const vfoKey = `ysf_linked_${connRoom}_${displayTitle}_${flag}`;
+  if (callsignEl._lastYsfVfoKey === vfoKey) return;
+  callsignEl._lastYsfVfoKey = vfoKey;
+
+  const flagHtml = `<span class="ysf-vfo-ref-flag">${safeEscapeHtml(flag)}</span>`;
+  const idHtml = `<strong class="ysf-vfo-ref-id">#${safeEscapeHtml(connRoom)}</strong>`;
+  const nameHtml = `<span class="ysf-vfo-ref-name">${safeEscapeHtml(displayTitle)}</span>`;
+
+  const itemHtml = `<span class="asl-vfo-marquee-item ysf-vfo-marquee-item">${flagHtml} ${idHtml} ${nameHtml}</span>`;
+
+  callsignEl.innerHTML = `<div class="asl-vfo-marquee-track"><div class="asl-vfo-marquee-inner">${itemHtml}</div></div>`;
+  callsignEl.title = window.t
+    ? window.t("ysf.vfo_tooltip_reflector", { id: connRoom, name: displayTitle }, `Рефлектор YSF #${connRoom}: ${displayTitle}`)
+    : `Рефлектор YSF #${connRoom}: ${displayTitle}`;
+
+  // 3. Бесшовная бесконечная бегущая строка при переполнении
+  requestAnimationFrame(() => {
+    const track = callsignEl.querySelector(".asl-vfo-marquee-track");
+    const inner = callsignEl.querySelector(".asl-vfo-marquee-inner");
+    const item = callsignEl.querySelector(".asl-vfo-marquee-item");
+    if (!track || !inner || !item) return;
+
+    const itemWidth = Math.ceil(item.getBoundingClientRect().width || item.scrollWidth);
+    const trackWidth = Math.floor(track.getBoundingClientRect().width || track.clientWidth);
+    const diff = itemWidth - trackWidth;
+    if (diff > 4) {
+      const sep = `<span class="asl-vfo-marquee-sep" aria-hidden="true">&nbsp;---&nbsp;</span>`;
+      inner.innerHTML = `${itemHtml}${sep}${itemHtml}${sep}`;
+      callsignEl.classList.add("has-asl-marquee");
+      track.classList.add("asl-marquee-active");
+      const halfWidth = Math.max(100, Math.round(inner.scrollWidth / 2));
+      const durSec = Math.max(7, Math.min(30, Math.round(halfWidth / 28)));
+      track.style.setProperty("--asl-marquee-shift", `-${halfWidth}px`);
+      track.style.setProperty("--asl-marquee-duration", `${durSec}s`);
+    } else {
+      callsignEl.classList.remove("has-asl-marquee");
+      track.classList.remove("asl-marquee-active");
+    }
+  });
+}
+
+const YSF_STARTER_DG_IDS = ["01", "02", "03", "05", "09", "10", "13", "20", "24", "65", "79", "90"];
+const YSF_STARTER_DG_ID_OPT = YSF_STARTER_DG_IDS.join(";") + ";";
+const _YSF_MR_DETECT_RE = /(?:^|[^A-Z0-9])(YCS|FCS)(?:[0-9]{0,4}|[^A-Z0-9]|$)/i;
+
+function _parseYsfDgIdList(raw) {
+  const s = String(raw || "").trim();
+  if (!s || s === "00" || s.toLowerCase() === "all") return [];
+  const out = [];
+  for (const tok of s.split(/[;,\s]+/)) {
+    const t = tok.trim();
+    if (!t || !/^\d+$/.test(t)) continue;
+    const n = parseInt(t, 10);
+    if (n >= 1 && n <= 99 && !out.includes(n)) {
+      out.push(n);
+      if (out.length >= 12) break;
+    }
+  }
+  return out;
+}
+
+const _YSF_MUTANT_DETECT_RE = /(?:^|[^A-Z0-9])(PYSF3|PYSFREFLECTOR3|YSFREFLECTOR3|MULTI[-_\s]?STREAM|DG[-_]?ID(?:_ENABLE|S|\d{1,2})?)(?:[^A-Z0-9]|$)/i;
+
+function _findYsfCatalogRoom(roomId) {
+  const sId = String(roomId || "").trim();
+  if (!sId) return null;
+  const ysfList = (typeof window !== "undefined" && typeof window.getNetworkServersList === "function"
+    ? window.getNetworkServersList("ysf")
+    : ((typeof window !== "undefined" && window._dmrServersCache && window._dmrServersCache["ysf"]) || [])) || [];
+  let hit = Array.isArray(ysfList)
+    ? ysfList.find(r => String(r.id || "").trim() === sId || (sId.length < 5 && String(r.id || "").trim() === sId.padStart(5, "0")))
+    : null;
+  if (!hit && typeof window !== "undefined" && Array.isArray(window.DEFAULT_YSF_BOOKMARKS)) {
+    hit = window.DEFAULT_YSF_BOOKMARKS.find(r => String(r.id || "").trim() === sId || (sId.length < 5 && String(r.id || "").trim() === sId.padStart(5, "0"))) || null;
+  }
+  return hit || null;
+}
+
+export function resolveYsfMatrixCellTypeInfo(roomId, cellItem = null, targetHs = null) {
+  const sId = String(roomId || "").trim();
+  if (!sId) return { reflectorType: "single", isMultiroom: false, kind: "", override: "" };
+
+  const catRoom = _findYsfCatalogRoom(sId);
+  const collectionOverride = (typeof window !== "undefined" && typeof window.getYsfRoomTypeOverride === "function")
+    ? window.getYsfRoomTypeOverride(sId)
+    : String(getServerCollectionValue("ysf_room_types", sId) || "").trim().toLowerCase();
+  const cellOverride = cellItem && typeof cellItem === "object"
+    ? String(cellItem.type_override || "").trim().toLowerCase()
+    : "";
+  const effectiveOverride = (collectionOverride === "single" || collectionOverride === "multi_standard" || collectionOverride === "multi_mutant")
+    ? collectionOverride
+    : ((cellOverride === "single" || cellOverride === "multi_standard" || cellOverride === "multi_mutant") ? cellOverride : "");
+
+  const activeHsId = targetHs ? String(targetHs.ysf_room || targetHs.ysf_room_id || targetHs.config?.ysf_room_id || "").trim() : "";
+  const isSameActive = Boolean(targetHs && activeHsId && activeHsId === sId);
+
+  const synthetic = {
+    id: sId,
+    name: (catRoom && catRoom.name) || (cellItem && cellItem.label) || (isSameActive && (targetHs.ysf_name || targetHs.ysf_room_name)) || "",
+    reflector_name: (catRoom && catRoom.reflector_name) || (cellItem && cellItem.label) || "",
+    description: (catRoom && catRoom.description) || "",
+    host: (catRoom && catRoom.host) || (isSameActive && targetHs.ysf_host) || "",
+    multiroom_kind: (catRoom && catRoom.multiroom_kind) || (isSameActive && targetHs.ysf_multiroom_kind) || "",
+    reflector_type: (isSameActive && targetHs.ysf_reflector_type === "multi_mutant")
+      ? "multi_mutant"
+      : ((catRoom && catRoom.reflector_type) || ""),
+    room_type_override: effectiveOverride,
+  };
+
+  if (typeof window !== "undefined" && typeof window.classifyYsfReflector === "function") {
+    return window.classifyYsfReflector(synthetic, sId);
+  }
+  const fields = [synthetic.name, synthetic.reflector_name, synthetic.description, synthetic.host];
+  let stdK = "";
+  let mutK = "";
+  for (const f of fields) {
+    if (!f) continue;
+    const up = String(f).toUpperCase();
+    if (!stdK) { const ms = up.match(_YSF_MR_DETECT_RE); if (ms) stdK = ms[1].toUpperCase(); }
+    if (!mutK) { const mm = up.match(_YSF_MUTANT_DETECT_RE); if (mm) mutK = mm[1].toUpperCase(); }
+  }
+  if (effectiveOverride === "single") return { reflectorType: "single", isMultiroom: false, kind: "", override: "single" };
+  if (effectiveOverride === "multi_standard") return { reflectorType: "multi_standard", isMultiroom: true, kind: stdK || "YCS", override: "multi_standard" };
+  if (effectiveOverride === "multi_mutant") return { reflectorType: "multi_mutant", isMultiroom: true, kind: mutK || "MANUAL", override: "multi_mutant" };
+  if (stdK) return { reflectorType: "multi_standard", isMultiroom: true, kind: stdK, override: "" };
+  if (mutK) return { reflectorType: "multi_mutant", isMultiroom: true, kind: mutK, override: "" };
+  if (synthetic.reflector_type === "multi_mutant") return { reflectorType: "multi_mutant", isMultiroom: true, kind: synthetic.multiroom_kind || "LIVE_DGID", override: "" };
+  return { reflectorType: "single", isMultiroom: false, kind: "", override: "" };
+}
+
+function _getYsfHsMultiroomInfo(targetHs) {
+  if (!targetHs) return { isMultiroom: false, reflectorType: "single", kind: "" };
+  const rid = String(targetHs.ysf_room || targetHs.ysf_room_id || targetHs.config?.ysf_room_id || "").trim();
+  const resolved = resolveYsfMatrixCellTypeInfo(rid, null, targetHs);
+  if (resolved.override === "single") {
+    return { isMultiroom: false, reflectorType: "single", kind: "" };
+  }
+  if (resolved.isMultiroom) {
+    return { isMultiroom: true, reflectorType: resolved.reflectorType, kind: resolved.kind || "YCS" };
+  }
+  if (targetHs.ysf_is_multiroom === true) {
+    const fallbackType = targetHs.ysf_reflector_type === "multi_mutant" ? "multi_mutant" : "multi_standard";
+    return { isMultiroom: true, reflectorType: fallbackType, kind: targetHs.ysf_multiroom_kind || (fallbackType === "multi_mutant" ? "LIVE_DGID" : "YCS") };
+  }
+  return { isMultiroom: false, reflectorType: "single", kind: "" };
+}
+
+export async function applyYsfDgIdLive(cid, payload = {}, card = null) {
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const targetHs = curHsList.find(h => h && h.id === cid) || curHsList[0];
+  if (!targetHs) return { ok: false };
+  const effCard = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || document.getElementById("radioContainer");
+  const roomId = String(payload.room_id || targetHs.ysf_room || targetHs.ysf_room_id || targetHs.config?.ysf_room_id || "25000").trim();
+  const body = { hotspot_id: cid, room_id: roomId };
+  if (Object.prototype.hasOwnProperty.call(payload, "rx_dg_id")) {
+    body.rx_dg_id = String(payload.rx_dg_id || "").trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "tx_dg_id")) {
+    body.tx_dg_id = payload.tx_dg_id;
+  }
+  try {
+    const resp = await fetch("/api/ysf/dg-id", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      let errMsg = `HTTP ${resp.status}`;
+      try { const ej = await resp.json(); if (ej && ej.detail) errMsg = ej.detail; } catch (_) {}
+      if (typeof showToast === "function") showToast(`✕ ${errMsg}`, "error", effCard);
+      return { ok: false };
+    }
+    const res = await resp.json();
+    if (res && res.hotspot) {
+      Object.assign(targetHs, res.hotspot);
+    } else if (res) {
+      if (res.rx_dg_id !== undefined) targetHs.ysf_dg_id = res.rx_dg_id;
+      if (res.tx_dg_id !== undefined) targetHs.ysf_tx_dg_id = res.tx_dg_id;
+    }
+    if (effCard) {
+      syncCardYsfDgIdBar(effCard, targetHs);
+      if (typeof window.updateCardPttHint === "function") window.updateCardPttHint(effCard);
+    }
+    return { ok: true, data: res };
+  } catch (err) {
+    const errMsg = window.t ? window.t("ysf.dgid_error", { err: err.message || err }, `✕ DG-ID error: ${err.message || err}`) : `✕ DG-ID error: ${err.message || err}`;
+    if (typeof showToast === "function") showToast(errMsg, "error", effCard);
+    return { ok: false };
+  }
+}
+
+export function isYsfTxDgIdPromptRequired(cid) {
+  const resId = resolveHotspotId(cid || (typeof window !== "undefined" && window.activeHotspotId) || "default");
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const hs = curHsList.find(h => h && (h.id === resId || h.id === cid)) || curHsList[0];
+  if (!hs) return false;
+  if (String(hs.network_type || "").toLowerCase() !== "ysf") return false;
+  const txVal = Number(hs.ysf_tx_dg_id || hs.config?.ysf_tx_dg_id || 0);
+  if (txVal >= 1 && txVal <= 99) return false;
+  const mrInfo = _getYsfHsMultiroomInfo(hs);
+  const rxIds = _parseYsfDgIdList(hs.ysf_dg_id || hs.config?.ysf_dg_id || "");
+  return mrInfo.isMultiroom || rxIds.length > 1;
+}
+
+function _closeYsfDgIdPresetsMenus() {
+  document.querySelectorAll(".ysf-dgid-presets-menu").forEach(el => el.remove());
+}
+
+function _openYsfDgIdPresetsMenu(anchorBtn, cid, card, targetHs) {
+  const existing = document.querySelector(".ysf-dgid-presets-menu");
+  const sameAnchor = existing && existing._anchorBtn === anchorBtn;
+  _closeYsfDgIdPresetsMenus();
+  if (sameAnchor) return;
+
+  const mrInfo = _getYsfHsMultiroomInfo(targetHs);
+  const curRx = String(targetHs.ysf_dg_id || (mrInfo.isMultiroom ? YSF_STARTER_DG_ID_OPT : "00")).trim();
+  const menu = document.createElement("div");
+  menu.className = "ysf-dgid-presets-menu";
+  menu._anchorBtn = anchorBtn;
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "ysf-dgid-presets-title";
+  titleEl.textContent = mrInfo.isMultiroom
+    ? (window.t ? window.t("ysf.dgid_presets_title_hub", { kind: mrInfo.kind || "Hub" }, `${mrInfo.kind || "Hub"} DG-ID subscription (YSFO):`) : `${mrInfo.kind || "Hub"} DG-ID subscription (YSFO):`)
+    : (window.t ? window.t("ysf.dgid_presets_title_rx", {}, "RX DG-ID subscription (YSFO):") : "RX DG-ID subscription (YSFO):");
+  menu.appendChild(titleEl);
+
+  const btn12 = document.createElement("button");
+  btn12.type = "button";
+  btn12.className = "btn-ysf-preset-wide";
+  btn12.textContent = window.t ? window.t("ysf.dgid_preset_12_btn", {}, "★ 12 popular (01..90;)") : "★ 12 popular (01..90;)";
+  btn12.addEventListener("click", async () => {
+    _closeYsfDgIdPresetsMenus();
+    const r = await applyYsfDgIdLive(cid, { rx_dg_id: YSF_STARTER_DG_ID_OPT }, card);
+    if (r.ok && typeof showToast === "function") {
+      showToast(window.t ? window.t("ysf.ysfo_updated_12", {}, "✓ YSFO updated: subscribed to 12 popular DG-IDs") : "✓ YSFO updated: subscribed to 12 popular DG-IDs", "success", card);
+    }
+  });
+  menu.appendChild(btn12);
+
+  const btnAll = document.createElement("button");
+  btnAll.type = "button";
+  btnAll.className = "btn-ysf-preset-wide";
+  btnAll.textContent = mrInfo.isMultiroom
+    ? (window.t ? window.t("ysf.dgid_all_unsupported", {}, "00 — ALL (not supported in YCS/FCS/DG-ID)") : "00 — ALL (not supported in YCS/FCS/DG-ID)")
+    : (window.t ? window.t("ysf.dgid_all_listen", {}, "00 — Listen to all channels (ALL)") : "00 — Listen to all channels (ALL)");
+  btnAll.disabled = mrInfo.isMultiroom;
+  btnAll.addEventListener("click", async () => {
+    _closeYsfDgIdPresetsMenus();
+    const r = await applyYsfDgIdLive(cid, { rx_dg_id: "00", tx_dg_id: null }, card);
+    if (r.ok && typeof showToast === "function") {
+      showToast(window.t ? window.t("ysf.ysfo_updated_all", {}, "✓ YSFO updated: mode 00 (ALL)") : "✓ YSFO updated: mode 00 (ALL)", "success", card);
+    }
+  });
+  menu.appendChild(btnAll);
+
+  const grid = document.createElement("div");
+  grid.className = "ysf-dgid-presets-grid";
+  const curParsed = _parseYsfDgIdList(curRx);
+  for (const dStr of YSF_STARTER_DG_IDS) {
+    const num = parseInt(dStr, 10);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-ysf-preset-num" + (curParsed.length === 1 && curParsed[0] === num ? " is-active" : "");
+    btn.textContent = dStr;
+    btn.title = window.t ? window.t("ysf.dgid_listen_only_title", { id: dStr }, `Listen only to DG-ID ${dStr}`) : `Listen only to DG-ID ${dStr}`;
+    btn.addEventListener("click", async () => {
+      _closeYsfDgIdPresetsMenus();
+      const r = await applyYsfDgIdLive(cid, { rx_dg_id: `${dStr};` }, card);
+      if (r.ok && typeof showToast === "function") {
+        showToast(window.t ? window.t("ysf.ysfo_updated_single", { id: dStr }, `✓ YSFO updated: RX DG-ID ${dStr}`) : `✓ YSFO updated: RX DG-ID ${dStr}`, "success", card);
+      }
+    });
+    grid.appendChild(btn);
+  }
+  menu.appendChild(grid);
+
+  document.body.appendChild(menu);
+  const rect = anchorBtn.getBoundingClientRect();
+  const mw = menu.offsetWidth || 266;
+  const mh = menu.offsetHeight || 220;
+  let left = Math.max(8, Math.min(window.innerWidth - mw - 8, rect.right - mw));
+  let top = (rect.bottom + mh + 10 <= window.innerHeight) ? (rect.bottom + 4) : Math.max(8, rect.top - mh - 4);
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+
+  const onOutside = (ev) => {
+    if (!menu.contains(ev.target) && ev.target !== anchorBtn) {
+      _closeYsfDgIdPresetsMenus();
+      document.removeEventListener("pointerdown", onOutside, true);
+    }
+  };
+  setTimeout(() => document.addEventListener("pointerdown", onOutside, true), 0);
+}
+
+export function closeYsfTxDgIdModal() {
+  const modal = document.getElementById("ysfTxDgIdModal");
+  if (!modal) return;
+  modal.classList.remove("active");
+}
+
+export function openYsfTxDgIdModal(cid) {
+  const modal = document.getElementById("ysfTxDgIdModal");
+  if (!modal) return;
+  const resId = resolveHotspotId(cid || window.activeHotspotId || "default");
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+  const targetHs = curHsList.find(h => h && (h.id === resId || h.id === cid)) || curHsList[0];
+  if (!targetHs) return;
+
+  const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHs.id}"]`) || document.getElementById("radioContainer");
+  const roomId = String(targetHs.ysf_room || targetHs.ysf_room_id || "25000").trim();
+  const roomName = String(targetHs.ysf_name || targetHs.ysf_room_name || `YSF #${roomId}`).trim();
+  const mrInfo = _getYsfHsMultiroomInfo(targetHs);
+
+  const hubBadge = document.getElementById("ysfTxDgIdHubBadge");
+  if (hubBadge) {
+    hubBadge.style.display = mrInfo.isMultiroom ? "inline-flex" : "none";
+    hubBadge.classList.toggle("is-multi-standard", mrInfo.reflectorType === "multi_standard");
+    hubBadge.classList.toggle("is-multi-mutant", mrInfo.reflectorType === "multi_mutant");
+    hubBadge.textContent = `${mrInfo.kind || "MULTI"} · 01–99`;
+  }
+  const subEl = document.getElementById("ysfTxDgIdRoomSubtitle");
+  if (subEl) {
+    subEl.textContent = window.t
+      ? window.t("ysf.tx_dgid_subtitle_dynamic", { id: roomId, name: roomName }, `#${roomId} ${roomName} — which DG-ID would you like to transmit on?`)
+      : `#${roomId} ${roomName} — which DG-ID would you like to transmit on?`;
+  }
+
+  const lastRxWrap = document.getElementById("ysfTxDgIdLastRxWrap");
+  const lastRxDg = Number(targetHs._ysfLastRxDgId || targetHs.ysf_rx_dg_id || 0);
+  const lastRxCaller = String(targetHs._ysfLastRxCaller || "").trim();
+  if (lastRxWrap) {
+    lastRxWrap.innerHTML = "";
+    if (lastRxDg >= 1 && lastRxDg <= 99) {
+      lastRxWrap.style.display = "";
+      const btnLast = document.createElement("button");
+      btnLast.type = "button";
+      btnLast.className = "btn-ysf-tx-lastrx";
+      const dgStr = String(lastRxDg).padStart(2, "0");
+      btnLast.textContent = lastRxCaller
+        ? (window.t ? window.t("ysf.tx_dgid_reply_caller", { caller: lastRxCaller, dgid: dgStr }, `🎙️ Reply to ${lastRxCaller} on DG-ID ${dgStr}`) : `🎙️ Reply to ${lastRxCaller} on DG-ID ${dgStr}`)
+        : (window.t ? window.t("ysf.tx_dgid_reply_active", { dgid: dgStr }, `🎙️ Reply to active RX DG-ID ${dgStr}`) : `🎙️ Reply to active RX DG-ID ${dgStr}`);
+      btnLast.addEventListener("click", () => _selectTxDgId(lastRxDg));
+      lastRxWrap.appendChild(btnLast);
+    } else {
+      lastRxWrap.style.display = "none";
+    }
+  }
+
+  const curTx = Number(targetHs.ysf_tx_dg_id || 0);
+  const rxIds = _parseYsfDgIdList(targetHs.ysf_dg_id || "");
+  const rxSet = new Set(rxIds);
+  const gridSet = new Set(rxIds);
+  for (const s of YSF_STARTER_DG_IDS) gridSet.add(parseInt(s, 10));
+  if (curTx >= 1 && curTx <= 99) gridSet.add(curTx);
+  if (lastRxDg >= 1 && lastRxDg <= 99) gridSet.add(lastRxDg);
+  const sortedGridIds = Array.from(gridSet).sort((a, b) => a - b);
+
+  async function _selectTxDgId(chosenNum) {
+    const num = parseInt(chosenNum, 10);
+    if (isNaN(num) || num < 1 || num > 99) {
+      if (typeof showToast === "function") showToast(window.t ? window.t("ysf.tx_dgid_invalid", {}, "Enter a valid DG-ID from 01 to 99") : "Enter a valid DG-ID from 01 to 99", "error");
+      return;
+    }
+    closeYsfTxDgIdModal();
+    const r = await applyYsfDgIdLive(targetHs.id, { tx_dg_id: num }, card);
+    if (r.ok && typeof showToast === "function") {
+      const dgPad = String(num).padStart(2, "0");
+      showToast(window.t ? window.t("ysf.tx_dgid_selected", { dgid: dgPad, room: roomId }, `✓ TX DG-ID ${dgPad} selected for #${roomId} — press PTT to transmit`) : `✓ TX DG-ID ${dgPad} selected for #${roomId} — press PTT to transmit`, "success", 3200);
+    }
+  }
+
+  const gridEl = document.getElementById("ysfTxDgIdGrid");
+  if (gridEl) {
+    gridEl.innerHTML = "";
+    for (const num of sortedGridIds) {
+      const dgStr = String(num).padStart(2, "0");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-ysf-tx-pick" + (num === curTx ? " is-selected" : "");
+      const subLbl = num === curTx
+        ? (window.t ? window.t("ysf.tx_dgid_tx_active", {}, "TX active") : "TX active")
+        : (rxSet.has(num) ? (window.t ? window.t("ysf.tx_dgid_listening", {}, "Listening ✓") : "Listening ✓") : "DG-ID");
+      btn.innerHTML = `<strong>${dgStr}</strong><small>${safeEscapeHtml(subLbl)}</small>`;
+      btn.addEventListener("click", () => _selectTxDgId(num));
+      gridEl.appendChild(btn);
+    }
+  }
+
+  const customInp = document.getElementById("ysfTxDgIdCustomInput");
+  if (customInp) {
+    customInp.value = (curTx >= 1 && curTx <= 99) ? String(curTx).padStart(2, "0") : "";
+  }
+  const btnCustom = document.getElementById("btnYsfTxDgIdCustomApply");
+  if (btnCustom) {
+    btnCustom.onclick = () => {
+      if (customInp) _selectTxDgId(customInp.value);
+    };
+  }
+  if (customInp) {
+    customInp.onkeydown = (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        _selectTxDgId(customInp.value);
+      }
+    };
+  }
+
+  const btnClear = document.getElementById("btnYsfTxDgIdClear");
+  if (btnClear) {
+    btnClear.style.display = (curTx >= 1 && curTx <= 99) ? "" : "none";
+    btnClear.onclick = async () => {
+      closeYsfTxDgIdModal();
+      const r = await applyYsfDgIdLive(targetHs.id, { tx_dg_id: null }, card);
+      if (r.ok && typeof showToast === "function") {
+        showToast(window.t ? window.t("ysf.tx_dgid_cleared", {}, "TX DG-ID cleared — you will be asked to choose an ID before transmitting") : "TX DG-ID cleared — you will be asked to choose an ID before transmitting", "info", card);
+      }
+    };
+  }
+
+  const btnCloseX = document.getElementById("closeYsfTxDgIdModalBtn");
+  const btnCancel = document.getElementById("btnYsfTxDgIdCancel");
+  if (btnCloseX) btnCloseX.onclick = closeYsfTxDgIdModal;
+  if (btnCancel) btnCancel.onclick = closeYsfTxDgIdModal;
+  modal.onclick = (ev) => {
+    if (ev.target === modal) closeYsfTxDgIdModal();
+  };
+
+  modal.classList.add("active");
+}
+
+export function syncCardYsfDgIdBar(card, hs = null) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const bar = card.querySelector(".ysf-dgid-bar");
+  if (!bar) return;
+
+  const isYsfNet = ((targetHs && targetHs.network_type) || card.dataset.networkType || "bm").toLowerCase() === "ysf";
+  if (!isYsfNet || !targetHs) {
+    bar.style.setProperty("display", "none", "important");
+    return;
+  }
+  bar.style.removeProperty("display");
+
+  const cid = targetHs.id || card.dataset.hotspotId || "default";
+  const mrInfo = _getYsfHsMultiroomInfo(targetHs);
+  bar.classList.toggle("is-multiroom", mrInfo.isMultiroom);
+  bar.classList.toggle("is-multi-standard", mrInfo.reflectorType === "multi_standard");
+  bar.classList.toggle("is-multi-mutant", mrInfo.reflectorType === "multi_mutant");
+
+  const hubTag = bar.querySelector(".ysf-dgid-hub-tag");
+  if (hubTag) {
+    hubTag.textContent = mrInfo.isMultiroom ? `${mrInfo.kind || "YCS"} 01-99` : "DG-ID";
+    hubTag.title = mrInfo.reflectorType === "multi_mutant"
+      ? (window.t ? window.t("ysf.dgid_hub_mutant_title", { kind: mrInfo.kind || "DG-ID" }, `Non-standard multi-room reflector (${mrInfo.kind || "DG-ID"} mutant): DG-ID 01–99 subscription (YSFO)`) : `Non-standard multi-room reflector (${mrInfo.kind || "DG-ID"} mutant): DG-ID 01–99 subscription (YSFO)`)
+      : (mrInfo.isMultiroom
+        ? (window.t ? window.t("ysf.dgid_hub_standard_title", { kind: mrInfo.kind || "YCS" }, `Standard multi-room hub ${mrInfo.kind || "YCS"}: DG-ID 01–99 subscription (YSFO)`) : `Standard multi-room hub ${mrInfo.kind || "YCS"}: DG-ID 01–99 subscription (YSFO)`)
+        : (window.t ? window.t("ysf.dgid_single_title", {}, "DG-ID channel mode (YSFO)") : "DG-ID channel mode (YSFO)"));
+  }
+
+  const liveRxEl = bar.querySelector(".ysf-rx-dgid-live");
+  const rxLiveId = Number(targetHs.ysf_rx_dg_id || 0);
+  if (liveRxEl) {
+    if (targetHs._ysfCarrierRx && rxLiveId >= 1 && rxLiveId <= 99) {
+      liveRxEl.style.display = "";
+      liveRxEl.textContent = `RX:${String(rxLiveId).padStart(2, "0")}`;
+    } else {
+      liveRxEl.style.display = "none";
+    }
+  }
+
+  const rxInput = bar.querySelector(".ysf-dgid-rx-input");
+  const rxVal = String(targetHs.ysf_dg_id || (mrInfo.isMultiroom ? YSF_STARTER_DG_ID_OPT : "00")).trim();
+  if (rxInput && document.activeElement !== rxInput) {
+    rxInput.value = rxVal;
+  }
+
+  const txBtn = bar.querySelector(".btn-ysf-tx-dgid");
+  const txValSpan = bar.querySelector(".ysf-tx-dgid-val");
+  if (txBtn && txValSpan) {
+    const txVal = Number(targetHs.ysf_tx_dg_id || 0);
+    const rxList = _parseYsfDgIdList(rxVal);
+    const needsPrompt = (mrInfo.isMultiroom || rxList.length > 1) && !(txVal >= 1 && txVal <= 99);
+    txBtn.classList.toggle("is-tx-set", txVal >= 1 && txVal <= 99);
+    txBtn.classList.toggle("needs-tx-choice", needsPrompt);
+    if (txVal >= 1 && txVal <= 99) {
+      txValSpan.textContent = String(txVal).padStart(2, "0");
+    } else if (needsPrompt) {
+      txValSpan.textContent = "?";
+    } else {
+      txValSpan.textContent = "00";
+    }
+  }
+
+  if (!bar._ysfDgIdWired) {
+    bar._ysfDgIdWired = true;
+    const commitRx = async () => {
+      if (!rxInput) return;
+      const curCid = resolveHotspotId(card.dataset.hotspotId || cid);
+      const val = rxInput.value.trim();
+      const res = await applyYsfDgIdLive(curCid, { rx_dg_id: val }, card);
+      if (res.ok && typeof showToast === "function") {
+        const shown = String(res.data?.rx_dg_id || val || "00").replace(/;+$/, "");
+        showToast(window.t ? window.t("ysf.ysfo_sent_live", { dgid: shown }, `✓ YSFO sent without reconnect: DG-ID ${shown}`) : `✓ YSFO sent without reconnect: DG-ID ${shown}`, "success", card);
+      }
+    };
+    const btnApply = bar.querySelector(".btn-ysf-dgid-apply");
+    const btnPresets = bar.querySelector(".btn-ysf-dgid-presets");
+    if (btnApply) {
+      btnApply.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        commitRx();
+      });
+    }
+    if (rxInput) {
+      rxInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          commitRx();
+        }
+      });
+    }
+    if (btnPresets) {
+      btnPresets.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const curCid = resolveHotspotId(card.dataset.hotspotId || cid);
+        const curHs = (getCurrentHotspots().find(h => h && h.id === curCid)) || targetHs;
+        _openYsfDgIdPresetsMenu(btnPresets, curCid, card, curHs);
+      });
+    }
+    if (txBtn) {
+      txBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const curCid = resolveHotspotId(card.dataset.hotspotId || cid);
+        openYsfTxDgIdModal(curCid);
+      });
+    }
+  }
+}
+
+export function updateCardYsfPanel(card, hs) {
+  if (!card) return;
+  const targetHs = hs || (card.dataset.hotspotId ? (getCurrentHotspots().find(h => h.id === card.dataset.hotspotId) || null) : null) || (getCurrentHotspots()[0] || null);
+  const isYsfNet = ((targetHs && targetHs.network_type) || card.dataset.networkType || "bm").toLowerCase() === "ysf";
+  card.classList.toggle("card-net-ysf", isYsfNet);
+  syncCardYsfDgIdBar(card, targetHs);
+  if (!isYsfNet) {
+    const existingYsfRow = card.querySelector(".vfo-ysf-row");
+    if (existingYsfRow) existingYsfRow.style.setProperty("display", "none", "important");
+    const orphanDashPair = card.querySelector(".vfo-ts1-row .ysf-dash-pair");
+    if (orphanDashPair) orphanDashPair.remove();
+    const btnContactsRestore = card.querySelector("#btnMyContactsMain") || card.querySelector(".btn-my-contacts");
+    if (btnContactsRestore && !card.classList.contains("card-net-allstar")) {
+      const lblRestore = btnContactsRestore.querySelector(".ptt-side-label");
+      if (lblRestore) {
+        lblRestore.textContent = window.t ? window.t("contacts.button_label", {}, "Контакты") : "Контакты";
+        lblRestore.setAttribute("data-i18n", "contacts.button_label");
+      }
+      btnContactsRestore.title = window.t ? window.t("contacts.btn_title", {}, "Контакты и группы (телефонная книга DMR ID и TG)") : "Контакты и группы (телефонная книга DMR ID и TG)";
+      btnContactsRestore.setAttribute("data-i18n-title", "contacts.btn_title");
+    }
+    return;
+  }
+
+  card.dataset.networkType = "ysf";
+  const cid = (targetHs && targetHs.id) || card.dataset.hotspotId || "default";
+
+  // Скрываем TS2 и API rows (YSF — симплекс без слотов, панель активности TS1 должна быть ВСЕГДА видима)
+  const vfoTs1 = card.querySelector(".vfo-ts1-row");
+  const vfoTs2 = card.querySelector(".vfo-ts2-row");
+  const apiRow = card.querySelector(".api-status-row");
+  if (vfoTs1) vfoTs1.style.removeProperty("display");
+  if (vfoTs2) vfoTs2.style.setProperty("display", "none", "important");
+  if (apiRow) apiRow.style.setProperty("display", "none", "important");
+
+  // Обновляем строку статуса экрана (флаг, ID, название рефлектора)
+  updateYsfVfoHeader(card, targetHs);
+
+  // 1. Создаем или находим vfoYsf row
+  let vfoYsf = card.querySelector(".vfo-ysf-row");
+  if (!vfoYsf) {
+    vfoYsf = document.createElement("div");
+    vfoYsf.className = "vfo-row vfo-ysf-row card-net-ysf";
+    if (vfoTs2 && vfoTs2.parentElement) {
+      vfoTs2.parentElement.insertBefore(vfoYsf, vfoTs2);
+    } else {
+      const screenEl = card.querySelector(".radio-screen") || card;
+      screenEl.appendChild(vfoYsf);
+    }
+  } else {
+    vfoYsf.style.removeProperty("display");
+  }
+
+  // 2. Данные активной комнаты (при Standby / отключении — пусто, без ложного фолбэка на #25000)
+  const isOnlineYsf = Boolean(targetHs && isYsfOnlineStatus(targetHs.status));
+  const rawRoomId = String((targetHs && (targetHs.ysf_room || targetHs.ysf_room_id || targetHs.config?.ysf_room || targetHs.room_id)) || "").trim();
+  const activeRoomId = (isOnlineYsf && rawRoomId) ? rawRoomId : "";
+  const activeRoomName = activeRoomId
+    ? String((targetHs && (targetHs.ysf_name || targetHs.ysf_room_name || targetHs.config?.ysf_name)) || `YSF #${activeRoomId}`).trim()
+    : (window.t ? window.t("ysf.standby_desc", {}, "Отключён (STANDBY)") : "Отключён (STANDBY)");
+
+  // 3. Быстрый ввод ID и кнопка PTT
+  const quickInp = card.querySelector(".quick-tg-input");
+  const quickBox = card.querySelector(".quick-tg-box");
+  const quickApply = card.querySelector(".btn-quick-tg-apply");
+  const ysfDialTip = window.t ? window.t("ysf.quick_dial_tip", {}, "Быстрый переход в комнату YSF по номеру ID (Enter для подключения)") : "Быстрый переход в комнату YSF по номеру ID (Enter для подключения)";
+  if (quickInp) {
+    quickInp.placeholder = "ID #";
+    quickInp.maxLength = 5;
+    quickInp.setAttribute("title", ysfDialTip);
+    quickInp.setAttribute("data-i18n-title", "ysf.quick_dial_tip");
+  }
+  if (quickBox) {
+    quickBox.setAttribute("title", ysfDialTip);
+    quickBox.setAttribute("data-i18n-title", "ysf.quick_dial_tip");
+  }
+  if (quickApply) {
+    quickApply.setAttribute("title", ysfDialTip);
+    quickApply.setAttribute("data-i18n-title", "ysf.quick_dial_tip");
+  }
+
+  const pttTargetInfo = card.querySelector("#pttTargetInfo") || card.querySelector(".ptt-target-info");
+  const pttTargetDesc = card.querySelector("#pttTargetDesc") || card.querySelector(".ptt-target-desc");
+  if (pttTargetInfo) pttTargetInfo.textContent = activeRoomId ? `#${activeRoomId}` : "#---";
+  if (pttTargetDesc) pttTargetDesc.textContent = activeRoomName;
+
+  // 4. Кнопка «Контакты» -> «Избранное» (с синхронизацией data-i18n и без перекрытия обработчиков)
+  const btnContacts = card.querySelector("#btnMyContactsMain") || card.querySelector(".btn-my-contacts");
+  if (btnContacts) {
+    const lbl = btnContacts.querySelector(".ptt-side-label");
+    if (lbl) {
+      lbl.textContent = window.t ? window.t("contacts.ysf_bookmarks", {}, "Избранное") : "Избранное";
+      lbl.setAttribute("data-i18n", "contacts.ysf_bookmarks");
+    }
+    btnContacts.title = window.t ? window.t("contacts.ysf_bookmarks_title", {}, "Избранные комнаты YSF") : "Избранные комнаты YSF";
+    btnContacts.setAttribute("data-i18n-title", "contacts.ysf_bookmarks_title");
+    btnContacts.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.openMyContactsModal === "function") {
+        window.openMyContactsModal(cid, "ysf_bookmarks");
+      }
+    };
+  }
+
+  // 5. Загружаем память комнат
+  const rooms = getYsfMatrixRooms(cid);
+  const ysfCurPage = getYsfMatrixPage(cid, targetHs);
+
+  const prevSlider = vfoYsf.querySelector(".ysf-slider-container");
+  const wasTextView = prevSlider ? prevSlider.classList.contains("is-text-view") : false;
+  const prevStreamEl = vfoYsf.querySelector(".ysf-caption-stream");
+  const prevStreamNodes = prevStreamEl ? Array.from(prevStreamEl.childNodes) : [];
+  const prevStreamEntries = prevStreamEl && Array.isArray(prevStreamEl._entries) ? prevStreamEl._entries : null;
+  const prevLastCallKey = prevStreamEl ? prevStreamEl._lastCallKey : null;
+  const prevLastCallId = prevStreamEl ? prevStreamEl._lastCallId : null;
+  const prevLastMsgTime = prevStreamEl ? prevStreamEl._lastMsgTime : null;
+  const prevBoxEl = vfoYsf.querySelector(".asl-live-caption-box");
+  const prevUserScrolled = prevBoxEl ? Boolean(prevBoxEl._isUserScrolled) : false;
+  const prevScanPopover = vfoYsf.querySelector(".asl-scan-settings-popover");
+
+  const scanBtnTitle = window.t ? window.t("ysf.scan_btn_title", {}, "Клик: запуск/остановка сканирования комнат (Scan: ON). Удержание: настройки") : "Клик: запуск/остановка сканирования комнат (Scan: ON). Удержание: настройки";
+  const unlinkTitle = window.t ? window.t("ysf.unlink_title", {}, "Отключиться от комнаты YSF (Off). Удержание: меню памяти ячеек") : "Отключиться от комнаты YSF (Off). Удержание: меню памяти ячеек";
+  const diceBtnTitle = window.t ? window.t("ysf.dice_btn_title", {}, "Случайная активная комната YSF (Dice). Удержание: настройки") : "Случайная активная комната YSF (Dice). Удержание: настройки";
+  const dashBtnTitle = window.t ? window.t("asl.dash_btn_title", {}, "Открыть / закрыть дашборд подключенного рефлектора (список участников и индикация говорящего)") : "Открыть / закрыть дашборд подключенного рефлектора (список участников и индикация говорящего)";
+  const dashChkTitle = window.t ? window.t("asl.dash_auto_title", {}, "Автооткрытие дашборда при подключении к рефлектору") : "Автооткрытие дашборда при подключении к рефлектору";
+  const dashBtnLabel = window.t ? window.t("asl.dash_btn_label", {}, "Дашборд") : "Дашборд";
+  const isAutoOpen = isYsfDashAutoOpenEnabled(cid);
+
+  vfoYsf.innerHTML = `
+    <div class="asl-top-section ysf-top-section">
+      <div class="allstar-top-left-actions ysf-top-left-actions">
+        <button type="button" class="btn-allstar-scan btn-ysf-scan${targetHs && targetHs._ysfScanActive ? " scan-running" : ""}" title="${safeEscapeHtml(scanBtnTitle)}">
+          <span class="asl-scan-dot"></span>
+          <span class="asl-action-text">Scan</span>
+        </button>
+        <button type="button" class="btn-allstar-unlink btn-ysf-unlink" title="${safeEscapeHtml(unlinkTitle)}">
+          <span class="asl-action-text">Off</span>
+        </button>
+        <button type="button" class="btn-allstar-dice btn-ysf-dice${targetHs && targetHs._ysfDiceRolling ? " dice-rolling" : ""}" title="${safeEscapeHtml(diceBtnTitle)}" aria-label="${safeEscapeHtml(diceBtnTitle)}">
+          <svg class="asl-dice-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect class="dice-border" x="3" y="3" width="18" height="18" rx="3.5" fill="currentColor" fill-opacity="0.14"/>
+            <circle class="dice-dot dot-1" cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+            <circle class="dice-dot dot-2" cx="16" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+            <circle class="dice-dot dot-3" cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+            <circle class="dice-dot dot-4" cx="8" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+            <circle class="dice-dot dot-5" cx="16" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+      </div>
+      <div class="vfo-pipeline-stage asl-pipeline-stage">
+        <div class="vfo-pipeline-icon icon-mic" title="Speech transcription (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+          <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
+            <line x1="9" y1="5" x2="15" y2="5"/>
+            <line x1="9" y1="8" x2="15" y2="8"/>
+            <path d="M5 10a7 7 0 0 0 14 0"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+          </svg>
+        </div>
+        <div class="vfo-pipeline-icon icon-trans" title="Text translation" data-i18n-title="vfo.pipeline_trans_title">
+          <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="17 1 21 5 17 9"/>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+            <polyline points="7 23 3 19 7 15"/>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+          </svg>
+        </div>
+        <div class="vfo-pipeline-icon icon-tts" title="Speech synthesis (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+          <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+        </div>
+      </div>
+      <div class="allstar-top-right-actions">
+        <span class="vfo-tts-badge asl-top-badge" id="vfoYsfTtsBadge_${cid}" role="button" tabindex="0" title="Speech synthesis (TTS): click to toggle, hold to select voice" data-i18n-title="vfo.tts_single_title">
+          <span class="tts-icon-spk">🔊</span>
+          <span class="tts-lang-code">RUS</span>
+        </span>
+        <span class="vfo-lang-badge asl-top-badge" id="vfoYsfLangBadge_${cid}" role="button" tabindex="0" title="Transcriber: click to toggle, hold for settings" data-i18n-title="vfo.transcriber_single_title">
+          <span class="lang-icon-mic">🎙️</span>
+          <span class="lang-code-text">TXT</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="asl-slider-container ysf-slider-container" id="ysfSliderContainer_${cid}">
+      <div class="asl-text-panel ysf-text-panel" id="ysfTextPanel_${cid}" inert>
+        <div class="asl-live-caption-box vfo-caption-box" id="ysfCaptionBox_${cid}" title="AI Speech Transcript" data-i18n-title="vfo.caption_box_title">
+          <div class="vfo-caption-stream asl-caption-stream ysf-caption-stream" id="ysfCaptionStream_${cid}" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Waiting for speech..."></div>
+        </div>
+      </div>
+
+      <div class="asl-dock-notch ysf-dock-notch" id="ysfDockNotch_${cid}" title="${window.t ? window.t("ysf.notch_title", {}, "Swipe down or click: transcript text") : "Swipe down or click: transcript text"}" aria-label="${window.t ? window.t("ysf.notch_title", {}, "Swipe down or click: transcript text") : "Swipe down or click: transcript text"}" data-i18n-title="ysf.notch_title" data-i18n-aria-label="ysf.notch_title" role="button" tabindex="0">
+        <span class="asl-notch-pages ysf-notch-pages" aria-hidden="true">${[0, 1, 2].map(pg => `<i class="asl-notch-seg ysf-notch-seg${pg === ysfCurPage ? " is-active" : ""}" data-page="${pg}"></i>`).join("")}</span>
+        <span class="asl-notch-dash-badge ysf-notch-dash-badge" id="ysfNotchDashBadge_${cid}" aria-hidden="true">DASHBOARD 4×5</span>
+      </div>
+
+      <div class="asl-matrix-container ysf-matrix-container${targetHs && targetHs._ysfDashOpen ? " is-dash-view" : ""}" id="ysfMatrixContainer_${cid}">
+        <div class="asl-pages-viewport ysf-pages-viewport" id="ysfPagesViewport_${cid}">
+        ${[0, 1, 2].map(pg => {
+          const pgPos = ((pg - ysfCurPage + 4) % 3) - 1;
+          const isMoveModeActive = Boolean(targetHs && targetHs._ysfMovingIdx !== null && targetHs._ysfMovingIdx !== undefined);
+          return `<div class="asl-matrix-grid asl-page ysf-matrix-grid ysf-page${isMoveModeActive ? " asl-matrix-move-mode" : ""}" data-page="${pg}" style="--asl-pos:${pgPos};"${pgPos !== 0 ? ' inert aria-hidden="true"' : ''}>
+          ${rooms.slice(pg * YSF_PAGE_SIZE, (pg + 1) * YSF_PAGE_SIZE).map((rItem, li) => {
+            const idx = pg * YSF_PAGE_SIZE + li;
+            const isEmpty = !rItem || !rItem.room;
+            const cleanRoom = !isEmpty ? String(rItem.room).trim() : "";
+            const isConn = !isEmpty && Boolean(targetHs && targetHs._ysfConnectingRoom && cleanRoom === String(targetHs._ysfConnectingRoom).trim());
+            const isDisc = !isEmpty && Boolean(targetHs && targetHs._ysfDisconnectingRoom && (cleanRoom === String(targetHs._ysfDisconnectingRoom).trim() || targetHs._ysfDisconnectingRoom === "all"));
+            const isActive = !isEmpty && !isDisc && Boolean(activeRoomId) && cleanRoom === activeRoomId && isOnlineYsf;
+            const isScanOn = Boolean(rItem && rItem.scan && !isEmpty);
+
+            let rFlag = isEmpty ? "➕" : (rItem.flag || "🌐");
+            if (!isEmpty && (rFlag === "➕" || rFlag === "🌐")) {
+              const detected = detectYsfCountryFlag(cleanRoom, rItem.label);
+              if (detected && detected.flag && detected.flag !== "➕") {
+                rFlag = detected.flag;
+                rItem.flag = rFlag;
+              }
+            }
+
+            const rNum = cleanRoom ? safeEscapeHtml(cleanRoom) : (window.t ? window.t("asl.empty_node_btn", {}, "Empty") : "Empty");
+            const setupLbl = window.t ? window.t("asl.configure_node_btn", {}, "[setup]") : "[setup]";
+            const rDesc = (rItem && rItem.label) ? safeEscapeHtml(rItem.label) : (isEmpty ? safeEscapeHtml(setupLbl) : "");
+
+            const isMovingSource = (isMoveModeActive && targetHs._ysfMovingIdx === idx);
+            const isMoveTarget = (isMoveModeActive && !isMovingSource);
+
+            const cellTypeInfo = !isEmpty
+              ? resolveYsfMatrixCellTypeInfo(cleanRoom, rItem, targetHs)
+              : { reflectorType: "single", isMultiroom: false, kind: "" };
+            const cellType = cellTypeInfo.reflectorType || "single";
+            const cellKind = cellTypeInfo.kind || (cellType === "multi_mutant" ? "PYSF3" : "YCS");
+
+            let typeTitleSuffix = "";
+            let typeDotHtml = "";
+            let cellTypeCls = "";
+            if (!isEmpty) {
+              if (cellType === "multi_standard") {
+                cellTypeCls = " ysf-cell-type-standard";
+                typeTitleSuffix = ` · ${window.t ? window.t("ysf.cell_tip_standard", { kind: cellKind }, `Standard multi-room hub (${cellKind} · DG-ID 01–99)`) : `Standard multi-room hub (${cellKind} · DG-ID 01–99)`}`;
+                typeDotHtml = '<span class="ysf-cell-type-dot ysf-cell-type-dot--standard" aria-hidden="true"></span>';
+              } else if (cellType === "multi_mutant") {
+                cellTypeCls = " ysf-cell-type-mutant";
+                typeTitleSuffix = ` · ${window.t ? window.t("ysf.cell_tip_mutant", { kind: cellKind }, `Non-standard multi-room reflector (mutant ${cellKind} / DG-ID)`) : `Non-standard multi-room reflector (mutant ${cellKind} / DG-ID)`}`;
+                typeDotHtml = '<span class="ysf-cell-type-dot ysf-cell-type-dot--mutant" aria-hidden="true"></span>';
+              } else {
+                typeTitleSuffix = ` · ${window.t ? window.t("ysf.cell_tip_single", {}, "Single-room reflector (DG-ID 00)") : "Single-room reflector (DG-ID 00)"}`;
+              }
+            }
+
+            let titleTip = isEmpty
+              ? (window.t ? window.t("ysf.empty_cell_title", { idx: idx + 1 }, `Cell #${idx + 1}: Empty — Click/Hold: configure`) : `Cell #${idx + 1}: Empty — Click/Hold: configure`)
+              : (window.t ? window.t("ysf.room_cell_title", { room: cleanRoom, desc: rDesc, suffix: typeTitleSuffix }, `Room #${cleanRoom} (${rDesc})${typeTitleSuffix} — Click: connect, Right click / Hold: menu`) : `Room #${cleanRoom} (${rDesc})${typeTitleSuffix} — Click: connect, Right click / Hold: menu`);
+            if (isMovingSource) {
+              titleTip = window.t ? window.t("ysf.move_source_title", { room: cleanRoom }, `Moving #${cleanRoom}... Click target cell`) : `Moving #${cleanRoom}... Click target cell`;
+            } else if (isMoveTarget) {
+              const srcRoom = rooms[targetHs._ysfMovingIdx]?.room;
+              titleTip = isEmpty
+                ? (window.t ? window.t("ysf.move_to_empty", { room: srcRoom }, `Move #${srcRoom} here`) : `Move #${srcRoom} here`)
+                : (window.t ? window.t("ysf.swap_with", { room: cleanRoom }, `Swap places with #${cleanRoom}`) : `Swap places with #${cleanRoom}`);
+            }
+
+            let stateCls = "";
+            if (isActive) stateCls = " asl-node-linked-monitor active-room active-asl-node";
+            else if (isConn) stateCls = " asl-node-connecting asl-node-connecting-monitor";
+            else if (isDisc) stateCls = " asl-node-disconnecting";
+            if (!isEmpty && targetHs && targetHs._ysfScanActive && targetHs._ysfScanningRoom && cleanRoom === String(targetHs._ysfScanningRoom).trim()) {
+              stateCls += " asl-node-scanning-now ysf-node-scanning-now";
+            }
+            if (isMovingSource) stateCls += " asl-node-moving-source";
+            if (isMoveTarget) stateCls += " asl-node-move-target";
+
+            const rightClusterHtml = (isScanOn || typeDotHtml)
+              ? `<span class="asl-btn-right-cluster">${isScanOn ? '<span class="asl-btn-scan-badge">S</span>' : ''}${typeDotHtml}</span>`
+              : '';
+
+            return `
+              <button type="button" class="btn-allstar-node btn-ysf-room-cell${stateCls}${cellTypeCls}${isEmpty ? " asl-node-empty" : ""}${isScanOn ? " asl-node-scan-on" : ""}" data-room="${cleanRoom}" data-idx="${idx}" data-reflector-type="${cellType}" title="${safeEscapeHtml(titleTip)}">
+                <div class="asl-btn-header">
+                  <span class="asl-btn-flag">${rFlag}</span>
+                  <strong class="asl-btn-num">${rNum}</strong>
+                  ${rightClusterHtml}
+                </div>
+                <div class="asl-btn-footer">
+                  <span class="asl-btn-conns asl-conns-hidden"></span>
+                  <small class="asl-btn-desc">${rDesc}</small>
+                </div>
+              </button>
+            `;
+          }).join("")}
+          </div>`;
+        }).join("")}
+        </div>
+        <div class="asl-dash-grid-viewport ysf-dash-grid-viewport" id="ysfDashGridViewport_${cid}"></div>
+      </div>
+    </div>
+  `;
+
+  // Размещаем кнопку [Дашборд ☑] внутри верхнего баннера активности вызова (.vfo-ts1-row) справа снизу
+  if (vfoTs1) {
+    vfoTs1.querySelectorAll(".ysf-dash-pair").forEach(el => el.remove());
+    const dashPairEl = document.createElement("div");
+    dashPairEl.className = `control-pair-btn ysf-dash-pair allstar-dash-pair${targetHs && targetHs._ysfDashOpen ? " dash-open" : ""}`;
+    dashPairEl.id = `ysfDashPair_${cid}`;
+    dashPairEl.innerHTML = `
+      <button type="button" class="btn-action-trigger btn-ysf-dash-trigger btn-asl-dash-trigger" title="${safeEscapeHtml(dashBtnTitle)}">
+        <span class="btn-action-label">${safeEscapeHtml(dashBtnLabel)}</span>
+      </button>
+      <div class="preset-dropdown-wrapper ysf-dash-auto-wrap asl-dash-auto-wrap" title="${safeEscapeHtml(dashChkTitle)}">
+        <label class="asl-dash-auto-label">
+          <input type="checkbox" class="chk-ysf-dash-auto chk-asl-dash-auto"${isAutoOpen ? " checked" : ""} aria-label="${safeEscapeHtml(dashChkTitle)}" />
+        </label>
+      </div>
+    `;
+    vfoTs1.appendChild(dashPairEl);
+  }
+
+  // Настраиваем встраиваемый транскрибатор / TTS прямо в .vfo-ysf-row (как в AllStarLink)
+  vfoYsf.setAttribute("data-slot", "1");
+  setupSlotTranscribeClick(vfoYsf, 1);
+  setupSlotTtsClick(vfoYsf, 1);
+  const ysfTs1TranscribeActive = isSlotTranscribeActive(cid, 1);
+  const ysfTs1TtsActive = isSlotTtsActive(cid, 1);
+  vfoYsf.classList.toggle("has-transcribe", ysfTs1TranscribeActive);
+  updateSlotLangBadge(vfoYsf, 1, ysfTs1TranscribeActive);
+  updateSlotTtsBadge(vfoYsf, 1, ysfTs1TtsActive);
+
+  if (prevStreamNodes.length > 0) {
+    const nextStream = vfoYsf.querySelector(".ysf-caption-stream");
+    if (nextStream) {
+      prevStreamNodes.forEach(n => nextStream.appendChild(n));
+      if (prevStreamEntries) nextStream._entries = prevStreamEntries;
+      nextStream._lastCallKey = prevLastCallKey;
+      nextStream._lastCallId = prevLastCallId;
+      nextStream._lastMsgTime = prevLastMsgTime;
+    }
+  }
+
+  const ysfCaptionBox = vfoYsf.querySelector(".asl-live-caption-box");
+  if (ysfCaptionBox) {
+    ysfCaptionBox._isUserScrolled = prevUserScrolled;
+    ensureCaptionFontControls(ysfCaptionBox);
+    setupCaptionBoxPinchZoom(ysfCaptionBox);
+    if (typeof setupCaptionBoxLongPress === "function") {
+      setupCaptionBoxLongPress(vfoYsf, 1);
+    }
+  }
+
+  const sliderContainer = vfoYsf.querySelector(".ysf-slider-container");
+  const textPanel = vfoYsf.querySelector(".ysf-text-panel");
+  const dockNotch = vfoYsf.querySelector(".ysf-dock-notch");
+  const matrixContainer = vfoYsf.querySelector(".ysf-matrix-container");
+
+  const setYsfTextView = (isText) => {
+    if (!sliderContainer) return;
+    if (isText) {
+      sliderContainer.classList.add("is-text-view");
+      if (textPanel) textPanel.removeAttribute("inert");
+      if (matrixContainer) matrixContainer.setAttribute("inert", "");
+      if (dockNotch) {
+        dockNotch.title = window.t ? window.t("ysf.notch_title_matrix", {}, "Свайп вверх или клик: Память комнат YSF") : "Свайп вверх или клик: Память комнат YSF";
+        dockNotch.setAttribute("aria-label", dockNotch.title);
+      }
+    } else {
+      sliderContainer.classList.remove("is-text-view");
+      if (textPanel) textPanel.setAttribute("inert", "");
+      if (matrixContainer) matrixContainer.removeAttribute("inert");
+      if (dockNotch) {
+        dockNotch.title = window.t ? window.t("ysf.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации";
+        dockNotch.setAttribute("aria-label", dockNotch.title);
+      }
+    }
+    if (vfoYsf) {
+      vfoYsf.scrollTop = 0;
+      vfoYsf.scrollLeft = 0;
+    }
+  };
+
+  vfoYsf.setYsfTextView = setYsfTextView;
+  setYsfTextView(Boolean(wasTextView || ysfTs1TranscribeActive));
+
+  // Автоматическое переключение экрана при изменении статуса транскрибации (MutationObserver)
+  if (vfoYsf._transcribeObserver) {
+    try { vfoYsf._transcribeObserver.disconnect(); } catch (_) {}
+  }
+  let prevHasTranscribe = vfoYsf.classList.contains("has-transcribe");
+  const ysfObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.type === "attributes" && m.attributeName === "class") {
+        const curHasTranscribe = vfoYsf.classList.contains("has-transcribe");
+        if (curHasTranscribe !== prevHasTranscribe) {
+          prevHasTranscribe = curHasTranscribe;
+          setYsfTextView(curHasTranscribe);
+        }
+      }
+    }
+  });
+  ysfObserver.observe(vfoYsf, { attributes: true, attributeFilter: ["class"] });
+  vfoYsf._transcribeObserver = ysfObserver;
+
+  // Автоматическое переключение на панель текста при включении озвучки речи (TTS)
+  const ysfTtsBadge = vfoYsf.querySelector(".vfo-tts-badge");
+  if (ysfTtsBadge) {
+    ysfTtsBadge.addEventListener("click", () => {
+      setTimeout(() => {
+        if (typeof isSlotTtsActive === "function" && isSlotTtsActive(cid, 1)) {
+          setYsfTextView(true);
+        }
+      }, 60);
+    });
+  }
+
+  // Защита от паразитного скролла контейнера VFO при Tab-навигации
+  vfoYsf.scrollTop = 0;
+  vfoYsf.scrollLeft = 0;
+  if (!vfoYsf._ysfScrollGuardWired) {
+    vfoYsf._ysfScrollGuardWired = true;
+    vfoYsf.addEventListener("scroll", () => {
+      if (vfoYsf.scrollTop !== 0) vfoYsf.scrollTop = 0;
+      if (vfoYsf.scrollLeft !== 0) vfoYsf.scrollLeft = 0;
+    }, { passive: true });
+    vfoYsf.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        const sc = vfoYsf.querySelector(".ysf-slider-container");
+        if (sc && sc.classList.contains("is-text-view") && typeof vfoYsf.setYsfTextView === "function") {
+          vfoYsf.setYsfTextView(false);
+        }
+      }
+    });
+  }
+
+  // Pages layout & drag
+  const pagesViewport = vfoYsf.querySelector(".ysf-pages-viewport");
+  const pageEls = pagesViewport ? Array.from(pagesViewport.querySelectorAll(".ysf-page")) : [];
+  const notchSegs = Array.from(vfoYsf.querySelectorAll(".ysf-notch-seg"));
+  let ysfPage = ysfCurPage;
+
+  const layoutYsfPages = (page, animate) => {
+    pageEls.forEach((el, pg) => {
+      const oldPos = parseInt(el.style.getPropertyValue("--asl-pos") || "0", 10);
+      const newPos = ((pg - page + 4) % 3) - 1;
+      const noAnim = !animate || Math.abs(newPos - oldPos) === 2;
+      if (noAnim) el.classList.add("no-anim");
+      el.style.setProperty("--asl-pos", String(newPos));
+      el.toggleAttribute("inert", newPos !== 0);
+      el.setAttribute("aria-hidden", newPos !== 0 ? "true" : "false");
+      if (noAnim) {
+        void el.offsetWidth;
+        el.classList.remove("no-anim");
+      }
+    });
+    notchSegs.forEach((seg, pg) => seg.classList.toggle("is-active", pg === page));
+  };
+
+  const resetYsfPagesDrag = () => {
+    if (!pagesViewport) return;
+    pagesViewport.classList.remove("is-dragging");
+    pagesViewport.style.setProperty("--asl-drag", "0px");
+  };
+
+  const goYsfPage = (delta) => {
+    if (!pagesViewport) return;
+    ysfPage = setYsfMatrixPageValue(cid, targetHs, ysfPage + delta);
+    document.querySelectorAll(".asl-card-edit-popover").forEach(el => el.remove());
+    resetYsfPagesDrag();
+    layoutYsfPages(ysfPage, true);
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(12); } catch (_) {}
+    }
+    probeYsfMatrixRooms(card, targetHs, false);
+  };
+
+  let wasSwipeGesture = false;
+  let activeYsfPressTimer = null;
+  const cancelActiveCellPress = () => {
+    if (activeYsfPressTimer) {
+      clearTimeout(activeYsfPressTimer);
+      activeYsfPressTimer = null;
+    }
+  };
+
+  // Notch clicks, keyboard and notch swipe
+  if (dockNotch) {
+    let notchStartY = 0;
+    let isNotchTracking = false;
+
+    dockNotch.addEventListener("pointerdown", (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      isNotchTracking = true;
+      notchStartY = e.clientY;
+      try { dockNotch.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    dockNotch.addEventListener("pointermove", (e) => {
+      if (!isNotchTracking) return;
+      const dy = e.clientY - notchStartY;
+      const isCurText = sliderContainer && sliderContainer.classList.contains("is-text-view");
+      if (!isCurText && dy > 20) {
+        isNotchTracking = false;
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+        setYsfTextView(true);
+      } else if (isCurText && dy < -20) {
+        isNotchTracking = false;
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+        setYsfTextView(false);
+      }
+    });
+    dockNotch.addEventListener("pointerup", (e) => {
+      isNotchTracking = false;
+      try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+    });
+    dockNotch.addEventListener("pointercancel", (e) => {
+      isNotchTracking = false;
+      try { dockNotch.releasePointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    dockNotch.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (wasSwipeGesture) return;
+      const segTarget = e.target.closest(".ysf-notch-seg");
+      if (segTarget && segTarget.dataset.page !== undefined) {
+        const targetPg = parseInt(segTarget.dataset.page, 10);
+        if (Number.isInteger(targetPg)) {
+          ysfPage = setYsfMatrixPageValue(cid, targetHs, targetPg);
+          layoutYsfPages(ysfPage, true);
+          probeYsfMatrixRooms(card, targetHs, false);
+        }
+        return;
+      }
+
+      const dashBadge = e.target.closest(".ysf-notch-dash-badge");
+      if (dashBadge) {
+        if (targetHs) targetHs._ysfDashOpen = !targetHs._ysfDashOpen;
+        renderYsfDashboard(card, targetHs, cid);
+        return;
+      }
+
+      const isCurText = sliderContainer && sliderContainer.classList.contains("is-text-view");
+      setYsfTextView(!isCurText);
+    });
+    dockNotch.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const isCurText = sliderContainer && sliderContainer.classList.contains("is-text-view");
+        setYsfTextView(!isCurText);
+      }
+    });
+  }
+
+  // Horizontal (X -> pages) & Vertical (Y swipe down -> text panel) gestures on matrix
+  if (matrixContainer) {
+    let mStartX = 0;
+    let mStartY = 0;
+    let mTracking = false;
+    let mCaptured = false;
+    let mAxis = null;
+    let mLastDx = 0;
+    let mStartTs = 0;
+
+    const startMatrixDrag = (clientY, clientX) => {
+      mTracking = true;
+      mCaptured = false;
+      mAxis = null;
+      mLastDx = 0;
+      mStartTs = Date.now();
+      mStartY = clientY;
+      mStartX = clientX;
+    };
+
+    const moveMatrixDrag = (clientY, clientX, pointerId, targetEl) => {
+      if (!mTracking) return;
+      const rDx = clientX - mStartX;
+      const rDy = clientY - mStartY;
+      const adx = Math.abs(rDx);
+      const ady = Math.abs(rDy);
+
+      if (!mAxis && Math.max(adx, ady) > 12) {
+        mAxis = adx > ady ? "x" : "y";
+        cancelActiveCellPress();
+        if (!mCaptured && targetEl && pointerId !== undefined) {
+          mCaptured = true;
+          try { targetEl.setPointerCapture(pointerId); } catch (_) {}
+        }
+        if (mAxis === "x" && pagesViewport) {
+          pagesViewport.classList.add("is-dragging");
+        }
+      }
+
+      if (mAxis === "x" && pagesViewport) {
+        const w = pagesViewport.clientWidth || 1;
+        mLastDx = Math.max(-w, Math.min(w, rDx));
+        pagesViewport.style.setProperty("--asl-drag", mLastDx + "px");
+        return;
+      }
+
+      if (mAxis === "y" && rDy > 25 && rDy > adx * 0.9) {
+        mTracking = false;
+        cancelActiveCellPress();
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        if (targetEl && pointerId !== undefined) {
+          try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+        }
+        setYsfTextView(true);
+      }
+    };
+
+    const finishSwipe = (pointerId, targetEl) => {
+      const wasTracking = mTracking;
+      mTracking = false;
+      if (mCaptured && targetEl && pointerId !== undefined) {
+        try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+      }
+      mCaptured = false;
+
+      if (wasTracking && mAxis === "x" && pagesViewport) {
+        const w = pagesViewport.clientWidth || 1;
+        const dt = Math.max(1, Date.now() - mStartTs);
+        const absDx = Math.abs(mLastDx);
+        const pass = absDx > w * 0.22 || ((absDx / dt) > 0.45 && absDx > 24);
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        if (pass) {
+          goYsfPage(mLastDx < 0 ? 1 : -1);
+        } else {
+          resetYsfPagesDrag();
+        }
+      }
+      mAxis = null;
+    };
+
+    matrixContainer.addEventListener("pointerdown", (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      startMatrixDrag(e.clientY, e.clientX);
+    });
+    matrixContainer.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "mouse" && e.buttons === 0 && mTracking) {
+        finishSwipe(e.pointerId, matrixContainer);
+        return;
+      }
+      moveMatrixDrag(e.clientY, e.clientX, e.pointerId, matrixContainer);
+    });
+    matrixContainer.addEventListener("pointerup", (e) => finishSwipe(e.pointerId, matrixContainer));
+    matrixContainer.addEventListener("pointercancel", (e) => finishSwipe(e.pointerId, matrixContainer));
+
+    matrixContainer.addEventListener("touchstart", (e) => {
+      if (e.touches && e.touches[0]) {
+        startMatrixDrag(e.touches[0].clientY, e.touches[0].clientX);
+      }
+    }, { passive: true });
+    matrixContainer.addEventListener("touchmove", (e) => {
+      if (e.touches && e.touches[0]) {
+        moveMatrixDrag(e.touches[0].clientY, e.touches[0].clientX);
+      }
+    }, { passive: true });
+    matrixContainer.addEventListener("touchend", () => finishSwipe(), { passive: true });
+    matrixContainer.addEventListener("touchcancel", () => finishSwipe(), { passive: true });
+  }
+
+  // Swipe UP on textPanel -> return to room matrix (with .caption-font-ctrl protection)
+  if (textPanel) {
+    let textStartY = 0;
+    let textStartX = 0;
+    let isTextTracking = false;
+
+    const startTextDrag = (clientY, clientX) => {
+      isTextTracking = true;
+      textStartY = clientY;
+      textStartX = clientX;
+    };
+
+    const moveTextDrag = (clientY, clientX, pointerId, targetEl) => {
+      if (!isTextTracking) return;
+      const dy = textStartY - clientY; // > 0 при движении вверх
+      const dx = Math.abs(clientX - textStartX);
+      if (dy > 25 && dy > dx * 0.9) {
+        isTextTracking = false;
+        wasSwipeGesture = true;
+        setTimeout(() => { wasSwipeGesture = false; }, 320);
+        if (targetEl && pointerId !== undefined) {
+          try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+        }
+        setYsfTextView(false);
+      }
+    };
+
+    const endTextDrag = (pointerId, targetEl) => {
+      isTextTracking = false;
+      if (targetEl && pointerId !== undefined) {
+        try { targetEl.releasePointerCapture(pointerId); } catch (_) {}
+      }
+    };
+
+    textPanel.addEventListener("pointerdown", (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target && e.target.closest && e.target.closest(".caption-font-ctrl")) return;
+      startTextDrag(e.clientY, e.clientX);
+      try { textPanel.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    textPanel.addEventListener("pointermove", (e) => {
+      moveTextDrag(e.clientY, e.clientX, e.pointerId, textPanel);
+    });
+    textPanel.addEventListener("pointerup", (e) => endTextDrag(e.pointerId, textPanel));
+    textPanel.addEventListener("pointercancel", (e) => endTextDrag(e.pointerId, textPanel));
+
+    textPanel.addEventListener("touchstart", (e) => {
+      if (e.target && e.target.closest && e.target.closest(".caption-font-ctrl")) return;
+      if (e.touches && e.touches[0]) {
+        startTextDrag(e.touches[0].clientY, e.touches[0].clientX);
+      }
+    }, { passive: true });
+    textPanel.addEventListener("touchmove", (e) => {
+      if (e.touches && e.touches[0]) {
+        moveTextDrag(e.touches[0].clientY, e.touches[0].clientX);
+      }
+    }, { passive: true });
+    textPanel.addEventListener("touchend", () => endTextDrag(), { passive: true });
+    textPanel.addEventListener("touchcancel", () => endTextDrag(), { passive: true });
+  }
+
+  // Room cells click, long press & context menu
+  vfoYsf.querySelectorAll(".btn-ysf-room-cell").forEach(cellBtn => {
+    const idx = parseInt(cellBtn.dataset.idx, 10);
+    let pressTimer = null;
+    let isLongPress = false;
+
+    const startPress = () => {
+      isLongPress = false;
+      cancelActiveCellPress();
+      pressTimer = setTimeout(() => {
+        isLongPress = true;
+        activeYsfPressTimer = null;
+        const rId = cellBtn.dataset.room;
+        if (!rId) {
+          openYsfCardEditPopover({ idx, cid, card, targetHs, rooms });
+        } else {
+          openYsfCardContextMenu({ btn: cellBtn, idx, cid, card, targetHs, rooms });
+        }
+      }, 550);
+      activeYsfPressTimer = pressTimer;
+    };
+
+    const cancelPress = () => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        if (activeYsfPressTimer === pressTimer) {
+          activeYsfPressTimer = null;
+        }
+        pressTimer = null;
+      }
+    };
+
+    cellBtn.addEventListener("pointerdown", startPress);
+    cellBtn.addEventListener("pointerup", cancelPress);
+    cellBtn.addEventListener("pointerleave", cancelPress);
+    cellBtn.addEventListener("pointercancel", cancelPress);
+
+    cellBtn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelPress();
+      if (isLongPress) return;
+      const rId = cellBtn.dataset.room;
+      if (!rId) {
+        openYsfCardEditPopover({ idx, cid, card, targetHs, rooms });
+      } else {
+        openYsfCardContextMenu({ btn: cellBtn, idx, cid, card, targetHs, rooms });
+      }
+    });
+
+    cellBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (isLongPress || wasSwipeGesture) return;
+
+      // Обработка режима перемещения (Move)
+      if (targetHs && targetHs._ysfMovingIdx !== null && targetHs._ysfMovingIdx !== undefined) {
+        clearYsfMoveCancelListener();
+        const sourceIdx = Number(targetHs._ysfMovingIdx);
+        const targetIdx = idx;
+        targetHs._ysfMovingIdx = null;
+
+        if (
+          Number.isInteger(sourceIdx) &&
+          sourceIdx >= 0 && sourceIdx < YSF_MEMORY_SIZE &&
+          targetIdx >= 0 && targetIdx < YSF_MEMORY_SIZE &&
+          sourceIdx !== targetIdx
+        ) {
+          const temp = rooms[sourceIdx];
+          rooms[sourceIdx] = rooms[targetIdx];
+          rooms[targetIdx] = temp;
+          saveYsfMatrixRooms(cid, rooms);
+          if (typeof showToast === "function") {
+            const movedRoom = temp && temp.room ? `#${temp.room}` : (window.t ? window.t("ysf.slot_num_label", { num: sourceIdx + 1 }, `slot #${sourceIdx + 1}`) : `slot #${sourceIdx + 1}`);
+            showToast(window.t ? window.t("ysf.room_moved_toast", { room: movedRoom, target: targetIdx + 1 }, `Room ${movedRoom} moved to slot #${targetIdx + 1}`) : `Room ${movedRoom} moved to slot #${targetIdx + 1}`, "info", 2000);
+          }
+        }
+        updateCardYsfPanel(card, targetHs);
+        return;
+      }
+
+      const rId = String(cellBtn.dataset.room || "").trim();
+      if (!rId) {
+        openYsfCardEditPopover({ idx, cid, card, targetHs, rooms });
+        return;
+      }
+
+      const activeRoom = String((targetHs && (targetHs.ysf_room || targetHs.ysf_room_id)) || (card && card.dataset.ysfRoom) || "").trim();
+      const connectingRoom = String((targetHs && targetHs._ysfConnectingRoom) || "").trim();
+      const disconnectingRoom = String((targetHs && targetHs._ysfDisconnectingRoom) || "").trim();
+      const isDisconnectingNow = Boolean(disconnectingRoom && (disconnectingRoom === rId || disconnectingRoom === "all"));
+      const isCurrentlyConnected = !isDisconnectingNow && Boolean(
+        (activeRoom && activeRoom === rId && targetHs && isYsfOnlineStatus(targetHs.status)) ||
+        (connectingRoom && connectingRoom === rId)
+      );
+
+      if (isCurrentlyConnected) {
+        if (targetHs && targetHs._ysfScanActive) {
+          stopYsfMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
+        }
+        if (targetHs && targetHs._ysfDiceRolling) {
+          stopYsfDiceSearch(cid, card, targetHs, { immediateAbort: true, silent: true });
+        }
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          try { navigator.vibrate(45); } catch (_) {}
+        }
+        ysfDisconnectProcedure(cid, card, { showStatusBanner: true });
+        return;
+      }
+
+      const item = rooms[idx];
+      if (typeof window.connectYsfRoomById === "function") {
+        window.connectYsfRoomById(rId, (item && item.label) || "", card);
+      }
+    });
+  });
+
+  // Отмена режима перемещения карточки (Move) при клике вне матрицы
+  clearYsfMoveCancelListener();
+  if (targetHs && targetHs._ysfMovingIdx !== null && targetHs._ysfMovingIdx !== undefined) {
+    const onMoveCancelClick = (e) => {
+      if (!targetHs || targetHs._ysfMovingIdx === null || targetHs._ysfMovingIdx === undefined) {
+        clearYsfMoveCancelListener();
+        return;
+      }
+      if (!e.target.closest(".asl-matrix-grid") && !e.target.closest(".asl-card-context-menu")) {
+        clearYsfMoveCancelListener();
+        targetHs._ysfMovingIdx = null;
+        updateCardYsfPanel(card, targetHs);
+      }
+    };
+    const timerId = setTimeout(() => {
+      document.addEventListener("click", onMoveCancelClick, true);
+      _ysfMoveCancelDocListener = onMoveCancelClick;
+    }, 100);
+  }
+
+  // Action: Scan
+  const btnScan = vfoYsf.querySelector(".btn-ysf-scan");
+  if (btnScan) {
+    let scanHoldTimer = null;
+    let scanLong = false;
+    const cancelScanHold = () => {
+      if (scanHoldTimer) {
+        clearTimeout(scanHoldTimer);
+        scanHoldTimer = null;
+      }
+    };
+    btnScan.addEventListener("pointerdown", (e) => {
+      if (e && e.button !== undefined && e.button !== 0) return;
+      scanLong = false;
+      cancelScanHold();
+      scanHoldTimer = setTimeout(() => {
+        scanLong = true;
+        scanHoldTimer = null;
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          try { navigator.vibrate([40, 30, 40]); } catch (_) {}
+        }
+        openYsfScanSettingsPopover({ cid, card, targetHs, anchorEl: btnScan });
+      }, 550);
+    });
+    btnScan.addEventListener("pointerup", cancelScanHold);
+    btnScan.addEventListener("pointerleave", cancelScanHold);
+    btnScan.addEventListener("pointercancel", cancelScanHold);
+
+    btnScan.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelScanHold();
+      openYsfScanSettingsPopover({ cid, card, targetHs, anchorEl: btnScan });
+    });
+
+    btnScan.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (scanLong) {
+        scanLong = false;
+        return;
+      }
+      if (targetHs && targetHs._ysfScanActive) {
+        stopYsfMatrixScan(cid, card, targetHs, { keepCurrentLink: true });
+      } else {
+        startYsfMatrixScan(cid, card, targetHs, rooms);
+      }
+    });
+  }
+
+  // Action: Off (Unlink)
+  const btnOff = vfoYsf.querySelector(".btn-ysf-unlink");
+  if (btnOff) {
+    let offHoldTimer = null;
+    let offLong = false;
+    btnOff.addEventListener("pointerdown", () => {
+      offLong = false;
+      offHoldTimer = setTimeout(() => {
+        offLong = true;
+        openYsfMatrixManageModal(cid, card, targetHs, rooms);
+      }, 550);
+    });
+    const cancelOffHold = () => {
+      if (offHoldTimer) { clearTimeout(offHoldTimer); offHoldTimer = null; }
+    };
+    btnOff.addEventListener("pointerup", cancelOffHold);
+    btnOff.addEventListener("pointerleave", cancelOffHold);
+    btnOff.addEventListener("pointercancel", cancelOffHold);
+
+    btnOff.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (offLong) return;
+      if (targetHs && targetHs._ysfScanActive) {
+        stopYsfMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
+      }
+      if (targetHs && targetHs._ysfDiceRolling) {
+        stopYsfDiceSearch(cid, card, targetHs, { immediateAbort: true, silent: true });
+      }
+      await ysfDisconnectProcedure(cid, card);
+    });
+  }
+
+  // Action: Dice (Случайный активный рефлектор: клик — старт/стоп, удержание/ПКМ — мини-настройки)
+  const btnDice = vfoYsf.querySelector(".btn-ysf-dice");
+  if (btnDice) {
+    let diceHoldTimer = null;
+    let diceLong = false;
+    let diceDownX = 0;
+    let diceDownY = 0;
+    const cancelDiceHold = () => {
+      if (diceHoldTimer) {
+        clearTimeout(diceHoldTimer);
+        diceHoldTimer = null;
+      }
+    };
+    btnDice.addEventListener("pointerdown", (e) => {
+      if (e && e.button !== undefined && e.button !== 0) return;
+      diceLong = false;
+      diceDownX = e.clientX || 0;
+      diceDownY = e.clientY || 0;
+      cancelDiceHold();
+      diceHoldTimer = setTimeout(() => {
+        diceLong = true;
+        diceHoldTimer = null;
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          try { navigator.vibrate([40, 30, 40]); } catch (_) {}
+        }
+        openYsfDiceSettingsPopover({ cid, card, targetHs, anchorEl: btnDice });
+      }, 550);
+    });
+    btnDice.addEventListener("pointermove", (e) => {
+      if (!diceHoldTimer) return;
+      const dx = (e.clientX || 0) - diceDownX;
+      const dy = (e.clientY || 0) - diceDownY;
+      if ((dx * dx + dy * dy) > 100) {
+        cancelDiceHold();
+      }
+    });
+    btnDice.addEventListener("pointerup", cancelDiceHold);
+    btnDice.addEventListener("pointerleave", cancelDiceHold);
+    btnDice.addEventListener("pointercancel", cancelDiceHold);
+    btnDice.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelDiceHold();
+      openYsfDiceSettingsPopover({ cid, card, targetHs, anchorEl: btnDice });
+    });
+
+    btnDice.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (diceLong) {
+        diceLong = false;
+        return;
+      }
+      if (!targetHs) return;
+
+      // Повторное нажатие во время поиска: мягкая остановка после завершения текущей внутренней итерации
+      if (targetHs._ysfDiceRolling) {
+        stopYsfDiceSearch(cid, card, targetHs, { finishInnerIteration: true });
+        return;
+      }
+
+      // 1. Если запущен сканер матрицы YSF, тихо останавливаем его
+      if (targetHs._ysfScanActive) {
+        stopYsfMatrixScan(cid, card, targetHs, { keepCurrentLink: true, silent: true });
+      }
+
+      const runId = (targetHs._ysfDiceRunId || 0) + 1;
+      targetHs._ysfDiceRunId = runId;
+      targetHs._ysfDiceRolling = true;
+      targetHs._ysfDiceStopRequested = false;
+      syncYsfDiceButtonUI(card, targetHs);
+
+      const triedIds = new Set();
+      const MAX_DICE_ATTEMPTS = 20;
+      const isRunTokenValid = () => Boolean(targetHs && targetHs._ysfDiceRunId === runId);
+      const isLoopAlive = () => Boolean(isRunTokenValid() && targetHs._ysfDiceRolling && !targetHs._ysfDiceStopRequested);
+      const cancellablePause = async (ms) => {
+        const steps = Math.max(1, Math.ceil(ms / 50));
+        for (let i = 0; i < steps; i++) {
+          if (!isLoopAlive()) return false;
+          await new Promise(r => setTimeout(r, 50));
+        }
+        return isLoopAlive();
+      };
+
+      let connectedOk = false;
+      let stoppedByUser = false;
+      let stoppedByConfig = false;
+      let lastWasSilenceExhausted = false;
+
+      try {
+        for (let attempt = 1; attempt <= MAX_DICE_ATTEMPTS; attempt++) {
+          if (!isLoopAlive()) {
+            stoppedByUser = Boolean(targetHs._ysfDiceStopRequested);
+            break;
+          }
+
+          setAslProcBannerState(card, {
+            active: true,
+            text: attempt === 1
+              ? (window.t ? window.t("ysf.dice_searching", {}, "🎲 Поиск случайного активного рефлектора...") : "🎲 Поиск случайного активного рефлектора...")
+              : (window.t ? window.t("ysf.dice_retry", { attempt, max: MAX_DICE_ATTEMPTS }, `🎲 Повторный поиск рефлектора (${attempt}/${MAX_DICE_ATTEMPTS})...`) : `🎲 Повторный поиск рефлектора (${attempt}/${MAX_DICE_ATTEMPTS})...`),
+            tone: "neutral",
+            autoHideMs: 0
+          });
+
+          const excludeQs = triedIds.size > 0
+            ? `?exclude=${encodeURIComponent(Array.from(triedIds).join(","))}`
+            : "";
+          const resp = await fetch(`/api/ysf/dice${excludeQs}`);
+          if (!isRunTokenValid()) break;
+
+          const data = await resp.json();
+          if (!isRunTokenValid()) break;
+
+          if (!(data && data.status === "ok" && data.room && data.room.id)) {
+            if (targetHs._ysfDiceStopRequested) {
+              stoppedByUser = true;
+              break;
+            }
+            if (typeof showToast === "function") {
+              showToast(window.t ? window.t("ysf.dice_empty_toast", {}, "🎲 Нет доступных активных комнат YSF") : "🎲 Нет доступных активных комнат YSF", "warning", 2500, card);
+            }
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t ? window.t("ysf.dice_empty_toast", {}, "🎲 Нет доступных активных комнат YSF") : "🎲 Нет доступных активных комнат YSF",
+              tone: "negative",
+              autoHideMs: 4000,
+              fadeOutMs: 2000
+            });
+            break;
+          }
+
+          const r = data.room;
+          const rId = String(r.id).trim();
+          const rName = r.name || r.reflector_name || `YSF #${rId}`;
+          const rHost = r.host || "";
+          const rPort = parseInt(r.port, 10) || 42000;
+          const rClients = r.connections || r.online_count || data.online_count || 0;
+          triedIds.add(rId);
+
+          // Если нажали стоп во время подбора комнаты — завершаем итерацию до начала нового UDP-коннекта
+          if (targetHs._ysfDiceStopRequested) {
+            stoppedByUser = true;
+            break;
+          }
+
+          // 2. Определяем флаг страны
+          const flagInfo = (typeof detectYsfCountryFlag === "function")
+            ? detectYsfCountryFlag(rId, rName)
+            : { flag: "🌐" };
+          const rFlag = flagInfo.flag || "🌐";
+
+          // 3. Записываем выпавший рефлектор в правую нижнюю ячейку ТЕКУЩЕГО экрана памяти (как в ASL)
+          const curPage = getYsfMatrixPage(cid, targetHs);
+          const diceTargetIdx = curPage * YSF_PAGE_SIZE + (YSF_PAGE_SIZE - 1);
+          const curRooms = getYsfMatrixRooms(cid);
+
+          const presetRooms = new Set(
+            curRooms.filter((_, i) => i !== diceTargetIdx)
+              .map(u => String((u && u.room) || "").trim())
+              .filter(Boolean)
+          );
+
+          if (Array.isArray(curRooms) && curRooms.length > diceTargetIdx && !presetRooms.has(rId)) {
+            curRooms[diceTargetIdx] = {
+              room: rId,
+              label: rName,
+              flag: rFlag,
+              scan: false
+            };
+            saveYsfMatrixRooms(cid, curRooms);
+            updateCardYsfPanel(card, targetHs);
+          }
+
+          // Сбрасываем старые флаги приёма перед новым подключением, чтобы не принять прошлую передачу за новую
+          targetHs._ysfCarrierRx = false;
+          targetHs._ysfLastRxAudioMs = 0;
+          targetHs._ysfRxActiveRoom = "";
+          targetHs._ysfKeyedRooms = [];
+          if (card._lastRx && card._lastRx[1]) {
+            card._lastRx[1].active = false;
+            card._lastRx[1].lastAudioTime = 0;
+          }
+          const ts1Clean = card.querySelector(".vfo-ts1-row");
+          if (ts1Clean) ts1Clean.classList.remove("vfo-rx-active");
+
+          // 4. Запускаем подключение и дожидаемся фактического результата (done/failed)
+          let connRes = { ok: false };
+          if (typeof window.connectYsfRoomById === "function") {
+            connRes = await window.connectYsfRoomById(rId, rName, card, rHost, rPort, {
+              fromDice: true,
+              awaitOutcome: true
+            });
+          }
+          if (!isRunTokenValid()) break;
+
+          if (connRes && connRes.ok) {
+            const curCfg = getYsfDiceConfig(cid);
+            if (!curCfg.continueOnSilence) {
+              connectedOk = true;
+              if (typeof showToast === "function") {
+                const callerPart = data.active_caller ? ` (${data.active_caller})` : "";
+                const liveHint = data.live_rx
+                  ? (window.t ? window.t("ysf.dice_live_air", { caller: callerPart }, ` 🔥 on air${callerPart}`) : ` 🔥 on air${callerPart}`)
+                  : (window.t ? window.t("ysf.dice_quiet_now", {}, " (currently quiet in room)") : " (currently quiet in room)");
+                const toastMsg = window.t
+                  ? window.t("ysf.dice_connected_toast", { room: rId, name: rName, clients: rClients, hint: liveHint }, `🎲 Random reflector: #${rId} (${rName}) [👥 ${rClients}]${liveHint}`)
+                  : `🎲 Random reflector: #${rId} (${rName}) [👥 ${rClients}]${liveHint}`;
+                showToast(toastMsg, data.live_rx ? "success" : "info", 3200, card);
+              }
+              break;
+            }
+
+            // Режим «Продолжать при отсутствии общения в течение N секунд»
+            let elapsedSilenceMs = 0;
+            let speechDetected = isYsfRoomRxActive(card, targetHs);
+            let cfgWaitDisabled = false;
+            const stepMs = 150;
+            while (!speechDetected && isLoopAlive()) {
+              const liveCfg = getYsfDiceConfig(cid);
+              if (!liveCfg.continueOnSilence) {
+                cfgWaitDisabled = true;
+                break;
+              }
+              const waitTotalMs = Math.max(1, liveCfg.silenceWaitSec) * 1000;
+              if (elapsedSilenceMs >= waitTotalMs) break;
+
+              if (isYsfRoomRxActive(card, targetHs)) {
+                speechDetected = true;
+                break;
+              }
+
+              const remSec = Math.max(1, Math.ceil((waitTotalMs - elapsedSilenceMs) / 1000));
+              setAslProcBannerState(card, {
+                active: true,
+                text: window.t
+                  ? window.t("ysf.dice_wait_speech", { room: rId, sec: remSec }, `🎲 #${rId} connected — waiting for speech (${remSec}s)...`)
+                  : `🎲 #${rId} connected — waiting for speech (${remSec}s)...`,
+                tone: "neutral",
+                autoHideMs: 0
+              });
+
+              await new Promise(r => setTimeout(r, stepMs));
+              elapsedSilenceMs += stepMs;
+            }
+            if (!isRunTokenValid()) break;
+
+            if (!speechDetected && isYsfRoomRxActive(card, targetHs)) {
+              speechDetected = true;
+            }
+
+            if (speechDetected || cfgWaitDisabled) {
+              connectedOk = true;
+              if (speechDetected) {
+                setAslProcBannerState(card, {
+                  active: true,
+                  text: window.t
+                    ? window.t("ysf.dice_speech_found", { room: rId }, `🔊 #${rId}: active speech detected`)
+                    : `🔊 #${rId}: active speech detected`,
+                  tone: "positive",
+                  autoHideMs: 4000,
+                  fadeOutMs: 1800
+                });
+              }
+              if (typeof showToast === "function") {
+                const callerPart = data.active_caller ? ` (${data.active_caller})` : "";
+                const liveHint = speechDetected
+                  ? (window.t ? window.t("ysf.dice_live_air", { caller: callerPart }, ` 🔥 on air${callerPart}`) : ` 🔥 on air${callerPart}`)
+                  : (window.t ? window.t("ysf.dice_silence_disabled", {}, " (silence mode disabled)") : " (silence mode disabled)");
+                const toastMsg = window.t
+                  ? window.t("ysf.dice_connected_toast", { room: rId, name: rName, clients: rClients, hint: liveHint }, `🎲 Random reflector: #${rId} (${rName}) [👥 ${rClients}]${liveHint}`)
+                  : `🎲 Random reflector: #${rId} (${rName}) [👥 ${rClients}]${liveHint}`;
+                showToast(toastMsg, speechDetected ? "success" : "info", 3200, card);
+              }
+              break;
+            }
+
+            if (targetHs._ysfDiceStopRequested || !isLoopAlive()) {
+              stoppedByUser = true;
+              break;
+            }
+
+            const afterWaitCfg = getYsfDiceConfig(cid);
+            if (!afterWaitCfg.continueOnSilence) {
+              connectedOk = true;
+              break;
+            }
+
+            if (attempt < MAX_DICE_ATTEMPTS) {
+              setAslProcBannerState(card, {
+                active: true,
+                text: window.t
+                  ? window.t("ysf.dice_silence_retry", { room: rId, sec: afterWaitCfg.silenceWaitSec, attempt: attempt + 1, max: MAX_DICE_ATTEMPTS }, `🔇 #${rId}: silent (${afterWaitCfg.silenceWaitSec}s) — trying next (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`)
+                  : `🔇 #${rId}: silent (${afterWaitCfg.silenceWaitSec}s) — trying next (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`,
+                tone: "neutral",
+                autoHideMs: 0
+              });
+              const keepGoing = await cancellablePause(250);
+              if (!keepGoing) {
+                stoppedByUser = Boolean(isRunTokenValid() && targetHs._ysfDiceStopRequested);
+                break;
+              }
+              continue;
+            }
+
+            lastWasSilenceExhausted = true;
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t
+                ? window.t("ysf.dice_silence_exhausted", { max: MAX_DICE_ATTEMPTS }, `🔇 No active speech found across ${MAX_DICE_ATTEMPTS} random reflectors`)
+                : `🔇 No active speech found across ${MAX_DICE_ATTEMPTS} random reflectors`,
+              tone: "negative",
+              autoHideMs: 4500,
+              fadeOutMs: 2000
+            });
+            break;
+          }
+
+          if (targetHs._ysfDiceStopRequested) {
+            stoppedByUser = true;
+            break;
+          }
+
+          const failCfg = getYsfDiceConfig(cid);
+          if (!failCfg.continueOnFail) {
+            stoppedByConfig = true;
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t
+                ? window.t("ysf.dice_fail_stopped", { room: rId }, `✕ #${rId} unreachable — retry on failure is disabled`)
+                : `✕ #${rId} unreachable — retry on failure is disabled`,
+              tone: "negative",
+              autoHideMs: 4000,
+              fadeOutMs: 2000
+            });
+            if (typeof showToast === "function") {
+              showToast(
+                window.t
+                  ? window.t("ysf.dice_fail_stopped", { room: rId }, `✕ #${rId} unreachable — retry on failure is disabled`)
+                  : `✕ #${rId} unreachable — retry on failure is disabled`,
+                "warning",
+                2800,
+                card
+              );
+            }
+            break;
+          }
+
+          if (attempt < MAX_DICE_ATTEMPTS) {
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t
+                ? window.t("ysf.dice_retry", { attempt: attempt + 1, max: MAX_DICE_ATTEMPTS }, `🎲 Retrying reflector search (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`)
+                : `🎲 Retrying reflector search (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`,
+              tone: "neutral",
+              autoHideMs: 0
+            });
+            const keepGoing = await cancellablePause(350);
+            if (!keepGoing) {
+              stoppedByUser = Boolean(isRunTokenValid() && targetHs._ysfDiceStopRequested);
+              break;
+            }
+          } else {
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t
+                ? window.t("ysf.dice_exhausted", { max: MAX_DICE_ATTEMPTS }, `✕ Failed to connect to any of ${MAX_DICE_ATTEMPTS} random reflectors`)
+                : `✕ Failed to connect to any of ${MAX_DICE_ATTEMPTS} random reflectors`,
+              tone: "negative",
+              autoHideMs: 4000,
+              fadeOutMs: 2000
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[YSF] Dice roll error:", err);
+        if (isRunTokenValid() && !targetHs._ysfDiceStopRequested && typeof showToast === "function") {
+          const diceErrMsg = window.t
+            ? window.t("ysf.dice_roll_error", { error: err.message || err }, `✕ Dice roll error: ${err.message || err}`)
+            : `✕ Dice roll error: ${err.message || err}`;
+          showToast(diceErrMsg, "error", 2500, card);
+        }
+      } finally {
+        if (isRunTokenValid()) {
+          const wasStopped = stoppedByUser || Boolean(targetHs._ysfDiceStopRequested);
+          targetHs._ysfDiceRolling = false;
+          targetHs._ysfDiceStopRequested = false;
+          syncYsfDiceButtonUI(card, targetHs);
+          if (wasStopped && !connectedOk && !stoppedByConfig && !lastWasSilenceExhausted) {
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t ? window.t("ysf.dice_stopped", {}, "⏹ Поиск случайного рефлектора остановлен") : "⏹ Поиск случайного рефлектора остановлен",
+              tone: "neutral",
+              autoHideMs: 4000,
+              fadeOutMs: 2000
+            });
+          }
+        }
+      }
+    });
+  }
+
+  // Directory button
+  const btnYsfDir = card.querySelector(".btn-ysf-rooms-dir");
+  if (btnYsfDir && !btnYsfDir._wiredYsf) {
+    btnYsfDir._wiredYsf = true;
+    btnYsfDir.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (typeof window.openMyContactsModal === "function") {
+        window.openMyContactsModal(cid, "ysf_dir");
+      }
+    });
+  }
+
+  // Presets M1-M5
+  if (typeof window.renderQuickMemButtons === "function") {
+    window.renderQuickMemButtons(targetHs ? targetHs.id : null);
+  }
+
+  const ysfDashPair = (vfoTs1 && vfoTs1.querySelector(".ysf-dash-pair")) || card.querySelector(".ysf-dash-pair");
+  if (ysfDashPair) {
+    const triggerBtn = ysfDashPair.querySelector(".btn-ysf-dash-trigger");
+    const autoWrap = ysfDashPair.querySelector(".ysf-dash-auto-wrap");
+    const autoChk = ysfDashPair.querySelector(".chk-ysf-dash-auto");
+
+    if (triggerBtn) {
+      triggerBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (targetHs) {
+          targetHs._ysfDashOpen = !targetHs._ysfDashOpen;
+          ysfDashPair.classList.toggle("dash-open", targetHs._ysfDashOpen);
+        }
+        renderYsfDashboard(card, targetHs, cid);
+      };
+    }
+
+    if (autoWrap && autoChk) {
+      autoWrap.onclick = (e) => {
+        e.stopPropagation();
+        if (e.target !== autoChk) {
+          autoChk.checked = !autoChk.checked;
+          autoChk.dispatchEvent(new Event("change"));
+        }
+      };
+      autoChk.onchange = (e) => {
+        e.stopPropagation();
+        const en = Boolean(autoChk.checked);
+        setYsfDashAutoOpenEnabled(cid, en);
+        if (typeof showToast === "function") {
+          const msg = en
+            ? (window.t ? window.t("ysf.dash_auto_on_toast", {}, "✅ Автооткрытие дашборда рефлектора YSF включено") : "✅ Автооткрытие дашборда рефлектора YSF включено")
+            : (window.t ? window.t("ysf.dash_auto_off_toast", {}, "⚪ Автооткрытие дашборда рефлектора YSF выключено") : "⚪ Автооткрытие дашборда рефлектора YSF выключено");
+          showToast(msg);
+        }
+      };
+    }
+  }
+
+  // Initial dashboard / status poll
+  renderYsfDashboard(card, targetHs, cid);
+  syncYsfMatrixButtonsState(card, targetHs);
+  probeYsfMatrixRooms(card, targetHs, false);
+  if (prevScanPopover) {
+    vfoYsf.style.position = "relative";
+    vfoYsf.appendChild(prevScanPopover);
+  }
+}
+
+export async function startAdnDiceSearch(cid, card, targetHs, btnDice) {
+  if (!card || !targetHs) return;
+
+  const isSimplex = (targetHs.duplex === false || (targetHs.config && targetHs.config.duplex === false));
+  const activeSlotNum = Number(card._activeSlot || (typeof getHotspotSlot === "function" ? getHotspotSlot(cid) : 2));
+  const targetSlot = isSimplex ? 2 : (activeSlotNum === 1 ? 1 : 2);
+
+  const runId = (targetHs._adnDiceRunId || 0) + 1;
+  targetHs._adnDiceRunId = runId;
+  targetHs._adnDiceRolling = true;
+  targetHs._adnDiceStopRequested = false;
+  syncAdnDiceButtonUI(card, targetHs);
+
+  const triedIds = new Set();
+  const MAX_DICE_ATTEMPTS = 20;
+  const isRunTokenValid = () => Boolean(targetHs && targetHs._adnDiceRunId === runId);
+  const isLoopAlive = () => Boolean(isRunTokenValid() && targetHs._adnDiceRolling && !targetHs._adnDiceStopRequested);
+  const cancellablePause = async (ms) => {
+    const steps = Math.max(1, Math.ceil(ms / 50));
+    for (let i = 0; i < steps; i++) {
+      if (!isLoopAlive()) return false;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return isLoopAlive();
+  };
+
+  let connectedOk = false;
+  let stoppedByUser = false;
+  let stoppedByConfig = false;
+  let lastWasSilenceExhausted = false;
+
+  try {
+    for (let attempt = 1; attempt <= MAX_DICE_ATTEMPTS; attempt++) {
+      if (!isLoopAlive()) {
+        stoppedByUser = Boolean(targetHs._adnDiceStopRequested);
+        break;
+      }
+
+      setAslProcBannerState(card, {
+        active: true,
+        text: attempt === 1
+          ? (window.t ? window.t("adn.dice_searching", {}, "🎲 Поиск случайной активной TG ADN...") : "🎲 Поиск случайной активной TG ADN...")
+          : (window.t ? window.t("adn.dice_retry", { attempt, max: MAX_DICE_ATTEMPTS }, `🎲 Повторный поиск TG ADN (${attempt}/${MAX_DICE_ATTEMPTS})...`) : `🎲 Повторный поиск TG ADN (${attempt}/${MAX_DICE_ATTEMPTS})...`),
+        tone: "neutral",
+        autoHideMs: 0
+      });
+
+      const excludeQs = triedIds.size > 0
+        ? `?exclude=${encodeURIComponent(Array.from(triedIds).join(","))}`
+        : "";
+      const resp = await fetch(`/api/adn/dice${excludeQs}`);
+      if (!isRunTokenValid()) break;
+
+      const data = await resp.json().catch(() => null);
+      if (!isRunTokenValid()) break;
+
+      if (!(data && data.status === "ok" && data.talkgroup && data.talkgroup.tg)) {
+        if (targetHs._adnDiceStopRequested) {
+          stoppedByUser = true;
+          break;
+        }
+        if (typeof showToast === "function") {
+          showToast(window.t ? window.t("adn.dice_empty_toast", {}, "🎲 Сейчас нет доступных активных TG ADN") : "🎲 Сейчас нет доступных активных TG ADN", "warning", 2500, card);
+        }
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t ? window.t("adn.dice_empty_toast", {}, "🎲 Сейчас нет доступных активных TG ADN") : "🎲 Сейчас нет доступных активных TG ADN",
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+        break;
+      }
+
+      const tgId = Number(data.talkgroup.tg);
+      const tgName = data.talkgroup.name || `TG ${tgId}`;
+      const activeCaller = data.active_caller || (data.talkgroup.talker && data.talkgroup.talker.call) || "";
+      triedIds.add(tgId);
+
+      if (targetHs._adnDiceStopRequested) {
+        stoppedByUser = true;
+        break;
+      }
+
+      if (card._lastRx && card._lastRx[targetSlot]) {
+        card._lastRx[targetSlot].active = false;
+        card._lastRx[targetSlot].lastAudioTime = 0;
+      }
+      const targetTsRow = card.querySelector(targetSlot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+      if (targetTsRow) targetTsRow.classList.remove("vfo-rx-active");
+
+      // Подключение через назначение статической TG на targetSlot:
+      // Шаг А: снять текущую динамику TG 4000
+      try {
+        await fetch("/api/bm/drop-dynamic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hotspot_id: cid, slot: targetSlot })
+        });
+      } catch (_) {}
+      if (!isRunTokenValid()) break;
+
+      // Шаг Б: получить текущую статику слота и удалить другие группы
+      try {
+        const curStaticResp = await fetch(`/api/bm/static-groups?hotspot_id=${encodeURIComponent(cid)}`);
+        if (curStaticResp.ok) {
+          const stData = await curStaticResp.json().catch(() => null);
+          if (stData && (stData.ts1 || stData.ts2)) {
+            const currentSlotList = (targetSlot === 1 ? stData.ts1 : stData.ts2) || [];
+            const toDelete = currentSlotList
+              .map(item => Number(typeof item === "object" ? item.talkgroup : item))
+              .filter(id => Number.isFinite(id) && id > 0 && id !== tgId);
+            if (toDelete.length > 0) {
+              await fetch("/api/bm/static-groups", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ hotspot_id: cid, slot: targetSlot, talkgroups: toDelete })
+              });
+            }
+          }
+        }
+      } catch (_) {}
+      if (!isRunTokenValid()) break;
+
+      // Шаг В: назначить новую статическую TG
+      let assignOk = false;
+      try {
+        const postResp = await fetch("/api/bm/static-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hotspot_id: cid, slot: targetSlot, talkgroups: [tgId] })
+        });
+        const postData = await postResp.json().catch(() => ({}));
+        if (postResp.ok && postData.status === "ok") {
+          assignOk = true;
+          if (postData.rpto_options && targetHs) {
+            targetHs.rpto_options = postData.rpto_options;
+          }
+          if (targetSlot === 1) {
+            targetHs.tg_ts1 = tgId;
+          } else {
+            targetHs.tg_ts2 = tgId;
+          }
+          if (typeof renderRadiosGrid === "function") {
+            renderRadiosGrid();
+          }
+        }
+      } catch (_) {}
+      if (!isRunTokenValid()) break;
+
+      if (assignOk) {
+        const curCfg = getAdnDiceConfig(cid);
+        if (!curCfg.continueOnSilence) {
+          connectedOk = true;
+          if (typeof showToast === "function") {
+            const callerPart = activeCaller ? ` (${activeCaller})` : "";
+            const liveHint = data.live_rx
+              ? (window.t ? window.t("adn.dice_live_air", { caller: callerPart }, ` 🔥 в эфире${callerPart}`) : ` 🔥 в эфире${callerPart}`)
+              : (window.t ? window.t("adn.dice_quiet_now", {}, " (сейчас тихо)") : " (сейчас тихо)");
+            const toastMsg = window.t
+              ? window.t("adn.dice_connected_toast", { slot: targetSlot, tg: tgId, name: tgName, hint: liveHint }, `🎲 Случайная TG ADN: TS${targetSlot} · TG ${tgId} (${tgName})${liveHint}`)
+              : `🎲 Случайная TG ADN: TS${targetSlot} · TG ${tgId} (${tgName})${liveHint}`;
+            showToast(toastMsg, data.live_rx ? "success" : "info", 3200, card);
+          }
+          setAslProcBannerState(card, {
+            active: true,
+            text: window.t
+              ? window.t("adn.dice_connected_toast", { slot: targetSlot, tg: tgId, name: tgName, hint: "" }, `🎲 TS${targetSlot} · TG ${tgId} (${tgName})`)
+              : `🎲 TS${targetSlot} · TG ${tgId} (${tgName})`,
+            tone: "positive",
+            autoHideMs: 4000,
+            fadeOutMs: 1800
+          });
+          break;
+        }
+
+        // Режим ожидания речи
+        let elapsedSilenceMs = 0;
+        let speechDetected = isAdnSlotRxActive(card, targetHs, targetSlot);
+        let cfgWaitDisabled = false;
+        const stepMs = 150;
+        while (!speechDetected && isLoopAlive()) {
+          const liveCfg = getAdnDiceConfig(cid);
+          if (!liveCfg.continueOnSilence) {
+            cfgWaitDisabled = true;
+            break;
+          }
+          const waitTotalMs = Math.max(1, liveCfg.silenceWaitSec) * 1000;
+          if (elapsedSilenceMs >= waitTotalMs) break;
+
+          if (isAdnSlotRxActive(card, targetHs, targetSlot)) {
+            speechDetected = true;
+            break;
+          }
+
+          const remSec = Math.max(1, Math.ceil((waitTotalMs - elapsedSilenceMs) / 1000));
+          setAslProcBannerState(card, {
+            active: true,
+            text: window.t
+              ? window.t("adn.dice_wait_speech", { slot: targetSlot, tg: tgId, sec: remSec }, `🎲 TS${targetSlot} TG ${tgId}: ожидание речи (${remSec}с)...`)
+              : `🎲 TS${targetSlot} TG ${tgId}: ожидание речи (${remSec}с)...`,
+            tone: "neutral",
+            autoHideMs: 0
+          });
+
+          await new Promise(r => setTimeout(r, stepMs));
+          elapsedSilenceMs += stepMs;
+        }
+        if (!isRunTokenValid()) break;
+
+        if (!speechDetected && isAdnSlotRxActive(card, targetHs, targetSlot)) {
+          speechDetected = true;
+        }
+
+        if (speechDetected || cfgWaitDisabled) {
+          connectedOk = true;
+          if (speechDetected) {
+            setAslProcBannerState(card, {
+              active: true,
+              text: window.t
+                ? window.t("adn.dice_speech_found", { slot: targetSlot, tg: tgId }, `🔊 TS${targetSlot} TG ${tgId}: обнаружена речь в эфире`)
+                : `🔊 TS${targetSlot} TG ${tgId}: обнаружена речь в эфире`,
+              tone: "positive",
+              autoHideMs: 4000,
+              fadeOutMs: 1800
+            });
+          }
+          if (typeof showToast === "function") {
+            const callerPart = activeCaller ? ` (${activeCaller})` : "";
+            const liveHint = speechDetected
+              ? (window.t ? window.t("adn.dice_live_air", { caller: callerPart }, ` 🔥 в эфире${callerPart}`) : ` 🔥 в эфире${callerPart}`)
+              : (window.t ? window.t("adn.dice_silence_disabled", {}, " (режим тишины отключён)") : " (режим тишины отключён)");
+            const toastMsg = window.t
+              ? window.t("adn.dice_connected_toast", { slot: targetSlot, tg: tgId, name: tgName, hint: liveHint }, `🎲 Случайная TG ADN: TS${targetSlot} · TG ${tgId} (${tgName})${liveHint}`)
+              : `🎲 Случайная TG ADN: TS${targetSlot} · TG ${tgId} (${tgName})${liveHint}`;
+            showToast(toastMsg, speechDetected ? "success" : "info", 3200, card);
+          }
+          break;
+        }
+
+        if (targetHs._adnDiceStopRequested || !isLoopAlive()) {
+          stoppedByUser = true;
+          break;
+        }
+
+        const afterWaitCfg = getAdnDiceConfig(cid);
+        if (!afterWaitCfg.continueOnSilence) {
+          connectedOk = true;
+          break;
+        }
+
+        if (attempt < MAX_DICE_ATTEMPTS) {
+          setAslProcBannerState(card, {
+            active: true,
+            text: window.t
+              ? window.t("adn.dice_silence_retry", { tg: tgId, sec: afterWaitCfg.silenceWaitSec, attempt: attempt + 1, max: MAX_DICE_ATTEMPTS }, `🔇 TG ${tgId}: тишина (${afterWaitCfg.silenceWaitSec}с) — следующая (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`)
+              : `🔇 TG ${tgId}: тишина (${afterWaitCfg.silenceWaitSec}с) — следующая (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`,
+            tone: "neutral",
+            autoHideMs: 0
+          });
+          const keepGoing = await cancellablePause(250);
+          if (!keepGoing) {
+            stoppedByUser = Boolean(isRunTokenValid() && targetHs._adnDiceStopRequested);
+            break;
+          }
+          continue;
+        }
+
+        lastWasSilenceExhausted = true;
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t
+            ? window.t("adn.dice_silence_exhausted", { max: MAX_DICE_ATTEMPTS }, `🔇 Не найдено активной речи среди ${MAX_DICE_ATTEMPTS} случайных TG ADN`)
+            : `🔇 Не найдено активной речи среди ${MAX_DICE_ATTEMPTS} случайных TG ADN`,
+          tone: "negative",
+          autoHideMs: 4500,
+          fadeOutMs: 2000
+        });
+        break;
+      }
+
+      if (targetHs._adnDiceStopRequested) {
+        stoppedByUser = true;
+        break;
+      }
+
+      const failCfg = getAdnDiceConfig(cid);
+      if (!failCfg.continueOnFail) {
+        stoppedByConfig = true;
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t
+            ? window.t("adn.dice_fail_stopped", { tg: tgId }, `✕ TG ${tgId}: ошибка подключения — повтор при сбое отключён`)
+            : `✕ TG ${tgId}: ошибка подключения — повтор при сбое отключён`,
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+        if (typeof showToast === "function") {
+          showToast(
+            window.t
+              ? window.t("adn.dice_fail_stopped", { tg: tgId }, `✕ TG ${tgId}: ошибка подключения — повтор при сбое отключён`)
+              : `✕ TG ${tgId}: ошибка подключения — повтор при сбое отключён`,
+            "warning",
+            2800,
+            card
+          );
+        }
+        break;
+      }
+
+      if (attempt < MAX_DICE_ATTEMPTS) {
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t
+            ? window.t("adn.dice_retry", { attempt: attempt + 1, max: MAX_DICE_ATTEMPTS }, `🎲 Повторный поиск TG ADN (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`)
+            : `🎲 Повторный поиск TG ADN (${attempt + 1}/${MAX_DICE_ATTEMPTS})...`,
+          tone: "neutral",
+          autoHideMs: 0
+        });
+        const keepGoing = await cancellablePause(350);
+        if (!keepGoing) {
+          stoppedByUser = Boolean(isRunTokenValid() && targetHs._adnDiceStopRequested);
+          break;
+        }
+      } else {
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t
+            ? window.t("adn.dice_exhausted", { max: MAX_DICE_ATTEMPTS }, `✕ Не удалось подключиться ни к одной из ${MAX_DICE_ATTEMPTS} случайных TG ADN`)
+            : `✕ Не удалось подключиться ни к одной из ${MAX_DICE_ATTEMPTS} случайных TG ADN`,
+          tone: "negative",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[ADN] Dice roll error:", err);
+    if (isRunTokenValid() && !targetHs._adnDiceStopRequested && typeof showToast === "function") {
+      const diceErrMsg = window.t
+        ? window.t("adn.dice_roll_error", { error: err.message || err }, `✕ Ошибка «Кубика» ADN: ${err.message || err}`)
+        : `✕ Ошибка «Кубика» ADN: ${err.message || err}`;
+      showToast(diceErrMsg, "error", 2500, card);
+    }
+  } finally {
+    if (isRunTokenValid()) {
+      const wasStopped = stoppedByUser || Boolean(targetHs._adnDiceStopRequested);
+      targetHs._adnDiceRolling = false;
+      targetHs._adnDiceStopRequested = false;
+      syncAdnDiceButtonUI(card, targetHs);
+      if (wasStopped && !connectedOk && !stoppedByConfig && !lastWasSilenceExhausted) {
+        setAslProcBannerState(card, {
+          active: true,
+          text: window.t ? window.t("adn.dice_stopped", {}, "⏹ Поиск случайной TG ADN остановлен") : "⏹ Поиск случайной TG ADN остановлен",
+          tone: "neutral",
+          autoHideMs: 4000,
+          fadeOutMs: 2000
+        });
+      }
+    }
+  }
+}
+
+export function setupAdnDiceButton(card, cid, hs) {
+  if (!card) return;
+  const btnDice = card.querySelector(".btn-adn-dice");
+  if (!btnDice || btnDice._wiredAdnDice) return;
+  btnDice._wiredAdnDice = true;
+
+  const isCardAdnNetwork = () => {
+    const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+    const targetHs = curHsList.find(h => h && h.id === cid) || hs || null;
+    const rawNet = (targetHs && targetHs.network_type)
+      || (card.dataset && card.dataset.networkType)
+      || (card.classList && card.classList.contains("card-net-adn") ? "adn" : "")
+      || "";
+    return String(rawNet).trim().toLowerCase() === "adn";
+  };
+
+  let diceHoldTimer = null;
+  let diceLong = false;
+  let diceDownX = 0;
+  let diceDownY = 0;
+  const cancelDiceHold = () => {
+    if (diceHoldTimer) {
+      clearTimeout(diceHoldTimer);
+      diceHoldTimer = null;
+    }
+  };
+
+  btnDice.addEventListener("pointerdown", (e) => {
+    if (!isCardAdnNetwork()) return;
+    if (e && e.button !== undefined && e.button !== 0) return;
+    diceLong = false;
+    diceDownX = e.clientX || 0;
+    diceDownY = e.clientY || 0;
+    cancelDiceHold();
+    diceHoldTimer = setTimeout(() => {
+      diceLong = true;
+      diceHoldTimer = null;
+      if (!isCardAdnNetwork()) return;
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate([40, 30, 40]); } catch (_) {}
+      }
+      openAdnDiceSettingsPopover({ cid, card, targetHs: hs, anchorEl: btnDice });
+    }, 550);
+  });
+
+  btnDice.addEventListener("pointermove", (e) => {
+    if (!diceHoldTimer) return;
+    const dx = (e.clientX || 0) - diceDownX;
+    const dy = (e.clientY || 0) - diceDownY;
+    if ((dx * dx + dy * dy) > 100) {
+      cancelDiceHold();
+    }
+  });
+
+  btnDice.addEventListener("pointerup", cancelDiceHold);
+  btnDice.addEventListener("pointerleave", cancelDiceHold);
+  btnDice.addEventListener("pointercancel", cancelDiceHold);
+  btnDice.addEventListener("contextmenu", (e) => {
+    if (!isCardAdnNetwork()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cancelDiceHold();
+    openAdnDiceSettingsPopover({ cid, card, targetHs: hs, anchorEl: btnDice });
+  });
+
+  btnDice.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!isCardAdnNetwork()) return;
+    if (diceLong) {
+      diceLong = false;
+      return;
+    }
+    const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+    const targetHs = curHsList.find(h => h && h.id === cid) || hs || curHsList[0] || null;
+    if (!targetHs || String(targetHs.network_type || "").toLowerCase() !== "adn") return;
+
+    if (targetHs._adnDiceRolling) {
+      stopAdnDiceSearch(cid, card, targetHs);
+      return;
+    }
+
+    startAdnDiceSearch(cid, card, targetHs, btnDice);
   });
 }
 
@@ -3641,7 +9447,8 @@ export function updateCardAllStarPanel(card, hs) {
             } else if (targetHs.status === "ONLINE" || targetHs.status === "CONNECTING") {
               targetHs.status = "ONLINE";
               if (typeof updateBmStatus === "function") {
-                updateBmStatus("ONLINE", (data.own_node || targetHs.allstar_node) ? `Node ${data.own_node || targetHs.allstar_node}` : "AllStarLink активен", cid);
+                const aslActiveLabel = window.t ? window.t("asl.status_active", {}, "AllStarLink active") : "AllStarLink active";
+                updateBmStatus("ONLINE", (data.own_node || targetHs.allstar_node) ? `Node ${data.own_node || targetHs.allstar_node}` : aslActiveLabel, cid);
               }
             }
             if (typeof updateCardBmBanner === "function") {
@@ -3727,11 +9534,18 @@ export function updateCardAllStarPanel(card, hs) {
 
     const getDefaultNodes = (targetCid) => {
       try {
-        const customDef = localStorage.getItem(`proxdmr_asl_default_nodes_${targetCid}`) || localStorage.getItem("proxdmr_asl_default_nodes_global");
-        if (customDef) {
-          const parsed = JSON.parse(customDef);
-          if (Array.isArray(parsed) && (parsed.length === 20 || parsed.length === ASL_MEMORY_SIZE)) return padAslNodes(parsed);
+        let parsed = null;
+        if (hasServerCollectionKey("asl_default_nodes", targetCid)) {
+          parsed = getServerCollectionValue("asl_default_nodes", targetCid);
+        } else if (hasServerCollectionKey("asl_default_nodes", "global")) {
+          parsed = getServerCollectionValue("asl_default_nodes", "global");
         }
+        if (typeof parsed === "string") parsed = JSON.parse(parsed);
+        if (!parsed) {
+          const customDef = localStorage.getItem(`proxdmr_asl_default_nodes_${targetCid}`) || localStorage.getItem("proxdmr_asl_default_nodes_global");
+          if (customDef) parsed = JSON.parse(customDef);
+        }
+        if (Array.isArray(parsed) && (parsed.length === 20 || parsed.length === ASL_MEMORY_SIZE)) return padAslNodes(parsed);
       } catch (_) {}
       return padAslNodes([...DEFAULT_NODES]);
     };
@@ -3739,10 +9553,8 @@ export function updateCardAllStarPanel(card, hs) {
     const activeDefaults = getDefaultNodes(cid);
     let userNodes = [...activeDefaults];
     try {
-      const saved = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+      const parsed = getAslStoredNodes(cid);
+      if (Array.isArray(parsed) && parsed.length > 0) {
           const seen = new Set();
           userNodes = activeDefaults.map((defNode, idx) => {
             let item = parsed[idx];
@@ -3777,7 +9589,6 @@ export function updateCardAllStarPanel(card, hs) {
               prefMode: (item.prefMode === "2" || item.prefMode === "3") ? item.prefMode : undefined
             };
           });
-        }
       }
     } catch (e) {}
 
@@ -3834,9 +9645,12 @@ export function updateCardAllStarPanel(card, hs) {
         if (!displayNodes[i].node) {
           const lk = unlistedLinks[unlistedIdx++];
           const cleanN = String(lk.node).trim();
+          const extFallbackLabel = lk.direction === "IN"
+            ? (window.t ? window.t("asl.external_inbound", {}, "Inbound") : "Inbound")
+            : (window.t ? window.t("asl.external_node", {}, "External") : "External");
           displayNodes[i] = {
             node: cleanN,
-            label: lk.callsign || lk.name || lk.city || (lk.direction === "IN" ? "Входящий" : "Внешний"),
+            label: lk.callsign || lk.name || lk.city || extFallbackLabel,
             flag: lk.flag || "🌐",
             isExternal: true
           };
@@ -3848,13 +9662,16 @@ export function updateCardAllStarPanel(card, hs) {
     const wasTextView = prevSliderContainer ? prevSliderContainer.classList.contains("is-text-view") : false;
     const prevStreamEl = vfoAllStar.querySelector(".asl-caption-stream");
     const prevStreamNodes = prevStreamEl ? Array.from(prevStreamEl.childNodes) : [];
+    const prevAslPopover = vfoAllStar.querySelector(".asl-scan-settings-popover");
 
     closeAslCardContextMenu(card, targetHs);
     clearAslMoveCancelListener();
 
-    const diceBtnTitle = window.t
-      ? window.t("asl.dice_btn_title", {}, "Случайный активный узел (stats.allstarlink.org/stats/keyed) → последняя ячейка текущего экрана (Монитор *2)")
-      : "Случайный активный узел (stats.allstarlink.org/stats/keyed) → последняя ячейка текущего экрана (Монитор *2)";
+    const diceBtnTitle = (targetHs && targetHs._aslDiceRolling)
+      ? (window.t ? window.t("asl.dice_btn_stop_title", {}, "Нажмите для остановки поиска случайного узла ASL") : "Нажмите для остановки поиска случайного узла ASL")
+      : (window.t
+          ? window.t("asl.dice_btn_title", {}, "Случайный активный узел ASL (клик — старт/стоп, удержание/ПКМ — настройки)")
+          : "Случайный активный узел ASL (клик — старт/стоп, удержание/ПКМ — настройки)");
 
     const aslCurPage = getAslMatrixPage(cid, targetHs);
     const aslMoveClass = (targetHs && targetHs._aslMovingIdx !== null && targetHs._aslMovingIdx !== undefined) ? "asl-matrix-move-mode" : "";
@@ -3881,7 +9698,7 @@ export function updateCardAllStarPanel(card, hs) {
           </button>
         </div>
         <div class="vfo-pipeline-stage asl-pipeline-stage">
-          <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
+          <div class="vfo-pipeline-icon icon-mic" title="Speech transcription (ASR)" data-i18n-title="vfo.pipeline_asr_title">
             <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" fill-opacity="0.2"/>
               <line x1="9" y1="5" x2="15" y2="5"/>
@@ -3891,7 +9708,7 @@ export function updateCardAllStarPanel(card, hs) {
               <line x1="8" y1="21" x2="16" y2="21"/>
             </svg>
           </div>
-          <div class="vfo-pipeline-icon icon-trans" title="Перевод текста" data-i18n-title="vfo.pipeline_trans_title">
+          <div class="vfo-pipeline-icon icon-trans" title="Text translation" data-i18n-title="vfo.pipeline_trans_title">
             <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="17 1 21 5 17 9"/>
               <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
@@ -3899,7 +9716,7 @@ export function updateCardAllStarPanel(card, hs) {
               <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
             </svg>
           </div>
-          <div class="vfo-pipeline-icon icon-tts" title="Синтез речи (TTS)" data-i18n-title="vfo.pipeline_tts_title">
+          <div class="vfo-pipeline-icon icon-tts" title="Speech synthesis (TTS)" data-i18n-title="vfo.pipeline_tts_title">
             <svg class="pipeline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.25"/>
               <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
@@ -3908,11 +9725,11 @@ export function updateCardAllStarPanel(card, hs) {
           </div>
         </div>
         <div class="allstar-top-right-actions">
-          <span class="vfo-tts-badge asl-top-badge" id="vfoTtsBadge_${cid}" role="button" tabindex="0" title="Озвучка речи (TTS): клик — вкл/выкл, удержание — выбор голоса" data-i18n-title="vfo.tts_badge_title">
+          <span class="vfo-tts-badge asl-top-badge" id="vfoTtsBadge_${cid}" role="button" tabindex="0" title="Speech synthesis (TTS): click to toggle, hold to select voice" data-i18n-title="vfo.tts_single_title">
             <span class="tts-icon-spk">🔊</span>
             <span class="tts-lang-code">RUS</span>
           </span>
-          <span class="vfo-lang-badge asl-top-badge" id="vfoLangBadge_${cid}" role="button" tabindex="0" title="Транскрибатор: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts1_title">
+          <span class="vfo-lang-badge asl-top-badge" id="vfoLangBadge_${cid}" role="button" tabindex="0" title="Transcriber: click to toggle, hold for settings" data-i18n-title="vfo.transcriber_single_title">
             <span class="lang-icon-mic">🎙️</span>
             <span class="lang-code-text">TXT</span>
           </span>
@@ -3920,20 +9737,20 @@ export function updateCardAllStarPanel(card, hs) {
       </div>
 
       <div class="asl-slider-container" id="aslSliderContainer_${cid}">
-        <!-- Верхняя секция: Текстовое окно транскрибации речи (по умолчанию свернуто) -->
+        <!-- Top section: Speech transcript text drawer (collapsed by default) -->
         <div class="asl-text-panel" id="aslTextPanel_${cid}" inert>
-          <div class="asl-live-caption-box vfo-caption-box" id="aslCaptionBox_${cid}" title="AI Расшифровка речи" data-i18n-title="vfo.caption_box_title">
-            <div class="vfo-caption-stream asl-caption-stream" id="aslCaptionStream_${cid}" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Ожидание речи..."></div>
+          <div class="asl-live-caption-box vfo-caption-box" id="aslCaptionBox_${cid}" title="AI Speech Transcript" data-i18n-title="vfo.caption_box_title">
+            <div class="vfo-caption-stream asl-caption-stream" id="aslCaptionStream_${cid}" data-i18n-empty="transcriber.waiting_speech" data-empty-text="🎙️ Waiting for speech..."></div>
           </div>
         </div>
 
-        <!-- Разделитель-шторка (Notch Handle) -->
-        <div class="asl-dock-notch" id="aslDockNotch_${cid}" title="${window.t ? window.t("asl.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации"}" role="button" tabindex="0" aria-label="${window.t ? window.t("asl.notch_title", {}, "Свайп вниз или клик: текст транскрибации") : "Свайп вниз или клик: текст транскрибации"}" data-i18n-title="asl.notch_title" data-i18n-aria-label="asl.notch_title">
-          <span class="asl-notch-pages" aria-hidden="true">${[0, 1, 2].map(pg => `<i class="asl-notch-seg${pg === aslCurPage ? " is-active" : ""}" data-page="${pg}" title="${window.t ? window.t("asl.page_indicator_title", { page: pg + 1, total: ASL_PAGE_COUNT }, `Экран ${pg + 1} из ${ASL_PAGE_COUNT}`) : `Экран ${pg + 1} из ${ASL_PAGE_COUNT}`}"></i>`).join("")}</span>
+        <!-- Notch splitter handle -->
+        <div class="asl-dock-notch" id="aslDockNotch_${cid}" title="${window.t ? window.t("asl.notch_title", {}, "Swipe down or click: transcript text") : "Swipe down or click: transcript text"}" role="button" tabindex="0" aria-label="${window.t ? window.t("asl.notch_title", {}, "Swipe down or click: transcript text") : "Swipe down or click: transcript text"}" data-i18n-title="asl.notch_title" data-i18n-aria-label="asl.notch_title">
+          <span class="asl-notch-pages" aria-hidden="true">${[0, 1, 2].map(pg => `<i class="asl-notch-seg${pg === aslCurPage ? " is-active" : ""}" data-page="${pg}" title="${window.t ? window.t("asl.page_indicator_title", { page: pg + 1, total: ASL_PAGE_COUNT }, `Page ${pg + 1} of ${ASL_PAGE_COUNT}`) : `Page ${pg + 1} of ${ASL_PAGE_COUNT}`}"></i>`).join("")}</span>
           <span class="asl-notch-dash-badge" id="aslNotchDashBadge_${cid}" aria-hidden="true">DASHBOARD 4×5</span>
         </div>
 
-        <!-- Нижняя секция: Память узлов (3 экрана 4х5) ИЛИ Дашборд узла (матрица 4х5 с вертикальным скроллом) -->
+        <!-- Bottom section: Node memory slots (3 pages 4x5) OR Node dashboard (scrollable 4x5 matrix) -->
         <div class="asl-matrix-container${targetHs && targetHs._aslDashMatrixOpen ? " is-dash-view" : ""}" id="aslMatrixContainer_${cid}">
           <div class="asl-pages-viewport" id="aslPagesViewport_${cid}">
           ${[0, 1, 2].map(pg => {
@@ -4050,16 +9867,18 @@ export function updateCardAllStarPanel(card, hs) {
         if (textPanel) textPanel.removeAttribute("inert");
         if (matrixContainer) matrixContainer.setAttribute("inert", "");
         if (dockNotch) {
-          dockNotch.title = "Свайп вверх или клик: Память Узлов";
-          dockNotch.setAttribute("aria-label", "Свайп вверх или клик: Память Узлов");
+          const mTitle = window.t ? window.t("asl.notch_title_matrix", {}, "Swipe up or click: Node Memory") : "Swipe up or click: Node Memory";
+          dockNotch.title = mTitle;
+          dockNotch.setAttribute("aria-label", mTitle);
         }
       } else {
         sliderContainer.classList.remove("is-text-view");
         if (textPanel) textPanel.setAttribute("inert", "");
         if (matrixContainer) matrixContainer.removeAttribute("inert");
         if (dockNotch) {
-          dockNotch.title = "Свайп вниз или клик: текст транскрибации";
-          dockNotch.setAttribute("aria-label", "Свайп вниз или клик: текст транскрибации");
+          const tTitle = window.t ? window.t("asl.notch_title", {}, "Swipe down or click: transcription text") : "Swipe down or click: transcription text";
+          dockNotch.title = tTitle;
+          dockNotch.setAttribute("aria-label", tTitle);
         }
       }
       if (vfoAllStar) {
@@ -4497,9 +10316,7 @@ export function updateCardAllStarPanel(card, hs) {
           const act = btn.dataset.action;
           if (act === "zero") {
             const emptyNodes = Array.from({ length: ASL_MEMORY_SIZE }, () => makeEmptyAslCell());
-            try {
-              localStorage.setItem(`proxdmr_asl_quick_nodes_${targetCid}`, JSON.stringify(emptyNodes));
-            } catch (_) {}
+            saveAslUserNodes(targetCid, emptyNodes);
             closeModal();
             updateCardAllStarPanel(targetCard, hsData);
             if (typeof showToast === "function") {
@@ -4507,18 +10324,16 @@ export function updateCardAllStarPanel(card, hs) {
             }
           } else if (act === "default") {
             const defNodes = getDefaultNodes(targetCid);
-            try {
-              localStorage.setItem(`proxdmr_asl_quick_nodes_${targetCid}`, JSON.stringify(defNodes));
-            } catch (_) {}
+            saveAslUserNodes(targetCid, defNodes);
             closeModal();
             updateCardAllStarPanel(targetCard, hsData);
             if (typeof showToast === "function") {
               showToast(tm("asl.mem_toast_default", "Память узлов сброшена к значениям по умолчанию"), "success", 3000);
             }
           } else if (act === "save_default") {
-            try {
-              localStorage.setItem(`proxdmr_asl_default_nodes_${targetCid}`, JSON.stringify(padAslNodes(currentNodes)));
-            } catch (_) {}
+            const tplNodes = padAslNodes(currentNodes);
+            setServerCollectionKey("asl_default_nodes", targetCid, tplNodes, "proxdmr_asl_default_nodes_", true);
+            setServerCollectionKey("asl_default_nodes", "global", tplNodes, "proxdmr_asl_default_nodes_", true);
             closeModal();
             if (typeof showToast === "function") {
               showToast(tm("asl.mem_toast_saved_default", "Текущая память сохранена как новый шаблон по умолчанию ⭐"), "success", 3500);
@@ -4801,15 +10616,72 @@ export function updateCardAllStarPanel(card, hs) {
         if (targetHs && targetHs._aslScanActive) {
           stopAslMatrixScan(cid, card, targetHs, { keepCurrentLink: false, silent: true });
         }
+        if (targetHs && targetHs._aslDiceRolling) {
+          stopAslDiceSearch(cid, card, targetHs, { immediateAbort: true, silent: true });
+        }
         aslDisconnectNodeProcedure(cid, "all", { showStatusBanner: true, showCardEffects: true });
       };
     }
 
-    // Random active node (Dice) button
-    const diceBtn = vfoAllStar.querySelector(".btn-allstar-dice");
+    // Random active node (Dice) button: клик — старт/стоп, удержание/ПКМ — настройки
+    const diceBtn = vfoAllStar.querySelector(".btn-allstar-dice:not(.btn-adn-dice)");
     if (diceBtn) {
+      let diceHoldTimer = null;
+      let diceLong = false;
+      let diceDownX = 0;
+      let diceDownY = 0;
+      const cancelDiceHold = () => {
+        if (diceHoldTimer) {
+          clearTimeout(diceHoldTimer);
+          diceHoldTimer = null;
+        }
+      };
+
+      diceBtn.addEventListener("pointerdown", (e) => {
+        if (e && e.button !== undefined && e.button !== 0) return;
+        diceLong = false;
+        diceDownX = e.clientX || 0;
+        diceDownY = e.clientY || 0;
+        cancelDiceHold();
+        diceHoldTimer = setTimeout(() => {
+          diceLong = true;
+          diceHoldTimer = null;
+          if (typeof navigator !== "undefined" && navigator.vibrate) {
+            try { navigator.vibrate([40, 30, 40]); } catch (_) {}
+          }
+          openAslDiceSettingsPopover({ cid, card, targetHs, anchorEl: diceBtn });
+        }, 550);
+      });
+
+      diceBtn.addEventListener("pointermove", (e) => {
+        if (!diceHoldTimer) return;
+        const dx = (e.clientX || 0) - diceDownX;
+        const dy = (e.clientY || 0) - diceDownY;
+        if ((dx * dx + dy * dy) > 100) {
+          cancelDiceHold();
+        }
+      });
+
+      diceBtn.addEventListener("pointerup", cancelDiceHold);
+      diceBtn.addEventListener("pointerleave", cancelDiceHold);
+      diceBtn.addEventListener("pointercancel", cancelDiceHold);
+      diceBtn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelDiceHold();
+        openAslDiceSettingsPopover({ cid, card, targetHs, anchorEl: diceBtn });
+      });
+
       diceBtn.onclick = (e) => {
         e.stopPropagation();
+        if (diceLong) {
+          diceLong = false;
+          return;
+        }
+        if (targetHs && targetHs._aslDiceRolling) {
+          stopAslDiceSearch(cid, card, targetHs, { finishInnerIteration: true });
+          return;
+        }
         rollRandomKeyedAslNode(cid, card, targetHs, userNodes, diceBtn);
       };
     }
@@ -4940,17 +10812,35 @@ export function updateCardAllStarPanel(card, hs) {
       }
     }
 
-    // Wire Contacts button on AllStar card to open contacts filtered for AllStar (with ASL Directory tab in header)
+    // Wire Contacts button on AllStar card to open contacts filtered for AllStar
     const contactsBtn = card.querySelector(".btn-my-contacts") || card.querySelector(".btn-open-contacts");
-    if (contactsBtn && !contactsBtn._aslWired) {
-      contactsBtn._aslWired = true;
+    if (contactsBtn) {
+      const cLbl = contactsBtn.querySelector(".ptt-side-label");
+      if (cLbl) {
+        cLbl.textContent = window.t ? window.t("contacts.button_label", {}, "Контакты") : "Контакты";
+        cLbl.setAttribute("data-i18n", "contacts.button_label");
+      }
       contactsBtn.title = window.t ? window.t("contacts.btn_open_title", {}, "Справочник контактов и узлов AllStarLink") : "Справочник контактов и узлов AllStarLink";
+      contactsBtn.setAttribute("data-i18n-title", "contacts.btn_open_title");
       contactsBtn.onclick = (e) => {
         e.stopPropagation();
         if (typeof window.openMyContactsModal === "function") {
           window.openMyContactsModal(cid, "dmr");
         }
       };
+    }
+
+    // Single-channel VU meter tooltips (no TS1 / TS2)
+    const vuWrap = card.querySelector(".screen-clock-vu");
+    const vuTs1Track = card.querySelector(".clock-vu-track.track-ts1");
+    const singleVuTip = window.t ? window.t("vfo.vu_single_title", {}, "Индикатор уровня звука") : "Индикатор уровня звука";
+    if (vuWrap) {
+      vuWrap.setAttribute("title", singleVuTip);
+      vuWrap.setAttribute("data-i18n-title", "vfo.vu_single_title");
+    }
+    if (vuTs1Track) {
+      vuTs1Track.setAttribute("title", singleVuTip);
+      vuTs1Track.setAttribute("data-i18n-title", "vfo.vu_single_title");
     }
 
     // Unified ASL Nodes Directory button wiring
@@ -4973,12 +10863,15 @@ export function updateCardAllStarPanel(card, hs) {
     if (quickInput) {
       quickInput.placeholder = "Node #";
       quickInput.setAttribute("title", aslDialTip);
+      quickInput.setAttribute("data-i18n-title", "asl.quick_dial_node_tip");
     }
     if (quickBox) {
       quickBox.setAttribute("title", aslDialTip);
+      quickBox.setAttribute("data-i18n-title", "asl.quick_dial_node_tip");
     }
     if (quickApply) {
       quickApply.setAttribute("title", aslDialTip);
+      quickApply.setAttribute("data-i18n-title", "asl.quick_dial_node_tip");
     }
 
     // Direct JS visibility toggle for ASL directory button
@@ -4995,6 +10888,10 @@ export function updateCardAllStarPanel(card, hs) {
     }
     if (typeof window.renderQuickMemButtons === "function") {
       window.renderQuickMemButtons(cid);
+    }
+    if (prevAslPopover) {
+      vfoAllStar.style.position = "relative";
+      vfoAllStar.appendChild(prevAslPopover);
     }
   } else {
     const labelWrap = card.querySelector(".bm-server-label-wrap");
@@ -5021,28 +10918,72 @@ export function updateCardAllStarPanel(card, hs) {
     if (ctcssPair) ctcssPair.style.display = "none";
     if (dashPair) dashPair.style.display = "none";
 
+    const isYsfCard = card.classList.contains("card-net-ysf") || (card.dataset.networkType === "ysf");
     const quickInput = card.querySelector(".quick-tg-input");
     const quickBox = card.querySelector(".quick-tg-box");
     const quickApply = card.querySelector(".btn-quick-tg-apply");
-    const tgDialTip = window.t ? window.t("vfo.quick_tg_input_title", {}, "Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)") : "Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)";
-    if (quickInput) {
-      quickInput.placeholder = "TG #";
-      quickInput.setAttribute("title", tgDialTip);
-    }
-    if (quickBox) {
-      quickBox.setAttribute("title", tgDialTip);
-    }
-    if (quickApply) {
-      quickApply.setAttribute("title", tgDialTip);
+    const vuWrap = card.querySelector(".screen-clock-vu");
+    const vuTs1Track = card.querySelector(".clock-vu-track.track-ts1");
+
+    if (isYsfCard) {
+      const ysfDialTip = window.t ? window.t("ysf.quick_dial_tip", {}, "Быстрый переход в комнату YSF по номеру ID (Enter для подключения)") : "Быстрый переход в комнату YSF по номеру ID (Enter для подключения)";
+      if (quickInput) {
+        quickInput.placeholder = "ID #";
+        quickInput.setAttribute("title", ysfDialTip);
+        quickInput.setAttribute("data-i18n-title", "ysf.quick_dial_tip");
+      }
+      if (quickBox) {
+        quickBox.setAttribute("title", ysfDialTip);
+        quickBox.setAttribute("data-i18n-title", "ysf.quick_dial_tip");
+      }
+      if (quickApply) {
+        quickApply.setAttribute("title", ysfDialTip);
+        quickApply.setAttribute("data-i18n-title", "ysf.quick_dial_tip");
+      }
+      const singleVuTip = window.t ? window.t("vfo.vu_single_title", {}, "Индикатор уровня звука") : "Индикатор уровня звука";
+      if (vuWrap) {
+        vuWrap.setAttribute("title", singleVuTip);
+        vuWrap.setAttribute("data-i18n-title", "vfo.vu_single_title");
+      }
+      if (vuTs1Track) {
+        vuTs1Track.setAttribute("title", singleVuTip);
+        vuTs1Track.setAttribute("data-i18n-title", "vfo.vu_single_title");
+      }
+    } else {
+      const tgBoxTip = window.t ? window.t("ptt.quick_tg_box_title", {}, "Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)") : "Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)";
+      const tgApplyTip = window.t ? window.t("ptt.quick_tg_apply_title", {}, "Установить TalkGroup для передачи") : "Установить TalkGroup для передачи";
+      if (quickInput) {
+        quickInput.placeholder = "TG #";
+        quickInput.setAttribute("title", tgBoxTip);
+        quickInput.setAttribute("data-i18n-title", "ptt.quick_tg_box_title");
+      }
+      if (quickBox) {
+        quickBox.setAttribute("title", tgBoxTip);
+        quickBox.setAttribute("data-i18n-title", "ptt.quick_tg_box_title");
+      }
+      if (quickApply) {
+        quickApply.setAttribute("title", tgApplyTip);
+        quickApply.setAttribute("data-i18n-title", "ptt.quick_tg_apply_title");
+      }
+      const vuDualTip = window.t ? window.t("clocks.vu_title", {}, "Индикаторы уровня TS1 / TS2") : "Индикаторы уровня TS1 / TS2";
+      const vuTs1Tip = window.t ? window.t("vfo.vu_bar_title", {}, "Уровень звука TS1") : "Уровень звука TS1";
+      if (vuWrap) {
+        vuWrap.setAttribute("title", vuDualTip);
+        vuWrap.setAttribute("data-i18n-title", "clocks.vu_title");
+      }
+      if (vuTs1Track) {
+        vuTs1Track.setAttribute("title", vuTs1Tip);
+        vuTs1Track.setAttribute("data-i18n-title", "vfo.vu_bar_title");
+      }
     }
   }
 }
 
 
-export function ensurePrimaryHotspotHeaderButtons(card, isPrimary) {
-    if (!card) return;
-    const headerBrandRow = card.querySelector(".header-brand-row");
-    if (!headerBrandRow) return;
+export function ensureTopToolbarControls() {
+    const toolbar = document.getElementById("proxdmrTopToolbar");
+    if (!toolbar) return;
+    const rightCluster = toolbar.querySelector("#toolbarRightCluster") || toolbar;
 
     const isApk = (typeof window.isProxDmrApkMode === "function")
       ? window.isProxDmrApkMode()
@@ -5055,91 +10996,31 @@ export function ensurePrimaryHotspotHeaderButtons(card, isPrimary) {
           (document.documentElement && document.documentElement.classList.contains("is-apk-mode"))
         );
 
-    if (!isPrimary) {
-      if (card.id === "radioContainer") {
-        card.removeAttribute("id");
+    const themeBtn = toolbar.querySelector("#themeToggleBtn, .theme-toggle-btn");
+    if (themeBtn) {
+      themeBtn.style.removeProperty("display");
+      if (typeof window.wireThemeToggleButton === "function") {
+        window.wireThemeToggleButton(themeBtn);
       }
-      headerBrandRow.querySelectorAll("#themeToggleBtn, .theme-toggle-btn, .fullscreen-toggle-btn, .android-exit-btn").forEach(el => el.remove());
-      return;
-    }
-
-    // 1st hotspot is permanently riveted as #radioContainer & never deletable
-    card.id = "radioContainer";
-    headerBrandRow.querySelectorAll(".hotspot-delete-btn").forEach(el => el.remove());
-
-    // Rivet #1: Color Theme Toggle Button (#themeToggleBtn)
-    const allThemeBtns = Array.from(headerBrandRow.querySelectorAll("#themeToggleBtn, .theme-toggle-btn"));
-    let themeBtn = allThemeBtns[0] || null;
-    if (allThemeBtns.length > 1) {
-      allThemeBtns.slice(1).forEach(el => el.remove());
-    }
-    if (!themeBtn) {
-      themeBtn = document.createElement("button");
-      themeBtn.type = "button";
-      themeBtn.id = "themeToggleBtn";
-      themeBtn.className = "theme-toggle-btn";
-      themeBtn.setAttribute("data-i18n-title", "theme.toggle_title");
-      themeBtn.setAttribute("data-i18n-aria-label", "theme.toggle_title");
-      themeBtn.innerHTML = `
-        <svg class="theme-icon icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-        </svg>
-        <svg class="theme-icon icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-          <circle cx="12" cy="12" r="5"></circle>
-          <line x1="12" y1="1" x2="12" y2="3"></line>
-          <line x1="12" y1="21" x2="12" y2="23"></line>
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-          <line x1="1" y1="12" x2="3" y2="12"></line>
-          <line x1="21" y1="12" x2="23" y2="12"></line>
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-        </svg>
-      `;
-      const brandTitle = headerBrandRow.querySelector(".brand-title");
-      if (brandTitle && brandTitle.nextSibling) {
-        headerBrandRow.insertBefore(themeBtn, brandTitle.nextSibling);
-      } else {
-        headerBrandRow.appendChild(themeBtn);
+      if (typeof window.applyThemeUI === "function") {
+        const activeTheme = (typeof window.getTheme === "function") ? window.getTheme() : (document.documentElement.getAttribute("data-theme") || "dark");
+        window.applyThemeUI(activeTheme);
       }
     }
-    themeBtn.id = "themeToggleBtn";
-    themeBtn.classList.add("theme-toggle-btn");
-    themeBtn.style.removeProperty("display");
-    const themeTitle = (typeof window.t === "function")
-      ? window.t("theme.toggle_title", {}, "Смена темы: День / Ночь (нажмите для переключения)")
-      : "Смена темы: День / Ночь (нажмите для переключения)";
-    themeBtn.title = themeTitle;
-    themeBtn.setAttribute("aria-label", themeTitle);
-    if (typeof window.wireThemeToggleButton === "function") {
-      window.wireThemeToggleButton(themeBtn);
-    }
-    if (typeof window.applyThemeUI === "function") {
-      const activeTheme = (typeof window.getTheme === "function") ? window.getTheme() : (document.documentElement.getAttribute("data-theme") || "dark");
-      window.applyThemeUI(activeTheme);
-    }
 
-    // Rivet #2: Rightmost Close Button (APK) or Fullscreen Toggle Button (Web)
     if (isApk) {
       if (document.body) document.body.classList.add("is-apk-mode");
       if (document.documentElement) document.documentElement.classList.add("is-apk-mode");
-      headerBrandRow.querySelectorAll(".fullscreen-toggle-btn:not(.android-exit-btn)").forEach(el => el.remove());
+      rightCluster.querySelectorAll(".fullscreen-toggle-btn:not(.android-exit-btn)").forEach(el => el.remove());
 
-      const allExitBtns = Array.from(headerBrandRow.querySelectorAll(".android-exit-btn"));
-      let exitBtn = allExitBtns[0] || null;
-      if (allExitBtns.length > 1) {
-        allExitBtns.slice(1).forEach(el => el.remove());
-      }
+      let exitBtn = rightCluster.querySelector(".android-exit-btn");
       if (!exitBtn) {
         exitBtn = document.createElement("button");
         exitBtn.type = "button";
         exitBtn.className = "fullscreen-toggle-btn android-exit-btn";
         exitBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-        headerBrandRow.appendChild(exitBtn);
-      } else if (headerBrandRow.lastElementChild !== exitBtn) {
-        headerBrandRow.appendChild(exitBtn);
+        rightCluster.appendChild(exitBtn);
       }
-      exitBtn.classList.add("fullscreen-toggle-btn", "android-exit-btn");
       exitBtn.style.removeProperty("display");
       const exitTitle = (typeof window.t === "function")
         ? window.t("app.quit_title", {}, "Полный выход из приложения")
@@ -5150,12 +11031,8 @@ export function ensurePrimaryHotspotHeaderButtons(card, isPrimary) {
         window.wireAndroidExitButton(exitBtn);
       }
     } else {
-      headerBrandRow.querySelectorAll(".android-exit-btn").forEach(el => el.remove());
-      const allFsBtns = Array.from(headerBrandRow.querySelectorAll(".fullscreen-toggle-btn:not(.android-exit-btn)"));
-      let fsBtn = allFsBtns[0] || null;
-      if (allFsBtns.length > 1) {
-        allFsBtns.slice(1).forEach(el => el.remove());
-      }
+      rightCluster.querySelectorAll(".android-exit-btn").forEach(el => el.remove());
+      let fsBtn = rightCluster.querySelector(".fullscreen-toggle-btn:not(.android-exit-btn)");
       if (!fsBtn) {
         fsBtn = document.createElement("button");
         fsBtn.type = "button";
@@ -5170,15 +11047,26 @@ export function ensurePrimaryHotspotHeaderButtons(card, isPrimary) {
             <path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M10 4v6m0 0H4m6 0L3 3m10 7h6m-6 0V4m0 6l7-7"/>
           </svg>
         `;
-        headerBrandRow.appendChild(fsBtn);
-      } else if (headerBrandRow.lastElementChild !== fsBtn) {
-        headerBrandRow.appendChild(fsBtn);
+        rightCluster.appendChild(fsBtn);
       }
       fsBtn.style.removeProperty("display");
       if (typeof window.updateFullscreenButtonsUI === "function") {
         window.updateFullscreenButtonsUI();
       }
     }
+}
+
+export function ensurePrimaryHotspotHeaderButtons(card, _isPrimaryIgnored) {
+    if (!card) return;
+    if (card.id === "radioContainer" && (_hotspotsLoadedOnce || (card.dataset.hotspotId && card.dataset.hotspotId !== "default"))) {
+      card.removeAttribute("id");
+    }
+    card.classList.remove("is-primary-fixed", "is-draggable-hotspot");
+    const headerBrandRow = card.querySelector(".header-brand-row");
+    if (!headerBrandRow) return;
+    card.querySelectorAll(".brand-logo-wrap").forEach(el => el.remove());
+    headerBrandRow.querySelectorAll("#themeToggleBtn, .theme-toggle-btn, .fullscreen-toggle-btn, .android-exit-btn, .hotspot-delete-btn").forEach(el => el.remove());
+    ensureTopToolbarControls();
 }
 
 export function renderRadiosGrid() {
@@ -5192,33 +11080,38 @@ export function renderRadiosGrid() {
       stack.remove();
     });
 
+    ensureTopToolbarControls();
+
     const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
       ? window.currentHotspots
       : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
     const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
+    const emptyHint = document.getElementById("archivedWorkspaceEmptyHint");
+
     if (!displayHotspots.length) {
-      // Never wipe static #radioContainer before /api/hotspots has actually loaded!
       if (_hotspotsLoadedOnce) {
-        radiosGrid.querySelectorAll(".radio-container:not(#radioContainer)").forEach(c => c.remove());
+        radiosGrid.querySelectorAll(".radio-container").forEach(c => c.remove());
+        if (emptyHint) emptyHint.style.display = "flex";
+      } else {
+        const staticCard = document.getElementById("radioContainer") || radiosGrid.querySelector(".radio-container");
+        if (staticCard) ensurePrimaryHotspotHeaderButtons(staticCard, false);
+        if (emptyHint) emptyHint.style.display = "none";
       }
-      const staticPrimary = document.getElementById("radioContainer") || radiosGrid.querySelector(".radio-container");
-      if (staticPrimary) {
-        ensurePrimaryHotspotHeaderButtons(staticPrimary, true);
+      if (typeof renderToolbarHotspotSlots === "function") {
+        renderToolbarHotspotSlots();
       }
       return;
     }
 
+    if (emptyHint) emptyHint.style.display = "none";
+
     const template = document.getElementById("radioCardTemplate");
     const existingCards = Array.from(radiosGrid.querySelectorAll(".radio-container"));
     const allowedIds = new Set(displayHotspots.map(h => h.id));
-    const primaryTargetId = displayHotspots[0] ? displayHotspots[0].id : null;
 
-    // Remove hidden or obsolete secondary cards, preserving #radioContainer for idx === 0
+    // Remove archived or deleted cards (including SSR #radioContainer if its hotspot was archived/deleted)
     existingCards.forEach((c) => {
       const cid = c.dataset.hotspotId;
-      if (c.id === "radioContainer" && primaryTargetId) {
-        return;
-      }
       if (cid && !allowedIds.has(cid)) {
         c.remove();
       }
@@ -5226,52 +11119,24 @@ export function renderRadiosGrid() {
 
     displayHotspots.forEach((hs, idx) => {
       let card = radiosGrid.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`);
-      if (!card) {
-        const primaryFallback = (idx === 0) ? (document.getElementById("radioContainer") || existingCards[0]) : null;
-        if (idx === 0 && primaryFallback && !allowedIds.has(primaryFallback.dataset.hotspotId)) {
-          card = primaryFallback;
-          card.dataset.hotspotId = hs.id;
-          card.dataset.networkType = (hs.network_type || "bm").toLowerCase();
-        } else if (template) {
-          card = template.content.firstElementChild.cloneNode(true);
-          card.dataset.hotspotId = hs.id;
-          card.dataset.networkType = (hs.network_type || "bm").toLowerCase();
-          if (window.I18N) window.I18N.apply(card);
-          radiosGrid.appendChild(card);
-        }
+      if (!card && template) {
+        card = template.content.firstElementChild.cloneNode(true);
+        card.dataset.hotspotId = hs.id;
+        card.dataset.networkType = (hs.network_type || "bm").toLowerCase();
+        if (window.I18N) window.I18N.apply(card);
+        radiosGrid.appendChild(card);
       }
       if (!card) return;
+      const cardCid = resolveHotspotId(card.dataset.hotspotId || hs.id || "default");
 
-      // Ensure DOM position in radiosGrid matches displayHotspots order!
+      // Keep strict DOM order matching displayHotspots (idx === 0 has zero special anchoring)
       if (card.parentElement === radiosGrid) {
         radiosGrid.appendChild(card);
       }
 
-      // Logo ProxDMR must be present ONLY on the first main hotspot card (idx === 0)
-      if (idx > 0) {
-        card.querySelectorAll(".brand-logo-wrap").forEach(el => el.remove());
-      } else {
-        const brandTitle = card.querySelector(".brand-title");
-        if (brandTitle && !brandTitle.querySelector(".brand-logo-wrap")) {
-          const logoWrap = document.createElement("div");
-          logoWrap.className = "brand-logo-wrap";
-          logoWrap.tabIndex = 0;
-          const hintText = (window.t && window.t("about.logo_hint")) || "Длинный тап — вызов About";
-          logoWrap.innerHTML = `
-            <img src="/static/img/Logo_light.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
-            <img src="/static/img/Logo_dark.png?v=2.9.85" alt="ProxDMR" class="brand-logo-img brand-logo-light">
-            <span class="brand-logo-hint" data-i18n="about.logo_hint">${hintText}</span>
-          `;
-          brandTitle.insertBefore(logoWrap, brandTitle.firstChild);
-        }
-      }
-
-      // Drag-and-drop reorder markers: 1st hotspot is fixed, 2..7 are draggable
-      card.classList.toggle("is-primary-fixed", idx === 0);
-      card.classList.toggle("is-draggable-hotspot", idx > 0);
-
-      // Rivet theme & close/fullscreen buttons exclusively onto 1st hotspot (idx === 0)
-      ensurePrimaryHotspotHeaderButtons(card, idx === 0);
+      // All hotspots are equal (no card dragging; reordering is in Top Toolbar & Archive Modal)
+      card.classList.remove("is-primary-fixed", "is-draggable-hotspot");
+      ensurePrimaryHotspotHeaderButtons(card, false);
 
       card.classList.toggle("active-hotspot", hs.id === activeHotspotId);
 
@@ -5283,15 +11148,15 @@ export function renderRadiosGrid() {
       const collapseBtn = card.querySelector(".hotspot-collapse-btn");
       if (collapseBtn) {
         collapseBtn.title = isCollapsed
-          ? (window.t ? window.t("vfo.hotspot_expand_title", {}, "Развернуть этот хотспот (удержание: отправить в архив)") : "Развернуть этот хотспот (удержание: отправить в архив)")
-          : (window.t ? window.t("vfo.hotspot_collapse_title", {}, "Свернуть этот хотспот (удержание: свернуть без отключения)") : "Свернуть этот хотспот (удержание: свернуть без отключения)");
+          ? (window.t ? window.t("vfo.hotspot_expand_title", {}, "Expand this hotspot (hold: move to archive)") : "Expand this hotspot (hold: move to archive)")
+          : (window.t ? window.t("vfo.hotspot_collapse_title", {}, "Collapse this hotspot (hold: collapse without disconnecting)") : "Collapse this hotspot (hold: collapse without disconnecting)");
       }
 
       // Populate text
       const nameBadge = card.querySelector(".hotspot-name-badge");
       if (nameBadge) {
         nameBadge.removeAttribute("data-i18n");
-        const hsName = hs.name || `Хотспот #${idx + 1}`;
+        const hsName = hs.name || (window.t ? window.t("vfo.hotspot_default_numbered", { num: idx + 1 }, `Hotspot #${idx + 1}`) : `Hotspot #${idx + 1}`);
         nameBadge.textContent = hsName;
         nameBadge.title = hsName;
         nameBadge.classList.toggle("is-online", (!isCollapsed || isLive) && isHotspotFullyOnline(hs));
@@ -5300,8 +11165,10 @@ export function renderRadiosGrid() {
       const duplexBadge = card.querySelector(".duplex-badge");
       if (duplexBadge) duplexBadge.textContent = "DUPLEX";
 
+      const isAslNet = ((hs && hs.network_type) || card.dataset.networkType || "").toLowerCase() === "allstar";
+      const isYsfNet = ((hs && hs.network_type) || card.dataset.networkType || "").toLowerCase() === "ysf";
       const csDisplay = card.querySelector(".callsign-display");
-      if (csDisplay) {
+      if (csDisplay && !isAslNet && !isYsfNet) {
         if (!csDisplay.dataset.rawCallsign) csDisplay.dataset.rawCallsign = hs.callsign || "N0CALL";
         const effCs = (window.localizeDemoText ? window.localizeDemoText(hs.callsign) : hs.callsign) || "N0CALL";
         csDisplay.textContent = effCs;
@@ -5311,10 +11178,16 @@ export function renderRadiosGrid() {
       if (idDisplay) idDisplay.textContent = `ID: ${hs.effective_id || hs.dmr_id || 0}`;
 
       const netTypeLower = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
-      ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom"].forEach(n => {
+      ["bm", "tgif", "freedmr", "xlx", "dmrplus", "allstar", "custom", "adn", "ysf"].forEach(n => {
         card.classList.toggle(`card-net-${n}`, netTypeLower === n);
       });
       card.dataset.networkType = netTypeLower;
+      applyCardBrandColors(card, netTypeLower);
+      try {
+        if (hs && hs.id) {
+          localStorage.setItem(`proxdmr_net_type_${hs.id}`, netTypeLower);
+        }
+      } catch (_) {}
 
       updateCardBmBanner(card, hs);
 
@@ -5327,6 +11200,9 @@ export function renderRadiosGrid() {
       updateCardXlxPanel(card, hs);
       updateCardDmrPlusPanel(card, hs);
       updateCardAllStarPanel(card, hs);
+      updateCardYsfPanel(card, hs);
+      syncAdnDiceButtonUI(card, hs);
+      setupAdnDiceButton(card, card.dataset.hotspotId || hs.id, hs);
       if (isXlxNet) {
         setCardSlot(card, 2, false);
       }
@@ -5341,31 +11217,46 @@ export function renderRadiosGrid() {
       const tg1Num = card.querySelector(".tg-ts1-num");
       if (tg1Num) {
         const cid = card.dataset.hotspotId || hs.id;
-        const curTg1 = getHotspotTg(cid, 1);
-        tg1Num.textContent = `TG ${curTg1}`;
-        tg1Num.style.cursor = "pointer";
-        tg1Num.title = window.t ? window.t("hotspots.tg1_select_title", {}, "Кликните для выбора группы или ID на TS1") : "Кликните для выбора группы или ID на TS1";
-        tg1Num.onclick = (e) => {
-          e.stopPropagation();
-          const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
-          if (curNet === "xlx") {
-            const warnMsg = window.t
-              ? window.t("hotspots.xlx_ts1_blocked_toast", {}, "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.")
-              : "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.";
-            showToast(warnMsg, 3000);
-            return;
-          }
-          switchActiveHotspot(cid);
-          setCardSlot(card, 1, true);
-          openTgTxUseModal(1, cid);
-        };
+        if (netTypeLower === "ysf") {
+          const ysfRoomNum = hs.ysf_room || hs.ysf_room_id || "";
+          tg1Num.textContent = ysfRoomNum ? `#${ysfRoomNum}` : "#---";
+          tg1Num.style.cursor = "default";
+          tg1Num.removeAttribute("title");
+          tg1Num.onclick = null;
+        } else {
+          const curTg1 = getHotspotTg(cid, 1);
+          tg1Num.textContent = `TG ${curTg1}`;
+          tg1Num.style.cursor = "pointer";
+          tg1Num.title = window.t ? window.t("hotspots.tg1_select_title", {}, "Кликните для выбора группы или ID на TS1") : "Кликните для выбора группы или ID на TS1";
+          tg1Num.onclick = (e) => {
+            e.stopPropagation();
+            const curNet = String(getHotspotNetworkType(card) || (hs && hs.network_type) || "bm").toLowerCase();
+            if (curNet === "ysf") return;
+            if (curNet === "xlx") {
+              const warnMsg = window.t
+                ? window.t("hotspots.xlx_ts1_blocked_toast", {}, "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.")
+                : "В сети XLX таймслот 1 не поддерживается протоколом. Используйте TS2.";
+              showToast(warnMsg, 3000);
+              return;
+            }
+            switchActiveHotspot(cid);
+            setCardSlot(card, 1, true);
+            openTgTxUseModal(1, cid);
+          };
+        }
       }
 
       const tg2Num = card.querySelector(".tg-ts2-num");
       if (tg2Num) {
         const cid = card.dataset.hotspotId || hs.id;
-        const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
-        if (curNet === "dmrplus") {
+        const curNet = netTypeLower;
+        if (curNet === "ysf") {
+          const ysfRoomNum = hs.ysf_room || hs.ysf_room_id || "";
+          tg2Num.textContent = ysfRoomNum ? `#${ysfRoomNum}` : "#---";
+          tg2Num.style.cursor = "default";
+          tg2Num.removeAttribute("title");
+          tg2Num.onclick = null;
+        } else if (curNet === "dmrplus") {
           tg2Num.textContent = "TG 9 (Reflector)";
           tg2Num.style.cursor = "pointer";
           tg2Num.title = window.t ? window.t("dmrplus.ts2_voice_hint", {}, "Голос на TS2 всегда в TG 9") : "Голос на TS2 всегда в TG 9";
@@ -5395,6 +11286,51 @@ export function renderRadiosGrid() {
             setCardSlot(card, 2, true);
             openTgTxUseModal(2, cid);
           };
+        }
+      }
+
+      // Hydrate active server RX slot state onto card before updating mode badge & REC UI
+      if (isAslNet) {
+        const aslActive = Boolean((hs.ts1 && hs.ts1.active) || hs._aslCarrierRx || (card._lastRx && card._lastRx[1] && card._lastRx[1].active));
+        if (aslActive) {
+          if (!card._lastRx) card._lastRx = {};
+          card._lastRx[1] = Object.assign({ slot: 1, network_type: "allstar" }, card._lastRx[1] || {}, {
+            active: true,
+            src_id: (hs.ts1 && hs.ts1.src_id) || (card._lastRx[1] && card._lastRx[1].src_id) || 0,
+            src_callsign: (hs.ts1 && hs.ts1.src_callsign) || (card._lastRx[1] && card._lastRx[1].src_callsign) || "",
+            lastAudioTime: (hs.ts1 && hs.ts1.last_seen) || (card._lastRx[1] && card._lastRx[1].lastAudioTime) || (Date.now() / 1000),
+          });
+          const vfoAsl = card.querySelector(".vfo-allstar-row");
+          if (vfoAsl) vfoAsl.classList.add("allstar-rx-active");
+          if (typeof window.updateCardModeBadge === "function") window.updateCardModeBadge(card);
+        }
+      } else {
+        let hydratedRx = false;
+        [1, 2].forEach(sNum => {
+          const st = sNum === 1 ? hs.ts1 : hs.ts2;
+          const isSlotLive = Boolean((st && st.active) || (sNum === 1 && isYsfNet && hs._ysfCarrierRx));
+          if (isSlotLive) {
+            hydratedRx = true;
+            if (!card._lastRx) card._lastRx = {};
+            card._lastRx[sNum] = Object.assign(
+              { slot: sNum, network_type: netTypeLower },
+              card._lastRx[sNum] || {},
+              st || {},
+              {
+                active: true,
+                timestamp: (st && st.last_seen) || (card._lastRx[sNum] && card._lastRx[sNum].timestamp) || (Date.now() / 1000),
+                lastAudioTime: (st && st.last_seen) || (card._lastRx[sNum] && card._lastRx[sNum].lastAudioTime) || (Date.now() / 1000),
+              }
+            );
+            const vfoRow = card.querySelector(sNum === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+            const rxTag = card.querySelector(sNum === 1 ? ".vfo-ts1-rx" : ".vfo-ts2-rx");
+            if (vfoRow) vfoRow.classList.add("vfo-rx-active");
+            if (rxTag) rxTag.classList.add("active");
+          }
+        });
+        if (hydratedRx) {
+          updateCardTgDisplay(card);
+          if (typeof window.updateCardModeBadge === "function") window.updateCardModeBadge(card);
         }
       }
 
@@ -5442,34 +11378,52 @@ export function renderRadiosGrid() {
         const apiStatus = hs._apiStatus || (hasApiKey ? "CHECKING" : "NO_KEY");
         let apiBadgeClass = "status-offline bm-offline";
         let apiBadgeText = "API:OFFLINE";
-        let apiComment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-        let apiTooltip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+        let apiComment = window.t ? window.t("status.api_no_key_detail", {}, "Key not configured (click to enter)") : "Key not configured (click to enter)";
+        let apiTooltip = window.t
+          ? window.t("status.api_no_key_tooltip", { net: netShort }, `⚪ ${netShort} API: Key not configured. Click to enter`)
+          : `⚪ ${netShort} API: Key not configured. Click to enter`;
 
         if (apiStatus === "ONLINE") {
           apiBadgeClass = "status-online bm-online";
           apiBadgeText = "API:ONLINE";
-          apiComment = hs._apiDetail ? `${apiDomain} (${hs._apiDetail})` : `${apiDomain} (Авторизован)`;
-          apiTooltip = `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
+          apiComment = hs._apiDetail
+            ? `${apiDomain} (${hs._apiDetail})`
+            : (window.t ? window.t("status.api_authorized_domain", { domain: apiDomain }, `${apiDomain} (Authorized)`) : `${apiDomain} (Authorized)`);
+          apiTooltip = window.t
+            ? window.t("status.api_authorized_tooltip", { net: netShort, ver: netVersion }, `🟢 ${netShort} API ${netVersion}: Authorized. Click to re-check`)
+            : `🟢 ${netShort} API ${netVersion}: Authorized. Click to re-check`;
         } else if (apiStatus === "CHECKING") {
           apiBadgeClass = "status-connecting bm-connecting";
           apiBadgeText = "API:CHECKING";
-          apiComment = isTgif ? "Проверка токена TGIF..." : (window.t ? window.t("status.api_checking_detail") : "Проверка токена v2...");
-          apiTooltip = `🟡 ${netShort} API: Проверка соединения...`;
+          apiComment = isTgif
+            ? (window.t ? window.t("status.api_checking_tgif", {}, "Checking TGIF token...") : "Checking TGIF token...")
+            : (window.t ? window.t("status.api_checking_detail", {}, "Checking v2 token...") : "Checking v2 token...");
+          apiTooltip = window.t
+            ? window.t("status.api_checking_tooltip", { net: netShort }, `🟡 ${netShort} API: Checking connection...`)
+            : `🟡 ${netShort} API: Checking connection...`;
         } else if (apiStatus === "AUTH_FAILED") {
           apiBadgeClass = "status-error bm-error";
           apiBadgeText = "API:AUTH FAIL";
-          apiComment = hs._apiDetail || (isTgif ? "Неверный токен TGIF (401)" : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
-          apiTooltip = `🔴 ${netShort} API: ${apiComment}. Нажмите для настройки`;
+          apiComment = hs._apiDetail || (isTgif
+            ? (window.t ? window.t("status.api_auth_tgif_detail", {}, "Invalid TGIF token (401)") : "Invalid TGIF token (401)")
+            : (window.t ? window.t("status.api_auth_detail", {}, "Invalid token (401 Unauthorized)") : "Invalid token (401 Unauthorized)"));
+          apiTooltip = window.t
+            ? window.t("status.api_auth_tooltip", { net: netShort, comment: apiComment }, `🔴 ${netShort} API: ${apiComment}. Click to configure`)
+            : `🔴 ${netShort} API: ${apiComment}. Click to configure`;
         } else if (apiStatus === "NO_KEY") {
           apiBadgeClass = "status-offline bm-offline";
           apiBadgeText = "API:NO KEY";
-          apiComment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
-          apiTooltip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+          apiComment = window.t ? window.t("status.api_no_key_detail", {}, "Key not configured (click to enter)") : "Key not configured (click to enter)";
+          apiTooltip = window.t
+            ? window.t("status.api_no_key_tooltip", { net: netShort }, `⚪ ${netShort} API: Key not configured. Click to enter`)
+            : `⚪ ${netShort} API: Key not configured. Click to enter`;
         } else if (apiStatus === "OFFLINE" || apiStatus === "ERROR") {
           apiBadgeClass = "status-error bm-error";
           apiBadgeText = "API:ERROR";
-          apiComment = hs._apiDetail || `Сервер ${apiDomain} недоступен`;
-          apiTooltip = `🔴 ${netShort} API: ${apiComment}. Клик для повторной проверки`;
+          apiComment = hs._apiDetail || (window.t ? window.t("status.api_server_unreachable", { domain: apiDomain }, `Server ${apiDomain} unreachable`) : `Server ${apiDomain} unreachable`);
+          apiTooltip = window.t
+            ? window.t("status.api_error_tooltip", { net: netShort, comment: apiComment }, `🔴 ${netShort} API: ${apiComment}. Click to re-check`)
+            : `🔴 ${netShort} API: ${apiComment}. Click to re-check`;
         }
 
         if (apiBadge) {
@@ -5570,7 +11524,7 @@ export function renderRadiosGrid() {
         const handleHotspotManageAction = (cid) => {
           const curHs = (window.currentHotspots || []).find(h => h.id === cid) || hs;
           const curNet = ((curHs && curHs.network_type) || "bm").toLowerCase();
-          if (curNet !== "bm" && curNet !== "tgif" && curNet !== "freedmr" && curNet !== "xlx") {
+          if (curNet !== "bm" && curNet !== "tgif" && curNet !== "freedmr" && curNet !== "adn" && curNet !== "xlx") {
             openHotspotSettings(curHs, "tab-edit-hs");
             setTimeout(() => {
               const targetId = "editHsRptoOptions";
@@ -5591,13 +11545,15 @@ export function renderRadiosGrid() {
         const btnStatic = card.querySelector(".btn-bm-static-edit");
         if (btnStatic) {
           if (netType === "tgif") {
-            btnStatic.title = "Управление TalkGroups TGIF (Статические / Динамические)";
+            btnStatic.title = window.t ? window.t("hotspots.manage_tg_tgif_title", {}, "Manage TGIF TalkGroups (Static / Dynamic)") : "Manage TGIF TalkGroups (Static / Dynamic)";
           } else if (netType === "freedmr") {
-            btnStatic.title = "Управление TalkGroups FreeDMR (Статические / Динамические)";
+            btnStatic.title = window.t ? window.t("hotspots.manage_tg_freedmr_title", {}, "Manage FreeDMR TalkGroups (Static / Dynamic)") : "Manage FreeDMR TalkGroups (Static / Dynamic)";
+          } else if (netType === "adn") {
+            btnStatic.title = window.t ? window.t("hotspots.manage_tg_adn_title", {}, "Manage ADN TalkGroups (Static / Dynamic)") : "Manage ADN TalkGroups (Static / Dynamic)";
           } else if (netType === "xlx") {
-            btnStatic.title = "Управление модулями XLX (A–Z / TG 9)";
+            btnStatic.title = window.t ? window.t("hotspots.manage_xlx_title", {}, "Manage XLX Modules (A–Z / TG 9)") : "Manage XLX Modules (A–Z / TG 9)";
           } else if (netType === "bm") {
-            btnStatic.title = "Управление TalkGroups BM (Статические / Динамические)";
+            btnStatic.title = window.t ? window.t("hotspots.manage_tg_bm_title", {}, "Manage BM TalkGroups (Static / Dynamic)") : "Manage BM TalkGroups (Static / Dynamic)";
           }
           btnStatic.onclick = (e) => {
             e.stopPropagation();
@@ -5618,13 +11574,15 @@ export function renderRadiosGrid() {
         const btnSrch = card.querySelector(".btn-srch-tg-id");
         if (btnSrch) {
           if (netType === "tgif") {
-            btnSrch.title = "TG: поиск групп | Manage: управление TG TGIF | ID: поиск позывных/ID";
+            btnSrch.title = window.t ? window.t("hotspots.srch_tgif_title", {}, "TG: search groups | Manage: TGIF TG management | ID: callsign/ID lookup") : "TG: search groups | Manage: TGIF TG management | ID: callsign/ID lookup";
           } else if (netType === "freedmr") {
-            btnSrch.title = "TG: поиск групп | Manage: управление TG FreeDMR | ID: поиск позывных/ID";
+            btnSrch.title = window.t ? window.t("hotspots.srch_freedmr_title", {}, "TG: search groups | Manage: FreeDMR TG management | ID: callsign/ID lookup") : "TG: search groups | Manage: FreeDMR TG management | ID: callsign/ID lookup";
+          } else if (netType === "adn") {
+            btnSrch.title = window.t ? window.t("hotspots.srch_adn_title", {}, "TG: search groups | Manage: ADN TG management | ID: callsign/ID lookup") : "TG: search groups | Manage: ADN TG management | ID: callsign/ID lookup";
           } else if (netType === "xlx") {
-            btnSrch.title = "TG: поиск групп | Manage: управление модулями XLX | ID: поиск позывных/ID";
+            btnSrch.title = window.t ? window.t("hotspots.srch_xlx_title", {}, "TG: search groups | Manage: XLX module management | ID: callsign/ID lookup") : "TG: search groups | Manage: XLX module management | ID: callsign/ID lookup";
           } else if (netType === "bm") {
-            btnSrch.title = "TG: поиск групп | Manage: управление TG BM | ID: поиск позывных/ID";
+            btnSrch.title = window.t ? window.t("hotspots.srch_bm_title", {}, "TG: search groups | Manage: BM TG management | ID: callsign/ID lookup") : "TG: search groups | Manage: BM TG management | ID: callsign/ID lookup";
           }
           btnSrch.onclick = (e) => {
             e.stopPropagation();
@@ -5661,8 +11619,10 @@ export function renderRadiosGrid() {
           btnContacts.onclick = (e) => {
             e.stopPropagation();
             const cid = card.dataset.hotspotId || hs.id;
+            const hsBtnNet = String(getHotspotNetworkType(card) || getHotspotNetworkType(cid) || "").toLowerCase();
+            const curNet = (hsBtnNet && hsBtnNet !== "bm") ? hsBtnNet : String(card.dataset.networkType || (hs && hs.network_type) || hsBtnNet || "bm").toLowerCase();
             switchActiveHotspot(cid);
-            openMyContactsModal(cid, "dmr");
+            openMyContactsModal(cid, curNet === "ysf" ? "ysf_bookmarks" : "dmr");
           };
         }
 
@@ -5703,7 +11663,8 @@ export function renderRadiosGrid() {
         const vfo1 = card.querySelector(".vfo-ts1-row");
         if (vfo1) {
           vfo1.addEventListener("click", (e) => {
-            const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
+            const hsVfoNet = String(getHotspotNetworkType(card) || "").toLowerCase();
+            const curNet = (hsVfoNet && hsVfoNet !== "bm") ? hsVfoNet : String(card.dataset.networkType || (hs && hs.network_type) || hsVfoNet || "bm").toLowerCase();
             if (curNet === "xlx") {
               e.stopPropagation();
               e.preventDefault();
@@ -5718,8 +11679,13 @@ export function renderRadiosGrid() {
               e.preventDefault();
               return;
             }
-            if (e.target.closest("button") || e.target.closest(".slot-badge") || e.target.closest(".vfo-lang-badge") || e.target.closest(".vfo-caption-box")) return;
+            if (e.target.closest("button") || e.target.closest(".slot-badge") || e.target.closest(".vfo-lang-badge") || e.target.closest(".vfo-caption-box") || e.target.closest(".ysf-dash-pair") || e.target.closest(".vfo-mute-btn")) return;
             const cid = card.dataset.hotspotId || hs.id;
+
+            if (curNet === "ysf" || curNet === "allstar") {
+              switchActiveHotspot(cid);
+              return;
+            }
 
             // Check if clicked on caller ID or caller callsign
             const callerTarget = e.target.closest(".ts-caller-id") || e.target.closest(".ts-caller-call");
@@ -5755,7 +11721,13 @@ export function renderRadiosGrid() {
             badge1.style.cursor = "pointer";
             badge1.title = window.t ? window.t("hotspots.tg1_badge_title", {}, "Выбрать группу передачи для TS1 (справочник TG)") : "Выбрать группу передачи для TS1 (справочник TG)";
             const openModal1 = (e) => {
-              const curNet = ((hs && hs.network_type) || "bm").toLowerCase();
+              const hsBadgeNet = String(getHotspotNetworkType(card) || "").toLowerCase();
+              const curNet = (hsBadgeNet && hsBadgeNet !== "bm") ? hsBadgeNet : String(card.dataset.networkType || (hs && hs.network_type) || hsBadgeNet || "bm").toLowerCase();
+              if (curNet === "ysf" || curNet === "allstar") {
+                e.stopPropagation();
+                e.preventDefault();
+                return;
+              }
               if (curNet === "xlx") {
                 e.stopPropagation();
                 e.preventDefault();
@@ -5797,7 +11769,7 @@ export function renderRadiosGrid() {
               e.preventDefault();
               return;
             }
-            if (e.target.closest("button") || e.target.closest(".slot-badge") || e.target.closest(".vfo-lang-badge") || e.target.closest(".vfo-caption-box")) return;
+            if (e.target.closest("button") || e.target.closest(".slot-badge") || e.target.closest(".vfo-lang-badge") || e.target.closest(".vfo-caption-box") || e.target.closest(".ysf-dash-pair") || e.target.closest(".vfo-mute-btn")) return;
             const cid = card.dataset.hotspotId || hs.id;
 
             // Check if clicked on caller ID or caller callsign
@@ -6048,6 +12020,18 @@ export function renderRadiosGrid() {
             if (hs && hs._aslScanActive) {
               stopAslMatrixScan(cid, card, hs, { keepCurrentLink: true, silent: true });
             }
+            if (hs && hs._aslDiceRolling) {
+              stopAslDiceSearch(cid, card, hs, { immediateAbort: true, silent: true });
+            }
+            if (hs && hs._ysfScanActive) {
+              stopYsfMatrixScan(cid, card, hs, { keepCurrentLink: true, silent: true });
+            }
+            if (hs && hs._ysfDiceRolling) {
+              stopYsfDiceSearch(cid, card, hs, { immediateAbort: true, silent: true });
+            }
+            if (hs && hs._adnDiceRolling) {
+              stopAdnDiceSearch(cid, card, hs, { immediateAbort: true, silent: true });
+            }
 
             if (cardPttBtn._isHoldLatched || (typeof window !== "undefined" && window.isPttHoldLatched)) {
               e.preventDefault();
@@ -6086,11 +12070,21 @@ export function renderRadiosGrid() {
               return;
             }
 
+            // 2c. Branch: YSF Multi-Room / Multi-DG-ID TX prompt ("в лоб") до захвата указателя и микрофона
+            if (isYsfTxDgIdPromptRequired(cid)) {
+              e.preventDefault();
+              e.stopPropagation();
+              openYsfTxDgIdModal(cid);
+              return;
+            }
+
             // Determine targetSlot based on left (TS1) vs right (TS2) click coordinate
-            const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+            const hsPttNet = String(getHotspotNetworkType(card) || "").toLowerCase();
+            const netType = (hsPttNet && hsPttNet !== "bm") ? hsPttNet : String(card.dataset.networkType || (hs && hs.network_type) || hsPttNet || "bm").toLowerCase();
             const isAllStar = netType === "allstar";
+            const isYsf = netType === "ysf";
             const isXlx = netType === "xlx";
-            const targetSlot = (isAllStar || isXlx) ? 2 : ((relX < (rect.width / 2)) ? 1 : 2);
+            const targetSlot = (isAllStar || isXlx) ? 2 : (isYsf ? 1 : ((relX < (rect.width / 2)) ? 1 : 2));
             const now = Date.now();
 
             // Проверка на ДВОЙНОЙ ТАП (<= 320 мс)
@@ -6120,6 +12114,9 @@ export function renderRadiosGrid() {
                   targetHs.is_asl_linked = false;
                   updateCardAllStarPanel(card, targetHs);
                 }
+                return;
+              }
+              if (isYsf) {
                 return;
               }
               setCardSlot(card, targetSlot, true);
@@ -6168,8 +12165,9 @@ export function renderRadiosGrid() {
             cardPttBtn.classList.add(`tx-slot-${targetSlot}`);
             switchActiveHotspot(cid);
 
-            const netTypeHold = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
-            const hasTimeslots = (netTypeHold !== "allstar" && netTypeHold !== "xlx");
+            const hsHoldNet = String(getHotspotNetworkType(card) || "").toLowerCase();
+            const netTypeHold = (hsHoldNet && hsHoldNet !== "bm") ? hsHoldNet : String(card.dataset.networkType || (hs && hs.network_type) || hsHoldNet || "bm").toLowerCase();
+            const hasTimeslots = (netTypeHold !== "allstar" && netTypeHold !== "xlx" && netTypeHold !== "ysf");
             holdSlideOriginX = e.clientX;
             holdSlideOriginY = e.clientY;
             holdSlideSlot = targetSlot;
@@ -6220,7 +12218,9 @@ export function renderRadiosGrid() {
                   banner.className = "ptt-latched-banner";
                   cardPttBtn.appendChild(banner);
                 }
-                banner.textContent = `🔒 ${slotLabel} ЗАФИКСИРОВАН`;
+                banner.textContent = window.t
+                  ? window.t("ptt.slot_latched_banner", { slot: slotLabel }, `🔒 ${slotLabel} LATCHED`)
+                  : `🔒 ${slotLabel} LATCHED`;
 
                 if (navigator.vibrate) {
                   try { navigator.vibrate([35, 40, 60]); } catch (_) {}
@@ -6244,10 +12244,12 @@ export function renderRadiosGrid() {
               const rect = cardPttBtn.getBoundingClientRect();
               const relX = e.clientX - rect.left;
               if (relX >= 0 && relX <= rect.width) {
-                const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+                const hsHoverNet = String(getHotspotNetworkType(card) || "").toLowerCase();
+                const netType = (hsHoverNet && hsHoverNet !== "bm") ? hsHoverNet : String(card.dataset.networkType || (hs && hs.network_type) || hsHoverNet || "bm").toLowerCase();
                 const isAllStar = netType === "allstar";
+                const isYsf = netType === "ysf";
                 const isXlx = netType === "xlx";
-                if (isAllStar) {
+                if (isAllStar || isYsf) {
                   cardPttBtn.classList.remove("hover-slot-1", "hover-slot-2");
                   return;
                 }
@@ -6437,25 +12439,30 @@ export function renderRadiosGrid() {
 
         const cardAgc = card.querySelector(".agc-toggle");
         if (cardAgc) {
-          const agcActive = getHotspotAgc(cid);
+          const agcActive = getHotspotAgc(cardCid);
           cardAgc.checked = agcActive;
           cardAgc.onclick = (e) => { e.stopPropagation(); };
           cardAgc.onchange = () => {
-            setHotspotAgc(cid, cardAgc.checked);
+            setHotspotAgc(cardCid, cardAgc.checked);
           };
         }
 
         const cardTsModeBtn = card.querySelector(".ts-audio-mode-btn");
         if (cardTsModeBtn && typeof window.setupTsAudioModeButton === "function") {
-          window.setupTsAudioModeButton(cardTsModeBtn, card, cid);
+          window.setupTsAudioModeButton(cardTsModeBtn, card, cardCid);
           if (typeof window.updateCardTsAudioModeUI === "function") {
-            window.updateCardTsAudioModeUI(card, cid);
+            window.updateCardTsAudioModeUI(card, cardCid);
           }
         }
 
         const collapseBtn = card.querySelector(".hotspot-collapse-btn");
         if (collapseBtn) {
-          setupCollapseButtonLongPress(collapseBtn, cid);
+          setupCollapseButtonLongPress(collapseBtn, cardCid);
+        }
+
+        const cardAdnDice = card.querySelector(".btn-adn-dice");
+        if (cardAdnDice) {
+          setupAdnDiceButton(card, cardCid, hs);
         }
 
         // Quick TG Direct Dial (Быстрый набор TG) + Live TG Preview Quote Popup
@@ -6498,7 +12505,8 @@ export function renderRadiosGrid() {
             return;
           }
 
-          const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+          const hsQuickNet = String(getHotspotNetworkType(card) || "").toLowerCase();
+          const netType = (hsQuickNet && hsQuickNet !== "bm") ? hsQuickNet : String(card.dataset.networkType || (hs && hs.network_type) || hsQuickNet || "bm").toLowerCase();
           if (netType === "allstar") {
             let nodesDir = [];
             if (typeof window.getAllStarNodesDirectory === "function") {
@@ -6517,7 +12525,7 @@ export function renderRadiosGrid() {
                 { node: "2143",  name: "WAN RS", hub: "Western Area Repeater Network", country: "US", flag: "🇺🇸" },
                 { node: "9999",  name: "AllStar Parrot", hub: "Global Parrot Repeater", country: "GLOBAL", flag: "🦜" },
                 { node: "51010", name: "World Conference", hub: "International ASL Bridge", country: "GLOBAL", flag: "🌐" },
-                { node: "2502",  name: "ASL Russia", hub: "Российский узел AllStarLink", country: "RU", flag: "🇷🇺" },
+                { node: "2502",  name: "ASL Russia", hub: (window.t ? window.t("asl.dir_russia_hub", {}, "AllStarLink Node Russia") : "AllStarLink Node Russia"), country: "RU", flag: "🇷🇺" },
                 { node: "52495", name: "ASL Germany", hub: "DL AllStarLink Repeater Network", country: "DE", flag: "🇩🇪" }
               ];
             }
@@ -6539,6 +12547,40 @@ export function renderRadiosGrid() {
                 <span class="quick-tg-pop-sub">${safeEscapeHtml(nodeDesc)}</span>
               </div>
             `;
+            previewPopup.classList.add("visible");
+            return;
+          } else if (netType === "ysf") {
+            const ysfList = (typeof window !== "undefined" && typeof window.getNetworkServersList === "function" ? window.getNetworkServersList("ysf") : ((window._dmrServersCache && window._dmrServersCache["ysf"]) || [])) || [];
+            const found = ysfList.find(r => {
+              const rIdStr = String(r.id || "").trim();
+              return rIdStr === cleanDigits || (parseInt(rIdStr, 10) === num);
+            });
+
+            if (found) {
+              const info = (typeof window.resolveYsfRoomInfo === "function") ? window.resolveYsfRoomInfo(found) : { flag: "🌐", refName: found.name || `YSF #${num}` };
+              const flag = info.flag || "🌐";
+              const rName = info.refName || found.reflector_name || found.name || `YSF #${found.id}`;
+              const rDesc = found.description || found.host || "";
+              previewPopup.innerHTML = `
+                <div class="quick-tg-preview-inner" style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.1rem;">${flag}</span>
+                  <div style="display: flex; flex-direction: column; overflow: hidden;">
+                    <div style="font-weight: 700; color: #c084fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">#${found.id} ${rName}</div>
+                    ${rDesc ? `<div style="font-size: 0.75rem; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rDesc}</div>` : ""}
+                  </div>
+                </div>
+              `;
+            } else {
+              const notFoundYsfTxt = window.t
+                ? window.t("ysf.room_not_found_preview", { room: cleanDigits }, `Room #${cleanDigits} not found in YSF`)
+                : `Room #${cleanDigits} not found in YSF`;
+              previewPopup.innerHTML = `
+                <div class="quick-tg-preview-inner" style="display: flex; align-items: center; gap: 6px; color: #ff7b72;">
+                  <span>⚠️</span>
+                  <span style="font-size: 0.8rem; font-weight: 600;">${safeEscapeHtml(notFoundYsfTxt)}</span>
+                </div>
+              `;
+            }
             previewPopup.classList.add("visible");
             return;
           }
@@ -6564,7 +12606,8 @@ export function renderRadiosGrid() {
             const nm = (usr.name || "").trim();
             const loc = [usr.city, usr.country].filter(Boolean).join(", ");
             const details = [nm, loc].filter(Boolean).join(", ");
-            return `<span class="quick-tg-pop-sub">↳ Напр.: <b>ID ${safeEscapeHtml(String(uid))}</b> — <strong>${safeEscapeHtml(cs)}</strong>${details ? ` (${safeEscapeHtml(details)})` : ""}</span>`;
+            const exPrefix = window.t ? window.t("tgtx.example_prefix", {}, "↳ Ex.:") : "↳ Ex.:";
+            return `<span class="quick-tg-pop-sub">${safeEscapeHtml(exPrefix)} <b>ID ${safeEscapeHtml(String(uid))}</b> — <strong>${safeEscapeHtml(cs)}</strong>${details ? ` (${safeEscapeHtml(details)})` : ""}</span>`;
           };
 
           if (isPrivate) {
@@ -6585,11 +12628,11 @@ export function renderRadiosGrid() {
               quoteHtml = `<span class="quick-tg-pop-main"><strong>${safeEscapeHtml(cs)}</strong>${nm ? ` — ${safeEscapeHtml(nm)}` : ""}</span>` +
                 (loc ? `<span class="quick-tg-pop-sub">${safeEscapeHtml(loc)}</span>` : "");
             } else if (isIdNotFound) {
-              const notFoundTxt = window.t ? window.t("tgtx.private_id_custom", {}, "Личный вызов DMR ID (нет в базе RadioID)") : "Личный вызов DMR ID (нет в базе RadioID)";
+              const notFoundTxt = window.t ? window.t("tgtx.private_id_custom", {}, "Private call DMR ID (not in RadioID)") : "Private call DMR ID (not in RadioID)";
               quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(notFoundTxt)}</span>` +
                 (idPrefixUser ? formatUserPrefixHint(idPrefixUser) : "");
             } else {
-              const searchTxt = window.t ? window.t("tgtx.private_id_searching", {}, "Личный вызов DMR ID • поиск позывного...") : "Личный вызов DMR ID • поиск позывного...";
+              const searchTxt = window.t ? window.t("tgtx.private_id_searching", {}, "Private call DMR ID • searching callsign...") : "Private call DMR ID • searching callsign...";
               quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(searchTxt)}</span>`;
               if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
               previewDebounceTimer = setTimeout(async () => {
@@ -6636,11 +12679,13 @@ export function renderRadiosGrid() {
           // TalkGroup (1 .. 999999)
           const isParrot = (num === 9990);
           const tgNames = (typeof window !== "undefined" && window.TG_NAMES) || {};
-          const rawName = tgNames[num] ? String(tgNames[num]).trim() : (isParrot ? "Parrot / Echo (Эхо-тест)" : "");
+          const parrotDefault = window.t ? window.t("tgtx.parrot_echo_name", {}, "Parrot / Echo (Echo Test)") : "Parrot / Echo (Echo Test)";
+          const rawName = tgNames[num] ? String(tgNames[num]).trim() : (isParrot ? parrotDefault : "");
           const cleanDesc = getCleanTgDesc(num, rawName);
           const cInfo = (num >= 100 || rawName) ? getCountryInfo(num, "", "") : { name: "Global", name_en: "", flag: "🌐" };
           const flagHtml = getFlagBadgeHtml(cInfo, isParrot);
-          const cLabel = isParrot ? "Эхо-тест" : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup");
+          const echoLabel = window.t ? window.t("tgtx.echo_test", {}, "Echo Test") : "Echo Test";
+          const cLabel = isParrot ? echoLabel : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup");
 
           let quoteHtml = "";
           let isKnown = false;
@@ -6733,7 +12778,8 @@ export function renderRadiosGrid() {
           const val = parseInt(valStr, 10);
           const cid = card.dataset.hotspotId || hs.id;
           const slot = card._activeSlot || getHotspotSlot(cid);
-          const netType = ((hs && hs.network_type) || card.dataset.networkType || "bm").toLowerCase();
+          const hsApplyNet = String(getHotspotNetworkType(card) || getHotspotNetworkType(cid) || "").toLowerCase();
+          const netType = (hsApplyNet && hsApplyNet !== "bm") ? hsApplyNet : String(card.dataset.networkType || (hs && hs.network_type) || hsApplyNet || "bm").toLowerCase();
           hideQuickPreview();
 
           if (netType === "allstar") {
@@ -6745,7 +12791,10 @@ export function renderRadiosGrid() {
               if (typeof showToast === "function") {
                 const mLabel = (currentMode === "*2") ? "Monitor" : "RX/TX";
                 const addLabel = isAdd ? " [+]" : "";
-                showToast(`Подключение к ноде #${val} (${mLabel}${addLabel})...`, "info", 2000);
+                const connToast = window.t
+                  ? window.t("asl.connecting_node_toast", { node: val, mode: `${mLabel}${addLabel}` }, `Connecting to node #${val} (${mLabel}${addLabel})...`)
+                  : `Connecting to node #${val} (${mLabel}${addLabel})...`;
+                showToast(connToast, "info", 2000);
               }
               quickInput.value = "";
               quickInput.placeholder = "Node #";
@@ -6764,7 +12813,67 @@ export function renderRadiosGrid() {
             return;
           }
 
+          if (netType === "ysf") {
+            const rawVal = quickInput.value.trim();
+            if (!rawVal) return;
+            const cleanNum = parseInt(rawVal, 10);
+            if (isNaN(cleanNum) || cleanNum <= 0) {
+              if (typeof showToast === "function") {
+                showToast(window.t ? window.t("ysf.invalid_room_id_toast", {}, "Enter a valid YSF room number (numeric ID)") : "Enter a valid YSF room number (numeric ID)", "error", card);
+              }
+              return;
+            }
+
+            const ysfList = (typeof window !== "undefined" && typeof window.getNetworkServersList === "function" ? window.getNetworkServersList("ysf") : ((window._dmrServersCache && window._dmrServersCache["ysf"]) || [])) || [];
+            const matchedRoom = ysfList.find(r => {
+              const rIdStr = String(r.id || "").trim();
+              return rIdStr === rawVal || (parseInt(rIdStr, 10) === cleanNum);
+            });
+
+            const box = quickInput.closest(".quick-tg-box");
+
+            if (!matchedRoom) {
+              if (box) {
+                box.style.borderColor = "#ff2a38";
+                box.style.boxShadow = "0 0 10px rgba(255, 42, 56, 0.5)";
+                setTimeout(() => {
+                  if (box) {
+                    box.style.borderColor = "";
+                    box.style.boxShadow = "";
+                  }
+                }, 800);
+              }
+              if (typeof showToast === "function") {
+                showToast(window.t ? window.t("ysf.room_not_in_dir_toast", { room: rawVal }, `YSF room #${rawVal} not found in directory`) : `YSF room #${rawVal} not found in directory`, "error", card);
+              }
+              return;
+            }
+
+            switchActiveHotspot(cid);
+            quickInput.value = "";
+            quickInput.placeholder = "ID #";
+
+            if (box) {
+              box.style.borderColor = "#2ea043";
+              box.style.boxShadow = "0 0 10px rgba(46, 160, 67, 0.4)";
+              setTimeout(() => {
+                if (box) {
+                  box.style.borderColor = "";
+                  box.style.boxShadow = "";
+                }
+              }, 600);
+            }
+
+            if (typeof window.connectYsfRoomById === "function") {
+              window.connectYsfRoomById(matchedRoom.id, matchedRoom.reflector_name || matchedRoom.name, card);
+            }
+            return;
+          }
+
           if (!isNaN(val) && val > 0 && val <= 9999999) {
+            if (hs && hs._adnDiceRolling) {
+              stopAdnDiceSearch(cid, card, hs, { immediateAbort: true, silent: true });
+            }
             switchActiveHotspot(cid);
             setHotspotTg(cid, slot, val, true);
             quickInput.value = "";
@@ -6859,11 +12968,12 @@ export function renderRadiosGrid() {
       setCardSlot(card, curCardSlot, false);
       updateCardTgDisplay(card);
 
-      // Ensure static Quick TG placeholder
+      // Ensure static Quick TG / ID / Node placeholder
       const isAslCard = card.classList.contains("card-net-allstar") || ((hs.network_type || "bm").toLowerCase() === "allstar");
+      const isYsfCard = card.classList.contains("card-net-ysf") || ((hs.network_type || "bm").toLowerCase() === "ysf");
       const quickInp = card.querySelector(".quick-tg-input");
       if (quickInp) {
-        quickInp.placeholder = isAslCard ? "Node #" : "TG #";
+        quickInp.placeholder = isYsfCard ? "ID #" : (isAslCard ? "Node #" : "TG #");
       }
 
       // Sync volume & mute UI on this card
@@ -6890,8 +13000,8 @@ export function renderRadiosGrid() {
       const cBtn = card.querySelector(".hotspot-collapse-btn");
       if (cBtn) {
         cBtn.title = isCardCollapsed
-          ? (window.t ? window.t("vfo.hotspot_expand_title") : "Развернуть этот хотспот")
-          : (window.t ? window.t("vfo.hotspot_collapse_title") : "Свернуть этот хотспот (удержание: свернуть без отключения)");
+          ? (window.t ? window.t("vfo.hotspot_expand_title", {}, "Expand this hotspot (hold: move to archive)") : "Expand this hotspot (hold: move to archive)")
+          : (window.t ? window.t("vfo.hotspot_collapse_title", {}, "Collapse this hotspot (hold: collapse without disconnect)") : "Collapse this hotspot (hold: collapse without disconnect)");
       }
       const nBadge = card.querySelector(".hotspot-name-badge");
       if (isCardCollapsed && !isCardLive) {
@@ -6901,9 +13011,10 @@ export function renderRadiosGrid() {
           audioPlayer.resetHotspot(hs.id);
         }
         if (hs.status === "ONLINE" || hs.status === "CONNECTING" || hs.status === "AUTHENTICATING") {
+          const collapsedDet = window.t ? window.t("status.bm_collapsed_detail", {}, "Collapsed / disconnected") : "Collapsed / disconnected";
           hs.status = "DISCONNECTED";
-          hs.detail = "Свернут / отключен";
-          updateBmStatus("DISCONNECTED", "Свернут / отключен", hs.id);
+          hs.detail = collapsedDet;
+          updateBmStatus("DISCONNECTED", collapsedDet, hs.id);
           fetch(`/api/hotspots/${hs.id}/collapse`, { method: "POST" }).catch(() => {});
           const curWs = (typeof window !== "undefined" && window.ws) || null;
           if (curWs && curWs.readyState === WebSocket.OPEN) {
@@ -6919,45 +13030,37 @@ export function renderRadiosGrid() {
 
     syncCollapsedHotspotStacks();
 
-    // Ensure live activity monitor / history panel stays correctly positioned after card reordering in radiosGrid
-    const liveMonitorPanel = document.getElementById("liveMonitorPanel");
-    const isLogVis = Boolean(typeof window.isLogVisible !== "undefined" ? window.isLogVisible : (liveMonitorPanel && !liveMonitorPanel.classList.contains("hidden")));
-    if (isLogVis && liveMonitorPanel) {
-      const isMobile = window.innerWidth <= 768;
-      const effectiveHid = (isMobile && (!window.currentLogHotspotId || window.currentLogHotspotId === "all"))
-        ? (window.activeHotspotId || ((window.currentHotspots || [])[0] && (window.currentHotspots || [])[0].id) || "default")
-        : window.currentLogHotspotId;
-
-      const targetCard = (effectiveHid && effectiveHid !== "all")
-        ? (document.querySelector(`.radio-container[data-hotspot-id="${effectiveHid}"]`) || document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"))
-        : (document.querySelector(".radio-container:not(.collapsed)") || document.querySelector(".radio-container"));
-
-      const anchorEl = (targetCard && targetCard.closest(".collapsed-hotspots-stack")) || targetCard;
-      if (anchorEl && anchorEl.nextElementSibling !== liveMonitorPanel) {
-        anchorEl.after(liveMonitorPanel);
-      }
-    } else if (!isLogVis && liveMonitorPanel) {
-      const dashboard = document.querySelector(".app-dashboard");
-      if (dashboard && liveMonitorPanel.parentElement !== dashboard) {
-        dashboard.appendChild(liveMonitorPanel);
-      }
-    }
-
     renderLogHotspotTabs();
     initQuickAssign();
     if (typeof updatePttLockUI === "function") {
       updatePttLockUI();
     }
+    if (typeof window !== "undefined") {
+      if (typeof window.updateAmbePresetUI === "function") {
+        try { window.updateAmbePresetUI(); } catch (_) {}
+      }
+      if (typeof window.updateAudioRxPresetUI === "function") {
+        try { window.updateAudioRxPresetUI(); } catch (_) {}
+      }
+      if (typeof window.updateAudioTxPresetUI === "function") {
+        try { window.updateAudioTxPresetUI(); } catch (_) {}
+      }
+    }
     if (typeof window.updateLogVisibility === "function") {
       window.updateLogVisibility(false);
     }
-    if (radiosGrid && typeof initGridDragReorder === "function") {
-      initGridDragReorder(radiosGrid, reorderHotspots);
-    }
+    syncDesktopHotspotsTopAlignment();
   }
 export function applyActiveHotspotToUI() {
     const hs = currentHotspots.find(h => h.id === activeHotspotId) || currentHotspots[0];
     if (!hs) return;
+
+    const activeNet = getHotspotNetworkType(hs);
+    if (activeNet === "adn") {
+      refreshAdnServers(false);
+    } else if (activeNet === "dmrplus") {
+      refreshDmrPlusServers(false);
+    }
 
     // Respect unified saved talkgroup from localStorage, or fall back to hotspot config defaults
     const savedTg = parseInt(localStorage.getItem(`proxdmr_tg_${hs.id}`) || localStorage.getItem("proxdmr_tg") || localStorage.getItem("proxdmr_tg_ts2") || localStorage.getItem("proxdmr_tg_ts1"), 10);
@@ -6980,7 +13083,7 @@ export function renderHotspotsList() {
     const activeHotspotId = window.activeHotspotId || "default";
     hotspotsListContainer.innerHTML = "";
     if (!currentHotspots.length) {
-      const emptyHs = window.t ? window.t("hotspots.empty_configured") : "Нет настроенных хотспотов";
+      const emptyHs = window.t ? window.t("hotspots.empty_configured", {}, "No configured hotspots") : "No configured hotspots";
       hotspotsListContainer.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem;">${emptyHs}</div>`;
       return;
     }
@@ -6996,29 +13099,34 @@ export function renderHotspotsList() {
       let netTag = "BM";
       let autoTgDisabledKey = "hotspots.auto_tg_bm_disabled_title";
       let autoTgCardTextKey = "hs_edit.auto_tg_bm";
-      let autoTgCardTextFallback = "Автонастройка TG BM";
+      let autoTgCardTextFallback = "Auto BM TG";
       if (hsNet === "tgif") {
         netTag = "TGIF";
         autoTgDisabledKey = "hotspots.auto_tg_tgif_disabled_title";
         autoTgCardTextKey = "hs_edit.auto_tg_tgif";
-        autoTgCardTextFallback = "Автонастройка TG TGIF";
+        autoTgCardTextFallback = "Auto TGIF TG";
       } else if (hsNet === "freedmr") {
         netTag = "FreeDMR";
         autoTgDisabledKey = "hotspots.auto_tg_freedmr_disabled_title";
         autoTgCardTextKey = "hs_edit.auto_tg_freedmr";
-        autoTgCardTextFallback = "Автонастройка TG FreeDMR";
+        autoTgCardTextFallback = "Auto FreeDMR TG";
+      } else if (hsNet === "adn") {
+        netTag = "ADN";
+        autoTgDisabledKey = "hotspots.auto_tg_adn_disabled_title";
+        autoTgCardTextKey = "hs_edit.auto_tg_adn";
+        autoTgCardTextFallback = "Auto ADN TG";
       } else if (hsNet === "xlx") {
         netTag = "XLX";
         autoTgDisabledKey = "hotspots.auto_tg_xlx_disabled_title";
         autoTgCardTextKey = "hs_edit.auto_tg_xlx";
-        autoTgCardTextFallback = "Автоподключение XLX";
+        autoTgCardTextFallback = "Auto-connect XLX";
       }
-      const lockTitle = window.t 
-        ? window.t(autoTgDisabledKey, {}, `Автонастройка TG ${netTag} отключена`) 
-        : `Автонастройка TG ${netTag} отключена`;
+      const lockTitle = window.t
+        ? window.t(autoTgDisabledKey, {}, `Auto ${netTag} TG disabled`)
+        : `Auto ${netTag} TG disabled`;
       const lockIcon = !isAutoTgBm ? `<span class="hs-lock-icon" style="margin-left: 6px; font-size: 0.95em; vertical-align: middle;" title="${lockTitle}">🔒</span>` : '';
-      const collapsedBgText = window.t ? window.t("hotspots.badge_collapsed_bg", {}, "🟢 СВЕРНУТ (В ФОНЕ)") : "🟢 СВЕРНУТ (В ФОНЕ)";
-      const collapsedText = window.t ? window.t("hotspots.badge_collapsed", {}, "⚪ СВЕРНУТ") : "⚪ СВЕРНУТ";
+      const collapsedBgText = window.t ? window.t("hotspots.badge_collapsed_bg", {}, "🟢 COLLAPSED (BG)") : "🟢 COLLAPSED (BG)";
+      const collapsedText = window.t ? window.t("hotspots.badge_collapsed", {}, "⚪ COLLAPSED") : "⚪ COLLAPSED";
       const statusBadge = isCollapsed
         ? (isLive
             ? `<span style='color: #00e676; font-size: 0.75rem; font-weight: bold;'>${collapsedBgText}</span>`
@@ -7027,6 +13135,7 @@ export function renderHotspotsList() {
           ? "<span style='color: var(--color-green); font-size: 0.75rem; font-weight: bold;'>🟢 ONLINE</span>"
           : "<span style='color: var(--text-muted); font-size: 0.75rem;'>⚪ OFFLINE</span>");
 
+      const autoRecTitle = window.t ? window.t("hs_edit.auto_record", {}, "Auto-record TS1/2") : "Auto-record TS1/2";
       card.innerHTML = `
         <div class="hotspot-card-header">
           <div class="hotspot-card-title">
@@ -7041,20 +13150,20 @@ export function renderHotspotsList() {
         <div class="hotspot-card-actions" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
           <div class="hotspot-card-btns" style="display: flex; align-items: center; gap: 6px;">
             <button class="btn-card-action primary btn-toggle-conn" data-id="${hs.id}">
-              ${isOnline ? (window.t ? window.t("hotspots.btn_disconnect") : "Отключить") : (window.t ? window.t("hotspots.btn_connect") : "🔗 Подключить")}
+              ${isOnline ? (window.t ? window.t("hotspots.btn_disconnect", {}, "Disconnect") : "Disconnect") : (window.t ? window.t("hotspots.btn_connect", {}, "🔗 Connect") : "🔗 Connect")}
             </button>
-            <button class="btn-card-action btn-edit-hs" data-id="${hs.id}">✏️ ${window.t ? window.t("buttons.edit") : "Изменить"}</button>
+            <button class="btn-card-action btn-edit-hs" data-id="${hs.id}">✏️ ${window.t ? window.t("buttons.edit", {}, "Edit") : "Edit"}</button>
             ${currentHotspots.length > 1 ? `<button class="btn-card-action danger btn-del-hs" data-id="${hs.id}">🗑️</button>` : ""}
           </div>
           <div class="hs-card-toggles-row" style="display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap;">
-            ${(hsNet === "bm" || hsNet === "tgif" || hsNet === "freedmr" || hsNet === "xlx") ? `
+            ${(hsNet === "bm") ? `
             <label class="hs-card-autotg-label" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; cursor: pointer; user-select: none; color: var(--text-primary, #c9d1d9);">
               <input type="checkbox" class="chk-hs-autotg" data-id="${hs.id}" ${isAutoTgBm ? 'checked' : ''} style="cursor: pointer; width: 15px; height: 15px; accent-color: #58a6ff;">
               <span>${window.t ? window.t(autoTgCardTextKey, {}, autoTgCardTextFallback) : autoTgCardTextFallback}</span>
             </label>` : ""}
-            <label class="hs-card-autorec-label" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; cursor: pointer; user-select: none; color: var(--text-primary, #c9d1d9);" title="Автозапись TS1/2">
+            <label class="hs-card-autorec-label" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; cursor: pointer; user-select: none; color: var(--text-primary, #c9d1d9);" title="${escapeHtml(autoRecTitle)}" data-i18n-title="hs_edit.auto_record">
               <input type="checkbox" class="chk-hs-autorec" data-id="${hs.id}" ${hs.auto_record !== false ? 'checked' : ''} style="cursor: pointer; width: 15px; height: 15px; accent-color: #ef4444;">
-              <span data-i18n="hs_edit.auto_record">${window.t ? window.t("hs_edit.auto_record") : "Автозапись TS1/2"}</span>
+              <span data-i18n="hs_edit.auto_record">${escapeHtml(autoRecTitle)}</span>
             </label>
           </div>
         </div>
@@ -7083,13 +13192,14 @@ export function renderHotspotsList() {
       const delBtn = card.querySelector(".btn-del-hs");
       if (delBtn) {
         delBtn.onclick = async () => {
+          const fallbackDel = `Delete hotspot "${hs.name}"?`;
           const ok = await (window.showAppConfirm ? window.showAppConfirm({
-            title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Удаление хотспота") : "Удаление хотспота",
+            title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Delete hotspot") : "Delete hotspot",
             icon: "🗑️",
-            message: window.t ? window.t("hotspots.delete_confirm_msg", { name: hs.name }, `Удалить хотспот "${hs.name}"?`) : `Удалить хотспот "${hs.name}"?`,
-            confirmText: window.t ? window.t("buttons.delete", {}, "Удалить") : "Удалить",
+            message: window.t ? window.t("hotspots.delete_confirm_msg", { name: hs.name }, fallbackDel) : fallbackDel,
+            confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
             confirmStyle: "danger"
-          }) : Promise.resolve(confirm(`Удалить хотспот "${hs.name}"?`)));
+          }) : Promise.resolve(confirm(window.t ? window.t("hotspots.delete_confirm_msg", { name: hs.name }, fallbackDel) : fallbackDel)));
           if (ok) {
             if (typeof disableHotspotTranscribe === "function") {
               disableHotspotTranscribe(hs.id, true);
@@ -7130,9 +13240,9 @@ export function renderHotspotsList() {
                 netKeyOn = "hotspots.auto_tg_xlx_on";
                 netKeyOff = "hotspots.auto_tg_xlx_off";
               }
-              const toastMsg = newVal 
-                ? (window.t ? window.t(netKeyOn, { name: hs.name }, `✅ [${hs.name}]: Автонастройка TG ${netTag} включена`) : `✅ [${hs.name}]: Автонастройка TG ${netTag} включена`) 
-                : (window.t ? window.t(netKeyOff, { name: hs.name }, `🔒 [${hs.name}]: Автонастройка TG ${netTag} отключена`) : `🔒 [${hs.name}]: Автонастройка TG ${netTag} отключена`);
+              const toastMsg = newVal
+                ? (window.t ? window.t(netKeyOn, { name: hs.name }, `✅ [${hs.name}]: Auto ${netTag} TG enabled`) : `✅ [${hs.name}]: Auto ${netTag} TG enabled`)
+                : (window.t ? window.t(netKeyOff, { name: hs.name }, `🔒 [${hs.name}]: Auto ${netTag} TG disabled`) : `🔒 [${hs.name}]: Auto ${netTag} TG disabled`);
               showToast(toastMsg, 2500);
             }
           } catch (err) {
@@ -7148,6 +13258,9 @@ export function renderHotspotsList() {
           e.stopPropagation();
           const newVal = autoRecChk.checked;
           hs.auto_record = newVal;
+          try {
+            localStorage.setItem(`proxdmr_autorec_${resolveHotspotId(hs.id)}`, newVal ? "1" : "0");
+          } catch (_) {}
           updateAllHotspotRecUI();
           try {
             const res = await fetch(`/api/hotspots/${hs.id}/auto-record`, {
@@ -7156,7 +13269,12 @@ export function renderHotspotsList() {
               body: JSON.stringify({ enabled: newVal })
             });
             if (res.ok) {
-              showToast(newVal ? (window.t ? window.t("hotspots.autorec_on", { name: hs.name }, `✅ [${hs.name}]: Автозапись вызовов включена`) : `✅ [${hs.name}]: Автозапись вызовов включена`) : (window.t ? window.t("hotspots.autorec_off", { name: hs.name }, `⏸️ [${hs.name}]: Автозапись вызовов отключена`) : `⏸️ [${hs.name}]: Автозапись вызовов отключена`), 2500);
+              showToast(
+                newVal
+                  ? (window.t ? window.t("hotspots.autorec_on", { name: hs.name }, `✅ [${hs.name}]: Call auto-recording enabled`) : `✅ [${hs.name}]: Call auto-recording enabled`)
+                  : (window.t ? window.t("hotspots.autorec_off", { name: hs.name }, `⏸️ [${hs.name}]: Call auto-recording disabled`) : `⏸️ [${hs.name}]: Call auto-recording disabled`),
+                2500
+              );
             }
           } catch (err) {
             console.error("Failed to toggle auto_record:", err);
@@ -7214,19 +13332,22 @@ export function renderBmMastersDropdown(currentHost, networkTypeOverride = null)
       editHsMasterSelect.appendChild(benchOpt);
     }
 
+    const netName = profile.shortName || profile.shortLabel || (netType ? netType.toUpperCase() : "DMR");
     const defOpt = document.createElement("option");
     defOpt.value = "";
     defOpt.textContent = netType === "bm"
       ? (window.t ? window.t("hs_edit.master_select_prompt") : "🌍 Выберите страну / сервер BM...")
-      : (window.t ? window.t("hs_edit.master_select_net_prompt", { net: profile.shortName }, `🌐 Выберите сервер ${profile.shortName}...`) : `🌐 Выберите сервер ${profile.shortName}...`);
+      : (window.t ? window.t("hs_edit.master_select_net_prompt", { net: netName }, `🌐 Выберите сервер ${netName}...`) : `🌐 Выберите сервер ${netName}...`);
     editHsMasterSelect.appendChild(defOpt);
 
     let matched = false;
     const cleanCurrent = (hostVal || "").trim().toLowerCase();
 
-    const curLang = (window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
-    const isCyrLang = (curLang === "ru" || curLang === "uk");
-    const recTag = window.t ? window.t("bm.master_recommended", {}, "⭐ [Рекомендуется]") : "⭐ [Рекомендуется]";
+    const curLang = (window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "en";
+    const recTag = window.t ? window.t("bm.master_recommended", {}, "⭐ [Recommended]") : "⭐ [Recommended]";
+    const intlLabel = window.t ? window.t("common.international", {}, "International") : "International";
+    const msUnit = window.t ? window.t("ping.unit_ms", {}, "ms") : "ms";
+    const deadLabel = window.t ? window.t("server_probe.no_reply", {}, "🔴 NO REPLY") : "🔴 NO REPLY";
 
     const cached = window._dmrServersCache && window._dmrServersCache[netType];
     const rawServers = (Array.isArray(cached) && cached.length > 0)
@@ -7244,32 +13365,59 @@ export function renderBmMastersDropdown(currentHost, networkTypeOverride = null)
         opt.value = m.host || "";
         if (m.port) opt.dataset.port = String(m.port);
         if (m.password) opt.dataset.password = String(m.password);
-        const cCode = (m.country_code || m.country || "GLOBAL").toUpperCase();
-        const countryName = cCode !== "GLOBAL"
-          ? getLocalizedCountryName(cCode, m.country_name || m.country || profile.shortLabel || profile.shortName || "DMR", curLang)
-          : (m.country_name || m.country || profile.shortLabel || profile.shortName || "DMR");
-        const flag = m.flag || (cCode !== "GLOBAL" ? isoToEmoji(cCode) : "🌐");
+
+        let cCode = (m.country_code || m.country || "").toUpperCase();
+        let refName = (m.reflector_name || "").trim();
+        const rawName = (m.name || "").trim();
+
+        if (netType === "ysf") {
+          if (!refName || !cCode || cCode === "GLOBAL") {
+            const match = rawName.match(/^([A-Za-z]{2})[-_ ]\s*(.*)$/);
+            if (match) {
+              if (!cCode || cCode === "GLOBAL") cCode = match[1].toUpperCase();
+              if (!refName) refName = match[2].trim();
+            }
+          }
+          if (!cCode) cCode = "XX";
+          if (m.id) opt.dataset.roomId = String(m.id);
+        }
+
+        const isGlobalOrXx = !cCode || cCode === "GLOBAL" || cCode === "XX";
+        const flag = m.flag || (!isGlobalOrXx ? isoToEmoji(cCode) : "🌐");
         const recSuffix = m.recommended ? ` ${recTag}` : "";
-        const prefixLabel = netType === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || "");
-        const labelMid = prefixLabel ? `${prefixLabel} ` : "";
+
+        let itemCore = "";
+        if (netType === "ysf") {
+          const localizedCountry = !isGlobalOrXx
+            ? getLocalizedCountryName(cCode, cCode, curLang)
+            : intlLabel;
+          const targetName = refName || localizedCountry;
+          const idTag = m.id ? ` #${m.id}` : "";
+          itemCore = `${flag} ${cCode} ${targetName}${idTag} (${m.host || ""})`;
+        } else {
+          const countryName = cCode !== "GLOBAL"
+            ? getLocalizedCountryName(cCode, m.country_name || m.country || profile.shortLabel || profile.shortName || "DMR", curLang)
+            : (m.country_name || m.country || profile.shortLabel || profile.shortName || "DMR");
+          const prefixLabel = netType === "bm" ? `BM ${m.id || ""}` : (m.name || m.id || "");
+          const labelMid = prefixLabel ? `${prefixLabel} ` : "";
+          itemCore = `${flag} ${countryName} — ${labelMid}(${m.host || ""})`;
+        }
 
         const st = (m.state || "").toLowerCase();
         const isDead = ["no_reply", "refused", "dns_fail"].includes(st) ||
                        (m.udp_ok === false && m.avg_ping == null && m.udp_ms == null) ||
                        (m.loss_pct !== undefined && m.loss_pct >= 100);
         const pingVal = (m.udp_ms !== undefined && m.udp_ms !== null) ? m.udp_ms : ((m.avg_ping !== undefined && m.avg_ping !== null) ? m.avg_ping : null);
-        const msUnit = isCyrLang ? "мс" : "ms";
-        const deadLabel = isCyrLang ? "🔴 НЕ ОТВЕЧАЕТ" : "🔴 NO REPLY";
 
         if (isDead) {
-          opt.textContent = `${deadLabel} · ${flag} ${countryName} — ${labelMid}(${m.host || ""})`;
+          opt.textContent = `${deadLabel} · ${itemCore}`;
           opt.style.color = "#ef4444";
           opt.dataset.dead = "1";
         } else if (pingVal !== null && !isNaN(pingVal)) {
-          opt.textContent = `⚡ ${Math.round(pingVal)} ${msUnit} · ${flag} ${countryName} — ${labelMid}(${m.host || ""})${recSuffix}`;
+          opt.textContent = `⚡ ${Math.round(pingVal)} ${msUnit} · ${itemCore}${recSuffix}`;
           opt.dataset.ping = String(Math.round(pingVal));
         } else {
-          opt.textContent = `${flag} ${countryName} — ${labelMid}(${m.host || ""})${recSuffix}`;
+          opt.textContent = `${itemCore}${recSuffix}`;
         }
 
         const mHost = (m.host || "").toLowerCase();
@@ -7285,15 +13433,15 @@ export function renderBmMastersDropdown(currentHost, networkTypeOverride = null)
     if (!matched && cleanCurrent) {
       const customOpt = document.createElement("option");
       customOpt.value = cleanCurrent;
-      customOpt.textContent = netType === "freedmr"
-        ? `⚠️ Свой / устаревший: ${cleanCurrent}`
-        : (window.t ? window.t("hs_edit.master_custom_option") : `✏️ Ввести свой адрес вручную (${cleanCurrent})`);
+      customOpt.textContent = (netType === "freedmr" || netType === "adn")
+        ? (window.t ? window.t("hs_edit.custom_outdated_opt", { host: cleanCurrent }, `⚠️ Custom / outdated: ${cleanCurrent}`) : `⚠️ Custom / outdated: ${cleanCurrent}`)
+        : (window.t ? window.t("hs_edit.master_custom_with_host", { host: cleanCurrent }, `✏️ Enter custom address (${cleanCurrent})`) : `✏️ Enter custom address (${cleanCurrent})`);
       customOpt.selected = true;
       editHsMasterSelect.appendChild(customOpt);
     } else {
       const customOpt = document.createElement("option");
       customOpt.value = "CUSTOM";
-      customOpt.textContent = window.t ? window.t("hs_edit.master_custom_option") : "✏️ Ввести свой адрес вручную (другой сервер / IP)";
+      customOpt.textContent = window.t ? window.t("hs_edit.master_custom_option", {}, "✏️ Enter custom address manually (another server / IP)") : "✏️ Enter custom address manually (another server / IP)";
       editHsMasterSelect.appendChild(customOpt);
     }
   }
@@ -7301,11 +13449,7 @@ export function renderBmMastersDropdown(currentHost, networkTypeOverride = null)
 export function buildRptoFromCurrentFormFields(netTypeOverride) {
   const editHsNetworkType = document.getElementById("editHsNetworkType");
   const cleanType = (netTypeOverride || (editHsNetworkType && editHsNetworkType.value) || "bm").toLowerCase();
-  const editHsTgTs1 = document.getElementById("editHsTgTs1");
-  const editHsTgTs2 = document.getElementById("editHsTgTs2");
   const editHsId = document.getElementById("editHsId");
-  const tg1 = parseInt(editHsTgTs1 ? editHsTgTs1.value : "0", 10) || 0;
-  const tg2 = parseInt(editHsTgTs2 ? editHsTgTs2.value : "0", 10) || 0;
 
   if (cleanType === "dmrplus") {
     const refEl = document.getElementById("editHsDmrPlusRef");
@@ -7313,12 +13457,10 @@ export function buildRptoFromCurrentFormFields(netTypeOverride) {
     const startRef = parseInt(refEl ? refEl.value : "4530", 10) || 4530;
     const relinkTime = parseInt(relinkEl ? relinkEl.value : "60", 10) || 60;
     const parts = [`StartRef=${startRef}`, `RelinkTime=${relinkTime}`];
-    if (tg1 > 0 && tg1 !== 9990) parts.push(`TS1_1=${tg1}`);
-    if (tg2 > 0 && tg2 !== 9990 && tg2 !== 9) parts.push(`TS2_1=${tg2}`);
     return parts.join(";") + ";";
   }
 
-  if (cleanType === "freedmr" || cleanType === "custom") {
+  if (cleanType === "freedmr" || cleanType === "adn" || cleanType === "custom") {
     const curId = editHsId ? editHsId.value.trim() : "";
     const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
     const curHs = currentHotspots.find(h => h.id === curId);
@@ -7333,7 +13475,14 @@ export function buildRptoFromCurrentFormFields(netTypeOverride) {
       if (tg1 > 0 && tg1 !== 9990) parts.push(`TS1=${tg1}`);
       if (tg2 > 0 && tg2 !== 9990 && tg2 !== tg1) parts.push(`TS2=${tg2}`);
       if (tg1 === tg2 && tg1 > 0) {
-        showToast(`FreeDMR не допускает одну TG на обоих слотах — TG ${tg1} оставлена только на TS1`, 2800);
+        const dupKey = (cleanType === "adn") ? "adn.dup_slot_toast" : "freedmr.dup_slot_toast";
+        const defDup = (cleanType === "adn")
+          ? `ADN Systems does not allow the same TG on both slots — TG ${tg1} was kept on TS1 only`
+          : `FreeDMR does not allow the same TG on both slots — TG ${tg1} was kept on TS1 only`;
+        const dupMsg = window.t
+          ? window.t(dupKey, { tg: tg1 }, defDup)
+          : defDup;
+        showToast(dupMsg, 2800);
       }
     }
 
@@ -7385,25 +13534,28 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const modTg = 4000 + Math.max(1, Math.min(26, curMod.charCodeAt(0) - 64));
 
     const hasBmApi = Boolean(profile.hasBmApi || profile.supportsBmApi || cleanType === "bm");
-    const hasRpto = Boolean(profile.hasRpto || profile.supportsRpto || cleanType === "freedmr" || cleanType === "dmrplus" || cleanType === "custom");
+    const hasRpto = Boolean(profile.hasRpto || profile.supportsRpto || cleanType === "freedmr" || cleanType === "adn" || cleanType === "dmrplus" || cleanType === "custom");
     const hasXlxModule = Boolean(profile.hasXlxModule || profile.supportsXlxModule || cleanType === "xlx");
     const fullName = profile.fullName || profile.name || "BrandMeister DMR";
     const shortLabel = profile.shortLabel || profile.shortName || "BM";
 
-    // 1. Toggle network type selector (ONLY for new HS) vs read-only network header (for existing HS)
+    // 1. Inverted Brand Header is ALWAYS visible for both new and existing hotspots
     const netTypeGroup = document.getElementById("editHsNetworkTypeGroup");
     const existingNetHeader = document.getElementById("editHsExistingNetHeader");
     if (netTypeGroup) {
-      netTypeGroup.style.display = isNewHotspot ? "block" : "none";
+      netTypeGroup.style.display = "none";
     }
     if (existingNetHeader) {
-      existingNetHeader.style.display = isNewHotspot ? "none" : "flex";
+      existingNetHeader.style.display = "flex";
+      // Clear previous header theme classes and apply current mode brand color class
+      [
+        "hs-net-header-bm", "hs-net-header-tgif", "hs-net-header-freedmr",
+        "hs-net-header-adn", "hs-net-header-dmrplus", "hs-net-header-xlx",
+        "hs-net-header-ysf", "hs-net-header-allstar", "hs-net-header-custom"
+      ].forEach(cls => existingNetHeader.classList.remove(cls));
+      existingNetHeader.classList.add(`hs-net-header-${cleanType}`);
     }
 
-    const pillEl = document.getElementById("editHsNetworkTypePill");
-    if (pillEl) {
-      renderNetworkBadgeElement(pillEl, cleanType, { xlxModule: curMod });
-    }
     const existingPillEl = document.getElementById("editHsExistingNetPill");
     if (existingPillEl) {
       renderNetworkBadgeElement(existingPillEl, cleanType, { xlxModule: curMod });
@@ -7420,12 +13572,16 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_tgif", {}, "🔒 Сеть HS • MMDVM + TGIF API v1") : "🔒 Сеть HS • MMDVM + TGIF API v1";
       } else if (cleanType === "freedmr") {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_freedmr", {}, "🔒 Сеть HS • HomeBrew + RPTO") : "🔒 Сеть HS • HomeBrew + RPTO";
+      } else if (cleanType === "adn") {
+        existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_adn", {}, "🔒 Сеть HS • HomeBrew + RPTO (ADN Systems)") : "🔒 Сеть HS • HomeBrew + RPTO (ADN Systems)";
       } else if (cleanType === "dmrplus") {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_dmrplus", {}, "🔒 Сеть HS • IPSC2 + StartRef (RPTO)") : "🔒 Сеть HS • IPSC2 + StartRef (RPTO)";
       } else if (cleanType === "xlx") {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_xlx", { mod: curMod, tg: modTg }, `🔒 Сеть HS • Модуль ${curMod} (TG ${modTg} на TS2)`) : `🔒 Сеть HS • Модуль ${curMod} (TG ${modTg} на TS2)`;
       } else if (cleanType === "allstar") {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_allstar", {}, "🔒 Сеть HS • AllStarLink (IAX2)") : "🔒 Сеть HS • AllStarLink (IAX2)";
+      } else if (cleanType === "ysf") {
+        existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_ysf", {}, "🔒 Сеть HS • Yaesu System Fusion (C4FM)") : "🔒 Сеть HS • Yaesu System Fusion (C4FM)";
       } else {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_custom", {}, "🔒 Сеть HS • Custom MMDVM") : "🔒 Сеть HS • Custom MMDVM";
       }
@@ -7435,7 +13591,7 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const formEl = document.getElementById("hotspotEditForm");
     if (formEl) {
       formEl.classList.add("hs-edit-dynamic-panel");
-      ["bm", "tgif", "freedmr", "dmrplus", "xlx", "allstar", "custom"].forEach(t => {
+      ["bm", "tgif", "freedmr", "adn", "dmrplus", "xlx", "ysf", "allstar", "custom"].forEach(t => {
         formEl.classList.remove(`hs-net-theme-${t}`);
       });
       formEl.classList.add(`hs-net-theme-${cleanType}`);
@@ -7445,7 +13601,6 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const pwdGroup = document.getElementById("editHsPasswordGroup");
     const apiKeyGroup = document.getElementById("editHsApiKeyGroup");
     const autoTgBmGroup = document.getElementById("editHsAutoTgBmGroup");
-    const testServersCol = document.getElementById("editHsTestServersCol");
     const dmrPlusGroup = document.getElementById("editHsDmrPlusGroup");
     const rptoGroup = document.getElementById("editHsRptoGroup");
     const rptoLabel = document.getElementById("editHsRptoLabel");
@@ -7455,42 +13610,28 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const btnSendRptoNow = document.getElementById("btnSendRptoNow");
     const xlxGroup = document.getElementById("editHsXlxGroup");
     const allstarGroup = document.getElementById("editHsAllStarGroup");
-    const tgRow = document.getElementById("editHsTgRow");
     const pwdLabel = document.getElementById("editHsPasswordLabel");
     const masterLabel = document.getElementById("editHsMasterSelectLabel");
     const editHsHost = document.getElementById("editHsHost");
     const editHsPort = document.getElementById("editHsPort");
     const editHsPassword = document.getElementById("editHsPassword");
-    const editHsTgTs1 = document.getElementById("editHsTgTs1");
-    const editHsTgTs2 = document.getElementById("editHsTgTs2");
-    const tgTs1Label = document.getElementById("editHsTgTs1Label");
-    const tgTs2Label = document.getElementById("editHsTgTs2Label");
-
-    if (pwdGroup) pwdGroup.style.display = "";
+    if (pwdGroup) pwdGroup.style.display = (cleanType === "ysf") ? "none" : "";
     if (apiKeyGroup) apiKeyGroup.style.display = hasBmApi ? "" : "none";
-    if (autoTgBmGroup) autoTgBmGroup.style.display = (hasBmApi || cleanType === "freedmr" || cleanType === "xlx") ? "inline-flex" : "none";
-    if (testServersCol) {
-      testServersCol.style.display = (cleanType === "custom" || cleanType === "bm" || cleanType === "tgif" || cleanType === "freedmr" || cleanType === "dmrplus" || cleanType === "xlx") ? "flex" : "none";
-      const btnTestBmServers = document.getElementById("btnTestBmServers");
-      const btnSpan = btnTestBmServers ? btnTestBmServers.querySelector("span:not(.btn-icon)") : null;
-      if (btnSpan) {
-        if (cleanType === "custom") {
-          btnSpan.textContent = window.t ? window.t("server_probe.btn_check_single", {}, "Проверить сервер") : "Проверить сервер";
-        } else {
-          btnSpan.textContent = window.t ? window.t("bm_bench.btn_test", {}, "Тест серверов") : "Тест серверов";
-        }
-      }
-    }
+    // Checkbox auto-TG is ONLY visible for BrandMeister (BM), hidden for all other networks!
+    if (autoTgBmGroup) autoTgBmGroup.style.display = (cleanType === "bm") ? "inline-flex" : "none";
+
     if (dmrPlusGroup) dmrPlusGroup.style.display = (cleanType === "dmrplus") ? "flex" : "none";
     if (rptoGroup) rptoGroup.style.display = hasRpto ? "" : "none";
     if (btnBuildRptoFromTg) btnBuildRptoFromTg.style.display = hasRpto ? "inline-flex" : "none";
     if (btnSendRptoNow) btnSendRptoNow.style.display = (!isNewHotspot && hasRpto) ? "inline-flex" : "none";
     if (xlxGroup) xlxGroup.style.display = hasXlxModule ? "" : "none";
     if (allstarGroup) allstarGroup.style.display = (cleanType === "allstar") ? "block" : "none";
-    if (tgRow) tgRow.style.display = (cleanType === "xlx" || cleanType === "allstar") ? "none" : "flex";
 
-    // AllStarLink: hide DMR-specific fields (DMR ID, SSID, Talker Alias, Master server selector, Host/Port)
+    // Callsign-only networks (AllStarLink, Yaesu System Fusion) hide DMR-specific fields (DMR ID, SSID, Talker Alias)
     const talkerAliasGroup = document.getElementById("editHsTalkerAliasGroup");
+    const talkerAliasText = document.getElementById("editHsTalkerAliasText");
+    const editHsTalkerAlias = document.getElementById("editHsTalkerAlias");
+    const locationRow = document.getElementById("editHsLocationRow");
     const callsignGroup = document.getElementById("editHsCallsignGroup");
     const dmrIdGroup = document.getElementById("editHsDmrIdGroup");
     const ssidGroup = document.getElementById("editHsSsidGroup");
@@ -7498,23 +13639,52 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     const hostPortRow = document.getElementById("editHsHostPortRow");
     const editHsDmrId = document.getElementById("editHsDmrId");
 
-    if (cleanType === "allstar") {
-      if (talkerAliasGroup) talkerAliasGroup.style.display = "none";
+    const isCallsignOnly = cleanType === "allstar" || cleanType === "ysf";
+    if (cleanType === "ysf") {
+      // YSF uses Callsign, Description (up to 20 chars) and QTH Locator
+      if (talkerAliasGroup) {
+        talkerAliasGroup.style.display = "";
+        if (talkerAliasText) talkerAliasText.textContent = window.t ? window.t("hs_edit.ysf_desc_label", {}, "Описание / Статус (YSF)") : "Описание / Статус (YSF)";
+        if (editHsTalkerAlias) {
+          editHsTalkerAlias.placeholder = window.t ? window.t("hs_edit.ysf_desc_placeholder", {}, "Имя / Описание (до 20 символов)") : "Имя / Описание (до 20 символов)";
+          editHsTalkerAlias.maxLength = 20;
+        }
+      }
+      if (locationRow) locationRow.style.display = "flex";
       if (dmrIdGroup) dmrIdGroup.style.display = "none";
       if (ssidGroup) ssidGroup.style.display = "none";
-      if (masterSelectGroup) masterSelectGroup.style.display = "none";
-      if (hostPortRow) hostPortRow.style.display = "none";
       if (callsignGroup) callsignGroup.style.flex = "1";
       if (editHsDmrId) editHsDmrId.removeAttribute("required");
-      if (editHsHost) editHsHost.removeAttribute("required");
+    } else if (cleanType === "allstar") {
+      if (talkerAliasGroup) talkerAliasGroup.style.display = "none";
+      if (locationRow) locationRow.style.display = "none";
+      if (dmrIdGroup) dmrIdGroup.style.display = "none";
+      if (ssidGroup) ssidGroup.style.display = "none";
+      if (callsignGroup) callsignGroup.style.flex = "1";
+      if (editHsDmrId) editHsDmrId.removeAttribute("required");
     } else {
-      if (talkerAliasGroup) talkerAliasGroup.style.display = "";
+      if (talkerAliasGroup) {
+        talkerAliasGroup.style.display = "";
+        if (talkerAliasText) talkerAliasText.textContent = window.t ? window.t("hs_edit.talker_alias", {}, "Передавать Talker Alias") : "Передавать Talker Alias";
+        if (editHsTalkerAlias) {
+          editHsTalkerAlias.placeholder = window.t ? window.t("hs_edit.talker_alias_placeholder", {}, "например: CALLSIGN Name") : "например: CALLSIGN Name";
+          editHsTalkerAlias.maxLength = 27;
+        }
+      }
+      if (locationRow) locationRow.style.display = "none";
       if (dmrIdGroup) dmrIdGroup.style.display = "";
       if (ssidGroup) ssidGroup.style.display = "";
-      if (masterSelectGroup) masterSelectGroup.style.display = "";
-      if (hostPortRow) hostPortRow.style.display = "";
       if (callsignGroup) callsignGroup.style.flex = "2";
       if (editHsDmrId) editHsDmrId.setAttribute("required", "required");
+    }
+
+    if (cleanType === "allstar") {
+      if (masterSelectGroup) masterSelectGroup.style.display = "none";
+      if (hostPortRow) hostPortRow.style.display = "none";
+      if (editHsHost) editHsHost.removeAttribute("required");
+    } else {
+      if (masterSelectGroup) masterSelectGroup.style.display = "";
+      if (hostPortRow) hostPortRow.style.display = "";
       if (editHsHost) editHsHost.setAttribute("required", "required");
     }
 
@@ -7543,6 +13713,10 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
       if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_freedmr", {}, "Автонастройка TG FreeDMR") : "Автонастройка TG FreeDMR";
       if (apiHelpBm) apiHelpBm.classList.add("hidden");
       if (apiHelpTgif) apiHelpTgif.classList.add("hidden");
+    } else if (cleanType === "adn") {
+      if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_adn", {}, "Автонастройка TG ADN") : "Автонастройка TG ADN";
+      if (apiHelpBm) apiHelpBm.classList.add("hidden");
+      if (apiHelpTgif) apiHelpTgif.classList.add("hidden");
     } else if (cleanType === "xlx") {
       if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_xlx", {}, "Автоподключение XLX") : "Автоподключение XLX";
       if (apiHelpBm) apiHelpBm.classList.add("hidden");
@@ -7559,19 +13733,42 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
       if (autoTgText) autoTgText.textContent = window.t ? window.t("hs_edit.auto_tg_bm", {}, "Автонастройка TG BM") : "Автонастройка TG BM";
     }
 
-    // Customize RPTO texts for FreeDMR vs DMR+ vs Custom
+    // Customize RPTO texts for FreeDMR vs ADN vs DMR+ vs Custom
+    const freedmrHelpBox = document.getElementById("freedmrHelpBox");
+    const adnHelpBox = document.getElementById("adnHelpBox");
+    const freedmrHelpToggle = document.getElementById("btnFreedmrHelpToggle");
+    const adnHelpToggle = document.getElementById("btnAdnHelpToggle");
+
     if (cleanType === "freedmr") {
       if (rptoLabel) rptoLabel.textContent = window.t ? window.t("hs_edit.rpto_freedmr_label", {}, "Опции FreeDMR (RPTO) — статические TG (TS1 / TS2)") : "Опции FreeDMR (RPTO) — статические TG (TS1 / TS2)";
       if (rptoInput) rptoInput.placeholder = "TS1=2501;TS2=250,2505;DIAL=0;";
       if (rptoHint) rptoHint.textContent = window.t ? window.t("hs_edit.rpto_freedmr_hint", {}, "Передаётся в пакете RPTO сразу после авторизации (нажмите «🔄 Из TS1/TS2» для автосборки из стартовых групп ниже)") : "Передаётся в пакете RPTO сразу после авторизации (нажмите «🔄 Из TS1/TS2» для автосборки из стартовых групп ниже)";
+      if (freedmrHelpToggle) freedmrHelpToggle.style.display = "";
+      if (adnHelpToggle) adnHelpToggle.style.display = "none";
+      if (adnHelpBox) adnHelpBox.style.display = "none";
+    } else if (cleanType === "adn") {
+      if (rptoLabel) rptoLabel.textContent = window.t ? window.t("hs_edit.rpto_adn_label", {}, "Опции ADN Systems (RPTO) — статические TG (TS1 / TS2)") : "Опции ADN Systems (RPTO) — статические TG (TS1 / TS2)";
+      if (rptoInput) rptoInput.placeholder = "TS1=91;TS2=250;DIAL=0;TIMER=10;VOICE=0;SINGLE=0;";
+      if (rptoHint) rptoHint.textContent = window.t ? window.t("hs_edit.rpto_adn_hint", {}, "Передаётся в пакете RPTO сразу после авторизации (нажмите «🔄 Из TS1/TS2» для автосборки из стартовых групп ниже)") : "Передаётся в пакете RPTO сразу после авторизации (нажмите «🔄 Из TS1/TS2» для автосборки из стартовых групп ниже)";
+      if (freedmrHelpToggle) freedmrHelpToggle.style.display = "none";
+      if (adnHelpToggle) adnHelpToggle.style.display = "";
+      if (freedmrHelpBox) freedmrHelpBox.style.display = "none";
     } else if (cleanType === "dmrplus") {
       if (rptoLabel) rptoLabel.textContent = window.t ? window.t("hs_edit.rpto_dmrplus_label", {}, "Строка конфигурации DMR+ / IPSC2 (RPTO)") : "Строка конфигурации DMR+ / IPSC2 (RPTO)";
       if (rptoInput) rptoInput.placeholder = "StartRef=4530;RelinkTime=60;TS1_1=2501;TS2_1=250;";
       if (rptoHint) rptoHint.textContent = window.t ? window.t("hs_edit.rpto_dmrplus_hint", {}, "Формируется автоматически из полей StartRef / RelinkTime / TG или редактируется вручную") : "Формируется автоматически из полей StartRef / RelinkTime / TG или редактируется вручную";
+      if (freedmrHelpToggle) freedmrHelpToggle.style.display = "none";
+      if (adnHelpToggle) adnHelpToggle.style.display = "none";
+      if (freedmrHelpBox) freedmrHelpBox.style.display = "none";
+      if (adnHelpBox) adnHelpBox.style.display = "none";
     } else if (cleanType === "custom") {
       if (rptoLabel) rptoLabel.textContent = window.t ? window.t("hs_edit.rpto_custom_label", {}, "Опции HomeBrew (RPTO) — статические TG и параметры") : "Опции HomeBrew (RPTO) — статические TG и параметры";
       if (rptoInput) rptoInput.placeholder = "TS1=2501;TS2=2505;";
       if (rptoHint) rptoHint.textContent = window.t ? window.t("hs_edit.rpto_custom_hint", {}, "Строка опций RPTO, отправляемая серверу HBlink3 / MMDVM после пакета RPTC") : "Строка опций RPTO, отправляемая серверу HBlink3 / MMDVM после пакета RPTC";
+      if (freedmrHelpToggle) freedmrHelpToggle.style.display = "none";
+      if (adnHelpToggle) adnHelpToggle.style.display = "none";
+      if (freedmrHelpBox) freedmrHelpBox.style.display = "none";
+      if (adnHelpBox) adnHelpBox.style.display = "none";
     }
 
     // Customize password label & placeholder
@@ -7585,6 +13782,9 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
       } else if (cleanType === "freedmr") {
         pwdLabel.textContent = window.t ? window.t("hs_edit.freedmr_password", {}, "Пароль хотспота FreeDMR (из портала / passw0rd)") : "Пароль хотспота FreeDMR (из портала / passw0rd)";
         if (editHsPassword) editHsPassword.placeholder = "passw0rd / FreeDMR Password";
+      } else if (cleanType === "adn") {
+        pwdLabel.textContent = window.t ? window.t("hs_edit.adn_password", {}, "Пароль хотспота ADN Systems (passw0rd / SelfCare)") : "Пароль хотспота ADN Systems (passw0rd / SelfCare)";
+        if (editHsPassword) editHsPassword.placeholder = "passw0rd / SelfCare Password";
       } else if (cleanType === "dmrplus") {
         pwdLabel.textContent = window.t ? window.t("hs_edit.dmrplus_password", {}, "Пароль сервера DMR+ / IPSC2 (стандартный: PASSWORD)") : "Пароль сервера DMR+ / IPSC2 (стандартный: PASSWORD)";
         if (editHsPassword) editHsPassword.placeholder = "PASSWORD";
@@ -7607,11 +13807,15 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
       } else if (cleanType === "tgif") {
         masterLabel.textContent = window.t ? window.t("hs_edit.master_select_tgif", {}, "Сервер TGIF Network (Основной / Европа)") : "Сервер TGIF Network (Основной / Европа)";
       } else if (cleanType === "freedmr") {
-        masterLabel.textContent = window.t ? window.t("hs_edit.master_select_freedmr", {}, "Сервер FreeDMR / ADN — выбор по странам") : "Сервер FreeDMR / ADN — выбор по странам";
+        masterLabel.textContent = window.t ? window.t("hs_edit.master_select_freedmr", {}, "Сервер FreeDMR — выбор по странам") : "Сервер FreeDMR — выбор по странам";
+      } else if (cleanType === "adn") {
+        masterLabel.textContent = window.t ? window.t("hs_edit.master_select_adn", {}, "Сервер ADN Systems — выбор по странам") : "Сервер ADN Systems — выбор по странам";
       } else if (cleanType === "dmrplus") {
         masterLabel.textContent = window.t ? window.t("hs_edit.master_select_dmrplus", {}, "Мастер-сервер DMR+ / IPSC2 — выбор по странам") : "Мастер-сервер DMR+ / IPSC2 — выбор по странам";
       } else if (cleanType === "xlx") {
         masterLabel.textContent = window.t ? window.t("hs_edit.master_select_xlx", {}, "Рефлектор XLX — выбор сервера (порт 62030)") : "Рефлектор XLX — выбор сервера (порт 62030)";
+      } else if (cleanType === "ysf") {
+        masterLabel.textContent = window.t ? window.t("hs_edit.master_select_ysf", {}, "Рефлектор YSF — выбор комнаты (порт 42000)") : "Рефлектор YSF — выбор комнаты (порт 42000)";
       } else {
         masterLabel.textContent = window.t ? window.t("hs_edit.master_select_custom", {}, "Выбор сервера (пресет или свой IP/домен)") : "Выбор сервера (пресет или свой IP/домен)";
       }
@@ -7619,24 +13823,9 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     if (editHsHost) {
       editHsHost.placeholder = cleanType === "allstar"
         ? (window.t ? window.t("hs_edit.allstar_host_placeholder", {}, "127.0.0.1 (или домен/IP ноды ASL)") : "127.0.0.1 (или домен/IP ноды ASL)")
-        : (profile.defaultHost || "127.0.0.1");
-    }
-
-    // Customize TS1 / TS2 labels per network
-    if (tgTs1Label && tgTs2Label) {
-      if (cleanType === "tgif") {
-        tgTs1Label.textContent = window.t ? window.t("hs_edit.tg_ts1", {}, "Стартовая TG (Слот 1)") : "Стартовая TG (Слот 1)";
-        tgTs2Label.textContent = window.t ? window.t("hs_edit.tg_ts2_tgif", {}, "Основная TG TGIF (Слот 2 • 4000 = сброс)") : "Основная TG TGIF (Слот 2 • 4000 = сброс)";
-      } else if (cleanType === "freedmr") {
-        tgTs1Label.textContent = window.t ? window.t("hs_edit.tg_ts1_freedmr", {}, "Статическая / стартовая TG (Слот 1)") : "Статическая / стартовая TG (Слот 1)";
-        tgTs2Label.textContent = window.t ? window.t("hs_edit.tg_ts2_freedmr", {}, "Статическая / стартовая TG (Слот 2)") : "Статическая / стартовая TG (Слот 2)";
-      } else if (cleanType === "dmrplus") {
-        tgTs1Label.textContent = window.t ? window.t("hs_edit.tg_ts1_dmrplus", {}, "Глобальная TG (Слот 1: TS1_1)") : "Глобальная TG (Слот 1: TS1_1)";
-        tgTs2Label.textContent = window.t ? window.t("hs_edit.tg_ts2_dmrplus", {}, "Локальная TG / Рефлектор (Слот 2: 9)") : "Локальная TG / Рефлектор (Слот 2: 9)";
-      } else {
-        tgTs1Label.textContent = window.t ? window.t("hs_edit.tg_ts1", {}, "Стартовая TG (Слот 1)") : "Стартовая TG (Слот 1)";
-        tgTs2Label.textContent = window.t ? window.t("hs_edit.tg_ts2", {}, "Стартовая TG (Слот 2)") : "Стартовая TG (Слот 2)";
-      }
+        : (cleanType === "ysf"
+          ? (window.t ? window.t("hs_edit.ysf_host_placeholder", {}, "161.97.73.43 (или домен/IP рефлектора YSF)") : "161.97.73.43 (или домен/IP рефлектора YSF)")
+          : (profile.defaultHost || "127.0.0.1"));
     }
 
     // 4. Apply network defaults when switching network type on a new hotspot
@@ -7683,29 +13872,44 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
         }
       }
       if (cleanType === "xlx") {
-        if (editHsTgTs1) editHsTgTs1.value = 9;
-        if (editHsTgTs2) editHsTgTs2.value = modTg;
         if (rptoInput) rptoInput.value = "";
       } else if (cleanType === "tgif") {
-        if (editHsTgTs1) editHsTgTs1.value = 9990;
-        if (editHsTgTs2) editHsTgTs2.value = 777;
         if (rptoInput) rptoInput.value = "";
       } else if (cleanType === "freedmr") {
-        if (editHsTgTs1) editHsTgTs1.value = 91;
-        if (editHsTgTs2) editHsTgTs2.value = 250;
         if (rptoInput) rptoInput.value = buildRptoFromCurrentFormFields("freedmr");
+      } else if (cleanType === "adn") {
+        if (rptoInput) rptoInput.value = buildRptoFromCurrentFormFields("adn");
       } else if (cleanType === "dmrplus") {
-        if (editHsTgTs1) editHsTgTs1.value = 2501;
-        if (editHsTgTs2) editHsTgTs2.value = 9;
         const refEl = document.getElementById("editHsDmrPlusRef");
         const relinkEl = document.getElementById("editHsDmrPlusRelink");
         if (refEl && !refEl.value) refEl.value = 4530;
         if (relinkEl && !relinkEl.value) relinkEl.value = 60;
         if (rptoInput) rptoInput.value = buildRptoFromCurrentFormFields("dmrplus");
-      } else {
-        if (editHsTgTs1) editHsTgTs1.value = 9990;
-        if (editHsTgTs2) editHsTgTs2.value = 9990;
       }
+    }
+
+    // Update brand color pickers
+    const colorSec = document.getElementById("editHsBrandColorSection");
+    const disabledHint = document.getElementById("editHsBrandColorDisabledHint");
+    const darkInput = document.getElementById("editHsBrandColorDark");
+    const darkHex = document.getElementById("editHsBrandColorDarkHex");
+    const lightInput = document.getElementById("editHsBrandColorLight");
+    const lightHex = document.getElementById("editHsBrandColorLightHex");
+    const colorTitle = document.getElementById("editHsBrandColorTitle");
+
+    const isEnabled = isNetworkColorEnabled();
+    if (colorSec) colorSec.classList.toggle("is-disabled", !isEnabled);
+    if (disabledHint) disabledHint.style.display = isEnabled ? "none" : "block";
+
+    const curDark = getNetworkBrandColor(cleanType, "dark");
+    const curLight = getNetworkBrandColor(cleanType, "light");
+
+    if (darkInput) darkInput.value = curDark;
+    if (darkHex) darkHex.value = curDark.toUpperCase();
+    if (lightInput) lightInput.value = curLight;
+    if (lightHex) lightHex.value = curLight.toUpperCase();
+    if (colorTitle) {
+      colorTitle.textContent = `${window.t ? window.t("hs_edit.brand_color_title", {}, "Выбор фирменного цвета") : "Выбор фирменного цвета"} (${shortLabel})`;
     }
 
     renderBmMastersDropdown(editHsHost ? editHsHost.value : "", cleanType);
@@ -7768,7 +13972,7 @@ export function populateEditHotspotFormFields(hs) {
           console.error("[HOTSPOTS] Failed to persist alive state:", err);
           editHsAliveToggle.checked = !isAlive;
           updateHsFormAliveState(!isAlive);
-          showToast(err.message || "Ошибка сохранения состояния хотспота", "error", 4000);
+          showToast(err.message || (window.t ? window.t("hotspots.err_save_state", {}, "Error saving hotspot state") : "Error saving hotspot state"), "error", 4000);
         } finally {
           editHsAliveToggle.disabled = false;
         }
@@ -7795,8 +13999,6 @@ export function populateEditHotspotFormFields(hs) {
     const bmApiHelpCard = document.getElementById("bmApiHelpCard");
     const editHsHost = document.getElementById("editHsHost");
     const editHsPort = document.getElementById("editHsPort");
-    const editHsTgTs1 = document.getElementById("editHsTgTs1");
-    const editHsTgTs2 = document.getElementById("editHsTgTs2");
     const editHsAutoconnect = document.getElementById("editHsAutoconnect");
     const editHsAutoTgBm = document.getElementById("editHsAutoTgBm");
 
@@ -7808,6 +14010,9 @@ export function populateEditHotspotFormFields(hs) {
     const netType = (hs && hs.network_type ? hs.network_type : "bm").toLowerCase();
     const netProfile = getDmrNetworkProfile(netType);
 
+    resetTestCredentialBtn(document.getElementById("btnTestHsPassword"), "hs_edit.btn_test_pwd_title", "Test server connection with password");
+    resetTestCredentialBtn(document.getElementById("btnTestHsApiKey"), "hs_edit.btn_test_api_title", "Validate API key on server");
+
     if (editHsNetworkType) {
       editHsNetworkType.value = netType;
     }
@@ -7815,23 +14020,45 @@ export function populateEditHotspotFormFields(hs) {
     if (editHsName) editHsName.value = hs.name || "";
     if (editHsCallsign) {
       editHsCallsign.value = window.isDemoMode
-        ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
+        ? (window.t ? window.t("demo.your_callsign", {}, "Your Callsign") : "Your Callsign")
         : (hs.callsign || "");
     }
     if (editHsTalkerAlias) {
       editHsTalkerAlias.value = window.isDemoMode
-        ? (window.t ? window.t("demo.your_name", {}, "Ваше имя") : "Ваше имя")
+        ? (window.t ? window.t("demo.your_name", {}, "Your Name") : "Your Name")
         : (hs.talker_alias || "");
       editHsTalkerAlias.style.opacity = (hs.send_talker_alias !== false) ? "1" : "0.5";
     }
     if (editHsSendTalkerAlias) editHsSendTalkerAlias.checked = hs.send_talker_alias !== false;
+    const editHsLocator = document.getElementById("editHsLocator");
+    if (editHsLocator) {
+      editHsLocator.value = (hs.qth_locator || hs.locator || "").toUpperCase();
+    }
+
+    const btnGetGpsLocation = document.getElementById("btnGetGpsLocation");
+    if (btnGetGpsLocation && !btnGetGpsLocation._wiredGps) {
+      btnGetGpsLocation._wiredGps = true;
+      btnGetGpsLocation.addEventListener("click", (e) => {
+        e.preventDefault();
+        requestDeviceGpsLocation((lat, lon) => {
+          const grid = latLonToMaidenheadGrid(lat, lon);
+          if (editHsLocator) editHsLocator.value = grid;
+          if (hs) {
+            hs.qth_locator = grid;
+            hs.latitude = lat;
+            hs.longitude = lon;
+          }
+          showToast(window.t ? window.t("hotspots.gps_locator_detected_toast", { grid, lat: lat.toFixed(4), lon: lon.toFixed(4) }, `✓ Locator detected via GPS: ${grid} (${lat.toFixed(4)}, ${lon.toFixed(4)})`) : `✓ Locator detected via GPS: ${grid} (${lat.toFixed(4)}, ${lon.toFixed(4)})`, "success", 3500);
+        });
+      });
+    }
     if (editHsDmrId) {
       editHsDmrId.value = window.isDemoMode ? "1234567" : (hs.dmr_id || "");
     }
     if (editHsSsid) editHsSsid.value = (hs.bm_ssid !== undefined && hs.bm_ssid !== null && Number(hs.bm_ssid) >= 1) ? Math.min(99, Math.max(1, Number(hs.bm_ssid))) : 1;
     let rawRpto = hs.rpto_options || "";
-    if (!rawRpto && netType === "freedmr") {
-      rawRpto = buildRptoFromCurrentFormFields("freedmr");
+    if (!rawRpto && (netType === "freedmr" || netType === "adn")) {
+      rawRpto = buildRptoFromCurrentFormFields(netType);
     }
     if (editHsRptoOptions) editHsRptoOptions.value = rawRpto;
     if (editHsDmrPlusRef) {
@@ -7850,7 +14077,7 @@ export function populateEditHotspotFormFields(hs) {
       editHsAllStarAlwaysOnline.checked = (hs.allstar_always_online !== undefined) ? Boolean(hs.allstar_always_online) : true;
     }
     if (editHsPassword) {
-      editHsPassword.value = hs.bm_password || (netType === "xlx" ? "passw0rd" : "");
+      editHsPassword.value = hs.bm_password || ((netType === "xlx" || netType === "adn") ? "passw0rd" : "");
       editHsPassword.type = "password";
     }
     if (btnToggleHsPassword) btnToggleHsPassword.textContent = "👁️";
@@ -7863,8 +14090,6 @@ export function populateEditHotspotFormFields(hs) {
     const hostVal = hs.bm_master_host || netProfile.defaultHost || "2322.master.brandmeister.network";
     if (editHsHost) editHsHost.value = hostVal;
     if (editHsPort) editHsPort.value = hs.bm_master_port || netProfile.defaultPort || 62031;
-    if (editHsTgTs1) editHsTgTs1.value = hs.default_tg_ts1 || 9990;
-    if (editHsTgTs2) editHsTgTs2.value = hs.default_tg_ts2 || 9990;
     if (editHsAutoconnect) {
       editHsAutoconnect.checked = hs.autoconnect !== undefined && hs.autoconnect !== null ? Boolean(hs.autoconnect) : true;
     }
@@ -7885,12 +14110,20 @@ export function populateEditHotspotFormFields(hs) {
       refreshFreeDmrServers().then(() => {
         renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "freedmr");
       });
+    } else if (netType === "adn") {
+      refreshAdnServers().then(() => {
+        renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "adn");
+      });
     } else if (netType === "dmrplus") {
       if (typeof refreshDmrPlusServers === "function") {
         refreshDmrPlusServers().then(() => {
           renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "dmrplus");
         });
       }
+    } else if (netType === "ysf") {
+      refreshYsfServers().then(() => {
+        renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "ysf");
+      });
     }
     if (typeof clearSettingsTabDirty === "function") {
       clearSettingsTabDirty("tab-edit-hs");
@@ -8052,12 +14285,15 @@ export function syncCustomHsDropdownUI(curId, hs, netColors, isLight) {
     const netProf = getDmrNetworkProfile(netType);
     const netTag = `[${netProf.badgePrefix}] `;
     const ssidStr = (h.bm_ssid !== undefined && h.bm_ssid !== null) ? ` · SSID ${h.bm_ssid}` : "";
-    const dispCall = (window.isDemoMode || h.callsign === "Ваш позывной")
-      ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
+    const dispCall = (window.isDemoMode || h.callsign === "Ваш позывной" || (window.i18n && typeof window.i18n.isTranslationOf === "function" && window.i18n.isTranslationOf("demo.your_callsign", h.callsign)))
+      ? (window.t ? window.t("demo.your_callsign", {}, "Your Callsign") : "Your Callsign")
       : (h.callsign || "");
     const callStr = dispCall ? ` (${dispCall}${ssidStr})` : "";
-    const hiddenTag = h.hidden ? " [скрыт]" : "";
-    item.textContent = `${netTag}${h.name || "Хотспот"}${callStr}${hiddenTag}`;
+    const hiddenTag = h.hidden ? (window.t ? window.t("hotspots.hidden_tag", {}, " [hidden]") : " [hidden]") : "";
+    const mainTitle = `${netTag}${h.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot")}`;
+    const callHtml = callStr ? `<span class="hs-item-call font-normal">${escapeHtml(callStr)}</span>` : "";
+    const hiddenHtml = hiddenTag ? `<span class="hs-item-hidden font-normal">${escapeHtml(hiddenTag)}</span>` : "";
+    item.innerHTML = `<span class="hs-item-main font-bold">${escapeHtml(mainTitle)}</span>${callHtml}${hiddenHtml}`;
 
     const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
     item.style.color = c;
@@ -8072,39 +14308,27 @@ export function syncCustomHsDropdownUI(curId, hs, netColors, isLight) {
     customMenu.appendChild(item);
   });
 
-  if (!curId) {
-    const newItem = document.createElement("div");
-    newItem.className = "hs-custom-dropdown-item hs-opt-new is-selected";
-    newItem.dataset.value = "__new__";
-    newItem.setAttribute("role", "option");
-    newItem.setAttribute("aria-selected", "true");
-    newItem.textContent = window.t ? window.t("hotspots.new_opt", {}, "+ Новый хотспот...") : "+ Новый хотспот...";
-    newItem.style.color = isLight ? "#2563eb" : "#4884FF";
-    newItem.addEventListener("click", (e) => {
-      e.stopPropagation();
-      selectCustomHsOption("__new__");
-    });
-    customMenu.appendChild(newItem);
-  }
-
   const activeHs = currentHotspots.find(h => h.id === curId) || hs;
   if (activeHs) {
     const netType = (activeHs.network_type || "bm").toLowerCase();
     const netProf = getDmrNetworkProfile(netType);
     const netTag = `[${netProf.badgePrefix}] `;
     const ssidStr = (activeHs.bm_ssid !== undefined && activeHs.bm_ssid !== null) ? ` · SSID ${activeHs.bm_ssid}` : "";
-    const dispCall = (window.isDemoMode || activeHs.callsign === "Ваш позывной")
-      ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
+    const dispCall = (window.isDemoMode || activeHs.callsign === "Ваш позывной" || (window.i18n && typeof window.i18n.isTranslationOf === "function" && window.i18n.isTranslationOf("demo.your_callsign", activeHs.callsign)))
+      ? (window.t ? window.t("demo.your_callsign", {}, "Your Callsign") : "Your Callsign")
       : (activeHs.callsign || "");
     const callStr = dispCall ? ` (${dispCall}${ssidStr})` : "";
-    const hiddenTag = activeHs.hidden ? " [скрыт]" : "";
-    customLabel.textContent = `${netTag}${activeHs.name || "Хотспот"}${callStr}${hiddenTag}`;
+    const hiddenTag = activeHs.hidden ? (window.t ? window.t("hotspots.hidden_tag", {}, " [hidden]") : " [hidden]") : "";
+    const mainTitle = `${netTag}${activeHs.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot")}`;
+    const callHtml = callStr ? `<span class="hs-item-call font-normal">${escapeHtml(callStr)}</span>` : "";
+    const hiddenHtml = hiddenTag ? `<span class="hs-item-hidden font-normal">${escapeHtml(hiddenTag)}</span>` : "";
+    customLabel.innerHTML = `<span class="hs-item-main font-bold">${escapeHtml(mainTitle)}</span>${callHtml}${hiddenHtml}`;
 
     const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
     customLabel.style.color = c;
     customTrigger.style.borderColor = (netType === "allstar" && !isLight) ? "rgba(255, 255, 255, 0.45)" : c;
   } else {
-    customLabel.textContent = window.t ? window.t("hotspots.new_opt", {}, "+ Новый хотспот...") : "+ Новый хотспот...";
+    customLabel.textContent = window.t ? window.t("hotspots.new_opt", {}, "+ New hotspot...") : "+ New hotspot...";
     customLabel.style.color = isLight ? "#2563eb" : "#4884FF";
     customTrigger.style.borderColor = isLight ? "#cbd5e1" : "rgba(255, 255, 255, 0.25)";
   }
@@ -8127,11 +14351,13 @@ export function updateEditHsToolbarUI(hs) {
     const isLight = document.documentElement.getAttribute("data-theme") === "light" || document.body.classList.contains("theme-light");
     const netColors = {
       bm: isLight ? "#c2410c" : "#ff8c5a",
-      allstar: isLight ? "#0f172a" : "#ffffff",
+      allstar: isLight ? "#334155" : "#e6edf3",
       freedmr: isLight ? "#047857" : "#34d399",
       tgif: isLight ? "#0e7490" : "#22d3ee",
       xlx: isLight ? "#b45309" : "#fbbf24",
       dmrplus: isLight ? "#6d28d9" : "#c4b5fd",
+      adn: isLight ? "#0284c7" : "#38bdf8",
+      ysf: isLight ? "#7c3aed" : "#c084fc",
       custom: isLight ? "#475569" : "#cbd5e1"
     };
 
@@ -8142,12 +14368,12 @@ export function updateEditHsToolbarUI(hs) {
       const netProf = getDmrNetworkProfile(netType);
       const netTag = `[${netProf.badgePrefix}] `;
       const ssidStr = (h.bm_ssid !== undefined && h.bm_ssid !== null) ? ` · SSID ${h.bm_ssid}` : "";
-      const dispCall = (window.isDemoMode || h.callsign === "Ваш позывной")
-        ? (window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной")
+      const dispCall = (window.isDemoMode || h.callsign === "Ваш позывной" || (window.i18n && typeof window.i18n.isTranslationOf === "function" && window.i18n.isTranslationOf("demo.your_callsign", h.callsign)))
+        ? (window.t ? window.t("demo.your_callsign", {}, "Your Callsign") : "Your Callsign")
         : (h.callsign || "");
       const callStr = dispCall ? ` (${dispCall}${ssidStr})` : "";
-      const hiddenTag = h.hidden ? " [скрыт]" : "";
-      opt.textContent = `${netTag}${h.name || "Хотспот"}${callStr}${hiddenTag}`;
+      const hiddenTag = h.hidden ? (window.t ? window.t("hotspots.hidden_tag", {}, " [hidden]") : " [hidden]") : "";
+      opt.textContent = `${netTag}${h.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot")}${callStr}${hiddenTag}`;
       opt.className = `hs-opt-net-${netType}${h.hidden ? " is-hidden-hs" : ""}`;
       const c = netColors[netType] || (isLight ? "#0f172a" : "#e2e8f0");
       opt.style.color = c;
@@ -8159,14 +14385,6 @@ export function updateEditHsToolbarUI(hs) {
       if (h.id === curId) opt.selected = true;
       editHsSelect.appendChild(opt);
     });
-
-    if (!curId) {
-      const newOpt = document.createElement("option");
-      newOpt.value = "__new__";
-      newOpt.textContent = window.t ? window.t("hotspots.new_opt", {}, "+ Новый хотспот...") : "+ Новый хотспот...";
-      newOpt.selected = true;
-      editHsSelect.appendChild(newOpt);
-    }
 
     const activeHs = currentHotspots.find(h => h.id === curId) || hs;
     if (activeHs) {
@@ -8209,13 +14427,13 @@ export function updateEditHsToolbarUI(hs) {
         btnConn.style.color = "#00e676";
         btnConn.style.borderColor = "rgba(0, 230, 118, 0.4)";
         btnConn.style.backgroundColor = "rgba(0, 230, 118, 0.1)";
-        btnConn.title = window.t ? window.t("hotspots.btn_conn_online_title", {}, "ONLINE: Подключен к BrandMeister (нажмите для отключения)") : "ONLINE: Подключен к BrandMeister (нажмите для отключения)";
+        btnConn.title = window.t ? window.t("hotspots.btn_conn_online_title", {}, "ONLINE: Connected to BrandMeister (click to disconnect)") : "ONLINE: Connected to BrandMeister (click to disconnect)";
       } else {
         btnConn.textContent = "Connect";
         btnConn.style.color = "#f85149";
         btnConn.style.borderColor = "rgba(248, 81, 73, 0.4)";
         btnConn.style.backgroundColor = "rgba(248, 81, 73, 0.08)";
-        btnConn.title = window.t ? window.t("hotspots.btn_conn_offline_title", {}, "Connect: Нажмите для подключения к BrandMeister") : "Connect: Нажмите для подключения к BrandMeister";
+        btnConn.title = window.t ? window.t("hotspots.btn_conn_offline_title", {}, "Connect: Click to connect to BrandMeister") : "Connect: Click to connect to BrandMeister";
       }
     }
   }
@@ -8223,26 +14441,20 @@ export function updateEditHsToolbarUI(hs) {
   // 4. Quick move up / down buttons in tab header
   const btnMoveHsUp = document.getElementById("btnMoveHsUp");
   const btnMoveHsDown = document.getElementById("btnMoveHsDown");
-  const btnOpenHsOrderModal = document.getElementById("btnOpenHsOrderModal");
 
   const curIdx = currentHotspots.findIndex(h => h.id === curId);
-  if (btnOpenHsOrderModal) {
-    btnOpenHsOrderModal.disabled = currentHotspots.length <= 1;
-    btnOpenHsOrderModal.style.opacity = currentHotspots.length <= 1 ? "0.4" : "1";
-    btnOpenHsOrderModal.style.cursor = currentHotspots.length <= 1 ? "not-allowed" : "pointer";
-  }
 
   if (btnMoveHsUp) {
-    // Cannot move up if: not found, new hotspot, is index 0 (primary is fixed), or index 1 (cannot jump over primary)
-    const canMoveUp = curIdx > 1;
+    // All hotspots are equal: any hotspot with curIdx > 0 can move up
+    const canMoveUp = curIdx > 0;
     btnMoveHsUp.disabled = !canMoveUp;
     btnMoveHsUp.style.opacity = canMoveUp ? "1" : "0.35";
     btnMoveHsUp.style.cursor = canMoveUp ? "pointer" : "not-allowed";
   }
 
   if (btnMoveHsDown) {
-    // Cannot move down if: not found, new hotspot, is index 0 (primary is fixed), or is already last
-    const canMoveDown = curIdx > 0 && curIdx < currentHotspots.length - 1;
+    // All hotspots are equal: any hotspot except the last one can move down
+    const canMoveDown = curIdx >= 0 && curIdx < currentHotspots.length - 1;
     btnMoveHsDown.disabled = !canMoveDown;
     btnMoveHsDown.style.opacity = canMoveDown ? "1" : "0.35";
     btnMoveHsDown.style.cursor = canMoveDown ? "pointer" : "not-allowed";
@@ -8272,11 +14484,6 @@ export function openEditHotspotForm(hs) {
 
 export async function reorderHotspots(orderIds) {
   if (!Array.isArray(orderIds) || !orderIds.length) return false;
-  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
-  if (currentHotspots.length > 0 && currentHotspots[0]) {
-    const primaryId = currentHotspots[0].id;
-    orderIds = [primaryId, ...orderIds.filter(id => id !== primaryId)];
-  }
   try {
     const resp = await fetch("/api/hotspots/reorder", {
       method: "POST",
@@ -8294,7 +14501,15 @@ export async function reorderHotspots(orderIds) {
     renderRadiosGrid();
     renderHotspotSelect();
     renderHotspotsList();
-    renderHotspotOrderList();
+    if (typeof renderToolbarHotspotSlots === "function") {
+      renderToolbarHotspotSlots();
+    }
+    if (typeof renderHotspotArchiveModal === "function") {
+      const archModal = document.getElementById("hotspotArchiveModal");
+      if (archModal && archModal.classList.contains("active")) {
+        renderHotspotArchiveModal();
+      }
+    }
     const editHsSelect = document.getElementById("editHsSelect");
     const curHs = (window.currentHotspots || []).find(h => h.id === (editHsSelect ? editHsSelect.value : ""));
     if (curHs) updateEditHsToolbarUI(curHs);
@@ -8309,12 +14524,12 @@ export async function reorderHotspots(orderIds) {
 
 export async function moveHotspotInOrder(hotspotId, direction) {
   const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
-  if (currentHotspots.length <= 2) return;
+  if (currentHotspots.length <= 1) return;
   const ids = currentHotspots.map(h => h.id);
   const idx = ids.indexOf(hotspotId);
-  if (idx <= 0) return; // Cannot move primary hotspot (idx === 0 is fixed)
+  if (idx < 0) return;
   const targetIdx = idx + direction;
-  if (targetIdx <= 0 || targetIdx >= ids.length) return; // Cannot move into or above index 0
+  if (targetIdx < 0 || targetIdx >= ids.length) return;
 
   const temp = ids[idx];
   ids[idx] = ids[targetIdx];
@@ -8329,90 +14544,256 @@ export async function moveHotspotInOrder(hotspotId, direction) {
   }
 }
 
-export function renderHotspotOrderList() {
-  const listEl = document.getElementById("hsOrderList");
-  if (!listEl) return;
-  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
-  listEl.innerHTML = "";
-  if (!currentHotspots.length) {
-    const emptyMsg = window.t ? window.t("hotspots.empty_configured", {}, "Нет настроенных хотспотов") : "Нет настроенных хотспотов";
-    listEl.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem;">${emptyMsg}</div>`;
-    return;
-  }
-
-  currentHotspots.forEach((hs, idx) => {
-    const item = document.createElement("div");
-    item.className = "hs-order-item";
-    item.style.display = "flex";
-    item.style.alignItems = "center";
-    item.style.justifyContent = "space-between";
-    item.style.gap = "10px";
-    item.style.padding = "8px 12px";
-    item.style.background = "rgba(255, 255, 255, 0.04)";
-    item.style.borderRadius = "8px";
-    item.style.border = "1px solid rgba(255, 255, 255, 0.08)";
-
-    const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid !== null) ? ` · SSID ${hs.bm_ssid}` : "";
-    const isPrimary = idx === 0;
-    const isFirstMovable = idx === 1;
-    const isLast = idx === currentHotspots.length - 1;
-
-    const rightControls = isPrimary
-      ? `<span style="font-size: 0.76rem; color: #58a6ff; font-weight: 600; background: rgba(88, 166, 255, 0.12); padding: 4px 8px; border-radius: 0px; border: 1px solid rgba(88, 166, 255, 0.25);" title="Первый хотспот всегда остается первым">🔒 ${window.t ? window.t("hotspots.order_fixed_primary", {}, "Основной (№1)") : "Основной (№1)"}</span>`
-      : `
-        <button type="button" class="btn-secondary btn-order-up" style="padding: 4px 10px; font-size: 0.82rem; cursor: ${isFirstMovable ? 'not-allowed' : 'pointer'}; opacity: ${isFirstMovable ? '0.35' : '1'}; border-radius: 0px;" ${isFirstMovable ? 'disabled' : ''} title="Выше">▲</button>
-        <button type="button" class="btn-secondary btn-order-down" style="padding: 4px 10px; font-size: 0.82rem; cursor: ${isLast ? 'not-allowed' : 'pointer'}; opacity: ${isLast ? '0.35' : '1'}; border-radius: 0px;" ${isLast ? 'disabled' : ''} title="Ниже">▼</button>
-      `;
-
-    item.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-        <span style="font-weight: 700; font-size: 0.95rem; color: #58a6ff; width: 28px; text-align: center; flex-shrink: 0; background: rgba(88, 166, 255, 0.12); padding: 2px 6px; border-radius: 0px;">#${idx + 1}</span>
-        <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary, #ffffff); display: flex; align-items: center; gap: 6px;">
-            <span>${safeEscapeHtml(hs.name || "Хотспот")}</span>
-            ${hs.hidden ? `<span style="font-size: 0.68rem; color: #ff7b72; background: rgba(248, 81, 73, 0.12); padding: 1px 6px; border: 1px solid rgba(248, 81, 73, 0.35); border-radius: var(--app-border-radius, 0px); font-weight: 700;">${window.t ? window.t("hotspots.hidden_badge", {}, "скрыт") : "скрыт"}</span>` : ""}
-          </div>
-          <div style="font-size: 0.78rem; color: var(--text-muted);">${safeEscapeHtml(hs.callsign || "")}${ssidStr} · ID: ${hs.effective_id || hs.dmr_id || "-"}</div>
-        </div>
-      </div>
-      <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-        ${rightControls}
-      </div>
-    `;
-
-    if (!isPrimary) {
-      const upBtn = item.querySelector(".btn-order-up");
-      if (upBtn && !isFirstMovable) {
-        upBtn.onclick = () => moveHotspotInOrder(hs.id, -1);
-      }
-      const downBtn = item.querySelector(".btn-order-down");
-      if (downBtn && !isLast) {
-        downBtn.onclick = () => moveHotspotInOrder(hs.id, 1);
-      }
-    }
-
-    listEl.appendChild(item);
-  });
-}
-
-export function openHotspotOrderModal() {
-  const modal = document.getElementById("hotspotOrderModal");
+// ─── Hotspot Type Selector Modal (CSS Modal) ──────────────────────────────
+export function openHsTypeSelectModal() {
+  const modal = document.getElementById("hsTypeSelectModal");
   if (!modal) return;
-  renderHotspotOrderList();
   modal.style.display = "flex";
   modal.classList.add("active");
   if (typeof pushNavState === "function") {
-    pushNavState("modal", "hotspotOrderModal");
+    pushNavState("modal", "hsTypeSelectModal");
   }
 }
 
-export function closeHotspotOrderModal() {
-  const modal = document.getElementById("hotspotOrderModal");
+export function closeHsTypeSelectModal() {
+  const modal = document.getElementById("hsTypeSelectModal");
   if (!modal) return;
   modal.style.display = "none";
   modal.classList.remove("active");
   if (typeof notifyNavClosed === "function") {
-    notifyNavClosed("modal", "hotspotOrderModal");
+    notifyNavClosed("modal", "hsTypeSelectModal");
+  }
+}
+
+export function startCreateNewHotspotWithType(netType) {
+  closeHsTypeSelectModal();
+  const cleanType = (netType || "bm").toLowerCase();
+  const editHsId = document.getElementById("editHsId");
+  if (editHsId) editHsId.value = "__new__";
+
+  const editHsName = document.getElementById("editHsName");
+  const netProf = getDmrNetworkProfile(cleanType);
+  if (editHsName) {
+    editHsName.value = "";
+  }
+
+  // Populate fields with network defaults for new hotspot (leave name blank until filled)
+  populateEditHotspotFormFields({
+    id: "__new__",
+    network_type: cleanType,
+    name: "",
+    bm_master_host: netProf.defaultHost || "",
+    bm_master_port: netProf.defaultPort || 62031,
+    bm_password: (cleanType === "xlx" || cleanType === "freedmr" || cleanType === "adn") ? "passw0rd" : "",
+    hidden: false
+  });
+
+  applyEditHsNetworkTypeUI(cleanType, { applyDefaults: true, isNewHotspot: true });
+
+  const editHsSelect = document.getElementById("editHsSelect");
+  if (editHsSelect) editHsSelect.value = "__new__";
+  const customLabel = document.getElementById("editHsCustomLabel");
+  if (customLabel) {
+    const newHsTxt = window.t ? window.t("hs_edit.new_hotspot_label", {}, "New Hotspot") : "New Hotspot";
+    customLabel.innerHTML = `<span class="hs-item-main font-bold">${escapeHtml(newHsTxt)}</span> <span class="hs-item-call font-normal">(${escapeHtml(netProf.badgePrefix)})</span>`;
+    customLabel.style.color = "#10b981";
+  }
+
+  const submitFooter = document.getElementById("editHsSubmitFooter");
+  if (submitFooter) submitFooter.style.display = "";
+
+  showToast(
+    window.t ? window.t("hs_edit.type_selected_toast", { name: netProf.fullName }, `Selected hotspot type: ${netProf.fullName}`) : `Selected hotspot type: ${netProf.fullName}`,
+    "info",
+    2500
+  );
+}
+
+// ─── Online Credential Testing Handlers ────────────────────────────────────
+export function resetTestCredentialBtn(btn, defaultTitleKey = "hs_edit.btn_test_pwd_title", defaultTitle = "Test server connection with password") {
+  if (!btn) return;
+  if (btn._resetTimer) {
+    clearTimeout(btn._resetTimer);
+    btn._resetTimer = null;
+  }
+  if (btn._textTimer) {
+    clearTimeout(btn._textTimer);
+    btn._textTimer = null;
+  }
+  btn.classList.remove("is-success", "is-error", "is-testing");
+  btn.textContent = window.t ? window.t("hs_edit.btn_test", {}, "Test") : "Test";
+  btn.title = window.t ? window.t(defaultTitleKey, {}, defaultTitle) : defaultTitle;
+}
+
+export async function testCurrentHotspotPassword() {
+  const btn = document.getElementById("btnTestHsPassword");
+  if (!btn || btn.classList.contains("is-testing")) return;
+
+  if (btn._resetTimer) {
+    clearTimeout(btn._resetTimer);
+    btn._resetTimer = null;
+  }
+  if (btn._textTimer) {
+    clearTimeout(btn._textTimer);
+    btn._textTimer = null;
+  }
+
+  const editHsNetworkType = document.getElementById("editHsNetworkType");
+  const editHsHost = document.getElementById("editHsHost");
+  const editHsPort = document.getElementById("editHsPort");
+  const editHsPassword = document.getElementById("editHsPassword");
+  const editHsDmrId = document.getElementById("editHsDmrId");
+  const editHsSsid = document.getElementById("editHsSsid");
+  const editHsCallsign = document.getElementById("editHsCallsign");
+
+  // Determine current active network type
+  const formEl = document.getElementById("hotspotEditForm");
+  let netType = "bm";
+  if (formEl) {
+    for (const t of ["bm", "tgif", "freedmr", "adn", "dmrplus", "xlx", "ysf", "allstar", "custom"]) {
+      if (formEl.classList.contains(`hs-net-theme-${t}`)) {
+        netType = t;
+        break;
+      }
+    }
+  }
+
+  const editHsId = document.getElementById("editHsId");
+  const payload = {
+    network_type: netType,
+    host: editHsHost ? editHsHost.value.trim() : "",
+    port: editHsPort ? parseInt(editHsPort.value, 10) : 62031,
+    password: editHsPassword ? editHsPassword.value.trim() : "",
+    dmr_id: editHsDmrId ? editHsDmrId.value.trim() : "",
+    ssid: editHsSsid ? editHsSsid.value.trim() : "1",
+    callsign: editHsCallsign ? editHsCallsign.value.trim() : "",
+    hotspot_id: editHsId ? editHsId.value.trim() : ""
+  };
+
+  if (!payload.host) {
+    showToast(window.t ? window.t("hs_edit.err_enter_host_test", {}, "Enter server address to test!") : "Enter server address to test!", "warning", 3000);
+    return;
+  }
+  if (!payload.password && netType !== "ysf") {
+    showToast(window.t ? window.t("hs_edit.err_enter_pwd_test", {}, "Enter password to test!") : "Enter password to test!", "warning", 3000);
+    return;
+  }
+
+  btn.classList.add("is-testing");
+  btn.classList.remove("is-success", "is-error");
+  const origText = window.t ? window.t("hs_edit.btn_test", {}, "Test") : "Test";
+  btn.textContent = "...";
+
+  try {
+    const res = await fetch("/api/hotspots/test-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      btn.classList.add("is-success");
+      btn.textContent = "✓ OK";
+      btn.title = data.detail || (window.t ? window.t("hs_edit.auth_ok_title", {}, "Authentication succeeded!") : "Authentication succeeded!");
+      showToast(data.detail || (window.t ? window.t("hs_edit.auth_ok_toast", {}, "✅ Password valid, authentication succeeded!") : "✅ Password valid, authentication succeeded!"), "success", 3500);
+    } else {
+      btn.classList.add("is-error");
+      btn.textContent = window.t ? window.t("hs_edit.btn_test_error", {}, "✗ Error") : "✗ Error";
+      btn.title = data.detail || (window.t ? window.t("hs_edit.auth_fail_title", {}, "Authentication failed") : "Authentication failed");
+      showToast(data.detail || (window.t ? window.t("hs_edit.auth_fail_toast", {}, "❌ Password authentication error") : "❌ Password authentication error"), "error", 4000);
+    }
+  } catch (err) {
+    btn.classList.add("is-error");
+    btn.textContent = window.t ? window.t("hs_edit.btn_test_error", {}, "✗ Error") : "✗ Error";
+    showToast(window.t ? window.t("hs_edit.test_check_error", { msg: err.message }, `Check error: ${err.message}`) : `Check error: ${err.message}`, "error", 4000);
+  } finally {
+    btn.classList.remove("is-testing");
+    btn._textTimer = setTimeout(() => {
+      btn.textContent = origText;
+      btn._textTimer = null;
+    }, 4000);
+    btn._resetTimer = setTimeout(() => {
+      resetTestCredentialBtn(btn, "hs_edit.btn_test_pwd_title", "Test server connection with password");
+    }, 30000);
+  }
+}
+
+export async function testCurrentHotspotApiKey() {
+  const btn = document.getElementById("btnTestHsApiKey");
+  if (!btn || btn.classList.contains("is-testing")) return;
+
+  if (btn._resetTimer) {
+    clearTimeout(btn._resetTimer);
+    btn._resetTimer = null;
+  }
+  if (btn._textTimer) {
+    clearTimeout(btn._textTimer);
+    btn._textTimer = null;
+  }
+
+  const editHsApiKey = document.getElementById("editHsApiKey");
+  const editHsDmrId = document.getElementById("editHsDmrId");
+  const editHsSsid = document.getElementById("editHsSsid");
+
+  const formEl = document.getElementById("hotspotEditForm");
+  let netType = "bm";
+  if (formEl) {
+    for (const t of ["bm", "tgif", "freedmr", "adn", "dmrplus", "xlx", "ysf", "allstar", "custom"]) {
+      if (formEl.classList.contains(`hs-net-theme-${t}`)) {
+        netType = t;
+        break;
+      }
+    }
+  }
+
+  const payload = {
+    network_type: netType,
+    api_key: editHsApiKey ? editHsApiKey.value.trim() : "",
+    dmr_id: editHsDmrId ? editHsDmrId.value.trim() : "",
+    ssid: editHsSsid ? editHsSsid.value.trim() : "1"
+  };
+
+  if (!payload.api_key) {
+    showToast(window.t ? window.t("hs_edit.err_enter_api_test", {}, "Enter API key to test!") : "Enter API key to test!", "warning", 3000);
+    return;
+  }
+
+  btn.classList.add("is-testing");
+  btn.classList.remove("is-success", "is-error");
+  const origText = window.t ? window.t("hs_edit.btn_test", {}, "Test") : "Test";
+  btn.textContent = "...";
+
+  try {
+    const res = await fetch("/api/hotspots/test-api-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      btn.classList.add("is-success");
+      btn.textContent = "✓ OK";
+      btn.title = data.detail || (window.t ? window.t("hs_edit.api_ok_title", {}, "API token verified by server!") : "API token verified by server!");
+      showToast(data.detail || (window.t ? window.t("hs_edit.api_ok_toast", {}, "✅ API token is valid!") : "✅ API token is valid!"), "success", 3500);
+    } else {
+      btn.classList.add("is-error");
+      btn.textContent = window.t ? window.t("hs_edit.btn_test_error", {}, "✗ Error") : "✗ Error";
+      btn.title = data.detail || (window.t ? window.t("hs_edit.api_fail_title", {}, "API key check failed") : "API key check failed");
+      showToast(data.detail || (window.t ? window.t("hs_edit.api_fail_toast", {}, "❌ API key check failed") : "❌ API key check failed"), "error", 4000);
+    }
+  } catch (err) {
+    btn.classList.add("is-error");
+    btn.textContent = window.t ? window.t("hs_edit.btn_test_error", {}, "✗ Error") : "✗ Error";
+    showToast(window.t ? window.t("hs_edit.api_check_error", { msg: err.message }, `API check error: ${err.message}`) : `API check error: ${err.message}`, "error", 4000);
+  } finally {
+    btn.classList.remove("is-testing");
+    btn._textTimer = setTimeout(() => {
+      btn.textContent = origText;
+      btn._textTimer = null;
+    }, 4000);
+    btn._resetTimer = setTimeout(() => {
+      resetTestCredentialBtn(btn, "hs_edit.btn_test_api_title", "Validate API key on server");
+    }, 30000);
   }
 }
 
@@ -8535,11 +14916,1541 @@ export function autoSaveExistingHotspotIfDirty() {
   }
 }
 
-export function initHotspotsManager() {
-  const radiosGrid = document.getElementById("radiosGrid");
-  if (radiosGrid && typeof initGridDragReorder === "function") {
-    initGridDragReorder(radiosGrid, reorderHotspots);
+// ─── Top Toolbar 7 Slots + 1s Process Cycle Registry + Archive Modal ───────
+const HOTSPOT_TOOLBAR_PROCESS_PROVIDERS = [];
+let _toolbarCycleTimer = null;
+let _toolbarCycleStep = 0;
+
+export function registerToolbarProcessProvider(providerFn) {
+  if (typeof providerFn !== "function") return;
+  if (!HOTSPOT_TOOLBAR_PROCESS_PROVIDERS.includes(providerFn)) {
+    HOTSPOT_TOOLBAR_PROCESS_PROVIDERS.push(providerFn);
   }
+}
+
+function getToolbarShortNetCode(netType) {
+  const raw = String(netType || "bm").trim().toLowerCase();
+  const prof = (typeof getDmrNetworkProfile === "function") ? getDmrNetworkProfile(raw) : null;
+  if (prof && prof.shortLabel) return String(prof.shortLabel).toUpperCase();
+  const fallbackMap = {
+    bm: "BM",
+    tgif: "TGIF",
+    freedmr: "FDMR",
+    adn: "ADN",
+    ysf: "YSF",
+    dmrplus: "DMR+",
+    xlx: "XLX",
+    allstar: "ASL",
+    asl: "ASL",
+    iax: "ASL",
+    allstarlink: "ASL",
+    custom: "HBP"
+  };
+  return (fallbackMap[raw] || "BM").toUpperCase();
+}
+
+function extractCleanToolbarHsName(hs) {
+  const rawName = String((hs && hs.name) || "").replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
+  if (!rawName) return "";
+  let clean = rawName;
+  try {
+    clean = rawName.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D]/gu, "").trim();
+  } catch (_) {}
+  if (!clean) clean = rawName;
+  return clean.replace(/\s+/g, " ").trim();
+}
+
+function formatToolbarAlphabetSuffix(zeroBasedIndex) {
+  let n = Math.max(0, Math.floor(Number(zeroBasedIndex) || 0));
+  let out = "";
+  do {
+    out = String.fromCharCode(97 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
+}
+
+export function resolveToolbarSlotLabels(displayHotspots) {
+  if (!Array.isArray(displayHotspots)) return [];
+  const unnamedCounts = new Map();
+  const parsed = displayHotspots.map((hs) => {
+    const cleanName = extractCleanToolbarHsName(hs);
+    const typeCode = getToolbarShortNetCode(hs && hs.network_type);
+    const isUnnamed = !cleanName;
+    if (isUnnamed) {
+      unnamedCounts.set(typeCode, (unnamedCounts.get(typeCode) || 0) + 1);
+    }
+    return { cleanName, typeCode, isUnnamed };
+  });
+
+  const unnamedSeen = new Map();
+  return parsed.map((entry) => {
+    if (!entry.isUnnamed) {
+      return { label: entry.cleanName, isUnnamed: false, typeCode: entry.typeCode };
+    }
+    const totalOfType = unnamedCounts.get(entry.typeCode) || 0;
+    if (totalOfType >= 2) {
+      const ord = unnamedSeen.get(entry.typeCode) || 0;
+      unnamedSeen.set(entry.typeCode, ord + 1);
+      return {
+        label: `${entry.typeCode}.${formatToolbarAlphabetSuffix(ord)}`,
+        isUnnamed: true,
+        typeCode: entry.typeCode
+      };
+    }
+    return { label: entry.typeCode, isUnnamed: true, typeCode: entry.typeCode };
+  });
+}
+
+function formatToolbarSlotName(hs, idx, displayHotspots = null) {
+  if (Array.isArray(displayHotspots)) {
+    const resolved = resolveToolbarSlotLabels(displayHotspots);
+    if (resolved[idx]) return resolved[idx].label;
+  }
+  const cleanName = extractCleanToolbarHsName(hs);
+  return cleanName || getToolbarShortNetCode(hs && hs.network_type);
+}
+
+function getToolbarSlotProcessList(hs) {
+  if (!hs) return [];
+  const cid = resolveHotspotId(hs.id);
+  const card = document.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`)
+    || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
+  const list = [];
+
+  for (const providerFn of HOTSPOT_TOOLBAR_PROCESS_PROVIDERS) {
+    try {
+      const item = providerFn(hs, cid, card);
+      if (item && item.key) {
+        list.push(item);
+      }
+    } catch (_) {}
+  }
+  return list;
+}
+
+function _isToolbarGlobalAutoRecEnabled() {
+  if (typeof window !== "undefined" && typeof window.__proxdmrGlobalAutoRecord === "boolean") {
+    return window.__proxdmrGlobalAutoRecord;
+  }
+  try {
+    const raw = localStorage.getItem("proxdmr_rec_settings");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.auto_record === false) return false;
+      if (parsed && parsed.auto_record_rx === false && parsed.auto_record_tx === false) return false;
+    }
+  } catch (_) {}
+  const chk = typeof document !== "undefined" ? document.getElementById("recOptAutoRecord") : null;
+  if (chk && typeof window !== "undefined" && window.__proxdmrRecSettingsLoaded && !chk.checked) {
+    return false;
+  }
+  return true;
+}
+
+function _resolveToolbarSlotCard(hs, cid) {
+  if (!hs || typeof document === "undefined") return null;
+  const rc = document.getElementById("radioContainer");
+  const rcMatch = rc && (!rc.dataset.hotspotId || resolveHotspotId(rc.dataset.hotspotId) === cid) ? rc : null;
+  return document.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`)
+    || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`)
+    || rcMatch;
+}
+
+function _isToolbarSlotRecEnabled(hs, cid, card) {
+  if (!hs) return false;
+  const recBtn = card ? card.querySelector(".header-rec-btn") : null;
+  let lsAutoRec = true;
+  try {
+    lsAutoRec = localStorage.getItem(`proxdmr_autorec_${cid}`) !== "0";
+  } catch (_) {}
+  const isPerHotspotRecOn = (hs.auto_record !== undefined ? (hs.auto_record !== false) : lsAutoRec)
+    && !(recBtn && recBtn.classList.contains("rec-off"));
+  return Boolean(isPerHotspotRecOn && _isToolbarGlobalAutoRecEnabled());
+}
+
+function _isToolbarGlobalAutoRecRxOff() {
+  try {
+    const raw = localStorage.getItem("proxdmr_rec_settings");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.auto_record_rx === false) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// Active Recording corner red-dot detector for expanded and live-collapsed hotspots (never fires if recording is disabled)
+function isToolbarSlotRxActive(hs) {
+  if (!hs || (isHotspotCollapsed(hs.id) && !isHotspotLiveCollapsed(hs.id))) return false;
+  const cid = resolveHotspotId(hs.id);
+  const card = _resolveToolbarSlotCard(hs, cid);
+  if (!_isToolbarSlotRecEnabled(hs, cid, card)) {
+    return false;
+  }
+
+  const isPttActive = Boolean(typeof window !== "undefined" && window.isPttPressed);
+  const activeTxId = (typeof window !== "undefined" && window.activeTxHotspotId) || (typeof window !== "undefined" && window.activeHotspotId);
+  if (isPttActive && resolveHotspotId(activeTxId) === cid) {
+    return true;
+  }
+
+  if (typeof window !== "undefined" && window.recordingsManager && window.recordingsManager.isSessionActive) {
+    return true;
+  }
+
+  if (!_isToolbarGlobalAutoRecRxOff() && isToolbarSlotRealRxActive(hs, card)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isToolbarSlotRealRxActive(hs, card) {
+  if (!hs) return false;
+  const netType = String(hs.network_type || (card && card.dataset.networkType) || "").toLowerCase();
+  const isAllStar = netType === "allstar" || Boolean(card && card.classList.contains("card-net-allstar"));
+  if (isAllStar) {
+    if (hs._aslCarrierRx || (hs.ts1 && hs.ts1.active)) return true;
+    if (card && card.querySelector(".vfo-allstar-row.allstar-rx-active")) return true;
+    if (card && card._lastRx && card._lastRx[1] && card._lastRx[1].active) return true;
+    return false;
+  }
+  if (hs._ysfCarrierRx || (hs.ts1 && hs.ts1.active) || (hs.ts2 && hs.ts2.active)) {
+    return true;
+  }
+  if (!card) return false;
+  if (card._lastRx) {
+    const s1 = card._lastRx[1];
+    const s2 = card._lastRx[2];
+    if ((s1 && s1.active) || (s2 && s2.active)) return true;
+  }
+  if (card.querySelector(".vfo-ts1-row.vfo-rx-active, .vfo-ts2-row.vfo-rx-active, .vfo-ts1-rx.active, .vfo-ts2-rx.active")) {
+    return true;
+  }
+  const modeBadge = card.querySelector(".mode-badge");
+  if (modeBadge && modeBadge.classList.contains("mode-rx")) {
+    return true;
+  }
+  return false;
+}
+
+// Active Real-RX corner green-dot detector when Recording is disabled
+function isToolbarSlotRxGreenDotActive(hs) {
+  if (!hs || (isHotspotCollapsed(hs.id) && !isHotspotLiveCollapsed(hs.id))) return false;
+  if (isToolbarSlotRxActive(hs)) return false;
+  const cid = resolveHotspotId(hs.id);
+  const card = _resolveToolbarSlotCard(hs, cid);
+  const recEnabled = _isToolbarSlotRecEnabled(hs, cid, card);
+  if (recEnabled && !_isToolbarGlobalAutoRecRxOff()) {
+    return false;
+  }
+  return isToolbarSlotRealRxActive(hs, card);
+}
+
+// Active speech transcription indicator ("T") for live slot transcription AND offline transcription from History/Player
+function isToolbarSlotTranscribeActive(hs) {
+  if (!hs) return false;
+  const cid = resolveHotspotId(hs.id);
+  const rm = (typeof window !== "undefined") ? window.recordingsManager : null;
+  const isOfflineActive = Boolean(
+    rm &&
+    typeof rm.isHotspotOfflineTranscribing === "function" &&
+    (rm.isHotspotOfflineTranscribing(cid) || rm.isHotspotOfflineTranscribing(hs.id))
+  );
+  const card = _resolveToolbarSlotCard(hs, cid);
+  const isBtnOfflineActive = Boolean(card && card.querySelector(".btn-hs-transcribe.transcribing"));
+  if (isOfflineActive || isBtnOfflineActive) return true;
+
+  if (isHotspotCollapsed(hs.id) && !isHotspotLiveCollapsed(hs.id)) return false;
+  if (!card) return false;
+  return Boolean(card.classList.contains("has-transcribe-mode") || card.querySelector(".has-transcribe"));
+}
+
+// Built-in Provider 2: Offline AI Transcribe ("t")
+registerToolbarProcessProvider((hs, cid, card) => {
+  const tBtn = card ? card.querySelector(".btn-hs-transcribe") : null;
+  const rm = (typeof window !== "undefined") ? window.recordingsManager : null;
+  const isRmActive = Boolean(
+    rm &&
+    typeof rm.isHotspotOfflineTranscribing === "function" &&
+    (rm.isHotspotOfflineTranscribing(cid) || (hs && rm.isHotspotOfflineTranscribing(hs.id)))
+  );
+  const visible = Boolean((tBtn && tBtn.style.display !== "none" && tBtn.classList.contains("transcribing")) || isRmActive);
+  if (!visible) return null;
+  return {
+    key: "transcribe",
+    badgeClass: "proc-mode-transcribe",
+    main: "t",
+    sub: "AI",
+    title: (tBtn && tBtn.title) || (window.t ? window.t("transcriber.offline_title", {}, "Offline transcription (Google AI)") : "Offline transcription (Google AI)")
+  };
+});
+
+// Built-in Provider 3: Piper TTS Model Upload (%)
+registerToolbarProcessProvider((_hs, _cid, card) => {
+  const ttsState = (typeof window !== "undefined" && window.__proxdmrTtsUploadState) || null;
+  if (ttsState && (ttsState.status === "running" || ttsState.status === "completed")) {
+    const pct = Math.max(0, Math.min(100, Math.round(Number(ttsState.progress) || 0)));
+    return {
+      key: "tts_upload",
+      badgeClass: "proc-mode-tts-upload",
+      main: "TTS",
+      sub: `${ttsState.status === "completed" ? 100 : pct}%`,
+      title: `TTS: ${ttsState.status === "completed" ? 100 : pct}%`
+    };
+  }
+  const ind = card ? card.querySelector(".header-tts-upload-indicator") : null;
+  if (ind && ind.style.display !== "none") {
+    const pEl = ind.querySelector(".tts-upload-percent");
+    return {
+      key: "tts_upload",
+      badgeClass: "proc-mode-tts-upload",
+      main: "TTS",
+      sub: pEl ? pEl.textContent : "0%",
+      title: ind.title || (window.t ? window.t("transcriber.piper_upload_title", {}, "Uploading Piper TTS voice model") : "Uploading Piper TTS voice model")
+    };
+  }
+  return null;
+});
+
+// Built-in Provider 4: BrandMeister / TGIF / FreeDMR TalkGroups Batch Upload (%)
+registerToolbarProcessProvider((hs, cid, card) => {
+  const bmState = (typeof window !== "undefined" && window.__proxdmrBmUploadState) || null;
+  if (bmState && (bmState.status === "running" || bmState.status === "completed")) {
+    const stCid = bmState.hotspotId ? resolveHotspotId(bmState.hotspotId) : "";
+    if (!stCid || stCid === cid || bmState.hotspotId === hs.id) {
+      return {
+        key: "bm_upload",
+        badgeClass: "proc-mode-bm-upload",
+        main: "TG",
+        sub: `${bmState.status === "completed" ? 100 : (bmState.percent || 0)}%`,
+        title: `TalkGroups Upload: ${bmState.status === "completed" ? 100 : (bmState.percent || 0)}%`
+      };
+    }
+  }
+  const ind = card ? card.querySelector(".header-bm-upload-indicator") : null;
+  if (ind && ind.style.display !== "none") {
+    const pEl = ind.querySelector(".bm-upload-percent");
+    return {
+      key: "bm_upload",
+      badgeClass: "proc-mode-bm-upload",
+      main: "TG",
+      sub: pEl ? pEl.textContent : "0%",
+      title: ind.title || (window.t ? window.t("bmtg.operation_title", {}, "TalkGroups operation") : "TalkGroups operation")
+    };
+  }
+  return null;
+});
+
+let _toolbarSlotFontFitRaf = null;
+let _toolbarSlotFontFitResizeObserver = null;
+let _toolbarSlotFontFitListenersBound = false;
+
+function isToolbarSlotNameOverflowing(btn, nameEl) {
+  if (!btn || !nameEl) return false;
+  const btnStyle = window.getComputedStyle(btn);
+  const padLeft = parseFloat(btnStyle.paddingLeft) || 0;
+  const padRight = parseFloat(btnStyle.paddingRight) || 0;
+  const borderLeft = parseFloat(btnStyle.borderLeftWidth) || 0;
+  const borderRight = parseFloat(btnStyle.borderRightWidth) || 0;
+  const btnRect = btn.getBoundingClientRect();
+  const contentWidth = (btnRect.width > 0 ? (btnRect.width - borderLeft - borderRight) : btn.clientWidth) - padLeft - padRight;
+  if (contentWidth <= 4) return false;
+
+  if (nameEl.scrollWidth > Math.floor(contentWidth)) {
+    return true;
+  }
+  try {
+    if (typeof document !== "undefined" && typeof document.createRange === "function" && nameEl.firstChild) {
+      const range = document.createRange();
+      range.selectNodeContents(nameEl);
+      const textWidth = range.getBoundingClientRect().width;
+      if (textWidth > contentWidth - 0.4) {
+        return true;
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
+function syncToolbarSlotLiveBorderSvg(btn) {
+  if (!btn) return;
+  const svg = btn.querySelector(":scope > .slot-live-border");
+  if (!svg) return;
+  const rectEl = svg.querySelector("rect");
+  if (!rectEl) return;
+  const r = btn.getBoundingClientRect();
+  const w = r.width > 4 ? Math.round(r.width * 10) / 10 : (btn.offsetWidth || 46);
+  const h = r.height > 4 ? Math.round(r.height * 10) / 10 : (btn.offsetHeight || 30);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("width", String(w));
+  svg.setAttribute("height", String(h));
+  const bw = 2.5;
+  const half = bw / 2;
+  rectEl.setAttribute("x", String(half));
+  rectEl.setAttribute("y", String(half));
+  rectEl.setAttribute("width", String(Math.max(1, Math.round((w - bw) * 10) / 10)));
+  rectEl.setAttribute("height", String(Math.max(1, Math.round((h - bw) * 10) / 10)));
+  let rad = 0;
+  try {
+    if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+      rad = parseFloat(window.getComputedStyle(btn).borderTopLeftRadius) || 0;
+    }
+  } catch (_) {}
+  const innerRad = Math.max(0, Math.round((rad - half) * 10) / 10);
+  rectEl.setAttribute("rx", String(innerRad));
+  rectEl.setAttribute("ry", String(innerRad));
+}
+
+function fitToolbarSlotNameFont(btn) {
+  if (!btn || btn.classList.contains("is-empty")) return;
+  syncToolbarSlotLiveBorderSvg(btn);
+  if (btn.classList.contains("is-proc-showing")) return;
+  const nameEl = btn.querySelector(".slot-name");
+  if (!nameEl) return;
+  if (typeof window === "undefined" || !nameEl.getClientRects || nameEl.getClientRects().length === 0) return;
+
+  nameEl.classList.remove("slot-font-minus-1", "slot-font-minus-2");
+  if (!isToolbarSlotNameOverflowing(btn, nameEl)) return;
+
+  nameEl.classList.add("slot-font-minus-1");
+  void nameEl.offsetWidth;
+  if (!isToolbarSlotNameOverflowing(btn, nameEl)) return;
+
+  nameEl.classList.remove("slot-font-minus-1");
+  nameEl.classList.add("slot-font-minus-2");
+}
+
+function fitAllToolbarSlotNames() {
+  if (typeof document === "undefined") return;
+  const container = document.getElementById("toolbarMiddleCluster");
+  if (!container) return;
+  container.querySelectorAll(".toolbar-hs-slot:not(.is-empty)").forEach((btn) => {
+    fitToolbarSlotNameFont(btn);
+  });
+}
+
+function scheduleFitAllToolbarSlotNames() {
+  if (typeof requestAnimationFrame !== "function") {
+    fitAllToolbarSlotNames();
+    return;
+  }
+  if (_toolbarSlotFontFitRaf) {
+    cancelAnimationFrame(_toolbarSlotFontFitRaf);
+  }
+  _toolbarSlotFontFitRaf = requestAnimationFrame(() => {
+    _toolbarSlotFontFitRaf = null;
+    fitAllToolbarSlotNames();
+  });
+}
+
+function ensureToolbarSlotFontFitObservers(container) {
+  if (typeof window === "undefined") return;
+  if (!_toolbarSlotFontFitListenersBound) {
+    _toolbarSlotFontFitListenersBound = true;
+    window.addEventListener("resize", scheduleFitAllToolbarSlotNames, { passive: true });
+    if (typeof document !== "undefined" && document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+      document.fonts.ready.then(() => scheduleFitAllToolbarSlotNames()).catch(() => {});
+    }
+  }
+  if (container && !_toolbarSlotFontFitResizeObserver && typeof ResizeObserver === "function") {
+    try {
+      _toolbarSlotFontFitResizeObserver = new ResizeObserver(() => {
+        scheduleFitAllToolbarSlotNames();
+      });
+      _toolbarSlotFontFitResizeObserver.observe(container);
+    } catch (_) {}
+  }
+}
+
+function applySlotCycleDisplay(btn, hs, idx) {
+  if (!btn) return;
+  const procClassList = ["is-proc-showing", "proc-mode-transcribe", "proc-mode-tts-upload", "proc-mode-bm-upload"];
+  const badgeEl = btn.querySelector(".slot-proc-badge");
+  const wasProcShowing = btn.classList.contains("is-proc-showing");
+
+  if (!hs) {
+    btn.classList.remove(...procClassList, "has-rx-dot", "has-rx-green-dot", "has-tr-dot");
+    if (badgeEl) badgeEl.innerHTML = "";
+    if (wasProcShowing) fitToolbarSlotNameFont(btn);
+    return;
+  }
+
+  const showTrDot = isToolbarSlotTranscribeActive(hs);
+  if (isHotspotCollapsed(hs.id) && !isHotspotLiveCollapsed(hs.id)) {
+    btn.classList.remove(...procClassList, "has-rx-dot", "has-rx-green-dot");
+    btn.classList.toggle("has-tr-dot", showTrDot);
+    if (badgeEl) badgeEl.innerHTML = "";
+    if (wasProcShowing) fitToolbarSlotNameFont(btn);
+    return;
+  }
+
+  if (btn.classList.contains("is-live-collapsed")) {
+    syncToolbarSlotLiveBorderSvg(btn);
+  }
+
+  const showRedRecDot = isToolbarSlotRxActive(hs);
+  const showGreenRxDot = !showRedRecDot && isToolbarSlotRxGreenDotActive(hs);
+  btn.classList.toggle("has-rx-dot", showRedRecDot);
+  btn.classList.toggle("has-rx-green-dot", showGreenRxDot);
+  btn.classList.toggle("has-tr-dot", showTrDot);
+
+  if (!isHotspotCollapsed(hs.id)) {
+    btn.classList.remove(...procClassList);
+    if (badgeEl) badgeEl.innerHTML = "";
+    if (wasProcShowing) fitToolbarSlotNameFont(btn);
+    return;
+  }
+
+  const processes = getToolbarSlotProcessList(hs);
+  if (!processes.length) {
+    btn.classList.remove(...procClassList);
+    if (badgeEl) badgeEl.innerHTML = "";
+    if (wasProcShowing) fitToolbarSlotNameFont(btn);
+    return;
+  }
+
+  const totalSteps = 1 + processes.length;
+  const activeStep = _toolbarCycleStep % totalSteps;
+  if (activeStep === 0) {
+    btn.classList.remove(...procClassList);
+    if (badgeEl) badgeEl.innerHTML = "";
+    if (wasProcShowing) fitToolbarSlotNameFont(btn);
+    return;
+  }
+
+  const proc = processes[activeStep - 1];
+  btn.classList.remove("proc-mode-transcribe", "proc-mode-tts-upload", "proc-mode-bm-upload");
+  btn.classList.add("is-proc-showing");
+  if (proc.badgeClass) {
+    btn.classList.add(proc.badgeClass);
+  }
+  if (badgeEl) {
+    badgeEl.innerHTML = `<span class="slot-proc-main">${safeEscapeHtml(proc.main || "")}</span>${proc.sub ? `<span class="slot-proc-sub">${safeEscapeHtml(proc.sub)}</span>` : ""}`;
+  }
+}
+
+function syncToolbarCycleTimer(shouldRun) {
+  if (shouldRun && !_toolbarCycleTimer) {
+    _toolbarCycleTimer = setInterval(() => {
+      _toolbarCycleStep = (_toolbarCycleStep + 1) % 100000;
+      refreshToolbarProcessIndicators();
+    }, 1000);
+  } else if (!shouldRun && _toolbarCycleTimer) {
+    clearInterval(_toolbarCycleTimer);
+    _toolbarCycleTimer = null;
+    _toolbarCycleStep = 0;
+  }
+}
+
+let _toolbarSlotDragState = null;
+
+export function refreshToolbarProcessIndicators() {
+  if (_toolbarSlotDragState) return;
+  const container = document.getElementById("toolbarMiddleCluster");
+  if (!container) return;
+  const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+    ? window.currentHotspots
+    : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
+  const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
+
+  let anyLiveWithProcesses = false;
+  container.querySelectorAll(".toolbar-hs-slot").forEach((btn) => {
+    const idx = parseInt(btn.dataset.slotIndex || "0", 10);
+    const hs = displayHotspots[idx] || null;
+    if (hs && isHotspotCollapsed(hs.id) && isHotspotLiveCollapsed(hs.id)) {
+      const procs = getToolbarSlotProcessList(hs);
+      if (procs.length > 0) anyLiveWithProcesses = true;
+    }
+    applySlotCycleDisplay(btn, hs, idx);
+  });
+
+  syncToolbarCycleTimer(anyLiveWithProcesses);
+}
+
+async function archiveHotspotWithConfirm(hs, idx) {
+  if (!hs) return;
+  const hsName = hs.name || hs.callsign || `${window.t ? window.t("hotspots.name_prefix", {}, "Hotspot") : "Hotspot"} #${idx + 1}`;
+  const titleText = window.t ? window.t("hotspots.archive_confirm_title", {}, "Archive Hotspot") : "Archive Hotspot";
+  const confirmMsg = window.t
+    ? window.t("hotspots.archive_confirm_msg", { name: hsName }, `Are you sure you want to archive hotspot "${hsName}"?`)
+    : `Are you sure you want to archive hotspot "${hsName}"?`;
+  const confirmBtnText = window.t ? window.t("hotspots.btn_to_archive", {}, "Archive") : "Archive";
+  const cancelBtnText = window.t ? window.t("buttons.cancel", {}, "Cancel") : "Cancel";
+
+  const confirmed = typeof window.showAppConfirm === "function"
+    ? await window.showAppConfirm({
+        title: titleText,
+        icon: "📦",
+        message: confirmMsg,
+        confirmText: confirmBtnText,
+        cancelText: cancelBtnText,
+        confirmStyle: "primary"
+      })
+    : (typeof confirm === "function" ? confirm(confirmMsg) : true);
+
+  if (!confirmed) return;
+  await toggleHotspotArchiveState(hs.id, true);
+}
+
+function closeToolbarSlotContextMenu() {
+  const existing = document.getElementById("toolbarSlotContextMenu");
+  if (existing && existing.parentNode) {
+    existing.parentNode.removeChild(existing);
+  }
+  if (typeof window !== "undefined" && typeof window._toolbarSlotCtxCleanup === "function") {
+    try { window._toolbarSlotCtxCleanup(); } catch (_) {}
+    window._toolbarSlotCtxCleanup = null;
+  }
+}
+
+function openToolbarSlotContextMenu(btn, hs, idx) {
+  if (!btn || !hs) return;
+  closeToolbarSlotContextMenu();
+
+  const cid = resolveHotspotId(hs.id);
+  const isCollapsed = Boolean(isHotspotCollapsed(cid));
+  const isSolo = Boolean(typeof window.isHotspotSoloActive === "function" && window.isHotspotSoloActive(cid));
+  const hsTitle = String(hs.name || "").trim() || formatToolbarSlotName(hs, idx);
+
+  const collapseText = window.t ? window.t("toolbar.menu_collapse", {}, "Свернуть") : "Свернуть";
+  const soloText = window.t ? window.t("toolbar.menu_solo", {}, "Solo") : "Solo";
+  const soloOffText = window.t ? window.t("toolbar.menu_solo_off", {}, "Solo OFF") : "Solo OFF";
+  const archiveText = window.t ? window.t("toolbar.menu_archive", {}, "Переместить в архив") : "Переместить в архив";
+
+  const menu = document.createElement("div");
+  menu.id = "toolbarSlotContextMenu";
+  menu.className = "toolbar-slot-ctx-menu";
+  menu.setAttribute("role", "menu");
+  const openedAt = Date.now();
+
+  let itemsHtml = `<div class="toolbar-slot-ctx-header">${safeEscapeHtml(hsTitle)}</div>`;
+  if (!isCollapsed) {
+    itemsHtml += `<button type="button" class="toolbar-slot-ctx-item" role="menuitem" data-action="collapse"><span class="ctx-item-icon" aria-hidden="true">🔽</span><span class="ctx-item-label">${safeEscapeHtml(collapseText)}</span></button>`;
+  }
+  itemsHtml += `<button type="button" class="toolbar-slot-ctx-item${isSolo ? " is-solo-active" : ""}" role="menuitem" data-action="solo"><span class="ctx-item-icon" aria-hidden="true">${isSolo ? "🔊" : "🎯"}</span><span class="ctx-item-label">${safeEscapeHtml(isSolo ? soloOffText : soloText)}</span></button>`;
+  itemsHtml += `<button type="button" class="toolbar-slot-ctx-item is-archive" role="menuitem" data-action="archive"><span class="ctx-item-icon" aria-hidden="true">📦</span><span class="ctx-item-label">${safeEscapeHtml(archiveText)}</span></button>`;
+  menu.innerHTML = itemsHtml;
+
+  document.body.appendChild(menu);
+
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
+  const menuRect = menu.getBoundingClientRect();
+  if (isMobile) {
+    const toolbarEl = document.getElementById("proxdmrTopToolbar");
+    const toolbarBottom = toolbarEl ? toolbarEl.getBoundingClientRect().bottom : 42;
+    const topPx = Math.max(12, Math.min(Math.round(toolbarBottom + 38), window.innerHeight - menuRect.height - 12));
+    menu.classList.add("is-mobile-pos");
+    menu.style.left = "50%";
+    menu.style.top = `${topPx}px`;
+  } else {
+    const btnRect = btn.getBoundingClientRect();
+    const rawLeft = Math.round(btnRect.left + 30);
+    const rawTop = Math.round(btnRect.top + 20);
+    const clampedLeft = Math.max(8, Math.min(rawLeft, window.innerWidth - menuRect.width - 8));
+    const clampedTop = Math.max(8, Math.min(rawTop, window.innerHeight - menuRect.height - 8));
+    menu.style.left = `${clampedLeft}px`;
+    menu.style.top = `${clampedTop}px`;
+  }
+
+  menu.addEventListener("click", async (e) => {
+    const itemBtn = e.target && typeof e.target.closest === "function" ? e.target.closest(".toolbar-slot-ctx-item") : null;
+    if (!itemBtn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (Date.now() - openedAt < 180) return;
+    const action = itemBtn.dataset.action;
+    closeToolbarSlotContextMenu();
+    if (action === "collapse") {
+      if (typeof window.collapseHotspot === "function") {
+        window.collapseHotspot(cid, { isLive: true });
+      }
+    } else if (action === "solo") {
+      if (typeof window.toggleHotspotSoloAudio === "function") {
+        window.toggleHotspotSoloAudio(cid);
+      }
+    } else if (action === "archive") {
+      await archiveHotspotWithConfirm(hs, idx);
+    }
+  });
+
+  const onDocPointerDown = (e) => {
+    if (!menu.contains(e.target)) {
+      closeToolbarSlotContextMenu();
+    }
+  };
+  const onDocKeyDown = (e) => {
+    if (e.key === "Escape") {
+      closeToolbarSlotContextMenu();
+    }
+  };
+  const onWinResize = () => {
+    closeToolbarSlotContextMenu();
+  };
+
+  document.addEventListener("pointerdown", onDocPointerDown, true);
+  document.addEventListener("keydown", onDocKeyDown, true);
+  window.addEventListener("resize", onWinResize);
+  window._toolbarSlotCtxCleanup = () => {
+    document.removeEventListener("pointerdown", onDocPointerDown, true);
+    document.removeEventListener("keydown", onDocKeyDown, true);
+    window.removeEventListener("resize", onWinResize);
+  };
+}
+
+function openToolbarEmptySlotArchiveMenu(btn, idx) {
+  if (!btn) return;
+  const lastClosed = typeof window !== "undefined" ? window._toolbarLastClosedArchiveSlot : null;
+  if (lastClosed && lastClosed.idx === idx && (Date.now() - lastClosed.at) < 400) {
+    window._toolbarLastClosedArchiveSlot = null;
+    return;
+  }
+  const existing = document.getElementById("toolbarSlotContextMenu");
+  if (existing && existing.dataset.menuType === "archive-picker" && existing.dataset.slotIndex === String(idx)) {
+    closeToolbarSlotContextMenu();
+    return;
+  }
+  closeToolbarSlotContextMenu();
+
+  const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+    ? window.currentHotspots
+    : (Array.isArray(currentHotspots) ? currentHotspots : []);
+  const archivedHs = allHs.filter(h => Boolean(h.hidden));
+
+  const headerText = window.t ? window.t("toolbar.menu_archive_pick_hdr", {}, "Из архива в слот") : "Из архива в слот";
+  const emptyText = window.t ? window.t("archive.no_archived", {}, "В архиве пока нет хотспотов") : "В архиве пока нет хотспотов";
+  const defaultHsName = window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot";
+
+  const menu = document.createElement("div");
+  menu.id = "toolbarSlotContextMenu";
+  menu.className = "toolbar-slot-ctx-menu is-archive-picker-menu";
+  menu.dataset.menuType = "archive-picker";
+  menu.dataset.slotIndex = String(idx);
+  menu.setAttribute("role", "menu");
+  const openedAt = Date.now();
+
+  let listItemsHtml = "";
+  if (!archivedHs.length) {
+    listItemsHtml = `<div class="toolbar-slot-ctx-empty">${safeEscapeHtml(emptyText)}</div>`;
+  } else {
+    listItemsHtml = archivedHs.map((h) => {
+      const netType = String(h.network_type || "bm").toLowerCase();
+      const shortNet = getToolbarShortNetCode(netType);
+      const hsTitle = String(h.name || "").trim() || String(h.callsign || "").trim() || defaultHsName;
+      const rawCall = window.localizeDemoText ? window.localizeDemoText(h.callsign || "") : (h.callsign || "");
+      const subText = (rawCall && rawCall !== hsTitle) ? rawCall : "";
+      return `<button type="button" class="toolbar-slot-ctx-item" role="menuitem" data-hs-id="${safeEscapeHtml(String(h.id))}"><span class="toolbar-slot-ctx-net-pill">${safeEscapeHtml(shortNet)}</span><span class="toolbar-slot-ctx-item-text"><span class="ctx-item-label">${safeEscapeHtml(hsTitle)}</span>${subText ? `<span class="toolbar-slot-ctx-item-sub">${safeEscapeHtml(subText)}</span>` : ""}</span></button>`;
+    }).join("");
+  }
+
+  menu.innerHTML = `<div class="toolbar-slot-ctx-header">${safeEscapeHtml(headerText)}</div><div class="toolbar-slot-ctx-list">${listItemsHtml}</div>`;
+  document.body.appendChild(menu);
+
+  const listEl = menu.querySelector(".toolbar-slot-ctx-list");
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
+  if (isMobile) {
+    const toolbarEl = document.getElementById("proxdmrTopToolbar");
+    const toolbarBottom = toolbarEl ? toolbarEl.getBoundingClientRect().bottom : 42;
+    const targetTop = Math.max(12, Math.round(toolbarBottom + 38));
+    if (listEl) {
+      const availListH = Math.max(120, window.innerHeight - targetTop - 72);
+      listEl.style.maxHeight = `${availListH}px`;
+    }
+    const menuRect = menu.getBoundingClientRect();
+    const clampedTop = Math.max(12, Math.min(targetTop, window.innerHeight - menuRect.height - 12));
+    menu.classList.add("is-mobile-pos");
+    menu.style.left = "50%";
+    menu.style.top = `${clampedTop}px`;
+  } else {
+    const btnRect = btn.getBoundingClientRect();
+    const rawLeft = Math.round(btnRect.left + 30);
+    const rawTop = Math.round(btnRect.top + 20);
+    if (listEl) {
+      const availListH = Math.max(140, window.innerHeight - rawTop - 72);
+      listEl.style.maxHeight = `${availListH}px`;
+    }
+    const menuRect = menu.getBoundingClientRect();
+    const clampedLeft = Math.max(8, Math.min(rawLeft, window.innerWidth - menuRect.width - 8));
+    const clampedTop = Math.max(8, Math.min(rawTop, window.innerHeight - menuRect.height - 8));
+    menu.style.left = `${clampedLeft}px`;
+    menu.style.top = `${clampedTop}px`;
+  }
+
+  menu.addEventListener("click", async (e) => {
+    const itemBtn = e.target && typeof e.target.closest === "function" ? e.target.closest(".toolbar-slot-ctx-item") : null;
+    if (!itemBtn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (Date.now() - openedAt < 180) return;
+    const hsId = itemBtn.dataset.hsId;
+    closeToolbarSlotContextMenu();
+    if (hsId) {
+      await toggleHotspotArchiveState(hsId, false);
+    }
+  });
+
+  const onDocPointerDown = (e) => {
+    if (!menu.contains(e.target)) {
+      if (btn.contains(e.target) && typeof window !== "undefined") {
+        window._toolbarLastClosedArchiveSlot = { idx, at: Date.now() };
+      }
+      closeToolbarSlotContextMenu();
+    }
+  };
+  const onDocKeyDown = (e) => {
+    if (e.key === "Escape") {
+      closeToolbarSlotContextMenu();
+    }
+  };
+  const onWinResize = () => {
+    closeToolbarSlotContextMenu();
+  };
+
+  document.addEventListener("pointerdown", onDocPointerDown, true);
+  document.addEventListener("keydown", onDocKeyDown, true);
+  window.addEventListener("resize", onWinResize);
+  window._toolbarSlotCtxCleanup = () => {
+    document.removeEventListener("pointerdown", onDocPointerDown, true);
+    document.removeEventListener("keydown", onDocKeyDown, true);
+    window.removeEventListener("resize", onWinResize);
+  };
+}
+
+function wireToolbarSlotInteractions(btn) {
+  if (!btn || btn._toolbarSlotWired) return;
+  btn._toolbarSlotWired = true;
+
+  const DRAG_ARM_HOLD_MS = 250;
+  const LONG_PRESS_HOLD_MS = 1250;
+  const PRE_ARM_ABORT_PX = 14;
+  const DRAG_MOVE_START_PX = 5;
+
+  let holdTimer = null;
+  let dragArmTimer = null;
+  let blinkResetTimer = null;
+  let dragArmed = false;
+  let didLongPress = false;
+  let pointerActive = false;
+  let activePointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let lastX = 0;
+  let lastY = 0;
+  let dragOriginX = 0;
+  let dragOriginY = 0;
+  let suppressClickUntil = 0;
+
+  const clearArmVisuals = () => {
+    if (blinkResetTimer) {
+      clearTimeout(blinkResetTimer);
+      blinkResetTimer = null;
+    }
+    btn.classList.remove("is-slot-drag-armed", "is-slot-drag-armed-blink");
+  };
+
+  const cancelDragArm = () => {
+    if (dragArmTimer) {
+      clearTimeout(dragArmTimer);
+      dragArmTimer = null;
+    }
+    dragArmed = false;
+    clearArmVisuals();
+  };
+
+  const cancelLongPressOnly = () => {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  };
+
+  const cancelHold = () => {
+    cancelLongPressOnly();
+    cancelDragArm();
+  };
+
+  const getActiveListAndDisplay = () => {
+    const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+      ? window.currentHotspots
+      : (Array.isArray(currentHotspots) ? currentHotspots : []);
+    const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
+    return { allHs, displayHotspots };
+  };
+
+  const getSlotHotspot = () => {
+    const idx = parseInt(btn.dataset.slotIndex || "0", 10);
+    const { displayHotspots } = getActiveListAndDisplay();
+    return { idx, hs: displayHotspots[idx] || null };
+  };
+
+  const cleanupSlotDrag = (shouldCommit) => {
+    const st = _toolbarSlotDragState;
+    if (!st) return;
+    _toolbarSlotDragState = null;
+
+    document.body.classList.remove("is-toolbar-slot-dragging");
+    if (st.btn) {
+      st.btn.classList.remove("is-slot-drag-source", "is-slot-drag-armed", "is-slot-drag-armed-blink");
+      try {
+        if (st.btn.hasPointerCapture && st.btn.hasPointerCapture(st.pointerId)) {
+          st.btn.releasePointerCapture(st.pointerId);
+        }
+      } catch (_) {}
+    }
+    if (st.avatar && st.avatar.parentNode) {
+      st.avatar.remove();
+    }
+    if (Array.isArray(st.occupiedBtns)) {
+      st.occupiedBtns.forEach((slotEl) => {
+        slotEl.style.transform = "";
+      });
+    }
+
+    if (shouldCommit && st.targetIdx !== st.origIdx) {
+      const { allHs, displayHotspots } = getActiveListAndDisplay();
+      const visibleIds = displayHotspots.map(h => h.id);
+      if (st.origIdx >= 0 && st.origIdx < visibleIds.length && st.targetIdx >= 0 && st.targetIdx < visibleIds.length) {
+        const [movedId] = visibleIds.splice(st.origIdx, 1);
+        visibleIds.splice(st.targetIdx, 0, movedId);
+
+        const queue = visibleIds.slice();
+        const fullOrder = [];
+        allHs.forEach((h) => {
+          if (h.hidden) {
+            fullOrder.push(h.id);
+          } else if (queue.length > 0) {
+            fullOrder.push(queue.shift());
+          }
+        });
+        while (queue.length > 0) {
+          fullOrder.push(queue.shift());
+        }
+        reorderHotspots(fullOrder);
+      }
+    }
+  };
+
+  const applyDragPreviewTransforms = (st) => {
+    const { occupiedBtns, rects, origIdx, targetIdx } = st;
+    for (let i = 0; i < occupiedBtns.length; i++) {
+      const el = occupiedBtns[i];
+      if (!el || !rects[i]) continue;
+      if (i === origIdx) {
+        el.style.transform = "";
+        continue;
+      }
+      let shiftedIdx = i;
+      if (origIdx < targetIdx && i > origIdx && i <= targetIdx) {
+        shiftedIdx = i - 1;
+      } else if (origIdx > targetIdx && i >= targetIdx && i < origIdx) {
+        shiftedIdx = i + 1;
+      }
+      const dx = (rects[shiftedIdx] ? rects[shiftedIdx].left : rects[i].left) - rects[i].left;
+      el.style.transform = dx !== 0 ? `translateX(${dx}px)` : "";
+    }
+  };
+
+  btn.addEventListener("pointerdown", (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (_toolbarSlotDragState) return;
+    const { idx, hs } = getSlotHotspot();
+    if (!hs) return;
+    didLongPress = false;
+    pointerActive = true;
+    activePointerId = e.pointerId;
+    cancelHold();
+    startX = e.clientX || 0;
+    startY = e.clientY || 0;
+    lastX = startX;
+    lastY = startY;
+    dragOriginX = startX;
+    dragOriginY = startY;
+
+    const cid = resolveHotspotId(hs.id);
+    const isCollapsed = Boolean(isHotspotCollapsed(cid));
+
+    dragArmTimer = setTimeout(() => {
+      dragArmTimer = null;
+      if (!pointerActive || didLongPress || _toolbarSlotDragState) return;
+      const container = document.getElementById("toolbarMiddleCluster");
+      const occupiedBtns = container ? Array.from(container.querySelectorAll(".toolbar-hs-slot:not(.is-empty)")) : [];
+      if (occupiedBtns.length < 2 || !occupiedBtns.includes(btn)) return;
+
+      dragArmed = true;
+      dragOriginX = lastX;
+      dragOriginY = lastY;
+      btn.classList.add("is-slot-drag-armed");
+      btn.classList.remove("is-slot-drag-armed-blink");
+      void btn.offsetWidth;
+      btn.classList.add("is-slot-drag-armed-blink");
+      blinkResetTimer = setTimeout(() => {
+        blinkResetTimer = null;
+        btn.classList.remove("is-slot-drag-armed-blink");
+      }, 320);
+      try {
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          navigator.vibrate(15);
+        }
+      } catch (_) {}
+    }, DRAG_ARM_HOLD_MS);
+
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      cancelDragArm();
+      if (_toolbarSlotDragState) return;
+      didLongPress = true;
+      pointerActive = false;
+      suppressClickUntil = Date.now() + 650;
+      if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+        window.addEventListener("pointerup", () => {
+          setTimeout(() => { didLongPress = false; }, 650);
+        }, { once: true });
+      }
+      try {
+        if (typeof showLongPressEffect === "function") {
+          const r = btn.getBoundingClientRect();
+          showLongPressEffect(r.left + r.width / 2, r.top + r.height / 2);
+        } else if (navigator.vibrate) {
+          navigator.vibrate(40);
+        }
+      } catch (_) {}
+      openToolbarSlotContextMenu(btn, hs, idx);
+    }, LONG_PRESS_HOLD_MS);
+  });
+
+  btn.addEventListener("pointermove", (e) => {
+    if (!pointerActive || e.pointerId !== activePointerId) return;
+    const curX = e.clientX || 0;
+    const curY = e.clientY || 0;
+    lastX = curX;
+    lastY = curY;
+
+    if (!_toolbarSlotDragState) {
+      if (!dragArmed) {
+        if (Math.hypot(curX - startX, curY - startY) > PRE_ARM_ABORT_PX) {
+          cancelHold();
+          pointerActive = false;
+          suppressClickUntil = Date.now() + 250;
+        }
+        return;
+      }
+
+      const postArmDx = curX - dragOriginX;
+      const postArmDy = curY - dragOriginY;
+      if (Math.hypot(postArmDx, postArmDy) < DRAG_MOVE_START_PX) return;
+
+      cancelLongPressOnly();
+      if (didLongPress) return;
+
+      const container = document.getElementById("toolbarMiddleCluster");
+      const occupiedBtns = container ? Array.from(container.querySelectorAll(".toolbar-hs-slot:not(.is-empty)")) : [];
+      const origIdx = occupiedBtns.indexOf(btn);
+      if (occupiedBtns.length < 2 || origIdx < 0) return;
+
+      cancelDragArm();
+
+      const rects = occupiedBtns.map(el => el.getBoundingClientRect());
+      const startRect = rects[origIdx];
+      const avatar = btn.cloneNode(true);
+      avatar.classList.remove("is-slot-drag-source", "is-slot-drag-armed", "is-slot-drag-armed-blink");
+      avatar.classList.add("toolbar-slot-drag-avatar");
+      avatar.style.left = `${startRect.left}px`;
+      avatar.style.top = `${startRect.top}px`;
+      avatar.style.width = `${startRect.width}px`;
+      avatar.style.height = `${startRect.height}px`;
+      document.body.appendChild(avatar);
+
+      document.body.classList.add("is-toolbar-slot-dragging");
+      btn.classList.add("is-slot-drag-source");
+      try {
+        if (btn.setPointerCapture) btn.setPointerCapture(e.pointerId);
+      } catch (_) {}
+
+      _toolbarSlotDragState = {
+        btn,
+        pointerId: e.pointerId,
+        occupiedBtns,
+        rects,
+        origIdx,
+        targetIdx: origIdx,
+        dragOriginX,
+        dragOriginY,
+        startCenterX: startRect.left + startRect.width / 2,
+        avatar
+      };
+    }
+
+    const st = _toolbarSlotDragState;
+    if (!st || st.btn !== btn || st.pointerId !== e.pointerId) return;
+    if (e.cancelable) e.preventDefault();
+
+    const dragDx = curX - st.dragOriginX;
+    const dragDy = curY - st.dragOriginY;
+    const clampedDy = Math.max(-14, Math.min(14, dragDy * 0.35));
+    st.avatar.style.transform = `translate3d(${dragDx}px, ${clampedDy}px, 0) scale(1.06)`;
+
+    const dragCenterX = st.startCenterX + dragDx;
+    let bestIdx = st.origIdx;
+    let bestDist = Infinity;
+    for (let i = 0; i < st.rects.length; i++) {
+      const cx = (st.rects[i].left + st.rects[i].right) / 2;
+      const dist = Math.abs(dragCenterX - cx);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx !== st.targetIdx) {
+      st.targetIdx = bestIdx;
+      applyDragPreviewTransforms(st);
+    }
+  });
+
+  btn.addEventListener("pointerup", (e) => {
+    if (e.pointerId !== activePointerId && _toolbarSlotDragState?.pointerId !== e.pointerId) {
+      cancelHold();
+      return;
+    }
+    const wasArmedWithoutDrag = Boolean(dragArmed && !_toolbarSlotDragState && !didLongPress);
+    cancelHold();
+    pointerActive = false;
+
+    if (_toolbarSlotDragState && _toolbarSlotDragState.btn === btn) {
+      suppressClickUntil = Date.now() + 400;
+      e.preventDefault();
+      e.stopPropagation();
+      cleanupSlotDrag(true);
+      return;
+    }
+
+    if (wasArmedWithoutDrag) {
+      suppressClickUntil = Date.now() + 300;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (didLongPress) {
+      suppressClickUntil = Date.now() + 650;
+      e.preventDefault();
+      e.stopPropagation();
+      setTimeout(() => { didLongPress = false; }, 650);
+    }
+  });
+
+  btn.addEventListener("pointercancel", () => {
+    cancelHold();
+    pointerActive = false;
+    didLongPress = false;
+    if (_toolbarSlotDragState && _toolbarSlotDragState.btn === btn) {
+      suppressClickUntil = Date.now() + 300;
+      cleanupSlotDrag(false);
+    }
+  });
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (Date.now() < suppressClickUntil) return;
+    if (didLongPress) {
+      didLongPress = false;
+      return;
+    }
+    const { idx, hs } = getSlotHotspot();
+    if (!hs) {
+      openToolbarEmptySlotArchiveMenu(btn, idx);
+      return;
+    }
+    const cid = resolveHotspotId(hs.id);
+    if (isHotspotCollapsed(cid)) {
+      if (typeof window.expandHotspot === "function") {
+        window.expandHotspot(cid);
+      }
+    } else {
+      if (typeof window.collapseHotspot === "function") {
+        window.collapseHotspot(cid, { isLive: false });
+      }
+    }
+  });
+
+  btn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+}
+
+export function renderToolbarHotspotSlots() {
+  if (_toolbarSlotDragState) return;
+  const container = document.getElementById("toolbarMiddleCluster");
+  if (!container) return;
+  const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+    ? window.currentHotspots
+    : (Array.isArray(currentHotspots) && currentHotspots.length ? currentHotspots : []);
+  const displayHotspots = allHs.filter(h => !h.hidden).slice(0, 7);
+  const slotEntries = resolveToolbarSlotLabels(displayHotspots);
+  const netClasses = ["net-type-bm", "net-type-tgif", "net-type-freedmr", "net-type-adn", "net-type-ysf", "net-type-dmrplus", "net-type-xlx", "net-type-allstar", "net-type-custom"];
+
+  let anyLiveWithProcesses = false;
+
+  container.querySelectorAll(".toolbar-hs-slot").forEach((btn) => {
+    wireToolbarSlotInteractions(btn);
+    const idx = parseInt(btn.dataset.slotIndex || "0", 10);
+    const hs = displayHotspots[idx] || null;
+    btn.classList.remove(...netClasses, "is-empty", "is-expanded", "is-collapsed", "is-live-collapsed", "has-rx-dot", "has-rx-green-dot", "has-tr-dot", "is-proc-showing", "proc-mode-transcribe", "proc-mode-tts-upload", "proc-mode-bm-upload");
+
+    if (!hs) {
+      btn.classList.add("is-empty");
+      btn.dataset.hotspotId = "";
+      btn.innerHTML = `<span class="slot-empty-dot" aria-hidden="true"></span>`;
+      const emptyTip = window.t ? window.t("toolbar.slot_empty_title", { num: idx + 1 }, `Свободный слот #${idx + 1} (клик: выбрать из архива)`) : `Свободный слот #${idx + 1} (клик: выбрать из архива)`;
+      btn.title = emptyTip;
+      btn.setAttribute("aria-label", emptyTip);
+      return;
+    }
+
+    const netType = String(hs.network_type || "bm").toLowerCase();
+    const shortNet = getToolbarShortNetCode(netType);
+    const normNetClass = netClasses.includes(`net-type-${netType}`) ? `net-type-${netType}` : "net-type-bm";
+    const isCollapsed = Boolean(isHotspotCollapsed(hs.id));
+    const isLive = Boolean(isCollapsed && isHotspotLiveCollapsed(hs.id));
+
+    btn.classList.add(normNetClass);
+    btn.dataset.hotspotId = hs.id;
+
+    if (!isCollapsed) {
+      btn.classList.add("is-expanded");
+    } else if (isLive) {
+      btn.classList.add("is-live-collapsed");
+      const procs = getToolbarSlotProcessList(hs);
+      if (procs.length > 0) anyLiveWithProcesses = true;
+    } else {
+      btn.classList.add("is-collapsed");
+    }
+
+    const stateLabel = !isCollapsed
+      ? (window.t ? window.t("toolbar.state_expanded", {}, "развернут (клик: свернуть, удержание: меню)") : "развернут (клик: свернуть, удержание: меню)")
+      : (isLive
+          ? (window.t ? window.t("toolbar.state_live_collapsed", {}, "активен в фоне (клик: развернуть, удержание: меню)") : "активен в фоне (клик: развернуть, удержание: меню)")
+          : (window.t ? window.t("toolbar.state_collapsed", {}, "свернут / отключен (клик: развернуть, удержание: меню)") : "свернут / отключен (клик: развернуть, удержание: меню)"));
+
+    const slotEntry = slotEntries[idx] || { label: formatToolbarSlotName(hs, idx, displayHotspots), isUnnamed: !extractCleanToolbarHsName(hs) };
+    const slotLabel = slotEntry.label;
+    const hsName = slotEntry.isUnnamed ? slotLabel : (String(hs.name || "").trim() || slotLabel);
+    const longCls = slotLabel.length >= 5 ? " is-name-long" : "";
+    const fullTip = `#${idx + 1} ${hsName} [${shortNet}] — ${stateLabel}`;
+    btn.title = fullTip;
+    btn.setAttribute("aria-label", fullTip);
+
+    btn.innerHTML = `<svg class="slot-live-border" aria-hidden="true" focusable="false"><rect x="1.25" y="1.25" width="43.5" height="27.5" rx="0" ry="0" /></svg><span class="slot-name${longCls}">${safeEscapeHtml(slotLabel)}</span><span class="slot-corner-indicators" aria-hidden="true"><span class="slot-tr-dot">T</span><span class="slot-rx-dot"></span></span><span class="slot-proc-badge" aria-hidden="true"></span>`;
+    applySlotCycleDisplay(btn, hs, idx);
+    fitToolbarSlotNameFont(btn);
+  });
+
+  ensureToolbarSlotFontFitObservers(container);
+  scheduleFitAllToolbarSlotNames();
+  syncToolbarCycleTimer(anyLiveWithProcesses);
+}
+
+export async function toggleHotspotArchiveState(hsId, makeHidden) {
+  const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+    ? window.currentHotspots
+    : (Array.isArray(currentHotspots) ? currentHotspots : []);
+  const existing = allHs.find(h => h.id === hsId);
+  if (!existing) return false;
+
+  if (!makeHidden) {
+    const activeCount = allHs.filter(h => !h.hidden && h.id !== hsId).length;
+    if (activeCount >= 7) {
+      const max7Msg = window.t
+        ? window.t("hotspots.max_active_7", {}, "Максимум 7 активных хотспотов на панели. Сначала отправьте один из них в архив")
+        : "Максимум 7 активных хотспотов на панели. Сначала отправьте один из них в архив";
+      showToast(max7Msg, "warning", 4000);
+      return false;
+    }
+  }
+
+  const cid = resolveHotspotId(existing.id);
+  const hsName = existing.name || existing.callsign || cid;
+
+  if (makeHidden) {
+    if (typeof disableHotspotTranscribe === "function") {
+      disableHotspotTranscribe(existing.id, true);
+    }
+    if (typeof setHotspotAudioMute === "function") {
+      setHotspotAudioMute(existing.id, true);
+    }
+    const ap = typeof getAudioPlayer === "function" ? getAudioPlayer() : (window.audioPlayer || null);
+    if (ap && ap.resetHotspot) {
+      ap.resetHotspot(existing.id);
+    }
+    if (typeof window !== "undefined" && typeof window.closeLogIfOpenForHotspot === "function") {
+      window.closeLogIfOpenForHotspot(existing.id, { skipRefreshIfKeptOpen: true });
+    }
+  } else {
+    try {
+      localStorage.setItem(`proxdmr_collapsed_${cid}`, "false");
+      localStorage.setItem(`proxdmr_live_collapsed_${cid}`, "false");
+    } catch (_) {}
+  }
+
+  const payload = {
+    ...existing,
+    hidden: Boolean(makeHidden),
+    collapsed: makeHidden ? true : false
+  };
+  const reconnectFlag = !makeHidden && (existing.autoconnect !== false);
+
+  try {
+    const resp = await fetch(`/api/hotspots/${encodeURIComponent(existing.id)}?reconnect=${reconnectFlag ? "true" : "false"}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.detail || resp.statusText);
+    }
+    existing.hidden = Boolean(makeHidden);
+    existing.collapsed = Boolean(makeHidden);
+    if (!makeHidden) {
+      existing.isLiveCollapsed = false;
+      existing.isManualBmDisconnect = false;
+      setActiveHotspotId(existing.id);
+      const activeIdsOrder = allHs.filter(h => !h.hidden && h.id !== existing.id).map(h => h.id);
+      const archivedIdsOrder = allHs.filter(h => Boolean(h.hidden) && h.id !== existing.id).map(h => h.id);
+      const restoredOrder = [...activeIdsOrder, existing.id, ...archivedIdsOrder];
+      await fetch("/api/hotspots/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order: restoredOrder })
+      }).catch(() => {});
+    }
+
+    const msg = makeHidden
+      ? (window.t ? window.t("hotspots.hs_archived_toast", { name: hsName }, `Хотспот «${hsName}» отправлен в архив`) : `Хотспот «${hsName}» отправлен в архив`)
+      : (window.t ? window.t("archive.unarchived_toast", { name: hsName }, `Хотспот «${hsName}» возвращен на панель`) : `Хотспот «${hsName}» возвращен на панель`);
+    showToast(msg, "info", 2800);
+
+    await loadHotspots();
+    renderHotspotArchiveModal();
+    return true;
+  } catch (err) {
+    console.error("[HOTSPOTS] Archive toggle failed:", err);
+    showToast((err && err.message) || (window.t ? window.t("archive.update_status_err", {}, "Failed to update archive status") : "Failed to update archive status"), "error", 3500);
+    return false;
+  }
+}
+
+export function renderHotspotArchiveModal() {
+  const listEl = document.getElementById("hsArchiveModalList");
+  if (!listEl) return;
+  const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length)
+    ? window.currentHotspots
+    : (Array.isArray(currentHotspots) ? currentHotspots : []);
+  const activeHs = allHs.filter(h => !h.hidden);
+  const archivedHs = allHs.filter(h => Boolean(h.hidden));
+
+  listEl.innerHTML = "";
+
+  const appendSection = (titleText, items, isArchivedGroup) => {
+    const hdr = document.createElement("div");
+    hdr.className = "hs-archive-section-hdr";
+    hdr.innerHTML = `<span>${safeEscapeHtml(titleText)}</span><span>${items.length}${isArchivedGroup ? "" : " / 7"}</span>`;
+    listEl.appendChild(hdr);
+
+    if (!items.length) {
+      const emptyRow = document.createElement("div");
+      emptyRow.style.fontSize = "0.8rem";
+      emptyRow.style.color = "var(--text-muted, #8b949e)";
+      emptyRow.style.padding = "4px 2px";
+      emptyRow.textContent = isArchivedGroup
+        ? (window.t ? window.t("archive.no_archived", {}, "В архиве пока нет хотспотов") : "В архиве пока нет хотспотов")
+        : (window.t ? window.t("archive.no_active", {}, "Нет активных хотспотов на панели") : "Нет активных хотспотов на панели");
+      listEl.appendChild(emptyRow);
+      return;
+    }
+
+    const moveArchiveItemInGroup = async (itemHsId, dir) => {
+      const groupIds = items.map(h => h.id);
+      const pos = groupIds.indexOf(itemHsId);
+      const nextPos = pos + dir;
+      if (pos < 0 || nextPos < 0 || nextPos >= groupIds.length) return;
+      const tmp = groupIds[pos];
+      groupIds[pos] = groupIds[nextPos];
+      groupIds[nextPos] = tmp;
+
+      const queue = groupIds.slice();
+      const fullOrder = allHs.map((h) => {
+        const belongsToGroup = isArchivedGroup ? Boolean(h.hidden) : !h.hidden;
+        if (belongsToGroup && queue.length > 0) {
+          return queue.shift();
+        }
+        return h.id;
+      });
+      await reorderHotspots(fullOrder);
+      renderHotspotArchiveModal();
+    };
+
+    items.forEach((hs, idx) => {
+      const netType = String(hs.network_type || "bm").toLowerCase();
+      const shortNet = getToolbarShortNetCode(netType);
+      const isCol = !hs.hidden && isHotspotCollapsed(hs.id);
+      const isLive = isCol && isHotspotLiveCollapsed(hs.id);
+      const statusTxt = hs.hidden
+        ? (window.t ? window.t("archive.status_archived", {}, "Archived") : "Archived")
+        : (isLive
+            ? (window.t ? window.t("hotspots.badge_collapsed_bg", {}, "Collapsed (background)") : "Collapsed (background)")
+            : (isCol
+                ? (window.t ? window.t("hotspots.badge_collapsed", {}, "Collapsed") : "Collapsed")
+                : (hs.status === "ONLINE" ? "ONLINE" : (hs.status || "OFFLINE"))));
+
+      const row = document.createElement("div");
+      row.className = `hs-archive-row${hs.hidden ? " is-archived" : ""}`;
+      const callInfo = (window.localizeDemoText ? window.localizeDemoText(hs.callsign || "") : (hs.callsign || "")) || "N0CALL";
+      const ssidInfo = (hs.bm_ssid !== undefined && hs.bm_ssid !== null && netType !== "allstar" && netType !== "ysf") ? ` · SSID ${hs.bm_ssid}` : "";
+      const isFirstItem = idx === 0;
+      const isLastItem = idx === items.length - 1;
+      const upTitle = safeEscapeHtml(window.t ? window.t("hotspots.move_up", {}, "Up") : "Up");
+      const downTitle = safeEscapeHtml(window.t ? window.t("hotspots.move_down", {}, "Down") : "Down");
+      const hsDefaultName = window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot";
+      const orderButtonsHtml = items.length > 1
+        ? `<button type="button" class="hs-archive-btn-move hs-archive-btn-up" title="${upTitle}" ${isFirstItem ? "disabled" : ""}>▲</button><button type="button" class="hs-archive-btn-move hs-archive-btn-down" title="${downTitle}" ${isLastItem ? "disabled" : ""}>▼</button>`
+        : "";
+
+      row.innerHTML = `
+        <div class="hs-archive-row-left">
+          <span class="hs-archive-slot-idx">${hs.hidden ? "📦" : `#${idx + 1}`}</span>
+          <div class="hs-archive-row-info">
+            <div class="hs-archive-row-name">
+              <span class="hotspot-network-badge net-type-${safeEscapeHtml(netType)}" style="font-size: 0.66rem; padding: 1px 5px;">${safeEscapeHtml(shortNet)}</span>
+              <span>${safeEscapeHtml(hs.name || hsDefaultName)}</span>
+            </div>
+            <div class="hs-archive-row-meta">${safeEscapeHtml(callInfo)}${ssidInfo} · ${safeEscapeHtml(statusTxt)}</div>
+          </div>
+        </div>
+        <div class="hs-archive-row-actions">
+          ${orderButtonsHtml}
+          <button type="button" class="hs-archive-btn-settings" title="${safeEscapeHtml(window.t ? window.t("buttons.edit", {}, "Settings") : "Settings")}">⚙️</button>
+          <button type="button" class="hs-archive-btn-toggle ${hs.hidden ? "from-archive" : "to-archive"}">
+            ${hs.hidden
+              ? (window.t ? window.t("archive.btn_restore", {}, "На панель") : "На панель")
+              : (window.t ? window.t("hotspots.btn_to_archive", {}, "В архив") : "В архив")}
+          </button>
+        </div>
+      `;
+
+      const upBtn = row.querySelector(".hs-archive-btn-up");
+      if (upBtn && !isFirstItem) {
+        upBtn.onclick = () => moveArchiveItemInGroup(hs.id, -1);
+      }
+      const downBtn = row.querySelector(".hs-archive-btn-down");
+      if (downBtn && !isLastItem) {
+        downBtn.onclick = () => moveArchiveItemInGroup(hs.id, 1);
+      }
+      const setBtn = row.querySelector(".hs-archive-btn-settings");
+      if (setBtn) {
+        setBtn.onclick = () => {
+          closeHotspotArchiveModal();
+          openHotspotSettings(hs, "tab-edit-hs");
+        };
+      }
+      const toggleBtn = row.querySelector(".hs-archive-btn-toggle");
+      if (toggleBtn) {
+        toggleBtn.onclick = async () => {
+          toggleBtn.disabled = true;
+          await toggleHotspotArchiveState(hs.id, !hs.hidden);
+          toggleBtn.disabled = false;
+        };
+      }
+      listEl.appendChild(row);
+    });
+  };
+
+  appendSection(window.t ? window.t("archive.section_active", {}, "Активные слоты панели") : "Активные слоты панели", activeHs, false);
+  appendSection(window.t ? window.t("archive.section_archived", {}, "Архив хотспотов") : "Архив хотспотов", archivedHs, true);
+}
+
+export function openHotspotArchiveModal() {
+  const modal = document.getElementById("hotspotArchiveModal");
+  if (!modal) return;
+  renderHotspotArchiveModal();
+  modal.style.display = "flex";
+  modal.classList.add("active");
+  if (typeof pushNavState === "function") {
+    pushNavState("modal", "hotspotArchiveModal");
+  }
+}
+
+export function closeHotspotArchiveModal() {
+  const modal = document.getElementById("hotspotArchiveModal");
+  if (!modal) return;
+  modal.style.display = "none";
+  modal.classList.remove("active");
+  if (typeof notifyNavClosed === "function") {
+    notifyNavClosed("modal", "hotspotArchiveModal");
+  }
+}
+
+function initTopToolbarAndArchiveUI() {
+  ensureTopToolbarControls();
+  renderToolbarHotspotSlots();
+
+  const btnOpenArch = document.getElementById("btnOpenHotspotArchiveModal");
+  if (btnOpenArch && !btnOpenArch._wired) {
+    btnOpenArch._wired = true;
+    btnOpenArch.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openHotspotArchiveModal();
+    });
+  }
+
+  const btnEmptyOpen = document.getElementById("btnEmptyArchiveOpen");
+  if (btnEmptyOpen && !btnEmptyOpen._wired) {
+    btnEmptyOpen._wired = true;
+    btnEmptyOpen.addEventListener("click", () => {
+      openHotspotArchiveModal();
+    });
+  }
+
+  const btnCloseArch = document.getElementById("closeHotspotArchiveModalBtn");
+  if (btnCloseArch && !btnCloseArch._wired) {
+    btnCloseArch._wired = true;
+    btnCloseArch.addEventListener("click", () => closeHotspotArchiveModal());
+  }
+
+  const btnCloseFooter = document.getElementById("btnCloseHotspotArchiveFooter");
+  if (btnCloseFooter && !btnCloseFooter._wired) {
+    btnCloseFooter._wired = true;
+    btnCloseFooter.addEventListener("click", () => closeHotspotArchiveModal());
+  }
+
+  const archModal = document.getElementById("hotspotArchiveModal");
+  if (archModal && !archModal._backdropWired) {
+    archModal._backdropWired = true;
+    archModal.addEventListener("click", (e) => {
+      if (e.target === archModal) {
+        closeHotspotArchiveModal();
+      }
+    });
+  }
+
+  const btnArchAdd = document.getElementById("btnArchiveAddHotspot");
+  if (btnArchAdd && !btnArchAdd._wired) {
+    btnArchAdd._wired = true;
+    btnArchAdd.addEventListener("click", () => {
+      closeHotspotArchiveModal();
+      openHotspotSettings(null, "tab-edit-hs");
+      openHsTypeSelectModal();
+    });
+  }
+
+  ensureDesktopHotspotsAlignmentObserver();
+}
+
+export function initHotspotsManager() {
+  initTopToolbarAndArchiveUI();
   const headerHotspotSelect = document.getElementById("headerHotspotSelect");
   if (headerHotspotSelect && !headerHotspotSelect._wired) {
     headerHotspotSelect._wired = true;
@@ -8629,6 +16540,16 @@ export function initHotspotsManager() {
           const editHsHost = document.getElementById("editHsHost");
           renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "freedmr");
         });
+      } else if (newNet === "adn") {
+        refreshAdnServers().then(() => {
+          const editHsHost = document.getElementById("editHsHost");
+          renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "adn");
+        });
+      } else if (newNet === "ysf") {
+        refreshYsfServers().then(() => {
+          const editHsHost = document.getElementById("editHsHost");
+          renderBmMastersDropdown(editHsHost ? editHsHost.value : "", "ysf");
+        });
       }
     });
   }
@@ -8650,15 +16571,9 @@ export function initHotspotsManager() {
       }
       const existingDescEl = document.getElementById("editHsExistingNetDesc");
       if (existingDescEl) {
-        existingDescEl.textContent = `🔒 Сеть HS • Модуль ${mod} (TG ${modTg} на TS2)`;
-      }
-      const tgTs2Label = document.getElementById("editHsTgTs2Label");
-      if (tgTs2Label) {
-        tgTs2Label.textContent = `TG модуля ${mod} (TS2: 4001–4026)`;
-      }
-      const editHsTgTs2 = document.getElementById("editHsTgTs2");
-      if (editHsTgTs2 && modCode >= 65 && modCode <= 90) {
-        editHsTgTs2.value = modTg;
+        existingDescEl.textContent = window.t
+          ? window.t("hotspots.xlx_hs_net_desc", { mod, tg: modTg }, `🔒 HS Network • Module ${mod} (TG ${modTg} on TS2)`)
+          : `🔒 HS Network • Module ${mod} (TG ${modTg} on TS2)`;
       }
     });
   }
@@ -8694,7 +16609,7 @@ export function initHotspotsManager() {
       const built = buildRptoFromCurrentFormFields();
       if (built) {
         editHsRptoOptions.value = built;
-        showToast(`✅ Сформирована строка RPTO: ${built}`, 2200);
+        showToast(window.t ? window.t("hotspots.rpto_built_toast", { value: built }, `✅ Built RPTO string: ${built}`) : `✅ Built RPTO string: ${built}`, 2200);
       }
     });
   }
@@ -8731,7 +16646,7 @@ export function initHotspotsManager() {
           const card = document.querySelector(`.radio-container[data-hotspot-id="${id}"]`);
           if (card) renderHotspotAuxStatusBadge(card, curHs);
         }
-        if (data.sent_live) {
+        if (data.rpto_sent || data.sent_live) {
           showToast(window.t ? window.t("hotspots.rpto_sent_live", {}, "✅ Пакет RPTO отправлен на сервер и сохранен") : "✅ Пакет RPTO отправлен на сервер и сохранен", 2800);
         } else {
           showToast(window.t ? window.t("hotspots.rpto_saved_offline", {}, "✅ Опции RPTO сохранены (будут отправлены при подключении)") : "✅ Опции RPTO сохранены (будут отправлены при подключении)", 2800);
@@ -8749,6 +16664,14 @@ export function initHotspotsManager() {
   const btnToggleHsApiKey = document.getElementById("btnToggleHsApiKey");
   const editHsApiKey = document.getElementById("editHsApiKey");
   const btnAddNewHotspot = document.getElementById("btnAddNewHotspot");
+  if (btnAddNewHotspot && !btnAddNewHotspot._wired) {
+    btnAddNewHotspot._wired = true;
+    btnAddNewHotspot.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeCustomHsDropdown();
+      openHsTypeSelectModal();
+    });
+  }
   const btnBmApiHelp = document.getElementById("btnBmApiHelp");
   const btnCloseBmApiHelp = document.getElementById("btnCloseBmApiHelp");
   const bmApiHelpCard = document.getElementById("bmApiHelpCard");
@@ -8832,6 +16755,10 @@ export function initHotspotsManager() {
           netTag = "FreeDMR";
           netKeyOn = "hotspots.auto_tg_freedmr_global_on";
           netKeyOff = "hotspots.auto_tg_freedmr_global_off";
+        } else if (hsNet === "adn") {
+          netTag = "ADN";
+          netKeyOn = "hotspots.auto_tg_adn_global_on";
+          netKeyOff = "hotspots.auto_tg_adn_global_off";
         } else if (hsNet === "xlx") {
           netTag = "XLX";
           netKeyOn = "hotspots.auto_tg_xlx_global_on";
@@ -8882,10 +16809,65 @@ export function initHotspotsManager() {
     });
   }
 
-  if (btnAddNewHotspot && !btnAddNewHotspot._wired) {
-    btnAddNewHotspot._wired = true;
-    btnAddNewHotspot.addEventListener("click", () => {
-      triggerAddNewHotspot();
+  // Hotspot Type Selector Modal Wiring
+  const btnCloseHsTypeModal = document.getElementById("btnCloseHsTypeModal");
+  if (btnCloseHsTypeModal && !btnCloseHsTypeModal._wired) {
+    btnCloseHsTypeModal._wired = true;
+    btnCloseHsTypeModal.addEventListener("click", () => {
+      closeHsTypeSelectModal();
+    });
+  }
+
+  const hsTypeModal = document.getElementById("hsTypeSelectModal");
+  if (hsTypeModal && !hsTypeModal._backdropWired) {
+    hsTypeModal._backdropWired = true;
+    hsTypeModal.addEventListener("click", (e) => {
+      if (e.target === hsTypeModal) closeHsTypeSelectModal();
+    });
+  }
+
+  document.querySelectorAll(".hs-type-item, .hs-type-card").forEach(item => {
+    if (!item._wired) {
+      item._wired = true;
+      item.addEventListener("click", () => {
+        const netType = item.dataset.netType;
+        if (netType) startCreateNewHotspotWithType(netType);
+      });
+    }
+  });
+
+  // Credential Test Buttons Wiring
+  const btnTestHsPassword = document.getElementById("btnTestHsPassword");
+  if (btnTestHsPassword && !btnTestHsPassword._wired) {
+    btnTestHsPassword._wired = true;
+    btnTestHsPassword.addEventListener("click", () => {
+      testCurrentHotspotPassword();
+    });
+  }
+
+  const btnTestHsApiKey = document.getElementById("btnTestHsApiKey");
+  if (btnTestHsApiKey && !btnTestHsApiKey._wired) {
+    btnTestHsApiKey._wired = true;
+    btnTestHsApiKey.addEventListener("click", () => {
+      testCurrentHotspotApiKey();
+    });
+  }
+
+  ["editHsPassword", "editHsHost", "editHsPort"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el._testResetWired) {
+      el._testResetWired = true;
+      el.addEventListener("input", () => {
+        resetTestCredentialBtn(document.getElementById("btnTestHsPassword"), "hs_edit.btn_test_pwd_title", "Test server connection with password");
+      });
+    }
+  });
+
+  const elApiKey = document.getElementById("editHsApiKey");
+  if (elApiKey && !elApiKey._testResetWired) {
+    elApiKey._testResetWired = true;
+    elApiKey.addEventListener("input", () => {
+      resetTestCredentialBtn(document.getElementById("btnTestHsApiKey"), "hs_edit.btn_test_api_title", "Verify API key validity on server");
     });
   }
 
@@ -8896,7 +16878,7 @@ export function initHotspotsManager() {
     editHsSelect.addEventListener("change", () => {
       const val = editHsSelect.value;
       if (val === "__new__") {
-        triggerAddNewHotspot();
+        openHsTypeSelectModal();
       } else {
         const currentHotspots = window.currentHotspots || [];
         const found = currentHotspots.find(h => h.id === val);
@@ -8930,30 +16912,6 @@ export function initHotspotsManager() {
     });
   }
 
-  const btnOpenHsOrderModal = document.getElementById("btnOpenHsOrderModal");
-  if (btnOpenHsOrderModal && !btnOpenHsOrderModal._wired) {
-    btnOpenHsOrderModal._wired = true;
-    btnOpenHsOrderModal.addEventListener("click", () => {
-      openHotspotOrderModal();
-    });
-  }
-
-  const closeHsOrderModalBtn = document.getElementById("closeHsOrderModalBtn");
-  if (closeHsOrderModalBtn && !closeHsOrderModalBtn._wired) {
-    closeHsOrderModalBtn._wired = true;
-    closeHsOrderModalBtn.addEventListener("click", () => {
-      closeHotspotOrderModal();
-    });
-  }
-
-  const btnDoneHsOrder = document.getElementById("btnDoneHsOrder");
-  if (btnDoneHsOrder && !btnDoneHsOrder._wired) {
-    btnDoneHsOrder._wired = true;
-    btnDoneHsOrder.addEventListener("click", () => {
-      closeHotspotOrderModal();
-    });
-  }
-
   const btnDeleteCurrentHotspot = document.getElementById("btnDeleteCurrentHotspot");
   if (btnDeleteCurrentHotspot && !btnDeleteCurrentHotspot._wired) {
     btnDeleteCurrentHotspot._wired = true;
@@ -8963,22 +16921,24 @@ export function initHotspotsManager() {
       if (!id) return;
       const currentHotspots = window.currentHotspots || [];
       if (currentHotspots.length <= 1) {
+        const lastMsg = window.t ? window.t("hotspots.cannot_delete_last", {}, "You cannot delete the only remaining hotspot!") : "You cannot delete the only remaining hotspot!";
         if (window.showAppAlert) {
-          await window.showAppAlert("Нельзя удалить единственный хотспот!", { title: "Предупреждение", icon: "ℹ️" });
+          await window.showAppAlert(lastMsg, { title: window.t ? window.t("dialog.alert_title", {}, "Attention") : "Attention", icon: "ℹ️" });
         } else {
-          alert("Нельзя удалить единственный хотспот!");
+          alert(lastMsg);
         }
         return;
       }
       const targetHs = currentHotspots.find(h => h.id === id);
-      const name = targetHs ? targetHs.name : "выбранный хотспот";
+      const name = (targetHs && targetHs.name) ? targetHs.name : (window.t ? window.t("hotspots.selected_fallback", {}, "selected hotspot") : "selected hotspot");
+      const confirmFallback = `Delete hotspot "${name}"?`;
       const ok = await (window.showAppConfirm ? window.showAppConfirm({
-        title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Удаление хотспота") : "Удаление хотспота",
+        title: window.t ? window.t("hotspots.delete_confirm_title", {}, "Delete hotspot") : "Delete hotspot",
         icon: "🗑️",
-        message: window.t ? window.t("hotspots.delete_confirm_msg", { name }, `Удалить хотспот "${name}"?`) : `Удалить хотспот "${name}"?`,
-        confirmText: window.t ? window.t("buttons.delete", {}, "Удалить") : "Удалить",
+        message: window.t ? window.t("hotspots.delete_confirm_msg", { name }, confirmFallback) : confirmFallback,
+        confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
         confirmStyle: "danger"
-      }) : Promise.resolve(confirm(`Удалить хотспот "${name}"?`)));
+      }) : Promise.resolve(confirm(window.t ? window.t("hotspots.delete_confirm_msg", { name }, confirmFallback) : confirmFallback)));
       if (!ok) return;
 
       try {
@@ -8990,16 +16950,17 @@ export function initHotspotsManager() {
           const errData = await resp.json().catch(() => ({}));
           throw new Error(errData.detail || resp.statusText);
         }
-        showToast(window.t ? window.t("hotspots.deleted_toast", {}, "🗑️ Хотспот удален") : "🗑️ Хотспот удален", 2500);
+        showToast(window.t ? window.t("hotspots.deleted_toast", {}, "🗑️ Hotspot deleted") : "🗑️ Hotspot deleted", 2500);
         await loadHotspots();
         const nextHs = (window.currentHotspots && window.currentHotspots[0]) || null;
         if (nextHs) {
           populateEditHotspotFormFields(nextHs);
         }
       } catch (err) {
-        const errMsg = "Ошибка при удалении: " + (err && err.message ? err.message : err);
+        const errDetail = (err && err.message ? err.message : err);
+        const errMsg = window.t ? window.t("hotspots.delete_error", { err: errDetail }, "Error deleting: " + errDetail) : ("Error deleting: " + errDetail);
         if (window.showAppAlert) {
-          await window.showAppAlert(errMsg, { title: window.t ? window.t("common.error", {}, "Ошибка") : "Ошибка", icon: "⚠️" });
+          await window.showAppAlert(errMsg, { title: window.t ? window.t("common.error", {}, "Error") : "Error", icon: "⚠️" });
         } else {
           alert(errMsg);
         }
@@ -9056,6 +17017,114 @@ export function initHotspotsManager() {
     });
   }
 
+  const chkColors = document.getElementById("optEnableNetworkColors");
+  if (chkColors && !chkColors._wired) {
+    chkColors._wired = true;
+    chkColors.addEventListener("change", async () => {
+      window.__enableNetworkColors = chkColors.checked;
+      document.body.classList.toggle("no-net-colors", !chkColors.checked);
+      document.documentElement.classList.toggle("no-net-colors", !chkColors.checked);
+      document.querySelectorAll(".radio-container").forEach(card => {
+        applyCardBrandColors(card, card.dataset.networkType || "bm");
+      });
+      const curNet = (document.getElementById("editHsNetworkType")?.value || "bm").toLowerCase();
+      applyEditHsNetworkTypeUI(curNet);
+      try {
+        await fetch("/api/settings/general", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enable_network_colors: chkColors.checked })
+        });
+      } catch (_) {}
+    });
+  }
+
+  const btnReset = document.getElementById("btnResetHsBrandColor");
+  if (btnReset && !btnReset._wired) {
+    btnReset._wired = true;
+    btnReset.addEventListener("click", async () => {
+      const curNet = (document.getElementById("editHsNetworkType")?.value || "bm").toLowerCase();
+      const def = DEFAULT_NETWORK_BRAND_COLORS[curNet] || DEFAULT_NETWORK_BRAND_COLORS.custom;
+      if (!window.__networkBrandColors) window.__networkBrandColors = {};
+      window.__networkBrandColors[curNet] = { dark: def.dark, light: def.light };
+      applyEditHsNetworkTypeUI(curNet);
+      document.querySelectorAll(`.radio-container[data-network-type="${curNet}"]`).forEach(card => {
+        applyCardBrandColors(card, curNet);
+      });
+      try {
+        await fetch("/api/settings/general", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ network_brand_colors: { [curNet]: { dark: def.dark, light: def.light } } })
+        });
+      } catch (_) {}
+    });
+  }
+
+  const darkColorInput = document.getElementById("editHsBrandColorDark");
+  const darkColorHex = document.getElementById("editHsBrandColorDarkHex");
+  const lightColorInput = document.getElementById("editHsBrandColorLight");
+  const lightColorHex = document.getElementById("editHsBrandColorLightHex");
+
+  const syncColorChange = async (theme, val) => {
+    const curNet = (document.getElementById("editHsNetworkType")?.value || "bm").toLowerCase();
+    if (!window.__networkBrandColors) window.__networkBrandColors = {};
+    if (!window.__networkBrandColors[curNet]) {
+      const def = DEFAULT_NETWORK_BRAND_COLORS[curNet] || DEFAULT_NETWORK_BRAND_COLORS.custom;
+      window.__networkBrandColors[curNet] = { dark: def.dark, light: def.light };
+    }
+    window.__networkBrandColors[curNet][theme] = val;
+    document.querySelectorAll(`.radio-container[data-network-type="${curNet}"]`).forEach(card => {
+      applyCardBrandColors(card, curNet);
+    });
+    try {
+      await fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ network_brand_colors: { [curNet]: window.__networkBrandColors[curNet] } })
+      });
+    } catch (_) {}
+  };
+
+  if (darkColorInput && !darkColorInput._wired) {
+    darkColorInput._wired = true;
+    darkColorInput.addEventListener("input", (e) => {
+      if (darkColorHex) darkColorHex.value = e.target.value.toUpperCase();
+      syncColorChange("dark", e.target.value);
+    });
+  }
+  if (darkColorHex && !darkColorHex._wired) {
+    darkColorHex._wired = true;
+    darkColorHex.addEventListener("change", (e) => {
+      let val = e.target.value.trim();
+      if (!val.startsWith("#")) val = "#" + val;
+      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+        if (darkColorInput) darkColorInput.value = val;
+        e.target.value = val.toUpperCase();
+        syncColorChange("dark", val);
+      }
+    });
+  }
+  if (lightColorInput && !lightColorInput._wired) {
+    lightColorInput._wired = true;
+    lightColorInput.addEventListener("input", (e) => {
+      if (lightColorHex) lightColorHex.value = e.target.value.toUpperCase();
+      syncColorChange("light", e.target.value);
+    });
+  }
+  if (lightColorHex && !lightColorHex._wired) {
+    lightColorHex._wired = true;
+    lightColorHex.addEventListener("change", (e) => {
+      let val = e.target.value.trim();
+      if (!val.startsWith("#")) val = "#" + val;
+      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+        if (lightColorInput) lightColorInput.value = val;
+        e.target.value = val.toUpperCase();
+        syncColorChange("light", val);
+      }
+    });
+  }
+
   if (hotspotEditForm && !hotspotEditForm._wired) {
     hotspotEditForm._wired = true;
     hotspotEditForm.addEventListener("submit", async (e) => {
@@ -9076,8 +17145,6 @@ export function initHotspotsManager() {
       const editHsApiKey = document.getElementById("editHsApiKey");
       const editHsHost = document.getElementById("editHsHost");
       const editHsPort = document.getElementById("editHsPort");
-      const editHsTgTs1 = document.getElementById("editHsTgTs1");
-      const editHsTgTs2 = document.getElementById("editHsTgTs2");
       const editHsAutoconnect = document.getElementById("editHsAutoconnect");
       const editHsAutoTgBm = document.getElementById("editHsAutoTgBm");
 
@@ -9086,19 +17153,23 @@ export function initHotspotsManager() {
       const xlxModuleVal = ((editHsXlxModule ? editHsXlxModule.value.trim().toUpperCase() : "D") || "D").slice(0, 1);
       const xlxModTg = 4000 + Math.max(1, Math.min(26, xlxModuleVal.charCodeAt(0) - 64));
       let rptoOptionsVal = editHsRptoOptions ? editHsRptoOptions.value.trim() : "";
-      if (!rptoOptionsVal && (networkTypeVal === "dmrplus" || networkTypeVal === "freedmr")) {
+      if (!rptoOptionsVal && (networkTypeVal === "dmrplus" || networkTypeVal === "freedmr" || networkTypeVal === "adn")) {
         rptoOptionsVal = buildRptoFromCurrentFormFields(networkTypeVal);
       }
 
-      const nameVal = (editHsName ? editHsName.value.trim() : "") || (id === "default" ? "Main" : `Хотспот #${(window.currentHotspots || []).length + 1}`);
+      const nameVal = editHsName ? editHsName.value.trim() : "";
       const callsignVal = (editHsCallsign ? editHsCallsign.value.trim().toUpperCase() : "") || "N0CALL";
       const isAllStar = networkTypeVal === "allstar";
+      const isYsf = networkTypeVal === "ysf";
+      const isCallsignOnly = isAllStar;
       const talkerAliasVal = isAllStar ? "" : (editHsTalkerAlias ? editHsTalkerAlias.value.trim() : "");
       const sendTalkerAliasVal = isAllStar ? false : (editHsSendTalkerAlias ? editHsSendTalkerAlias.checked : true);
-      const dmrIdVal = isAllStar ? 0 : (parseInt(editHsDmrId ? editHsDmrId.value : "0", 10) || 0);
+      const editHsLocator = document.getElementById("editHsLocator");
+      const locatorVal = editHsLocator ? editHsLocator.value.trim().toUpperCase() : "";
+      const dmrIdVal = isCallsignOnly ? 0 : (parseInt(editHsDmrId ? editHsDmrId.value : "0", 10) || 0);
       const rawSsid = editHsSsid ? editHsSsid.value.trim() : "";
       const parsedSsid = rawSsid !== "" ? parseInt(rawSsid, 10) : 1;
-      if (!isAllStar && rawSsid !== "" && (isNaN(parsedSsid) || parsedSsid < 1 || parsedSsid > 99)) {
+      if (!isCallsignOnly && rawSsid !== "" && (isNaN(parsedSsid) || parsedSsid < 1 || parsedSsid > 99)) {
         if (window._settingsModalAutoCloseTimer) {
           clearTimeout(window._settingsModalAutoCloseTimer);
           window._settingsModalAutoCloseTimer = null;
@@ -9112,20 +17183,22 @@ export function initHotspotsManager() {
         }
         return;
       }
-      const ssidVal = isAllStar ? 1 : (isNaN(parsedSsid) ? 1 : Math.max(1, Math.min(99, parsedSsid)));
+      const ssidVal = isCallsignOnly ? 1 : (isNaN(parsedSsid) ? 1 : Math.max(1, Math.min(99, parsedSsid)));
       let passwordVal = editHsPassword ? editHsPassword.value.trim() : "";
-      if (networkTypeVal === "xlx" && !passwordVal) {
+      if (isYsf) {
+        passwordVal = "";
+      } else if ((networkTypeVal === "xlx" || networkTypeVal === "adn") && !passwordVal) {
         passwordVal = "passw0rd";
       } else if (networkTypeVal === "dmrplus" && !passwordVal) {
         passwordVal = "PASSWORD";
       }
       const apiKeyVal = editHsApiKey ? editHsApiKey.value.trim() : "";
       const hostVal = (editHsHost ? editHsHost.value.trim() : "") || netProfile.defaultHost || "2322.master.brandmeister.network";
-      const portVal = parseInt(editHsPort ? editHsPort.value : String(netProfile.defaultPort || 62031), 10) || netProfile.defaultPort || 62031;
-      const tg1Val = networkTypeVal === "xlx" ? 9 : (parseInt(editHsTgTs1 ? editHsTgTs1.value : "9990", 10) || 9990);
-      const tg2Val = networkTypeVal === "xlx" ? xlxModTg : (parseInt(editHsTgTs2 ? editHsTgTs2.value : "9990", 10) || 9990);
+      const portVal = parseInt(editHsPort ? editHsPort.value : String(netProfile.defaultPort || (isYsf ? 42000 : 62031)), 10) || netProfile.defaultPort || (isYsf ? 42000 : 62031);
+      const tg1Val = networkTypeVal === "xlx" ? 9 : (isYsf ? 0 : 9990);
+      const tg2Val = networkTypeVal === "xlx" ? xlxModTg : (isYsf ? 0 : 9990);
       const autoconnectVal = editHsAutoconnect ? editHsAutoconnect.checked : true;
-      const autoTgBmVal = editHsAutoTgBm ? editHsAutoTgBm.checked : true;
+      const autoTgBmVal = (networkTypeVal === "bm" && editHsAutoTgBm) ? editHsAutoTgBm.checked : false;
 
       const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
       const existing = currentHotspots.find(h => h.id === id) || {};
@@ -9150,9 +17223,13 @@ export function initHotspotsManager() {
         callsign: callsignVal,
         talker_alias: talkerAliasVal,
         send_talker_alias: sendTalkerAliasVal,
+        description: talkerAliasVal,
+        qth_locator: locatorVal,
+        locator: locatorVal,
         dmr_id: dmrIdVal,
         bm_ssid: ssidVal,
         network_type: networkTypeVal,
+        ysf_room_id: (networkTypeVal === "ysf" && editHsMasterSelect && editHsMasterSelect.selectedOptions && editHsMasterSelect.selectedOptions[0] && editHsMasterSelect.selectedOptions[0].dataset.roomId) ? editHsMasterSelect.selectedOptions[0].dataset.roomId : (existing.ysf_room_id || "25000"),
         allstar_node: (document.getElementById("editHsAllStarNode") ? document.getElementById("editHsAllStarNode").value.trim() : (existing.allstar_node || "1999")),
         allstar_always_online: (document.getElementById("editHsAllStarAlwaysOnline") ? Boolean(document.getElementById("editHsAllStarAlwaysOnline").checked) : (existing.allstar_always_online !== undefined ? Boolean(existing.allstar_always_online) : true)),
         rpto_options: rptoOptionsVal,
@@ -9434,6 +17511,35 @@ window.renderRadiosGrid = renderRadiosGrid;
 window.linkHotspotXlxModule = linkHotspotXlxModule;
 window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
 window.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
+  window.updateCardYsfPanel = updateCardYsfPanel;
+  window.getYsfMatrixPage = getYsfMatrixPage;
+  window.setYsfMatrixPageValue = setYsfMatrixPageValue;
+  window.getYsfMatrixRooms = getYsfMatrixRooms;
+  window.saveYsfMatrixRooms = saveYsfMatrixRooms;
+  window.getYsfScanConfig = getYsfScanConfig;
+  window.saveYsfScanConfig = saveYsfScanConfig;
+  window.getYsfDiceConfig = getYsfDiceConfig;
+  window.saveYsfDiceConfig = saveYsfDiceConfig;
+  window.isYsfRoomRxActive = isYsfRoomRxActive;
+  window.startYsfMatrixScan = startYsfMatrixScan;
+  window.stopYsfMatrixScan = stopYsfMatrixScan;
+  window.renderYsfDashboard = renderYsfDashboard;
+  window.isYsfDashAutoOpenEnabled = isYsfDashAutoOpenEnabled;
+  window.setYsfDashAutoOpenEnabled = setYsfDashAutoOpenEnabled;
+  window.openYsfCardContextMenu = openYsfCardContextMenu;
+  window.closeYsfCardContextMenu = closeYsfCardContextMenu;
+  window.openYsfCardEditPopover = openYsfCardEditPopover;
+  window.openYsfScanSettingsPopover = openYsfScanSettingsPopover;
+  window.openYsfDiceSettingsPopover = openYsfDiceSettingsPopover;
+  window.openYsfMatrixManageModal = openYsfMatrixManageModal;
+  window.getAdnDiceConfig = getAdnDiceConfig;
+  window.saveAdnDiceConfig = saveAdnDiceConfig;
+  window.openAdnDiceSettingsPopover = openAdnDiceSettingsPopover;
+  window.syncAdnDiceButtonUI = syncAdnDiceButtonUI;
+  window.stopAdnDiceSearch = stopAdnDiceSearch;
+  window.startAdnDiceSearch = startAdnDiceSearch;
+  window.setupAdnDiceButton = setupAdnDiceButton;
+  window.isAdnSlotRxActive = isAdnSlotRxActive;
 window.openXlxAllModulesPopover = openXlxAllModulesPopover;
 window.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
 window.syncAslMatrixButtonsState = syncAslMatrixButtonsState;
@@ -9461,6 +17567,11 @@ window.isAslDtmfCard = isAslDtmfCard;
 window.executeAslDtmfMacroAction = executeAslDtmfMacroAction;
 window.getAslScanConfig = getAslScanConfig;
 window.saveAslScanConfig = saveAslScanConfig;
+window.getAslDiceConfig = getAslDiceConfig;
+window.saveAslDiceConfig = saveAslDiceConfig;
+window.openAslDiceSettingsPopover = openAslDiceSettingsPopover;
+window.syncAslDiceButtonUI = syncAslDiceButtonUI;
+window.stopAslDiceSearch = stopAslDiceSearch;
 window.isAslNodeRxActive = isAslNodeRxActive;
 window.startAslMatrixScan = startAslMatrixScan;
 window.stopAslMatrixScan = stopAslMatrixScan;
@@ -9470,11 +17581,15 @@ window.autoSaveExistingHotspotIfDirty = autoSaveExistingHotspotIfDirty;
 window.saveCurrentSettingsState = saveCurrentSettingsState;
 window.reorderHotspots = reorderHotspots;
 window.moveHotspotInOrder = moveHotspotInOrder;
-window.renderHotspotOrderList = renderHotspotOrderList;
-window.openHotspotOrderModal = openHotspotOrderModal;
-window.closeHotspotOrderModal = closeHotspotOrderModal;
+window.openHsTypeSelectModal = openHsTypeSelectModal;
+window.closeHsTypeSelectModal = closeHsTypeSelectModal;
+window.startCreateNewHotspotWithType = startCreateNewHotspotWithType;
+window.testCurrentHotspotPassword = testCurrentHotspotPassword;
+window.testCurrentHotspotApiKey = testCurrentHotspotApiKey;
+window.resetTestCredentialBtn = resetTestCredentialBtn;
 
 window.__proxdmr = window.__proxdmr || {};
+window.__proxdmr.resetTestCredentialBtn = resetTestCredentialBtn;
 window.__proxdmr.loadHotspots = loadHotspots;
 window.__proxdmr.renderHotspotSelect = renderHotspotSelect;
 window.__proxdmr.switchActiveHotspot = switchActiveHotspot;
@@ -9484,10 +17599,19 @@ window.__proxdmr.renderRadiosGrid = renderRadiosGrid;
 window.__proxdmr.linkHotspotXlxModule = linkHotspotXlxModule;
 window.__proxdmr.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
 window.__proxdmr.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
+window.__proxdmr.updateCardYsfPanel = updateCardYsfPanel;
 window.__proxdmr.openXlxAllModulesPopover = openXlxAllModulesPopover;
 window.__proxdmr.syncCollapsedHotspotStacks = syncCollapsedHotspotStacks;
+window.__proxdmr.syncDesktopHotspotsTopAlignment = syncDesktopHotspotsTopAlignment;
+window.syncDesktopHotspotsTopAlignment = syncDesktopHotspotsTopAlignment;
+window.__proxdmr.scheduleDesktopHotspotsTopAlignment = scheduleDesktopHotspotsTopAlignment;
+window.scheduleDesktopHotspotsTopAlignment = scheduleDesktopHotspotsTopAlignment;
 window.__proxdmr.syncAslMatrixButtonsState = syncAslMatrixButtonsState;
+window.__proxdmr.syncYsfMatrixButtonsState = syncYsfMatrixButtonsState;
+window.__proxdmr.probeYsfMatrixRooms = probeYsfMatrixRooms;
 window.__proxdmr.updateAslVfoHeader = updateAslVfoHeader;
+window.__proxdmr.updateYsfVfoHeader = updateYsfVfoHeader;
+window.__proxdmr.getYsfRoomShortInfo = getYsfRoomShortInfo;
 window.__proxdmr.getAslNodeShortInfo = getAslNodeShortInfo;
 window.__proxdmr.setAslProcBannerState = setAslProcBannerState;
 window.__proxdmr.formatAslProcMessage = formatAslProcMessage;
@@ -9508,12 +17632,26 @@ window.__proxdmr.autoSaveExistingHotspotIfDirty = autoSaveExistingHotspotIfDirty
 window.__proxdmr.saveCurrentSettingsState = saveCurrentSettingsState;
 window.__proxdmr.reorderHotspots = reorderHotspots;
 window.__proxdmr.moveHotspotInOrder = moveHotspotInOrder;
-window.__proxdmr.renderHotspotOrderList = renderHotspotOrderList;
-window.__proxdmr.openHotspotOrderModal = openHotspotOrderModal;
-window.__proxdmr.closeHotspotOrderModal = closeHotspotOrderModal;
+window.__proxdmr.openHsTypeSelectModal = openHsTypeSelectModal;
+window.__proxdmr.closeHsTypeSelectModal = closeHsTypeSelectModal;
+window.__proxdmr.startCreateNewHotspotWithType = startCreateNewHotspotWithType;
+window.__proxdmr.testCurrentHotspotPassword = testCurrentHotspotPassword;
+window.__proxdmr.testCurrentHotspotApiKey = testCurrentHotspotApiKey;
 window.__proxdmr.toggleCustomHsDropdown = toggleCustomHsDropdown;
 window.__proxdmr.closeCustomHsDropdown = closeCustomHsDropdown;
 window.ensurePrimaryHotspotHeaderButtons = ensurePrimaryHotspotHeaderButtons;
+window.ensureTopToolbarControls = ensureTopToolbarControls;
+window.renderToolbarHotspotSlots = renderToolbarHotspotSlots;
+window.refreshToolbarProcessIndicators = refreshToolbarProcessIndicators;
+window.registerToolbarProcessProvider = registerToolbarProcessProvider;
+window.openHotspotArchiveModal = openHotspotArchiveModal;
+window.closeHotspotArchiveModal = closeHotspotArchiveModal;
+window.renderHotspotArchiveModal = renderHotspotArchiveModal;
+window.__proxdmr.renderToolbarHotspotSlots = renderToolbarHotspotSlots;
+window.__proxdmr.refreshToolbarProcessIndicators = refreshToolbarProcessIndicators;
+window.__proxdmr.registerToolbarProcessProvider = registerToolbarProcessProvider;
+window.__proxdmr.openHotspotArchiveModal = openHotspotArchiveModal;
+window.__proxdmr.closeHotspotArchiveModal = closeHotspotArchiveModal;
 
 window.addEventListener("languageChanged", () => {
   const editHsNetworkType = document.getElementById("editHsNetworkType");
@@ -9527,17 +17665,19 @@ window.addEventListener("languageChanged", () => {
     if (window.isDemoMode) {
       const editHsCallsign = document.getElementById("editHsCallsign");
       const editHsTalkerAlias = document.getElementById("editHsTalkerAlias");
-      if (editHsCallsign) editHsCallsign.value = window.t ? window.t("demo.your_callsign", {}, "Ваш позывной") : "Ваш позывной";
-      if (editHsTalkerAlias) editHsTalkerAlias.value = window.t ? window.t("demo.your_name", {}, "Ваше имя") : "Ваше имя";
+      if (editHsCallsign) editHsCallsign.value = window.t ? window.t("demo.your_callsign", {}, "Your Callsign") : "Your Callsign";
+      if (editHsTalkerAlias) editHsTalkerAlias.value = window.t ? window.t("demo.your_name", {}, "Your Name") : "Your Name";
     }
   }
   renderBmMastersDropdown();
+  ensureTopToolbarControls();
+  renderToolbarHotspotSlots();
   if (_hotspotsLoadedOnce) {
     renderRadiosGrid();
   } else {
     const staticPrimary = document.getElementById("radioContainer");
     if (staticPrimary) {
-      ensurePrimaryHotspotHeaderButtons(staticPrimary, true);
+      ensurePrimaryHotspotHeaderButtons(staticPrimary, false);
     }
   }
 });
@@ -9560,7 +17700,12 @@ export function checkAndRenderFailoverBadges() {
 
     const failedCycles = hs.failed_cycles || 0;
     const det = (hs.detail || "").toLowerCase();
-    const isServerDeadNotice = failedCycles >= 3 || det.includes("не отвечает на udp") || (det.includes("все 5 попыток") && failedCycles >= 2);
+    const isServerDeadNotice = failedCycles >= 3 ||
+      det.includes("не отвечает на udp") ||
+      det.includes("not responding on udp") ||
+      det.includes("no udp reply") ||
+      det.includes("udp_no_reply") ||
+      ((det.includes("все 5 попыток") || det.includes("all 5 attempts")) && failedCycles >= 2);
 
     if (!isServerDeadNotice) {
       if (existing) existing.remove();
@@ -9576,12 +17721,14 @@ export function checkAndRenderFailoverBadges() {
       return;
     }
 
-    const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+    const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "en";
     const cCode = (fastest.country_code || fastest.country || "").toUpperCase();
     const cName = getLocalizedCountryName(cCode, fastest.country_name || fastest.country || "DMR", curLang);
     const flag = fastest.flag || (cCode ? isoToEmoji(cCode) : "") || "🌐";
     const pingMs = Math.round(fastest.udp_ms || fastest.avg_ping || 15);
-    const switchText = window.t ? window.t("server_probe.quick_switch", {}, "Переключить") : "Переключить";
+    const switchText = window.t ? window.t("server_probe.quick_switch", {}, "Switch") : "Switch";
+    const failoverPrefix = window.t ? window.t("server_probe.failover_best_prefix", {}, "⚠️ Server not responding. Best:") : "⚠️ Server not responding. Best:";
+    const msUnit = window.t ? window.t("ping.unit_ms", {}, "ms") : "ms";
 
     if (!existing) {
       const noticeDiv = document.createElement("div");
@@ -9589,9 +17736,9 @@ export function checkAndRenderFailoverBadges() {
       noticeDiv.style.cssText = "display:flex; align-items:center; justify-content:space-between; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius: 0px; padding:4px 8px; margin:4px 8px 6px; font-size:11px; color:#fca5a5;";
       noticeDiv.innerHTML = `
         <span style="display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-          <span>⚠️ Сервер не отвечает. Лучший:</span> <b>${cName} (${pingMs} мс)</b>
+          <span>${safeEscapeHtml(failoverPrefix)}</span> <b>${safeEscapeHtml(cName)} (${pingMs} ${safeEscapeHtml(msUnit)})</b>
         </span>
-        <button type="button" class="btn-failover-quick-switch" style="background:#2563eb; color:#fff; border:none; border-radius: 0px; padding:3px 10px; font-size:11px; font-weight:600; cursor:pointer; flex-shrink:0; margin-left:8px;">${switchText}</button>
+        <button type="button" class="btn-failover-quick-switch" style="background:#2563eb; color:#fff; border:none; border-radius: 0px; padding:3px 10px; font-size:11px; font-weight:600; cursor:pointer; flex-shrink:0; margin-left:8px;">${safeEscapeHtml(switchText)}</button>
       `;
 
       noticeDiv.querySelector(".btn-failover-quick-switch").addEventListener("click", () => {
@@ -9629,6 +17776,21 @@ window.onServerProbeComplete = function(msg) {
   if (typeof checkAndRenderFailoverBadges === "function") {
     checkAndRenderFailoverBadges();
   }
+  if (completedNet === "ysf") {
+    const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
+    document.querySelectorAll('.radio-container.card-net-ysf, .radio-container[data-network-type="ysf"]').forEach(cardEl => {
+      const cid = cardEl.dataset.hotspotId;
+      const hsObj = curHsList.find(h => h && h.id === cid);
+      if (hsObj) {
+        updateCardYsfPanel(cardEl, hsObj);
+        syncCardYsfDgIdBar(cardEl, hsObj);
+      }
+    });
+    const ysfView = document.getElementById("ysfRoomsView");
+    if (ysfView && ysfView.style.display !== "none" && typeof window.renderYsfRoomsList === "function") {
+      window.renderYsfRoomsList(document.getElementById("ysfRoomSearchInput")?.value || "");
+    }
+  }
 };
 
 export function appendAllStarLogEntry(cid, entry) {
@@ -9649,16 +17811,18 @@ let _aslDashFastPollTimer = null;
 
 export function isAslDashAutoOpenEnabled(cid = "default") {
   try {
-    const val = localStorage.getItem(`proxdmr_asl_dash_auto_${cid}`);
-    if (val === "0" || val === "false") return false;
-    if (val === "1" || val === "true") return true;
+    let val = hasServerCollectionKey("asl_dash_auto", cid)
+      ? getServerCollectionValue("asl_dash_auto", cid)
+      : localStorage.getItem(`proxdmr_asl_dash_auto_${cid}`);
+    if (val === false || val === "0" || val === "false") return false;
+    if (val === true || val === "1" || val === "true") return true;
   } catch (_) {}
   return true;
 }
 
 export function setAslDashAutoOpenEnabled(cid = "default", enabled = true) {
   try {
-    localStorage.setItem(`proxdmr_asl_dash_auto_${cid}`, enabled ? "1" : "0");
+    setServerCollectionKey("asl_dash_auto", cid, enabled ? "1" : "0", "proxdmr_asl_dash_auto_", false);
   } catch (_) {}
   const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
   if (card) {
@@ -10245,9 +18409,48 @@ if (typeof window !== "undefined" && !window._aslOnlinePollInterval) {
 if (typeof window !== 'undefined') {
   window.updateCardXlxPanel = updateCardXlxPanel;
   window.updateCardDmrPlusPanel = updateCardDmrPlusPanel;
+  window.updateCardYsfPanel = updateCardYsfPanel;
+  window.syncCardYsfDgIdBar = syncCardYsfDgIdBar;
+  window.resolveYsfMatrixCellTypeInfo = resolveYsfMatrixCellTypeInfo;
+  window.applyYsfDgIdLive = applyYsfDgIdLive;
+  window.isYsfTxDgIdPromptRequired = isYsfTxDgIdPromptRequired;
+  window.openYsfTxDgIdModal = openYsfTxDgIdModal;
+  window.closeYsfTxDgIdModal = closeYsfTxDgIdModal;
+  window.getYsfMatrixPage = getYsfMatrixPage;
+  window.setYsfMatrixPageValue = setYsfMatrixPageValue;
+  window.getYsfMatrixRooms = getYsfMatrixRooms;
+  window.saveYsfMatrixRooms = saveYsfMatrixRooms;
+  window.getYsfScanConfig = getYsfScanConfig;
+  window.saveYsfScanConfig = saveYsfScanConfig;
+  window.getYsfDiceConfig = getYsfDiceConfig;
+  window.saveYsfDiceConfig = saveYsfDiceConfig;
+  window.isYsfRoomRxActive = isYsfRoomRxActive;
+  window.startYsfMatrixScan = startYsfMatrixScan;
+  window.stopYsfMatrixScan = stopYsfMatrixScan;
+  window.renderYsfDashboard = renderYsfDashboard;
+  window.isYsfDashAutoOpenEnabled = isYsfDashAutoOpenEnabled;
+  window.setYsfDashAutoOpenEnabled = setYsfDashAutoOpenEnabled;
+  window.openYsfCardContextMenu = openYsfCardContextMenu;
+  window.closeYsfCardContextMenu = closeYsfCardContextMenu;
+  window.openYsfCardEditPopover = openYsfCardEditPopover;
+  window.openYsfScanSettingsPopover = openYsfScanSettingsPopover;
+  window.openYsfDiceSettingsPopover = openYsfDiceSettingsPopover;
+  window.openYsfMatrixManageModal = openYsfMatrixManageModal;
+  window.getAdnDiceConfig = getAdnDiceConfig;
+  window.saveAdnDiceConfig = saveAdnDiceConfig;
+  window.openAdnDiceSettingsPopover = openAdnDiceSettingsPopover;
+  window.syncAdnDiceButtonUI = syncAdnDiceButtonUI;
+  window.stopAdnDiceSearch = stopAdnDiceSearch;
+  window.startAdnDiceSearch = startAdnDiceSearch;
+  window.setupAdnDiceButton = setupAdnDiceButton;
+  window.isAdnSlotRxActive = isAdnSlotRxActive;
   window.linkHotspotDmrPlusReflector = linkHotspotDmrPlusReflector;
   window.updateCardAllStarPanel = updateCardAllStarPanel;
   window.updateAslVfoHeader = updateAslVfoHeader;
+  window.updateYsfVfoHeader = updateYsfVfoHeader;
+  window.syncYsfMatrixButtonsState = syncYsfMatrixButtonsState;
+  window.probeYsfMatrixRooms = probeYsfMatrixRooms;
+  window.getYsfRoomShortInfo = getYsfRoomShortInfo;
   window.getAslNodeShortInfo = getAslNodeShortInfo;
   window.appendAllStarLogEntry = appendAllStarLogEntry;
   window.appendAllStarTelemetryLog = appendAllStarTelemetryLog;
@@ -10260,7 +18463,120 @@ if (typeof window !== 'undefined') {
   window.isAslDashAutoOpenEnabled = isAslDashAutoOpenEnabled;
   window.setAslDashAutoOpenEnabled = setAslDashAutoOpenEnabled;
   window.syncAslDashPanelHeight = syncAslDashPanelHeight;
+  window.latLonToMaidenheadGrid = latLonToMaidenheadGrid;
+  window.requestDeviceGpsLocation = requestDeviceGpsLocation;
+  window.detectYsfCountryFlag = detectYsfCountryFlag;
+  window.ysfConnectRoomProcedure = ysfConnectRoomProcedure;
+  window.ysfDisconnectProcedure = ysfDisconnectProcedure;
+  window.syncYsfDiceButtonUI = syncYsfDiceButtonUI;
+  window.stopYsfDiceSearch = stopYsfDiceSearch;
+  window.getAslDiceConfig = getAslDiceConfig;
+  window.saveAslDiceConfig = saveAslDiceConfig;
+  window.openAslDiceSettingsPopover = openAslDiceSettingsPopover;
+  window.syncAslDiceButtonUI = syncAslDiceButtonUI;
+  window.stopAslDiceSearch = stopAslDiceSearch;
 }
+
+export function latLonToMaidenheadGrid(lat, lon) {
+  const adjLat = Number(lat) + 90.0;
+  const adjLon = Number(lon) + 180.0;
+  const f1 = String.fromCharCode(65 + Math.floor(adjLon / 20));
+  const f2 = String.fromCharCode(65 + Math.floor(adjLat / 10));
+  const f3 = Math.floor((adjLon % 20) / 2);
+  const f4 = Math.floor(adjLat % 10);
+  const remLon = (adjLon % 20) - (f3 * 2);
+  const remLat = (adjLat % 10) - f4;
+  const f5 = String.fromCharCode(97 + Math.floor(remLon / (2.0 / 24)));
+  const f6 = String.fromCharCode(97 + Math.floor(remLat / (1.0 / 24)));
+  return `${f1}${f2}${f3}${f4}${f5}${f6}`.toUpperCase();
+}
+
+export function requestDeviceGpsLocation(callback) {
+  if (typeof callback !== "function") return;
+
+  // 1. Android APK Bridge
+  if (typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.requestGpsLocation === "function") {
+    window._onAndroidGpsLocationReceived = (data) => {
+      try {
+        const obj = typeof data === "string" ? JSON.parse(data) : data;
+        if (obj && obj.lat && obj.lon) {
+          callback(Number(obj.lat), Number(obj.lon));
+          return;
+        }
+      } catch (err) {
+        console.warn("[GPS] Parse Android location error:", err);
+      }
+      const gpsErrMsg = window.t
+        ? window.t("hotspots.gps_device_failed", {}, "Failed to get coordinates from GPS device")
+        : "Failed to get coordinates from GPS device";
+      if (typeof showToast === "function") {
+        showToast(gpsErrMsg, "warning", 3000);
+      } else if (window.showToast) {
+        window.showToast(gpsErrMsg, "warning", 3000);
+      }
+    };
+    window.AndroidBridge.requestGpsLocation();
+    return;
+  }
+
+  // 2. Standard Web Browser Geolocation API
+  if (typeof navigator !== "undefined" && navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        callback(pos.coords.latitude, pos.coords.longitude);
+      },
+      (err) => {
+        console.warn("[GPS] Geolocation API error:", err);
+        const geoDenied = window.t
+          ? window.t("hotspots.geo_denied", {}, "Geolocation access is denied or unavailable")
+          : "Geolocation access is denied or unavailable";
+        if (typeof showToast === "function") {
+          showToast(geoDenied, "warning", 3000);
+        } else if (window.showToast) {
+          window.showToast(geoDenied, "warning", 3000);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+    return;
+  }
+
+  const geoUnsupported = window.t
+    ? window.t("hotspots.geo_unsupported", {}, "Geolocation is not supported by your browser")
+    : "Geolocation is not supported by your browser";
+  if (typeof showToast === "function") {
+    showToast(geoUnsupported, "warning", 3000);
+  } else if (window.showToast) {
+    window.showToast(geoUnsupported, "warning", 3000);
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (e) => {
+    const mapBtn = e.target.closest(".btn-caller-map");
+    if (!mapBtn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const lat = mapBtn.dataset.lat;
+    const lon = mapBtn.dataset.lon;
+    const call = mapBtn.dataset.callsign || "";
+    const grid = mapBtn.dataset.grid || "";
+    if (lat && lon) {
+      const url = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(lat)}&mlon=${encodeURIComponent(lon)}#map=13/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}`;
+      window.open(url, "_blank");
+    } else if (grid) {
+      const qthMsg = window.t
+        ? window.t("hotspots.qth_coords_toast", { call, grid }, `Coordinates ${call}: QTH ${grid}`)
+        : `Coordinates ${call}: QTH ${grid}`;
+      if (typeof showToast === "function") {
+        showToast(qthMsg, "info", 3000);
+      } else if (window.showToast) {
+        window.showToast(qthMsg, "info", 3000);
+      }
+    }
+  });
+}
+
 
 
 export function updateHsFormAliveState(isAlive) {
@@ -10287,4 +18603,8 @@ export function updateHsFormAliveState(isAlive) {
 }
 if (typeof window !== "undefined") {
   window.updateHsFormAliveState = updateHsFormAliveState;
+  window.DEFAULT_NETWORK_BRAND_COLORS = DEFAULT_NETWORK_BRAND_COLORS;
+  window.getNetworkBrandColor = getNetworkBrandColor;
+  window.isNetworkColorEnabled = isNetworkColorEnabled;
+  window.applyCardBrandColors = applyCardBrandColors;
 }

@@ -1,8 +1,8 @@
-import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.380';
-import { RecordingsManager } from './modules/audio/player.js?v=2.9.556';
-import './modules/ui/theme.js?v=2.9.541';
-import './modules/dmr/bm-monitor.js?v=2.9.623';
-import './modules/dmr/log-selection.js';
+import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.712';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.751';
+import './modules/ui/theme.js?v=2.9.734';
+import './modules/dmr/bm-monitor.js?v=2.9.738';
+import './modules/dmr/log-selection.js?v=2.9.736';
 import {
   handleCallTranscription,
   handleTranscriptionError,
@@ -27,31 +27,31 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.628';
-import { blePtt } from './modules/ptt/ble.js';
-import { initApkUpdater } from './modules/core/updater.js?v=2.9.367';
-import { initAndroidBridge } from './modules/core/android.js?v=2.9.552';
-import { initAuth, initAccountManager } from './modules/settings/account.js';
-import { initLanguageManager } from './modules/settings/language.js?v=2.9.624';
-import { initHamQthSettings } from './modules/settings/hamqth.js?v=2.9.628';
-import { initGeneralSettings } from './modules/settings/general.js?v=2.9.509';
-import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.509';
-import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.628';
-import { initOrientationLock } from './modules/ui/orientation.js';
+} from './modules/dmr/transcriber.js?v=2.9.729';
+import { blePtt } from './modules/ptt/ble.js?v=2.9.699';
+import { initApkUpdater } from './modules/core/updater.js?v=2.9.711';
+import { initAndroidBridge } from './modules/core/android.js?v=2.9.755';
+import { initAuth, initAccountManager } from './modules/settings/account.js?v=2.9.699';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.737';
+import { initHamQthSettings } from './modules/settings/hamqth.js?v=2.9.734';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.739';
+import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.711';
+import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.711';
+import { initOrientationLock } from './modules/ui/orientation.js?v=2.9.733';
 import {
   initQuickAssign,
   renderQuickMemButtons
-} from './modules/dmr/quick-assign.js?v=2.9.603';
-import { initStationClocks, updateClocks } from './modules/ui/clocks.js';
+} from './modules/dmr/quick-assign.js?v=2.9.736';
+import { initStationClocks, updateClocks } from './modules/ui/clocks.js?v=2.9.712';
 import {
   renderTranscriptionSummary
-} from './modules/dmr/transcription.js?v=2.9.547';
+} from './modules/dmr/transcription.js?v=2.9.738';
 import {
   initSearchManager,
   loadCallDbStats,
   loadTgDbStats,
   closeCallIdModal
-} from './modules/dmr/search.js?v=2.9.380';
+} from './modules/dmr/search.js?v=2.9.736';
 import {
   initContactsManager,
   openContactEditModal,
@@ -59,13 +59,13 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.627';
+} from './modules/dmr/contacts.js?v=2.9.748';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
   checkBmApiStatus,
   updateGwStatus
-} from './modules/network/watchdog.js?v=2.9.542';
+} from './modules/network/watchdog.js?v=2.9.712';
 import {
   initHotspotsManager,
   loadHotspots,
@@ -76,41 +76,41 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.628';
+} from './modules/dmr/hotspots.js?v=2.9.741';
 import {
   initBmTgStaticManager
-} from './modules/dmr/bm-static-manager.js?v=2.9.372';
+} from './modules/dmr/bm-static-manager.js?v=2.9.739';
 import {
   initAudioRouting
-} from './modules/audio/routing.js?v=2.9.564';
+} from './modules/audio/routing.js?v=2.9.729';
 import {
   initAudioDsp,
   syncActiveAudioRxPreset
-} from './modules/audio/dsp.js?v=2.9.628';
+} from './modules/audio/dsp.js?v=2.9.733';
 import {
   setupDsdfmeModal
-} from './modules/settings/vocoder.js?v=2.9.628';
+} from './modules/settings/vocoder.js?v=2.9.711';
 import {
   initPttEngine,
   updatePttLockUI,
   checkPttConnectionStatus,
   notifyPttConnectionBlocked
-} from './modules/ptt/engine.js?v=2.9.628';
-import { initAboutModal } from './modules/ui/about.js?v=2.9.625';
+} from './modules/ptt/engine.js?v=2.9.733';
+import { initAboutModal } from './modules/ui/about.js?v=2.9.711';
 import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.614';
 import {
   initFullscreen,
   toggleFullscreen,
   isFullscreenActive,
   updateFullscreenButtonsUI
-} from './modules/ui/fullscreen.js?v=2.9.541';
+} from './modules/ui/fullscreen.js?v=2.9.699';
 import {
   initBmBenchmark,
   renderBmBenchmarkTable,
   handleBmBenchmarkComplete,
   handleBmBenchmarkProgress,
   setBenchmarkRunningUI
-} from './modules/dmr/bm-benchmark.js?v=2.9.609';
+} from './modules/dmr/bm-benchmark.js?v=2.9.741';
 import {
   getHotspotSlot,
   setCardSlot,
@@ -129,7 +129,7 @@ import {
   selectHotspotTargetId,
   getStoredLastRx,
   saveStoredLastRx
-} from './modules/ui/vfo-display.js?v=2.9.578';
+} from './modules/ui/vfo-display.js?v=2.9.752';
 import {
   loadCardPingHistory,
   saveCardPingHistory,
@@ -148,12 +148,12 @@ import {
   updatePingElement,
   calculateCardPacketLoss,
   calculateClientPacketLoss
-} from './modules/network/ping-sparklines.js?v=2.9.594';
+} from './modules/network/ping-sparklines.js?v=2.9.712';
 import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js?v=2.9.625';
+} from './modules/settings/sync.js?v=2.9.737';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -173,6 +173,10 @@ import {
   isHotspotAudioMuted,
   setHotspotAudioMute,
   toggleHotspotAudioMute,
+  isHotspotSoloActive,
+  getActiveSoloHotspotId,
+  toggleHotspotSoloAudio,
+  exitSoloAudio,
   handleMuteButtonClick,
   handleMuteButtonDblClick,
   getHotspotVolume,
@@ -192,7 +196,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.624';
+} from './modules/audio/volume-mute.js?v=2.9.737';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -204,13 +208,13 @@ import {
   updateRxBannerFreshness,
   updateCardRxLiveBanner,
   updateRxLiveBanner
-} from './modules/dmr/bm-banner.js?v=2.9.590';
+} from './modules/dmr/bm-banner.js?v=2.9.737';
 import {
   currentBmStatus,
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js?v=2.9.624';
+} from './modules/dmr/bm-status.js?v=2.9.737';
 import {
   connectWebSocket,
   handleServerMessage,
@@ -219,7 +223,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.623';
+} from './modules/network/ws.js?v=2.9.752';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application
@@ -264,13 +268,19 @@ if (typeof window !== "undefined") {
       try {
         const urlStr = typeof input === "string" ? input : (input && input.url ? input.url : "");
         isLocalApi = urlStr.startsWith("/api/") || urlStr.includes(window.location.origin + "/api/");
-        if (isLocalApi && window.PROXDMR_CLIENT_ID) {
-          init = init ? Object.assign({}, init) : {};
-          const hdrs = new Headers(init.headers || (typeof input !== "string" && input && input.headers ? input.headers : undefined));
-          if (!hdrs.has("X-ProxDMR-Client-Id")) {
-            hdrs.set("X-ProxDMR-Client-Id", window.PROXDMR_CLIENT_ID);
+        if (isLocalApi) {
+          const activeLang = (window.I18N && window.I18N.currentLang) || (function () { try { return localStorage.getItem("proxdmr_language") || ""; } catch (_) { return ""; } })();
+          if (window.PROXDMR_CLIENT_ID || activeLang) {
+            init = init ? Object.assign({}, init) : {};
+            const hdrs = new Headers(init.headers || (typeof input !== "string" && input && input.headers ? input.headers : undefined));
+            if (window.PROXDMR_CLIENT_ID && !hdrs.has("X-ProxDMR-Client-Id")) {
+              hdrs.set("X-ProxDMR-Client-Id", window.PROXDMR_CLIENT_ID);
+            }
+            if (activeLang && !hdrs.has("X-ProxDMR-Lang")) {
+              hdrs.set("X-ProxDMR-Lang", activeLang);
+            }
+            init.headers = hdrs;
           }
-          init.headers = hdrs;
         }
       } catch (_) {}
       const pending = _origFetch(input, init);
@@ -292,7 +302,8 @@ if (typeof window !== "undefined") {
           const data = await resp.clone().json();
           if (!data || data.code !== "DEMO_READ_ONLY") return resp;
           const raw = String(data.detail || data.message || "");
-          const localized = raw.includes("экспорт")
+          const isExportLock = (data.action === "export") || /export|экспорт|експорт|exporter|esport/i.test(raw);
+          const localized = isExportLock
             ? window.t("demo.export_locked", {}, raw)
             : window.t("demo.settings_locked", {}, raw);
           const patched = Object.assign({}, data, { detail: localized, message: localized });
@@ -507,4 +518,29 @@ document.addEventListener("DOMContentLoaded", () => {
   startSystemLinkWatchdog();
   checkBmApiStatus();
   setInterval(checkBmApiStatus, 60000);
+
+  // ── Single-Active-Copy Freeze Hook ─────────────────────────────────────
+  // При сворачивании / переключении вкладки или заморозке процесса браузером
+  // мгновенно сбрасываем все ожидающие сохранения данные на сервер.
+  function flushPendingClientStateToServer() {
+    try {
+      if (typeof window.flushPendingClientSettingsSync === "function") {
+        window.flushPendingClientSettingsSync({ keepalive: true });
+      }
+      if (typeof window.flushPendingContactsSave === "function") {
+        window.flushPendingContactsSave();
+      }
+    } catch (err) {
+      console.warn("[FREEZE-HOOK] Flush state error:", err);
+    }
+  }
+  window.flushPendingClientStateToServer = flushPendingClientStateToServer;
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushPendingClientStateToServer();
+    }
+  });
+  window.addEventListener("pagehide", flushPendingClientStateToServer);
+  window.addEventListener("freeze", flushPendingClientStateToServer);
 });

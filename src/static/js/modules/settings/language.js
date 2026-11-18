@@ -1,6 +1,6 @@
-import { refreshAllCardsBmBanner } from '../dmr/bm-banner.js?v=2.9.590';
-import { currentBmStatus, updateBmStatus } from '../dmr/bm-status.js?v=2.9.624';
-import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.628';
+import { refreshAllCardsBmBanner } from '../dmr/bm-banner.js?v=2.9.737';
+import { currentBmStatus, updateBmStatus } from '../dmr/bm-status.js?v=2.9.737';
+import { renderHotspotsList } from '../dmr/hotspots.js?v=2.9.741';
 
 /**
  * Language Selector & i18n Localization Engine Module
@@ -11,7 +11,7 @@ export function initLanguageManager() {
     if (window.I18N) {
       window.I18N.populateLanguageSelect();
     }
-    const savedLang = localStorage.getItem("proxdmr_language") || "ru";
+    const savedLang = (window.I18N && window.I18N.currentLang) || localStorage.getItem("proxdmr_language") || "ru";
     optLanguage.value = savedLang;
     optLanguage.addEventListener("change", () => {
       const chosenLang = optLanguage.value;
@@ -23,12 +23,19 @@ export function initLanguageManager() {
       } else {
         localStorage.setItem("proxdmr_language", chosenLang);
       }
-      if (window.isDemoMode) {
-        return;
-      }
       const ws = window.ws;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "set_language", language: chosenLang }));
+      }
+      if (window.isDemoMode) {
+        try {
+          fetch("/api/i18n/lang", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ language: chosenLang })
+          }).catch(() => {});
+        } catch (_) {}
+        return;
       }
       try {
         fetch("/api/settings/general", {
@@ -54,7 +61,7 @@ export function initLanguageManager() {
         const editHsCall = document.getElementById("editHsCallsign");
         if (editHsCall) editHsCall.value = demoCallTxt;
 
-        const demoNameTxt = window.t ? window.t("demo.your_name", {}, "Ваше имя") : "Ваше имя";
+        const demoNameTxt = window.t ? window.t("demo.your_name", {}, "Your Name") : "Your Name";
         const editHsTa = document.getElementById("editHsTalkerAlias");
         if (editHsTa) editHsTa.value = demoNameTxt;
       }
@@ -63,13 +70,19 @@ export function initLanguageManager() {
       const optPreGainVal = document.getElementById("optPreGainVal");
       if (optPreGain && optPreGainVal) {
         const val = Math.round(parseFloat(optPreGain.value) || 0);
-        const unit = (lang === "ru" || lang === "uk") ? "дБ" : "dB";
+        const unit = window.t ? window.t("audio.unit_db", {}, "dB") : "dB";
         optPreGainVal.textContent = val > 0 ? `+${val} ${unit}` : `${val} ${unit}`;
       }
-      // Update idle standby caller texts
+      // Update idle standby caller texts across any previously selected language
       document.querySelectorAll(".ts-caller-call").forEach(el => {
-        if (!el.classList.contains("caller-active") && (!el.textContent || el.textContent === "Ожидание вызова..." || el.textContent === "Waiting for call...")) {
-          el.textContent = window.t ? window.t("vfo.standby") : "Ожидание вызова...";
+        if (el.classList.contains("caller-active")) return;
+        const txt = (el.textContent || "").trim();
+        const isStandby = el.dataset.standby === "1" || !txt ||
+          txt === "Ожидание вызова..." || txt === "Waiting for call..." ||
+          (window.I18N && typeof window.I18N.isTranslationOf === "function" && window.I18N.isTranslationOf("vfo.standby", txt));
+        if (isStandby) {
+          el.textContent = window.t ? window.t("vfo.standby") : "Waiting for call...";
+          el.dataset.standby = "1";
         }
       });
       // Update standby mode badges
@@ -128,7 +141,22 @@ export function initLanguageManager() {
       }
       if (typeof window.updateApkUpdateUI === "function") window.updateApkUpdateUI();
       if (typeof window.updateTgDisplay === "function") window.updateTgDisplay();
+      if (typeof window.updateHotspotCardPanUI === "function") window.updateHotspotCardPanUI();
+      if (typeof window.updateAllHotspotRecUI === "function") window.updateAllHotspotRecUI();
+      if (typeof window.setSwlState === "function" && typeof window.isSwlMode === "boolean") {
+        window.setSwlState(window.isSwlMode);
+      }
       if (typeof window.renderQuickMemButtons === "function") window.renderQuickMemButtons();
+      if (typeof window.renderBmBenchmarkTable === "function") window.renderBmBenchmarkTable();
+      if (typeof window.updatePttLockUI === "function") window.updatePttLockUI();
+      if (typeof window.refreshAuthLocalization === "function") window.refreshAuthLocalization();
+      if (typeof window.refreshAdminLocalization === "function") window.refreshAdminLocalization();
+      if (typeof window.refreshSearchLocalization === "function") window.refreshSearchLocalization();
+      if (typeof window.refreshStaticTgLocalization === "function") window.refreshStaticTgLocalization();
+      if (typeof window.refreshSystemUpdaterLocalization === "function") window.refreshSystemUpdaterLocalization();
+      if (typeof window.refreshAlertsLocalization === "function") window.refreshAlertsLocalization();
+      if (typeof window.refreshDspPresetLocalization === "function") window.refreshDspPresetLocalization();
+      if (typeof window.updateAllVolumeAndMuteUI === "function") window.updateAllVolumeAndMuteUI();
     });
   }
 }

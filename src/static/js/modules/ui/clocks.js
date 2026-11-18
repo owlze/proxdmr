@@ -8,8 +8,8 @@ import {
   getHistoryTimeMode,
   setHistoryTimeMode,
   updateClockBarActiveState
-} from "../core/formatters.js?v=2.9.367";
-import { showToast } from "../core/toast.js";
+} from "../core/formatters.js?v=2.9.712";
+import { showToast } from "../core/toast.js?v=2.9.699";
 
 /**
  * Update LOC and UTC clocks across the DOM

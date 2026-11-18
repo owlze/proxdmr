@@ -90,7 +90,8 @@ class SlotAgcState:
     envelope: float = 0.0           # Running speech envelope (int16 RMS scale)
     current_gain: float = 1.0       # Current linear gain multiplier
     last_applied_gain: float = 1.0  # Last gain applied (for interpolation)
-    last_speech_time: float = 0.0   # monotonic timestamp of last speech
+    last_speech_time: float = 0.0   # Stream timestamp of last active speech
+    stream_time: float = 0.0        # Cumulative audio stream time in seconds
     is_speech_active: bool = False  # Schmitt trigger state
     initialized: bool = False       # Whether envelope has been initialized
 
@@ -109,8 +110,9 @@ class ServerAudioAgc:
         self.enabled: bool = True
         self.profile: str = "standard"
 
-        # Target level
+        # Target level & peak ceiling guard (prevents high-crest speech from clipping)
         self.target_rms: float = TARGET_RMS
+        self.peak_ceiling: float = 24000.0
 
         # Speech detector thresholds
         self.speech_threshold: float = SPEECH_THRESHOLD
@@ -183,41 +185,42 @@ class ServerAudioAgc:
 
     # ─── Core Processing ──────────────────────────────────────────────────
 
-    def process_burst(self, pcm_bytes: bytes, slot: int = 1) -> bytes:
+    def process_float_samples(
+        self,
+        samples: list[float],
+        slot: int = 1,
+        apply_soft_clip: bool = False,
+    ) -> list[float]:
         """
-        Process a 960-byte PCM burst (480 samples, 16-bit signed LE, 8000 Hz).
-
-        Returns processed PCM bytes with AGC applied.
-        If AGC is disabled or input is invalid, returns original bytes unchanged.
+        Process a list of float PCM samples (int16 amplitude scale, 8000 Hz) in-place.
+        Uses stream-synchronous timing and peak-ceiling protection so high-crest
+        speech is never boosted into clipping.
         """
-        if not self.enabled:
-            return pcm_bytes
+        if not self.enabled or not samples:
+            return samples
 
-        num_samples = len(pcm_bytes) // 2
-        if num_samples == 0:
-            return pcm_bytes
-
-        # Unpack int16 samples
-        samples = list(struct.unpack(f"<{num_samples}h", pcm_bytes))
-
-        # Get or create slot state
+        num_samples = len(samples)
         state = self.slots.get(slot)
         if state is None:
             state = SlotAgcState()
             self.slots[slot] = state
 
-        now = time.monotonic()
-
-        # Dynamic chunk duration (supports both 20ms ASL frames and 60ms DMR bursts identically)
         chunk_dur = max(0.005, min(0.200, num_samples / 8000.0))
+        state.stream_time += chunk_dur
+        now = state.stream_time
+
         attack_alpha = math.exp(-chunk_dur / 0.060)
         decay_alpha = math.exp(-chunk_dur / 0.600)
         release_alpha = math.exp(-chunk_dur / max(0.100, self.decay_time))
 
-        # ── Step 1: Calculate RMS of this chunk ──
+        # ── Step 1: Calculate RMS and Peak of this chunk ──
         sum_sq = 0.0
+        chunk_peak = 0.0
         for s in samples:
             sum_sq += s * s
+            abs_s = -s if s < 0.0 else s
+            if abs_s > chunk_peak:
+                chunk_peak = abs_s
         chunk_rms = math.sqrt(sum_sq / num_samples)
 
         # ── Step 2: Speech detection (Schmitt trigger with hysteresis) ──
@@ -228,59 +231,58 @@ class ServerAudioAgc:
             if chunk_rms < self.noise_gate:
                 state.is_speech_active = False
 
-        # ── Step 3: Compute target gain ──
+        # ── Step 3: Compute target gain with Peak-Ceiling Guard ──
         target_gain = 1.0
 
         if state.is_speech_active:
             state.last_speech_time = now
 
-            # FIX for bug #2: Initialize envelope from actual signal, not fixed 0.16
             if not state.initialized:
                 state.envelope = chunk_rms
                 state.initialized = True
             elif chunk_rms > state.envelope:
-                # Attack: fast (60ms time constant) to catch speech onset
                 state.envelope = (
                     attack_alpha * state.envelope
                     + (1.0 - attack_alpha) * chunk_rms
                 )
             else:
-                # Decay: smooth (600ms time constant) for syllabic tracking
                 state.envelope = (
                     decay_alpha * state.envelope
                     + (1.0 - decay_alpha) * chunk_rms
                 )
 
-            # Logarithmic dynamic range compression
-            safe_env = max(10.0, state.envelope)  # Floor at ~-70 dBFS
+            safe_env = max(10.0, state.envelope)
             in_db = 20.0 * math.log10(safe_env / 32768.0)
-            target_db = 20.0 * math.log10(self.target_rms / 32768.0)  # ~-16 dBFS
+            target_db = 20.0 * math.log10(self.target_rms / 32768.0)
             diff_db = target_db - in_db
 
             if diff_db > 0:
-                # Boost quiet speech (clamped to max_gain_db)
                 gain_db = min(self.max_gain_db, diff_db * self.boost_ratio)
             else:
-                # Attenuate loud speech (clamped to min_gain_db which is negative)
-                # FIX for bug #1: min_gain_db is properly stored as negative value
                 gain_db = max(self.min_gain_db, diff_db * self.atten_ratio)
 
             target_gain = 10.0 ** (gain_db / 20.0)
+
+            # Peak-ceiling guard: never amplify high-crest speech peaks above peak_ceiling
+            if self.peak_ceiling > 0.0 and chunk_peak > 1.0:
+                if (chunk_peak * target_gain) > self.peak_ceiling:
+                    min_lin = 10.0 ** (self.min_gain_db / 20.0)
+                    safe_peak_gain = max(min_lin, self.peak_ceiling / chunk_peak)
+                    if safe_peak_gain < target_gain:
+                        target_gain = safe_peak_gain
+
             state.current_gain = target_gain
 
         else:
-            # Pause or background noise
             elapsed = (
                 (now - state.last_speech_time)
-                if state.last_speech_time > 0
+                if state.last_speech_time > 0.0
                 else 999.0
             )
 
             if elapsed < self.hang_time:
-                # Hang: freeze current gain during natural inter-word pauses
                 target_gain = state.current_gain
             else:
-                # FIX for bug #3: Per-chunk release decay (NOT cumulative!)
                 state.current_gain = (
                     release_alpha * state.current_gain
                     + (1.0 - release_alpha) * 1.0
@@ -290,6 +292,10 @@ class ServerAudioAgc:
                     + (1.0 - release_alpha) * 0.0
                 )
                 target_gain = state.current_gain
+
+            if self.peak_ceiling > 0.0 and chunk_peak > 1.0 and (chunk_peak * target_gain) > self.peak_ceiling:
+                min_lin = 10.0 ** (self.min_gain_db / 20.0)
+                target_gain = min(target_gain, max(min_lin, self.peak_ceiling / chunk_peak))
 
         # ── Step 4: Apply gain with sample-by-sample interpolation ──
         start_gain = state.last_applied_gain
@@ -302,23 +308,39 @@ class ServerAudioAgc:
             curr_gain += gain_step
             sample = samples[i] * curr_gain
 
-            # C1-continuous soft clipping with tanh above 24576
-            if sample > soft_knee:
-                over = sample - soft_knee
-                sample = soft_knee + soft_headroom * math.tanh(over / soft_headroom)
-            elif sample < -soft_knee:
-                over = sample + soft_knee
-                sample = -soft_knee + soft_headroom * math.tanh(over / soft_headroom)
+            if apply_soft_clip:
+                if sample > soft_knee:
+                    over = sample - soft_knee
+                    sample = soft_knee + soft_headroom * math.tanh(over / soft_headroom)
+                elif sample < -soft_knee:
+                    over = sample + soft_knee
+                    sample = -soft_knee + soft_headroom * math.tanh(over / soft_headroom)
 
-            # Hard clamp to int16 range
-            if sample > INT16_MAX:
-                sample = INT16_MAX
-            elif sample < INT16_MIN:
-                sample = INT16_MIN
+                if sample > INT16_MAX:
+                    sample = float(INT16_MAX)
+                elif sample < INT16_MIN:
+                    sample = float(INT16_MIN)
 
-            samples[i] = int(sample)
+            samples[i] = sample
 
         state.last_applied_gain = target_gain
+        return samples
 
-        # ── Step 5: Pack back to bytes ──
-        return struct.pack(f"<{num_samples}h", *samples)
+    def process_burst(self, pcm_bytes: bytes, slot: int = 1) -> bytes:
+        """
+        Process a PCM burst (16-bit signed LE, 8000 Hz).
+
+        Returns processed PCM bytes with AGC and soft-clipping applied.
+        If AGC is disabled or input is invalid, returns original bytes unchanged.
+        """
+        if not self.enabled:
+            return pcm_bytes
+
+        num_samples = len(pcm_bytes) // 2
+        if num_samples == 0:
+            return pcm_bytes
+
+        samples = [float(s) for s in struct.unpack(f"<{num_samples}h", pcm_bytes)]
+        self.process_float_samples(samples, slot=slot, apply_soft_clip=True)
+        int_samples = [int(s) for s in samples]
+        return struct.pack(f"<{num_samples}h", *int_samples)

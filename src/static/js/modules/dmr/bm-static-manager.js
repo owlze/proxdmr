@@ -1,6 +1,6 @@
-import { showToast } from '../core/toast.js';
-import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js';
-import { attachTgLivePreview } from '../core/formatters.js?v=2.9.367';
+import { showToast } from '../core/toast.js?v=2.9.699';
+import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js?v=2.9.698';
+import { attachTgLivePreview } from '../core/formatters.js?v=2.9.712';
 
 /**
  * ProxDMR BrandMeister Static & Dynamic TalkGroups Manager Module
@@ -112,43 +112,46 @@ let bmImportFinishedTimer = null;
 
 const POPULAR_TG_PRESETS = [
   {
-    group: "Россия (Основные и ФО)",
+    groupKey: "bmtg_static.preset_grp_ru_main",
+    group: "Russia (Main & Federal Districts)",
     items: [
-      { tg: 250, name: "250 - Россия (Общий / CIS)" },
-      { tg: 2501, name: "2501 - Россия 1 (National)" },
-      { tg: 2502, name: "2502 - Москва и область" },
-      { tg: 2503, name: "2503 - Санкт-Петербург и СЗФО" },
-      { tg: 2504, name: "2504 - Центральный ФО" },
-      { tg: 2505, name: "2505 - Южный & Кавказский ФО" },
-      { tg: 2506, name: "2506 - Приволжский ФО" },
-      { tg: 2507, name: "2507 - Уральский ФО" },
-      { tg: 2508, name: "2508 - Сибирский ФО" },
-      { tg: 2509, name: "2509 - Дальневосточный ФО" },
-      { tg: 25020, name: "25020 - Конференция РОСХАМ" },
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia (General / CIS)" },
+      { tg: 2501, labelKey: "bmtg_static.preset_2501", name: "2501 - Russia 1 (National)" },
+      { tg: 2502, labelKey: "bmtg_static.preset_2502", name: "2502 - Moscow & Region" },
+      { tg: 2503, labelKey: "bmtg_static.preset_2503", name: "2503 - St. Petersburg & NWFD" },
+      { tg: 2504, labelKey: "bmtg_static.preset_2504", name: "2504 - Central Federal District" },
+      { tg: 2505, labelKey: "bmtg_static.preset_2505", name: "2505 - Southern & Caucasus FD" },
+      { tg: 2506, labelKey: "bmtg_static.preset_2506", name: "2506 - Volga Federal District" },
+      { tg: 2507, labelKey: "bmtg_static.preset_2507", name: "2507 - Ural Federal District" },
+      { tg: 2508, labelKey: "bmtg_static.preset_2508", name: "2508 - Siberian Federal District" },
+      { tg: 2509, labelKey: "bmtg_static.preset_2509", name: "2509 - Far Eastern Federal District" },
+      { tg: 25020, labelKey: "bmtg_static.preset_25020", name: "25020 - ROSHAM Conference" },
     ]
   },
   {
-    group: "Регионы и области РФ",
+    groupKey: "bmtg_static.preset_grp_ru_regions",
+    group: "Russian Regions & Oblasts",
     items: [
-      { tg: 25011, name: "25011 - Калининградская обл." },
-      { tg: 25033, name: "25033 - Ленинградская обл." },
-      { tg: 250601, name: "250601 - Волгоградская обл." },
-      { tg: 250602, name: "250602 - Ростовская обл." },
-      { tg: 250603, name: "250603 - Армения / Локальная" },
-      { tg: 250641, name: "250641 - Краснодарский край" },
-      { tg: 250647, name: "250647 - Ставропольский край" },
-      { tg: 250907, name: "250907 - Приморский край" },
+      { tg: 25011, labelKey: "bmtg_static.preset_25011", name: "25011 - Kaliningrad Oblast" },
+      { tg: 25033, labelKey: "bmtg_static.preset_25033", name: "25033 - Leningrad Oblast" },
+      { tg: 250601, labelKey: "bmtg_static.preset_250601", name: "250601 - Volgograd Oblast" },
+      { tg: 250602, labelKey: "bmtg_static.preset_250602", name: "250602 - Rostov Oblast" },
+      { tg: 250603, labelKey: "bmtg_static.preset_250603", name: "250603 - Armenia / Local" },
+      { tg: 250641, labelKey: "bmtg_static.preset_250641", name: "250641 - Krasnodar Krai" },
+      { tg: 250647, labelKey: "bmtg_static.preset_250647", name: "250647 - Stavropol Krai" },
+      { tg: 250907, labelKey: "bmtg_static.preset_250907", name: "250907 - Primorsky Krai" },
     ]
   },
   {
-    group: "Международные и тест",
+    groupKey: "bmtg_static.preset_grp_intl",
+    group: "International & Test",
     items: [
-      { tg: 91, name: "91 - Worldwide (Весь мир)" },
-      { tg: 92, name: "92 - Europe (Европа)" },
-      { tg: 262, name: "262 - Германия" },
-      { tg: 310, name: "310 - США (TAC 310)" },
-      { tg: 9990, name: "9990 - Эхо-тест (Parrot)" },
-      { tg: 4000, name: "4000 - Unlink / Сброс" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 92, labelKey: "bmtg_static.preset_92", name: "92 - Europe" },
+      { tg: 262, labelKey: "bmtg_static.preset_262", name: "262 - Germany" },
+      { tg: 310, labelKey: "bmtg_static.preset_310", name: "310 - USA (TAC 310)" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Echo Test (Parrot)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink / Reset" },
     ]
   }
 ];
@@ -157,51 +160,110 @@ const POPULAR_TG_PRESETS = [
 
 const POPULAR_TGIF_PRESETS = [
   {
-    group: "TGIF Network (Популярные)",
+    groupKey: "bmtg_static.preset_grp_tgif",
+    group: "TGIF Network (Popular)",
     items: [
-      { tg: 777, name: "777 - TGIF Multi-Lang (Основная)" },
-      { tg: 31665, name: "31665 - The Mothership (Главная англоязычная)" },
-      { tg: 250, name: "250 - Russia / CIS" },
-      { tg: 91, name: "91 - Worldwide" },
-      { tg: 9990, name: "9990 - Parrot (Эхо-тест)" },
-      { tg: 4000, name: "4000 - Unlink (Отключение)" },
+      { tg: 777, labelKey: "bmtg_static.preset_777", name: "777 - TGIF Multi-Lang (Main)" },
+      { tg: 31665, labelKey: "bmtg_static.preset_31665", name: "31665 - The Mothership (Main English)" },
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia / CIS" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Parrot (Echo Test)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink (Disconnect)" },
     ]
   }
 ];
 
 const POPULAR_FREEDMR_PRESETS = [
   {
-    group: "FreeDMR Network (Популярные)",
+    groupKey: "bmtg_static.preset_grp_freedmr",
+    group: "FreeDMR Network (Popular)",
     items: [
-      { tg: 2501, name: "2501 - Russia 1 (Основная)" },
-      { tg: 2502, name: "2502 - Russia 2" },
-      { tg: 2503, name: "2503 - Russia 3" },
-      { tg: 2505, name: "2505 - Russia South" },
-      { tg: 250, name: "250 - Russia (Общий)" },
-      { tg: 91, name: "91 - Worldwide" },
-      { tg: 92, name: "92 - Europe" },
-      { tg: 9990, name: "9990 - Parrot (Эхо-тест)" },
-      { tg: 4000, name: "4000 - Unlink (Отключение)" },
+      { tg: 2501, labelKey: "bmtg_static.preset_2501", name: "2501 - Russia 1 (Main)" },
+      { tg: 2502, labelKey: "bmtg_static.preset_2502", name: "2502 - Russia 2" },
+      { tg: 2503, labelKey: "bmtg_static.preset_2503", name: "2503 - Russia 3" },
+      { tg: 2505, labelKey: "bmtg_static.preset_2505", name: "2505 - Russia South" },
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia (General)" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 92, labelKey: "bmtg_static.preset_92", name: "92 - Europe" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Parrot (Echo Test)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink (Disconnect)" },
+    ]
+  }
+];
+
+const POPULAR_ADN_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_adn",
+    group: "ADN Systems (Popular)",
+    items: [
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia (National)" },
+      { tg: 2501, labelKey: "bmtg_static.preset_2501", name: "2501 - Russia Central" },
+      { tg: 2502, labelKey: "bmtg_static.preset_2502", name: "2502 - Russia Northwest" },
+      { tg: 2503, labelKey: "bmtg_static.preset_2503", name: "2503 - Russia Volga" },
+      { tg: 2504, labelKey: "bmtg_static.preset_2504", name: "2504 - Russia Urals" },
+      { tg: 2505, labelKey: "bmtg_static.preset_2505", name: "2505 - Russia South" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 92, labelKey: "bmtg_static.preset_92", name: "92 - Europe" },
+      { tg: 93, labelKey: "bmtg_static.preset_93", name: "93 - North America" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Parrot (Echo Test)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink (Disconnect)" },
     ]
   }
 ];
 
 const POPULAR_XLX_PRESETS = [
   {
-    group: "XLX Reflector (Модули TS2)",
+    groupKey: "bmtg_static.preset_grp_xlx",
+    group: "XLX Reflector (TS2 Modules)",
     items: [
-      { tg: 4004, name: "Module D (TG 4004 - Основной)" },
-      { tg: 4001, name: "Module A (TG 4001)" },
-      { tg: 4002, name: "Module B (TG 4002)" },
-      { tg: 4003, name: "Module C (TG 4003)" },
-      { tg: 4005, name: "Module E (TG 4005)" },
-      { tg: 9, name: "TG 9 - Голосовой вызов рефлектора" },
-      { tg: 4000, name: "TG 4000 - Отключить модуль (Unlink)" },
+      { tg: 4004, labelKey: "bmtg_static.preset_xlx_4004", name: "Module D (TG 4004 - Main)" },
+      { tg: 4001, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "A", tg: 4001 }, name: "Module A (TG 4001)" },
+      { tg: 4002, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "B", tg: 4002 }, name: "Module B (TG 4002)" },
+      { tg: 4003, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "C", tg: 4003 }, name: "Module C (TG 4003)" },
+      { tg: 4005, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "E", tg: 4005 }, name: "Module E (TG 4005)" },
+      { tg: 9, labelKey: "bmtg_static.preset_xlx_9", name: "TG 9 - Reflector Voice Call" },
+      { tg: 4000, labelKey: "bmtg_static.preset_xlx_4000", name: "TG 4000 - Disconnect Module (Unlink)" },
     ]
   }
 ];
 
-function resolveNetworkInfo(taskOrHsOrNetType, fallbackHs = null) {
+const POPULAR_DMRPLUS_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_dmrplus_refl",
+    group: "DMR+ Reflectors (TS2)",
+    items: [
+      { tg: 4530, name: "4530 - Reflector RU (Russia / CIS)" },
+      { tg: 4001, name: "4001 - Reflector DL (Germany General)" },
+      { tg: 4020, name: "4020 - Reflector HB9 (Switzerland)" },
+      { tg: 4030, name: "4030 - Reflector OE (Austria)" },
+      { tg: 4300, name: "4300 - Reflector F (France)" },
+      { tg: 4350, name: "4350 - Reflector I (Italy)" },
+      { tg: 4400, name: "4400 - Reflector UK (United Kingdom)" },
+      { tg: 4500, name: "4500 - Reflector EA (Spain)" },
+      { tg: 4700, name: "4700 - Reflector US (North America)" },
+      { tg: 4800, name: "4800 - Reflector PY (Brazil)" },
+      { tg: 4000, name: "4000 - Unlink Reflector" },
+    ]
+  },
+  {
+    groupKey: "bmtg_static.preset_grp_dmrplus_ts1",
+    group: "DMR+ Static TalkGroups (TS1 / TS2)",
+    items: [
+      { tg: 1, name: "1 - Worldwide" },
+      { tg: 2, name: "2 - Europe" },
+      { tg: 8, name: "8 - Regional Net" },
+      { tg: 13, name: "13 - Worldwide English" },
+      { tg: 20, name: "20 - DACH (DE/AT/CH)" },
+      { tg: 250, name: "250 - Russia National" },
+      { tg: 262, name: "262 - Germany" },
+      { tg: 208, name: "208 - France" },
+      { tg: 222, name: "222 - Italy" },
+      { tg: 235, name: "235 - United Kingdom" },
+    ]
+  }
+];
+
+export function resolveNetworkInfo(taskOrHsOrNetType, fallbackHs = null) {
   let netType = "";
   if (typeof taskOrHsOrNetType === "string") {
     netType = taskOrHsOrNetType;
@@ -223,38 +285,52 @@ function resolveNetworkInfo(taskOrHsOrNetType, fallbackHs = null) {
 
   const isTgif = (netType === "tgif");
   const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
   const isXlx = (netType === "xlx");
-  const isBm = (!isTgif && !isFreeDmr && !isXlx);
+  const isDmrPlus = (netType === "dmrplus");
+  const isBm = (!isTgif && !isFreeDmr && !isAdn && !isXlx && !isDmrPlus);
 
-  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isXlx ? "XLX" : "BM"));
-  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isXlx ? "XLX Reflector" : "BrandMeister"));
+  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isAdn ? "ADN" : (isXlx ? "XLX" : (isDmrPlus ? "DMR+" : "BM"))));
+  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isAdn ? "ADN Systems" : (isXlx ? "XLX Reflector" : (isDmrPlus ? "DMR+ / IPSC2" : "BrandMeister"))));
 
-  return { netType, isTgif, isFreeDmr, isXlx, isBm, netShort, netFull };
+  return { netType, isTgif, isFreeDmr, isAdn, isXlx, isDmrPlus, isBm, netShort, netFull };
 }
 
 function populatePresetSelects(netType = "bm") {
   const isTgif = (netType === "tgif");
   const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
   const isXlx = (netType === "xlx");
+  const isDmrPlus = (netType === "dmrplus");
   let presets = POPULAR_TG_PRESETS;
   if (isTgif) presets = POPULAR_TGIF_PRESETS;
   else if (isFreeDmr) presets = POPULAR_FREEDMR_PRESETS;
+  else if (isAdn) presets = POPULAR_ADN_PRESETS;
   else if (isXlx) presets = POPULAR_XLX_PRESETS;
+  else if (isDmrPlus) presets = POPULAR_DMRPLUS_PRESETS;
 
   [selectPresetTs1, selectPresetTs2].forEach((sel, idx) => {
     if (!sel) return;
-    sel.innerHTML = '<option value="">-- Выбрать из списка --</option>';
+    const defPlaceholder = window.t ? window.t("bmtg_static.select_preset_placeholder", {}, "-- Select from list --") : "-- Select from list --";
+    sel.innerHTML = "";
+    const defOpt = document.createElement("option");
+    defOpt.value = "";
     if (isXlx && idx === 0) {
-      sel.innerHTML = '<option value="">-- TS1 не поддерживается в XLX --</option>';
+      defOpt.textContent = window.t ? window.t("bmtg_static.xlx_ts1_unsupported", {}, "-- TS1 is not supported in XLX --") : "-- TS1 is not supported in XLX --";
+      sel.appendChild(defOpt);
       return;
     }
+    defOpt.textContent = defPlaceholder;
+    sel.appendChild(defOpt);
     presets.forEach(group => {
       const optgroup = document.createElement("optgroup");
-      optgroup.label = group.group;
+      optgroup.label = (group.groupKey && window.t) ? window.t(group.groupKey, {}, group.group) : group.group;
       group.items.forEach(item => {
         const opt = document.createElement("option");
         opt.value = item.tg;
-        opt.textContent = item.name;
+        opt.textContent = (item.labelKey && window.t)
+          ? window.t(item.labelKey, item.labelParams || {}, item.name)
+          : item.name;
         optgroup.appendChild(opt);
       });
       sel.appendChild(optgroup);
@@ -266,9 +342,11 @@ populatePresetSelects();
 function applyManagerNetworkBranding(netType, hs, apiData = null) {
   const isTgif = (netType === "tgif");
   const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
   const isXlx = (netType === "xlx");
-  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isXlx ? "XLX" : "BM"));
-  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isXlx ? "XLX Reflector" : "BrandMeister"));
+  const isDmrPlus = (netType === "dmrplus");
+  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isAdn ? "ADN" : (isXlx ? "XLX" : (isDmrPlus ? "DMR+" : "BM"))));
+  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isAdn ? "ADN Systems" : (isXlx ? "XLX Reflector" : (isDmrPlus ? "DMR+ / IPSC2" : "BrandMeister"))));
 
   const modalTitleEl = document.getElementById("bmModalTitleText");
   if (modalTitleEl) {
@@ -276,8 +354,12 @@ function applyManagerNetworkBranding(netType, hs, apiData = null) {
       modalTitleEl.textContent = window.t ? window.t("bmtg.title_tgif", {}, "⚡ Управление TalkGroups TGIF") : "⚡ Управление TalkGroups TGIF";
     } else if (isFreeDmr) {
       modalTitleEl.textContent = window.t ? window.t("bmtg.title_freedmr", {}, "⚡ Управление TalkGroups FreeDMR") : "⚡ Управление TalkGroups FreeDMR";
+    } else if (isAdn) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_adn", {}, "⚡ Управление TalkGroups ADN Systems") : "⚡ Управление TalkGroups ADN Systems";
     } else if (isXlx) {
       modalTitleEl.textContent = window.t ? window.t("bmtg.title_xlx", {}, "⚡ Управление модулями XLX") : "⚡ Управление модулями XLX";
+    } else if (isDmrPlus) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_dmrplus", {}, "⚡ Рефлекторы и TG DMR+ (IPSC2)") : "⚡ Рефлекторы и TG DMR+ (IPSC2)";
     } else {
       modalTitleEl.textContent = window.t ? window.t("bmtg.title", {}, "⚡ Управление TalkGroups BrandMeister") : "⚡ Управление TalkGroups BrandMeister";
     }
@@ -287,15 +369,30 @@ function applyManagerNetworkBranding(netType, hs, apiData = null) {
     if (hs) {
       const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid > 0) ? String(hs.bm_ssid).padStart(2, "0") : "";
       const effId = apiData?.device_id || (hs.dmr_id ? `${hs.dmr_id}${ssidStr}` : "---");
+      const hsLabel = hs.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot");
       if (isTgif && apiData && apiData.limit !== undefined) {
-        bmModalDeviceBadge.textContent = `${hs.name || "Хотспот"} (ID: ${effId} • лимит статики: ${apiData.limit})`;
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_tgif_limit", { name: hsLabel, id: effId, limit: apiData.limit }, `${hsLabel} (ID: ${effId} • limit: ${apiData.limit})`)
+          : `${hsLabel} (ID: ${effId} • limit: ${apiData.limit})`;
       } else if (isXlx) {
         const curMod = apiData?.xlx_module || hs.xlx_module || "D";
-        bmModalDeviceBadge.textContent = `${hs.name || "Хотспот"} (ID: ${effId} • Активный модуль: ${curMod})`;
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_xlx_mod", { name: hsLabel, id: effId, mod: curMod }, `${hsLabel} (ID: ${effId} • Module: ${curMod})`)
+          : `${hsLabel} (ID: ${effId} • Module: ${curMod})`;
+      } else if (isDmrPlus) {
+        const curRef = (apiData && apiData.dmrplus_reflector !== undefined) ? (apiData.dmrplus_reflector || "Unlinked") : (hs.dmrplus_reflector || "Unlinked");
+        const rptoLen = ((apiData && apiData.rpto_options) || hs.rpto_options || "").length;
+        bmModalDeviceBadge.textContent = `${hsLabel} (ID: ${effId} • Ref: ${curRef} • RPTO: ${rptoLen}/255 B)`;
       } else if (isFreeDmr && hs.rpto_options) {
-        bmModalDeviceBadge.textContent = `${hs.name || "Хотспот"} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 б)`;
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_freedmr_rpto", { name: hsLabel, id: effId, len: hs.rpto_options.length }, `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`)
+          : `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`;
+      } else if (isAdn && hs.rpto_options) {
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_adn_rpto", { name: hsLabel, id: effId, len: hs.rpto_options.length }, `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`)
+          : `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`;
       } else {
-        bmModalDeviceBadge.textContent = `${hs.name || "Хотспот"} (ID: ${effId})`;
+        bmModalDeviceBadge.textContent = `${hsLabel} (ID: ${effId})`;
       }
     } else {
       bmModalDeviceBadge.textContent = "ID: ---";
@@ -307,8 +404,12 @@ function applyManagerNetworkBranding(netType, hs, apiData = null) {
       btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_tgif", {}, "Синхронизировать с TGIF API") : "Синхронизировать с TGIF API";
     } else if (isFreeDmr) {
       btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_freedmr", {}, "Синхронизировать с RPTO FreeDMR") : "Синхронизировать с RPTO FreeDMR";
+    } else if (isAdn) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_adn", {}, "Синхронизировать с RPTO ADN Systems") : "Синхронизировать с RPTO ADN Systems";
     } else if (isXlx) {
       btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_xlx", {}, "Синхронизировать состояние модулей XLX") : "Синхронизировать состояние модулей XLX";
+    } else if (isDmrPlus) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_dmrplus", {}, "Синхронизировать с RPTO DMR+ / IPSC2") : "Синхронизировать с RPTO DMR+ / IPSC2";
     } else {
       btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title", {}, "Синхронизировать с BM API") : "Синхронизировать с BM API";
     }
@@ -320,8 +421,12 @@ function applyManagerNetworkBranding(netType, hs, apiData = null) {
       loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_tgif", {}, "Загрузка данных TGIF API...") : "Загрузка данных TGIF API...";
     } else if (isFreeDmr) {
       loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_freedmr", {}, "Загрузка конфигурации FreeDMR...") : "Загрузка конфигурации FreeDMR...";
+    } else if (isAdn) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_adn", {}, "Загрузка конфигурации ADN Systems...") : "Загрузка конфигурации ADN Systems...";
     } else if (isXlx) {
       loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_xlx", {}, "Загрузка модулей рефлектора XLX...") : "Загрузка модулей рефлектора XLX...";
+    } else if (isDmrPlus) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_dmrplus", {}, "Загрузка конфигурации DMR+ / IPSC2...") : "Загрузка конфигурации DMR+ / IPSC2...";
     } else {
       loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading", {}, "Загрузка данных BM API...") : "Загрузка данных BM API...";
     }
@@ -330,9 +435,8 @@ function applyManagerNetworkBranding(netType, hs, apiData = null) {
   const progressTitleEl = document.getElementById("bmImportProgressTitleText");
   if (progressTitleEl && currentBmImportTask) {
     const taskInfo = resolveNetworkInfo(currentBmImportTask, hs);
-    const act = currentBmImportTask.action === "delete" ? "Удаление" : "Импорт";
-    const prep = currentBmImportTask.action === "delete" ? "из" : "в";
-    progressTitleEl.textContent = `${act} TalkGroups ${prep} ${taskInfo.netFull}`;
+    const titleKey = currentBmImportTask.action === "delete" ? "bmtg_static.progress_title_del" : "bmtg_static.progress_title_imp";
+    progressTitleEl.textContent = window.t ? window.t(titleKey, { net: taskInfo.netFull }) : taskInfo.netFull;
   }
 
   populatePresetSelects(netType);
@@ -467,28 +571,37 @@ async function loadBmTgStaticGroups(targetHid) {
   const hid = targetHid || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : "default");
   const curHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
   const hs = curHotspots.find(h => h.id === hid) || curHotspots[0];
-  const { isTgif: isTgifInitial, isFreeDmr: isFreeDmrInitial, isXlx: isXlxInitial, netShort: netShortInitial } = resolveNetworkInfo(hs);
+  const { isTgif: isTgifInitial, isFreeDmr: isFreeDmrInitial, isAdn: isAdnInitial, isXlx: isXlxInitial, netShort: netShortInitial } = resolveNetworkInfo(hs);
 
   if (bmModalStatusText) {
     bmModalStatusText.textContent = isTgifInitial
       ? (window.t ? window.t("bmtg_static.requesting_tgif", {}, "Запрос к TGIF API...") : "Запрос к TGIF API...")
       : (isFreeDmrInitial
         ? (window.t ? window.t("bmtg_static.requesting_freedmr", {}, "Запрос к FreeDMR...") : "Запрос к FreeDMR...")
-        : (isXlxInitial
-          ? (window.t ? window.t("bmtg_static.requesting_xlx", {}, "Запрос к XLX...") : "Запрос к XLX...")
-          : (window.t ? window.t("bmtg_static.requesting", {}, "Запрос к BM API...") : "Запрос к BM API...")));
+        : (isAdnInitial
+          ? (window.t ? window.t("bmtg_static.requesting_adn", {}, "Запрос к ADN Systems...") : "Запрос к ADN Systems...")
+          : (isXlxInitial
+            ? (window.t ? window.t("bmtg_static.requesting_xlx", {}, "Запрос к XLX...") : "Запрос к XLX...")
+            : (window.t ? window.t("bmtg_static.requesting", {}, "Запрос к BM API...") : "Запрос к BM API..."))));
   }
 
   if (bmModalDeviceBadge && hs) {
     const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid > 0) ? String(hs.bm_ssid).padStart(2, "0") : "";
     const effId = hs.dmr_id ? `${hs.dmr_id}${ssidStr}` : "---";
-    bmModalDeviceBadge.textContent = `${hs.name || "Хотспот"} (ID: ${effId})`;
+    const hsLabel = hs.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot");
+    bmModalDeviceBadge.textContent = `${hsLabel} (ID: ${effId})`;
   }
 
   try {
     const url = hid ? `/api/bm/static-groups?hotspot_id=${encodeURIComponent(hid)}` : "/api/bm/static-groups";
     const resp = await fetch(url);
-    const data = await resp.json();
+    const rawText = await resp.text().catch(() => "");
+    let data;
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      data = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+    }
 
     if (data.status !== "ok") {
       staticTgsTs1 = [];
@@ -505,23 +618,27 @@ async function loadBmTgStaticGroups(targetHid) {
       if (bmDynTotalBadge) bmDynTotalBadge.textContent = "0";
       updateMobileSlotBadges();
       if (data.code === "NO_API_KEY" && isTgifInitial) {
-        showBmTgAlert(data.detail || "Для управления статическими группами введите TGIF API Key в настройках хотспота. Динамические группы доступны во второй вкладке.", "info");
+        const noKeyMsg = window.t ? window.t("bmtg_static.tgif_no_api_key") : "Enter TGIF API Key in hotspot settings.";
+        showBmTgAlert(data.detail || noKeyMsg, "info");
       } else {
-        showBmTgAlert(data.detail || `Не удалось получить список групп с сервера ${netShortInitial}`, "error");
+        const failMsg = window.t ? window.t("bmtg_static.fetch_failed", { net: netShortInitial }) : `Failed to load groups from ${netShortInitial}`;
+        showBmTgAlert(data.detail || failMsg, "error");
       }
       if (bmModalStatusText) bmModalStatusText.textContent = window.t ? window.t("bmtg_static.sync_error") : "Ошибка синхронизации";
       return;
     }
 
     const netType = String(data.network_type || (hs && hs.network_type) || "bm").toLowerCase();
-    applyManagerNetworkBranding(netType, hs, data);
-
     if (data.rpto_options !== undefined && hs) {
       hs.rpto_options = data.rpto_options;
     }
     if (data.xlx_module !== undefined && hs) {
       hs.xlx_module = data.xlx_module;
     }
+    if (data.dmrplus_reflector !== undefined && hs) {
+      hs.dmrplus_reflector = data.dmrplus_reflector;
+    }
+    applyManagerNetworkBranding(netType, hs, data);
 
     if (data.tg_names) {
       if (netType === "tgif") {
@@ -532,6 +649,14 @@ async function loadBmTgStaticGroups(targetHid) {
         if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
         Object.assign(window.FREEDMR_TG_NAMES, data.tg_names);
         try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+      } else if (netType === "adn") {
+        if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+        Object.assign(window.ADN_TG_NAMES, data.tg_names);
+        try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (_) {}
+      } else if (netType === "dmrplus") {
+        if (!window.DMRPLUS_TG_NAMES) window.DMRPLUS_TG_NAMES = {};
+        Object.assign(window.DMRPLUS_TG_NAMES, data.tg_names);
+        try { localStorage.setItem("proxdmr_dmrplus_tg_names_cache", JSON.stringify(window.DMRPLUS_TG_NAMES)); } catch (_) {}
       } else {
         Object.assign((window.TG_NAMES || {}), data.tg_names);
         try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
@@ -562,9 +687,10 @@ async function loadBmTgStaticGroups(targetHid) {
     if (bmDynTotalBadge) bmDynTotalBadge.textContent = dynamicTgsTs1.length + dynamicTgsTs2.length;
     updateMobileSlotBadges();
 
-    if (netType !== "bm" && netType !== "tgif" && netType !== "freedmr" && netType !== "xlx") {
-      const netLabel = (netType === "dmrplus" ? "DMR+" : netType.toUpperCase());
-      showBmTgAlert(`Сеть ${netLabel}: статические подписки BrandMeister/TGIF не используются. Переход в разговорную группу выполняется динамически по нажатию PTT.`, "info");
+    if (netType !== "bm" && netType !== "tgif" && netType !== "freedmr" && netType !== "adn" && netType !== "xlx" && netType !== "dmrplus") {
+      const netLabel = netType.toUpperCase();
+      const dynOnlyMsg = window.t ? window.t("bmtg_static.no_static_dynamic_only", { net: netLabel }) : `${netLabel}: dynamic talkgroups via PTT only.`;
+      showBmTgAlert(dynOnlyMsg, "info");
       if (currentBmTgActiveTab === "static") {
         switchBmTgTab("dynamic");
       }
@@ -590,7 +716,8 @@ async function loadBmTgStaticGroups(targetHid) {
     if (bmStaticTotalBadge) bmStaticTotalBadge.textContent = "0";
     if (bmDynTotalBadge) bmDynTotalBadge.textContent = "0";
     updateMobileSlotBadges();
-    showBmTgAlert("Ошибка сети при обращении к серверу: " + err, "error");
+    const netErrMsg = window.t ? window.t("bmtg_static.net_err_detail", { err }) : `Network error: ${err}`;
+    showBmTgAlert(netErrMsg, "error");
     if (bmModalStatusText) bmModalStatusText.textContent = window.t ? window.t("bmtg_static.net_error") : "Сетевая ошибка";
   } finally {
     isBmTgLoading = false;
@@ -614,14 +741,17 @@ function renderSlotList(slot) {
   const netType = ((curHs && curHs.network_type) || "bm").toLowerCase();
   const isTgif = (netType === "tgif");
   const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
   const isXlx = (netType === "xlx");
+  const isDmrPlus = (netType === "dmrplus");
 
   if (isSlot1 && isXlx) {
-    if (countEl) countEl.textContent = "TS1 выключен в XLX";
+    if (countEl) countEl.textContent = window.t ? window.t("bmtg_static.xlx_ts1_off", {}, "TS1 disabled in XLX") : "TS1 disabled in XLX";
     if (selCountEl) selCountEl.textContent = "0";
     if (btnBulkDelEl) { btnBulkDelEl.classList.add("disabled"); btnBulkDelEl.disabled = true; }
     if (chkAllEl) { chkAllEl.checked = false; chkAllEl.disabled = true; }
-    listEl.innerHTML = `<div class="bm-empty-msg" style="color:var(--text-muted); padding:16px 12px; text-align:center;">Рефлекторы XLX (MMDVM) работают исключительно на <b>Таймслоте 2 (TS2)</b>.<br>Все команды модулей (4000..4026) и голосовой обмен (TG 9) направляются в TS2.</div>`;
+    const explainHtml = window.t ? window.t("bmtg_static.xlx_ts1_explain") : "XLX Reflectors (MMDVM) operate exclusively on <b>Timeslot 2 (TS2)</b>.";
+    listEl.innerHTML = `<div class="bm-empty-msg" style="color:var(--text-muted); padding:16px 12px; text-align:center;">${explainHtml}</div>`;
     return;
   }
 
@@ -629,17 +759,24 @@ function renderSlotList(slot) {
     const curMod = (curHs?.xlx_module || (items[0]?.module) || "").toUpperCase() || "";
     const activeModTg = curMod ? (4000 + Math.max(1, Math.min(26, curMod.charCodeAt(0) - 64))) : 0;
     if (countEl) {
-      countEl.textContent = curMod ? `Модуль ${curMod} (TG ${activeModTg})` : "Модуль не выбран";
+      countEl.textContent = curMod
+        ? (window.t ? window.t("bmtg_static.xlx_mod_badge", { mod: curMod, tg: activeModTg }, `Module ${curMod} (TG ${activeModTg})`) : `Module ${curMod} (TG ${activeModTg})`)
+        : (window.t ? window.t("bmtg_static.xlx_mod_none", {}, "Module not selected") : "Module not selected");
     }
     if (selCountEl) selCountEl.textContent = "0";
     if (btnBulkDelEl) { btnBulkDelEl.classList.add("disabled"); btnBulkDelEl.disabled = true; }
     if (chkAllEl) { chkAllEl.checked = false; chkAllEl.disabled = true; }
 
+    const xlxGridTitle = window.t ? window.t("bmtg_static.xlx_grid_title", {}, "⚡ XLX MODULES (A–Z) ON TS2:") : "⚡ XLX MODULES (A–Z) ON TS2:";
+    const xlxUnlinkTitle = window.t ? window.t("bmtg_static.xlx_unlink_title", {}, "Disconnect module (TG 4000)") : "Disconnect module (TG 4000)";
+    const xlxUnlinkBtn = window.t ? window.t("bmtg_static.xlx_unlink_btn", {}, "🔌 Unlink (4000)") : "🔌 Unlink (4000)";
+    const xlxGridHint = window.t ? window.t("bmtg_static.xlx_grid_hint") : "Click a module letter for instant switching (TG 4001–4026).";
+
     let gridHtml = `
       <div style="margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.22); border-radius: 0px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:0.75rem; font-weight:700; color:#fbbf24;">⚡ МОДУЛИ XLX (A–Z) НА TS2:</span>
-          <button type="button" class="btn-xlx-unlink" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius: 0px; padding:3px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" title="Отключить модуль (TG 4000)">🔌 Отключить (4000)</button>
+          <span style="font-size:0.75rem; font-weight:700; color:#fbbf24;">${xlxGridTitle}</span>
+          <button type="button" class="btn-xlx-unlink" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius: 0px; padding:3px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" title="${xlxUnlinkTitle}">${xlxUnlinkBtn}</button>
         </div>
         <div class="xlx-modules-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(44px, 1fr)); gap:5px;">
     `;
@@ -655,7 +792,7 @@ function renderSlotList(slot) {
     }
     gridHtml += `</div>
       <div style="font-size:0.68rem; color:var(--text-muted); margin-top:8px; line-height:1.35;">
-        Кликните по букве модуля для мгновенного переключения (TG 4001–4026) без разрыва соединения. Голосовая связь после привязки ведётся в группе <b>TG 9 (TS2)</b>.
+        ${xlxGridHint}
       </div>
     </div>`;
 
@@ -684,10 +821,14 @@ function renderSlotList(slot) {
   }
 
   if (countEl) {
-    const gText = items.length === 1
-      ? (window.t ? window.t("bmtg_static.group_one", { count: items.length }) : `${items.length} группа`)
-      : (window.t ? window.t("bmtg_static.groups_count", { count: items.length }) : `${items.length} групп`);
-    countEl.textContent = gText;
+    if (isDmrPlus) {
+      countEl.textContent = `${items.length} / 5 (IPSC2)`;
+    } else {
+      const gText = items.length === 1
+        ? (window.t ? window.t("bmtg_static.group_one", { count: items.length }) : `${items.length} группа`)
+        : (window.t ? window.t("bmtg_static.groups_count", { count: items.length }) : `${items.length} групп`);
+      countEl.textContent = gText;
+    }
   }
 
   if (selCountEl) selCountEl.textContent = selectedSet.size;
@@ -699,13 +840,76 @@ function renderSlotList(slot) {
     chkAllEl.checked = items.length > 0 && selectedSet.size === items.length;
   }
 
+  listEl.innerHTML = "";
+
+  if (!isSlot1 && isDmrPlus) {
+    const curRef = String((curHs && curHs.dmrplus_reflector) || "").trim();
+    const dmrpNames = (typeof window !== "undefined" && window.DMRPLUS_TG_NAMES) || {};
+    const curRefDesc = curRef ? (dmrpNames[curRef] || `Reflector ${curRef}`) : "Unlinked (TG 4000)";
+    const quickRefs = [
+      { id: "4530", label: "4530 RU" },
+      { id: "4001", label: "4001 DL" },
+      { id: "4020", label: "4020 HB" },
+      { id: "4030", label: "4030 OE" },
+      { id: "4300", label: "4300 FR" },
+      { id: "4350", label: "4350 IT" },
+      { id: "4400", label: "4400 UK" },
+      { id: "4500", label: "4500 ES" },
+      { id: "4700", label: "4700 US" },
+      { id: "4800", label: "4800 BR" },
+    ];
+    const reflBox = document.createElement("div");
+    reflBox.style.cssText = "margin-bottom:10px; padding:10px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.28);";
+    let tilesHtml = "";
+    quickRefs.forEach(r => {
+      const isAct = (curRef === r.id);
+      const tStyle = isAct
+        ? "background:#8b5cf6; color:#fff; font-weight:800; border:1px solid #a78bfa;"
+        : "background:rgba(255,255,255,0.06); color:var(--text-primary); border:1px solid rgba(255,255,255,0.14);";
+      tilesHtml += `<button type="button" class="btn-dmrplus-modal-tile" data-ref="${r.id}" title="${dmrpNames[r.id] || r.label}" style="${tStyle} padding:5px 4px; font-size:0.72rem; cursor:pointer; text-align:center;">${r.label}</button>`;
+    });
+    reflBox.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="font-size:0.76rem; font-weight:700; color:#c4b5fd;">📡 DMR+ Reflector (TS2 • Voice TG 9): <b>${curRefDesc}</b></span>
+        <div style="display:flex; gap:5px;">
+          <button type="button" class="btn-dmrplus-modal-status" style="background:rgba(59,130,246,0.16); border:1px solid rgba(59,130,246,0.4); color:#93c5fd; padding:3px 7px; font-size:0.7rem; cursor:pointer;">ℹ️ 5000 Status</button>
+          <button type="button" class="btn-dmrplus-modal-unlink" style="background:rgba(239,68,68,0.16); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; padding:3px 7px; font-size:0.7rem; cursor:pointer;">🔌 4000 Unlink</button>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(66px, 1fr)); gap:5px;">${tilesHtml}</div>
+    `;
+    reflBox.querySelectorAll(".btn-dmrplus-modal-tile").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const refTg = parseInt(btn.dataset.ref, 10);
+        if (refTg >= 4001 && refTg <= 4999) {
+          await executeAddTg(2, refTg);
+        }
+      });
+    });
+    const btnMStatus = reflBox.querySelector(".btn-dmrplus-modal-status");
+    if (btnMStatus) {
+      btnMStatus.addEventListener("click", async () => {
+        await executeAddTg(2, 5000);
+      });
+    }
+    const btnMUnlink = reflBox.querySelector(".btn-dmrplus-modal-unlink");
+    if (btnMUnlink) {
+      btnMUnlink.addEventListener("click", async () => {
+        await executeAddTg(2, 4000);
+      });
+    }
+    listEl.appendChild(reflBox);
+  }
+
   if (items.length === 0) {
     const noTgSlot = window.t ? window.t("bmtg_static.no_groups_ts", { slot }) : `Нет статических групп на TS${slot}`;
-    listEl.innerHTML = `<div class="bm-empty-msg">${noTgSlot}</div>`;
+    const emptyEl = document.createElement("div");
+    emptyEl.className = "bm-empty-msg";
+    emptyEl.textContent = noTgSlot;
+    listEl.appendChild(emptyEl);
     return;
   }
 
-  listEl.innerHTML = "";
   items.forEach(item => {
     const tg = item.talkgroup;
     const isSelected = selectedSet.has(tg);
@@ -713,10 +917,16 @@ function renderSlotList(slot) {
       ? (window.t ? window.t("bmtg_static.default_group_name_tgif", {}, "Группа TGIF") : "Группа TGIF")
       : (isFreeDmr
         ? (window.t ? window.t("bmtg_static.default_group_name_freedmr", {}, "Группа FreeDMR") : "Группа FreeDMR")
-        : (window.t ? window.t("bmtg_static.default_group_name", {}, "Группа BM") : "Группа BM"));
-    const rawLookup = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
-      ? window.getNetworkRawTgName(tg, netType)
-      : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]));
+        : (isAdn
+          ? (window.t ? window.t("bmtg_static.default_group_name_adn", {}, "Группа ADN") : "Группа ADN")
+          : (isDmrPlus
+            ? (window.t ? window.t("bmtg_static.default_group_name_dmrplus", {}, "Группа DMR+") : "Группа DMR+")
+            : (window.t ? window.t("bmtg_static.default_group_name", {}, "Группа BM") : "Группа BM"))));
+    const rawLookup = (isDmrPlus && typeof window !== "undefined" && window.DMRPLUS_TG_NAMES && window.DMRPLUS_TG_NAMES[tg])
+      ? window.DMRPLUS_TG_NAMES[tg]
+      : ((typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
+        ? window.getNetworkRawTgName(tg, netType)
+        : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (isAdn ? (window.ADN_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]))));
     const tgName = item.name || rawLookup || defTgName;
 
     const row = document.createElement("div");
@@ -759,10 +969,10 @@ function renderSlotList(slot) {
         ? window.t("bmtg_static.confirm_del_single", { tg, name: tgName, slot })
         : `Удалить статическую группу TG ${tg} (${tgName}) из слота TS${slot}?`;
       const ok = await (window.showAppConfirm ? window.showAppConfirm({
-        title: "Удаление статической TG",
+        title: window.t ? window.t("bmtg_static.del_title", {}, "Delete Static TG") : "Delete Static TG",
         icon: "⚡",
         message: confSingle,
-        confirmText: "Удалить",
+        confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
         confirmStyle: "danger"
       }) : Promise.resolve(confirm(confSingle)));
       if (ok) {
@@ -780,7 +990,7 @@ function renderSlotList(slot) {
       const n = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
         ? window.getNetworkRawTgName(tg, netType)
         : (window.TG_NAMES || {})[tg];
-      return !n || n === "Группа BrandMeister" || n === "Группа BM" || n === "Группа FreeDMR" || n === "Группа TGIF" || n === `TG ${tg}`;
+      return !n || n === "Группа BrandMeister" || n === "Группа BM" || n === "Группа FreeDMR" || n === "Группа ADN" || n === "Группа TGIF" || n === "BM Group" || n === "FreeDMR Group" || n === "ADN Group" || n === "TGIF Group" || n === `TG ${tg}`;
     });
 
   if (unknownTgs.length > 0) {
@@ -800,6 +1010,10 @@ function renderSlotList(slot) {
             if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
             Object.assign(window.FREEDMR_TG_NAMES, res.names);
             try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+          } else if (netType === "adn") {
+            if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+            Object.assign(window.ADN_TG_NAMES, res.names);
+            try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (_) {}
           } else {
             Object.assign((window.TG_NAMES || {}), res.names);
             try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
@@ -853,10 +1067,10 @@ if (btnDeleteSelectedTs1) {
       ? window.t("bmtg_static.confirm_del_multi", { count: tgs.length, slot: 1 })
       : `Удалить выбранные группы (${tgs.length}) из таймслота TS1?`;
     const ok = await (window.showAppConfirm ? window.showAppConfirm({
-      title: "Удаление групп TS1",
+      title: window.t ? window.t("bmtg_static.del_multi_title", { slot: 1 }, "Delete TS1 Groups") : "Delete TS1 Groups",
       icon: "⚡",
       message: confMulti1,
-      confirmText: "Удалить",
+      confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
       confirmStyle: "danger"
     }) : Promise.resolve(confirm(confMulti1)));
     if (ok) {
@@ -873,10 +1087,10 @@ if (btnDeleteSelectedTs2) {
       ? window.t("bmtg_static.confirm_del_multi", { count: tgs.length, slot: 2 })
       : `Удалить выбранные группы (${tgs.length}) из таймслота TS2?`;
     const ok = await (window.showAppConfirm ? window.showAppConfirm({
-      title: "Удаление групп TS2",
+      title: window.t ? window.t("bmtg_static.del_multi_title", { slot: 2 }, "Delete TS2 Groups") : "Delete TS2 Groups",
       icon: "⚡",
       message: confMulti2,
-      confirmText: "Удалить",
+      confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
       confirmStyle: "danger"
     }) : Promise.resolve(confirm(confMulti2)));
     if (ok) {
@@ -891,7 +1105,11 @@ async function executeDeleteTgs(slot, tgs) {
 
   // If deleting more than 5 groups, offload to background task
   if (tgs.length > 5) {
-    if (bmModalStatusText) bmModalStatusText.textContent = `Запуск фонового удаления ${tgs.length} групп из TS${slot}...`;
+    if (bmModalStatusText) {
+      bmModalStatusText.textContent = window.t
+        ? window.t("bmtg_static.bg_del_starting", { count: tgs.length, slot })
+        : `Starting background deletion of ${tgs.length} groups from TS${slot}...`;
+    }
     try {
       const resp = await fetch("/api/bm/static-groups/task", {
         method: "POST",
@@ -901,10 +1119,20 @@ async function executeDeleteTgs(slot, tgs) {
           slot: slot,
           talkgroups: tgs,
           action: "delete",
-          filename: "Пакетное удаление"
+          filename: window.t ? window.t("bmtg_static.batch_delete_name", {}, "Batch delete") : "Batch delete"
         })
       });
-      const res = await resp.json();
+      const rawText = await resp.text().catch(() => "");
+      let res;
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch (_) {
+        res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+      }
+      if (!resp.ok && res.status !== "error") {
+        res.status = "error";
+        if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+      }
       if (res.status === "ok" && res.task) {
         currentBmImportTask = res.task;
         updateBmImportUI(currentBmImportTask);
@@ -914,20 +1142,23 @@ async function executeDeleteTgs(slot, tgs) {
           currentBmImportTask = res.task;
           updateBmImportUI(res.task);
         }
-        showBmTgAlert(res.message || "Операция с группами уже выполняется", "info");
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.task_busy") : "Operation already in progress"), "info");
       } else {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
         const { netShort } = resolveNetworkInfo(curHs);
-        showBmTgAlert("Ошибка запуска удаления: " + (res.detail || res.message || `Неизвестная ошибка ${netShort}`), "error");
+        const errDetail = res.detail || res.message || (window.t ? window.t("bmtg_static.err_unknown_net", { net: netShort }) : `Unknown error ${netShort}`);
+        showBmTgAlert(window.t ? window.t("bmtg_static.err_start_del", { err: errDetail }) : errDetail, "error");
       }
     } catch (err) {
-      showBmTgAlert("Сетевая ошибка при удалении: " + err, "error");
+      showBmTgAlert(window.t ? window.t("bmtg_static.net_err_del", { err }) : `Network error: ${err}`, "error");
     }
     return;
   }
 
   // 5 or fewer groups: fast synchronous deletion
-  if (bmModalStatusText) bmModalStatusText.textContent = `Удаление TG из TS${slot}...`;
+  if (bmModalStatusText) {
+    bmModalStatusText.textContent = window.t ? window.t("bmtg_static.deleting_slot", { slot }) : `Deleting TG from TS${slot}...`;
+  }
   try {
     const resp = await fetch("/api/bm/static-groups", {
       method: "DELETE",
@@ -938,29 +1169,43 @@ async function executeDeleteTgs(slot, tgs) {
         talkgroups: tgs
       })
     });
-    const res = await resp.json();
+    const rawText = await resp.text().catch(() => "");
+    let res;
+    try {
+      res = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+    }
+    if (!resp.ok && res.status !== "error") {
+      res.status = "error";
+      if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+    }
     if (res.status === "ok") {
-      if (res.rpto_options !== undefined && currentStaticModalHotspotId) {
+      if (currentStaticModalHotspotId) {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId);
-        if (curHs) curHs.rpto_options = res.rpto_options;
-      }
-      if (res.xlx_module !== undefined && currentStaticModalHotspotId) {
-        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId);
-        if (curHs) curHs.xlx_module = res.xlx_module;
+        if (curHs) {
+          if (res.rpto_options !== undefined) curHs.rpto_options = res.rpto_options;
+          if (res.xlx_module !== undefined) curHs.xlx_module = res.xlx_module;
+          if (res.dmrplus_reflector !== undefined) curHs.dmrplus_reflector = res.dmrplus_reflector;
+        }
+        if (res.dmrplus_reflector !== undefined && typeof window.renderRadiosGrid === "function") {
+          window.renderRadiosGrid();
+        }
       }
       if (res.background && res.task) {
         currentBmImportTask = res.task;
         updateBmImportUI(currentBmImportTask);
         showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_delete_started", { count: tgs.length }, `Фоновое удаление ${tgs.length} групп запущено. Окно можно закрыть.`) : `Фоновое удаление ${tgs.length} групп запущено. Окно можно закрыть.`, 3500);
       } else {
-        showBmTgAlert(res.message || `Успешно удалено групп: ${res.deleted ? res.deleted.length : tgs.length}`, "success");
+        const delCnt = res.deleted ? res.deleted.length : tgs.length;
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.deleted_count", { count: delCnt }) : `Deleted: ${delCnt}`), "success");
         await loadBmTgStaticGroups(currentStaticModalHotspotId);
       }
     } else {
-      showBmTgAlert(res.detail || "Ошибка удаления групп", "error");
+      showBmTgAlert(res.detail || (window.t ? window.t("bmtg_static.err_del") : "Failed to delete groups"), "error");
     }
   } catch (err) {
-    showBmTgAlert("Ошибка сети при удалении: " + err, "error");
+    showBmTgAlert(window.t ? window.t("bmtg_static.net_err_del", { err }) : `Network error: ${err}`, "error");
   }
 }
 
@@ -972,7 +1217,11 @@ async function executeBatchAddTgs(slot, tgs, sourceTitle = "") {
   // If adding more than 5 groups, offload to background task
   if (validTgs.length > 5) {
     showBmTgAlert(null);
-    if (bmModalStatusText) bmModalStatusText.textContent = `Запуск фонового добавления ${validTgs.length} групп в TS${slot}...`;
+    if (bmModalStatusText) {
+      bmModalStatusText.textContent = window.t
+        ? window.t("bmtg_static.bg_add_starting", { count: validTgs.length, slot })
+        : `Starting background addition of ${validTgs.length} groups to TS${slot}...`;
+    }
     try {
       const resp = await fetch("/api/bm/static-groups/task", {
         method: "POST",
@@ -982,10 +1231,20 @@ async function executeBatchAddTgs(slot, tgs, sourceTitle = "") {
           slot: slot,
           talkgroups: validTgs,
           action: "add",
-          filename: sourceTitle || "Пакетное добавление"
+          filename: sourceTitle || (window.t ? window.t("bmtg_static.batch_add_name", {}, "Batch add") : "Batch add")
         })
       });
-      const res = await resp.json();
+      const rawText = await resp.text().catch(() => "");
+      let res;
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch (_) {
+        res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+      }
+      if (!resp.ok && res.status !== "error") {
+        res.status = "error";
+        if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+      }
       if (res.status === "ok" && res.task) {
         currentBmImportTask = res.task;
         updateBmImportUI(currentBmImportTask);
@@ -995,14 +1254,15 @@ async function executeBatchAddTgs(slot, tgs, sourceTitle = "") {
           currentBmImportTask = res.task;
           updateBmImportUI(res.task);
         }
-        showBmTgAlert(res.message || "Операция с группами уже выполняется", "info");
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.task_busy") : "Operation already in progress"), "info");
       } else {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
         const { netShort } = resolveNetworkInfo(curHs);
-        showBmTgAlert("Ошибка запуска добавления: " + (res.detail || res.message || `Неизвестная ошибка ${netShort}`), "error");
+        const errDetail = res.detail || res.message || (window.t ? window.t("bmtg_static.err_unknown_net", { net: netShort }) : `Unknown error ${netShort}`);
+        showBmTgAlert(window.t ? window.t("bmtg_static.err_start_add", { err: errDetail }) : errDetail, "error");
       }
     } catch (err) {
-      showBmTgAlert("Сетевая ошибка: " + err, "error");
+      showBmTgAlert(window.t ? window.t("bmtg_static.net_err_detail", { err }) : `Network error: ${err}`, "error");
     }
     return;
   }
@@ -1017,11 +1277,13 @@ window.executeDeleteTgs = executeDeleteTgs;
 
 async function executeAddTg(slot, tg) {
   if (!tg || tg <= 0 || tg > 9999999) {
-    showBmTgAlert("Пожалуйста, введите корректный номер TalkGroup (1-9999999)", "error");
+    showBmTgAlert(window.t ? window.t("bmtg_static.invalid_tg_num") : "Please enter a valid TalkGroup number (1-9999999)", "error");
     return;
   }
   showBmTgAlert(null);
-  if (bmModalStatusText) bmModalStatusText.textContent = `Добавление TG ${tg} в TS${slot}...`;
+  if (bmModalStatusText) {
+    bmModalStatusText.textContent = window.t ? window.t("bmtg_static.adding_tg", { tg, slot }) : `Adding TG ${tg} to TS${slot}...`;
+  }
   try {
     const resp = await fetch("/api/bm/static-groups", {
       method: "POST",
@@ -1033,29 +1295,43 @@ async function executeAddTg(slot, tg) {
         talkgroups: [tg]
       })
     });
-    const res = await resp.json();
+    const rawText = await resp.text().catch(() => "");
+    let res;
+    try {
+      res = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+    }
+    if (!resp.ok && res.status !== "error") {
+      res.status = "error";
+      if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+    }
     if (res.status === "ok") {
-      if (res.rpto_options !== undefined && currentStaticModalHotspotId) {
+      if (currentStaticModalHotspotId) {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId);
-        if (curHs) curHs.rpto_options = res.rpto_options;
-      }
-      if (res.xlx_module !== undefined && currentStaticModalHotspotId) {
-        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId);
-        if (curHs) curHs.xlx_module = res.xlx_module;
+        if (curHs) {
+          if (res.rpto_options !== undefined) curHs.rpto_options = res.rpto_options;
+          if (res.xlx_module !== undefined) curHs.xlx_module = res.xlx_module;
+          if (res.dmrplus_reflector !== undefined) curHs.dmrplus_reflector = res.dmrplus_reflector;
+        }
+        if (res.dmrplus_reflector !== undefined && typeof window.renderRadiosGrid === "function") {
+          window.renderRadiosGrid();
+        }
       }
       if (res.moved_from_other_slot && res.moved_from_other_slot.length > 0) {
         const fromSlot = slot === 1 ? 2 : 1;
-        showToast(`TG ${res.moved_from_other_slot.join(", ")} перенесена из TS${fromSlot} в TS${slot}`, 2800);
+        const movedStr = res.moved_from_other_slot.join(", ");
+        showToast(window.t ? window.t("bmtg_static.moved_slot_toast", { tgs: movedStr, from: fromSlot, to: slot }) : `TG ${movedStr} moved from TS${fromSlot} to TS${slot}`, 2800);
       }
-      showBmTgAlert(res.message || `TG ${tg} успешно добавлена в слот TS${slot}!`, "success");
+      showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.added_tg", { tg, slot }) : `TG ${tg} added to TS${slot}!`), "success");
       await loadBmTgStaticGroups(currentStaticModalHotspotId);
     } else {
       const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
       const { netShort } = resolveNetworkInfo(curHs);
-      showBmTgAlert(res.detail || `Ошибка добавления группы в ${netShort}`, "error");
+      showBmTgAlert(res.detail || (window.t ? window.t("bmtg_static.err_add_net", { net: netShort }) : `Failed to add group to ${netShort}`), "error");
     }
   } catch (err) {
-    showBmTgAlert("Ошибка сети при добавлении: " + err, "error");
+    showBmTgAlert(window.t ? window.t("bmtg_static.net_err_add", { err }) : `Network error: ${err}`, "error");
   }
 }
 
@@ -1196,8 +1472,8 @@ function exportSlotTgsToFile(slot) {
   const hs = (window.currentHotspots || []).find(h => h.id === curHid) || window.currentHotspots[0] || {};
   const hsName = hs.name ? hs.name.replace(/[^\w\d_-]+/g, "_") : "hotspot";
   const dmrId = hs.dmr_id || "";
-  const { isTgif, isFreeDmr, isXlx, netFull: netFullName } = resolveNetworkInfo(hs);
-  const netFilePrefix = isTgif ? "tgif" : (isFreeDmr ? "freedmr" : (isXlx ? "xlx" : "bm"));
+  const { isTgif, isFreeDmr, isAdn, isXlx, netFull: netFullName } = resolveNetworkInfo(hs);
+  const netFilePrefix = isTgif ? "tgif" : (isFreeDmr ? "freedmr" : (isAdn ? "adn" : (isXlx ? "xlx" : "bm")));
 
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
@@ -1214,7 +1490,7 @@ function exportSlotTgsToFile(slot) {
 
   // Sort by TG ID numerically
   const sorted = [...items].sort((a, b) => Number(a.talkgroup) - Number(b.talkgroup));
-  const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (window.TG_NAMES || {}));
+  const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (isAdn ? (window.ADN_TG_NAMES || {}) : (window.TG_NAMES || {})));
   sorted.forEach(it => {
     const tg = it.talkgroup;
     const name = it.name || nameMap[tg] || "";
@@ -1241,7 +1517,8 @@ function exportSlotTgsToFile(slot) {
   if (typeof showToast === "function") {
     showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_exported", { count: items.length, slot, filename }, `📤 Экспортировано ${items.length} групп из TS${slot} в файл ${filename}`) : `📤 Экспортировано ${items.length} групп из TS${slot} в файл ${filename}`, 2800);
   } else {
-    showBmTgAlert(`Экспортировано ${items.length} групп из TS${slot} в файл ${filename}`, "success");
+    const expMsg = (typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_exported", { count: items.length, slot, filename }) : `Exported ${items.length} groups from TS${slot} to ${filename}`;
+    showBmTgAlert(expMsg, "success");
   }
 }
 
@@ -1253,9 +1530,9 @@ function handleFileSelected(slot, file) {
     const parsed = parseTgIdsFromText(content);
 
     if (parsed.uniqueIds.length === 0) {
-      const msg = "В выбранном файле не найдено корректных номеров TalkGroup (целые положительные числа).";
+      const msg = window.t ? window.t("bm_file.no_valid_tgs") : "No valid TalkGroup numbers found in the file.";
       if (window.showAppAlert) {
-        window.showAppAlert(msg, { title: "Импорт TalkGroups", icon: "⚠️" });
+        window.showAppAlert(msg, { title: window.t ? window.t("bm_file.err_import_title", {}, "TalkGroups Import") : "TalkGroups Import", icon: "⚠️" });
       } else {
         alert(msg);
       }
@@ -1264,8 +1541,8 @@ function handleFileSelected(slot, file) {
 
     const curHid = currentStaticModalHotspotId || window.activeHotspotId || "default";
     const hs = (window.currentHotspots || []).find(h => h.id === curHid) || {};
-    const { netType, isTgif, isFreeDmr, isXlx } = resolveNetworkInfo(hs);
-    const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (window.TG_NAMES || {}));
+    const { netType, isTgif, isFreeDmr, isAdn, isXlx } = resolveNetworkInfo(hs);
+    const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (isAdn ? (window.ADN_TG_NAMES || {}) : (window.TG_NAMES || {})));
 
     const currentGroups = (slot === 1 ? staticTgsTs1 : staticTgsTs2).map(g => Number(g.talkgroup));
     const currentSet = new Set(currentGroups);
@@ -1273,7 +1550,9 @@ function handleFileSelected(slot, file) {
     const newToAdd = parsed.uniqueIds.filter(id => !currentSet.has(id));
 
     if (bmFileStatName) {
-      const sizeStr = file.size < 1024 ? `${file.size} байт` : `${(file.size / 1024).toFixed(1)} КБ`;
+      const sizeStr = file.size < 1024
+        ? (window.t ? window.t("bmtg_static.size_bytes", { size: file.size }, `${file.size} B`) : `${file.size} B`)
+        : (window.t ? window.t("bmtg_static.size_kb", { size: (file.size / 1024).toFixed(1) }, `${(file.size / 1024).toFixed(1)} KB`) : `${(file.size / 1024).toFixed(1)} KB`);
       bmFileStatName.textContent = `${file.name} (${sizeStr})`;
     }
     if (bmFileStatSlotBadge) {
@@ -1288,7 +1567,8 @@ function handleFileSelected(slot, file) {
     if (bmFilePreviewList) {
       bmFilePreviewList.innerHTML = "";
       if (newToAdd.length === 0) {
-        bmFilePreviewList.innerHTML = `<span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">Все найденные группы (${alreadyInSlot.length}) уже присутствуют в слоте TS${slot}.</span>`;
+        const alreadyMsg = window.t ? window.t("bmtg_static.file_already_in_slot", { count: alreadyInSlot.length, slot }) : `All ${alreadyInSlot.length} groups are already in TS${slot}.`;
+        bmFilePreviewList.innerHTML = `<span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">${alreadyMsg}</span>`;
       } else {
         newToAdd.forEach(tg => {
           const badge = document.createElement("span");
@@ -1361,9 +1641,9 @@ function handleFileSelected(slot, file) {
     }
   };
   reader.onerror = () => {
-    const msg = window.t ? window.t("bm_file.err_read") : "Не удалось прочитать файл. Попробуйте другой текстовый файл.";
+    const msg = window.t ? window.t("bm_file.err_read") : "Failed to read file.";
     if (window.showAppAlert) {
-      window.showAppAlert(msg, { title: "Ошибка чтения", icon: "⚠️" });
+      window.showAppAlert(msg, { title: window.t ? window.t("bm_file.err_read_title", {}, "Read Error") : "Read Error", icon: "⚠️" });
     } else {
       alert(msg);
     }
@@ -1453,9 +1733,15 @@ function findHotspotCard(hid) {
 }
 
 function hideAllBmUploadIndicators() {
+  if (typeof window !== "undefined") {
+    window.__proxdmrBmUploadState = null;
+  }
   document.querySelectorAll(".header-bm-upload-indicator").forEach(el => {
     el.style.display = "none";
   });
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
+  }
 }
 
 function updateBmImportUI(task) {
@@ -1466,10 +1752,6 @@ function updateBmImportUI(task) {
   }
 
   const isDelete = (task.action === "delete");
-  const actName = isDelete ? "Удаление" : "Импорт";
-  const actPrep = isDelete ? "из" : "в";
-  const actPast = isDelete ? "удалено" : "добавлено";
-  const actGen = isDelete ? "удаления" : "импорта";
 
   const curHs = (window.currentHotspots || []).find(h => h.id === (task.hotspot_id || currentStaticModalHotspotId)) || null;
   const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(task, curHs);
@@ -1496,19 +1778,31 @@ function updateBmImportUI(task) {
     }
   });
 
+  if (typeof window !== "undefined") {
+    window.__proxdmrBmUploadState = (task.status === "running" || task.status === "completed")
+      ? { hotspotId: targetHid, status: task.status, percent }
+      : null;
+  }
   if (targetIndicator) {
     if (task.status === "running") {
       targetIndicator.style.display = "inline-flex";
       if (targetPercent) targetPercent.textContent = `${percent}%`;
       const devStr = task.device_id ? ` (ID: ${task.device_id})` : "";
-      targetIndicator.title = `${actName} TalkGroups ${actPrep} ${netFull}${devStr}: ${current}/${total} (${percent}%) - нажмите для перехода`;
+      const runKey = isDelete ? "bmtg_static.indicator_running_del" : "bmtg_static.indicator_running_imp";
+      targetIndicator.title = window.t
+        ? window.t(runKey, { net: netFull, dev: devStr, current, total, percent })
+        : `${netFull}${devStr}: ${current}/${total} (${percent}%)`;
     } else if (task.status === "completed") {
       targetIndicator.style.display = "inline-flex";
       if (targetPercent) targetPercent.textContent = "100%";
-      targetIndicator.title = `${actName} TalkGroups ${actPrep} ${netFull} завершено`;
+      const doneKey = isDelete ? "bmtg_static.indicator_done_del" : "bmtg_static.indicator_done_imp";
+      targetIndicator.title = window.t ? window.t(doneKey, { net: netFull }) : `${netFull} completed`;
     } else {
       targetIndicator.style.display = "none";
     }
+  }
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
   }
 
   // 2. Modal Progress Card
@@ -1533,14 +1827,20 @@ function updateBmImportUI(task) {
     }
 
     if (bmImportProgressCount) {
-      const skippedText = task.skipped ? ` (${task.skipped} уже есть)` : "";
-      bmImportProgressCount.textContent = `${current} / ${total} групп${skippedText}`;
+      const skippedText = task.skipped
+        ? (window.t ? window.t("bmtg_static.skipped_exists", { count: task.skipped }) : ` (${task.skipped} skipped)`)
+        : "";
+      bmImportProgressCount.textContent = window.t
+        ? window.t("bmtg_static.progress_count", { current, total, skipped: skippedText })
+        : `${current} / ${total}${skippedText}`;
     }
 
     if (bmImportProgressErrors) {
       if (errorCount > 0) {
         bmImportProgressErrors.style.display = "inline-flex";
-        bmImportProgressErrors.textContent = `${errorCount} ошибок ${netShort}`;
+        bmImportProgressErrors.textContent = window.t
+          ? window.t("bmtg_static.progress_errors", { count: errorCount, net: netShort })
+          : `${errorCount} errors (${netShort})`;
       } else {
         bmImportProgressErrors.style.display = "none";
       }
@@ -1548,26 +1848,34 @@ function updateBmImportUI(task) {
 
     if (bmImportProgressTitleText) {
       if (task.status === "running") {
-        const curTg = task.current_tg ? ` (TG ${task.current_tg})` : "";
-        bmImportProgressTitleText.textContent = `${actName} TalkGroups ${actPrep} ${netFull}${curTg}`;
+        if (task.current_tg) {
+          const titleKeyTg = isDelete ? "bmtg_static.progress_title_del_tg" : "bmtg_static.progress_title_imp_tg";
+          bmImportProgressTitleText.textContent = window.t
+            ? window.t(titleKeyTg, { net: netFull, tg: task.current_tg })
+            : `${netFull} (TG ${task.current_tg})`;
+        } else {
+          const titleKey = isDelete ? "bmtg_static.progress_title_del" : "bmtg_static.progress_title_imp";
+          bmImportProgressTitleText.textContent = window.t ? window.t(titleKey, { net: netFull }) : netFull;
+        }
         if (btnCancelBmImport) {
           btnCancelBmImport.disabled = false;
-          btnCancelBmImport.textContent = "Отменить";
+          btnCancelBmImport.textContent = window.t ? window.t("buttons.cancel", {}, "Cancel") : "Cancel";
           btnCancelBmImport.style.display = "";
         }
       } else if (task.status === "completed") {
-        bmImportProgressTitleText.textContent = `${actName} успешно завершено (${doneCount} ${actPast})`;
+        const compKey = isDelete ? "bmtg_static.completed_del" : "bmtg_static.completed_imp";
+        bmImportProgressTitleText.textContent = window.t ? window.t(compKey, { count: doneCount }) : `Completed (${doneCount})`;
         if (btnCancelBmImport) btnCancelBmImport.style.display = "none";
       } else if (task.status === "cancelled") {
         bmImportProgressTitleText.textContent = isDelete
-          ? ((typeof window !== "undefined" && window.t) ? window.t("bmtg.delete_cancelled_by_user", {}, "Удаление отменено пользователем") : "Удаление отменено пользователем")
-          : ((typeof window !== "undefined" && window.t) ? window.t("bmtg.import_cancelled_by_user", {}, "Импорт отменен пользователем") : "Импорт отменен пользователем");
+          ? ((typeof window !== "undefined" && window.t) ? window.t("bmtg.delete_cancelled_by_user", {}, "Deletion cancelled by user") : "Deletion cancelled by user")
+          : ((typeof window !== "undefined" && window.t) ? window.t("bmtg.import_cancelled_by_user", {}, "Import cancelled by user") : "Import cancelled by user");
         if (btnCancelBmImport) btnCancelBmImport.style.display = "none";
       } else if (isErr) {
-        const errMsg = task.message || task.error_message || `Сбой ${netShort} API`;
+        const errMsg = task.message || task.error_message || (window.t ? window.t("bmtg_static.api_fail_net", { net: netShort }) : `${netShort} API error`);
         bmImportProgressTitleText.textContent = isDelete
-          ? ((typeof window !== "undefined" && window.t) ? window.t("bmtg.delete_error", { error: errMsg }, `Ошибка удаления: ${errMsg}`) : `Ошибка удаления: ${errMsg}`)
-          : ((typeof window !== "undefined" && window.t) ? window.t("bmtg.import_error", { error: errMsg }, `Ошибка импорта: ${errMsg}`) : `Ошибка импорта: ${errMsg}`);
+          ? ((typeof window !== "undefined" && window.t) ? window.t("bmtg.delete_error", { error: errMsg }, `Deletion error: ${errMsg}`) : `Deletion error: ${errMsg}`)
+          : ((typeof window !== "undefined" && window.t) ? window.t("bmtg.import_error", { error: errMsg }, `Import error: ${errMsg}`) : `Import error: ${errMsg}`);
         if (btnCancelBmImport) btnCancelBmImport.style.display = "none";
       }
     }
@@ -1588,10 +1896,6 @@ function onBmImportFinished(data) {
   updateBmImportUI(data);
 
   const isDelete = (data.action === "delete");
-  const actName = isDelete ? "Удаление" : "Импорт";
-  const actPrep = isDelete ? "из" : "в";
-  const actPast = isDelete ? "удалено" : "добавлено";
-  const actGen = isDelete ? "удаления" : "импорта";
 
   if (isDelete) {
     selectedTs1.clear();
@@ -1613,39 +1917,39 @@ function onBmImportFinished(data) {
   const isErr = data.status === "error" || data.status === "failed";
 
   const curHs = (window.currentHotspots || []).find(h => h.id === (data.hotspot_id || currentStaticModalHotspotId)) || null;
-  const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(data, curHs);
+  const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isAdn: isAdnTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(data, curHs);
 
   // Toast feedback
   if (data.status === "completed") {
     const toastKey = isDelete
-      ? (isTgifTask ? "bmtg.toast_delete_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_completed_freedmr" : "bmtg.toast_delete_completed"))
-      : (isTgifTask ? "bmtg.toast_import_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_import_completed_freedmr" : "bmtg.toast_import_completed"));
+      ? (isTgifTask ? "bmtg.toast_delete_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_completed_freedmr" : (isAdnTask ? "bmtg.toast_delete_completed_adn" : "bmtg.toast_delete_completed")))
+      : (isTgifTask ? "bmtg.toast_import_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_import_completed_freedmr" : (isAdnTask ? "bmtg.toast_import_completed_adn" : "bmtg.toast_import_completed")));
     const defMsg = isDelete
-      ? `Удаление из ${netFull} завершено: удалено ${doneCount} групп в TS${data.slot}`
-      : `Импорт в ${netFull} завершено: добавлено ${doneCount} групп в TS${data.slot}`;
+      ? `Deletion from ${netFull} completed: deleted ${doneCount} groups on TS${data.slot}`
+      : `Import to ${netFull} completed: added ${doneCount} groups on TS${data.slot}`;
     const msg = (typeof window !== "undefined" && window.t)
       ? window.t(toastKey, { count: doneCount, slot: data.slot }, defMsg)
       : defMsg;
     showToast(msg, 4000);
   } else if (data.status === "cancelled") {
     const toastKey = isDelete
-      ? (isTgifTask ? "bmtg.toast_delete_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_cancelled_freedmr" : "bmtg.toast_delete_cancelled"))
-      : (isTgifTask ? "bmtg.toast_import_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_import_cancelled_freedmr" : "bmtg.toast_import_cancelled"));
+      ? (isTgifTask ? "bmtg.toast_delete_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_cancelled_freedmr" : (isAdnTask ? "bmtg.toast_delete_cancelled_adn" : "bmtg.toast_delete_cancelled")))
+      : (isTgifTask ? "bmtg.toast_import_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_import_cancelled_freedmr" : (isAdnTask ? "bmtg.toast_import_cancelled_adn" : "bmtg.toast_import_cancelled")));
     const defMsg = isDelete
-      ? `Удаление из ${netFull} остановлено (${current}/${total} обработано)`
-      : `Импорт в ${netFull} остановлено (${current}/${total} обработано)`;
+      ? `Deletion from ${netFull} stopped (${current}/${total} processed)`
+      : `Import to ${netFull} stopped (${current}/${total} processed)`;
     const msg = (typeof window !== "undefined" && window.t)
       ? window.t(toastKey, { current, total }, defMsg)
       : defMsg;
     showToast(msg, 3000);
   } else if (isErr) {
-    const errMsg = data.message || data.error_message || "Неизвестная ошибка";
+    const errMsg = data.message || data.error_message || (window.t ? window.t("common.unknown_error", {}, "Unknown error") : "Unknown error");
     const toastKey = isDelete
-      ? (isTgifTask ? "bmtg.toast_delete_error_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_error_freedmr" : "bmtg.toast_delete_error"))
-      : (isTgifTask ? "bmtg.toast_import_error_tgif" : (isFreeDmrTask ? "bmtg.toast_import_error_freedmr" : "bmtg.toast_import_error"));
+      ? (isTgifTask ? "bmtg.toast_delete_error_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_error_freedmr" : (isAdnTask ? "bmtg.toast_delete_error_adn" : "bmtg.toast_delete_error")))
+      : (isTgifTask ? "bmtg.toast_import_error_tgif" : (isFreeDmrTask ? "bmtg.toast_import_error_freedmr" : (isAdnTask ? "bmtg.toast_import_error_adn" : "bmtg.toast_import_error")));
     const defMsg = isDelete
-      ? `Ошибка удаления в ${netShort}: ${errMsg}`
-      : `Ошибка импорта в ${netShort}: ${errMsg}`;
+      ? `${netShort} deletion error: ${errMsg}`
+      : `${netShort} import error: ${errMsg}`;
     const msg = (typeof window !== "undefined" && window.t)
       ? window.t(toastKey, { error: errMsg }, defMsg)
       : defMsg;
@@ -1690,7 +1994,9 @@ if (btnConfirmFileImport) {
 
     showBmTgAlert(null);
     if (bmModalStatusText) {
-      bmModalStatusText.textContent = `Запуск фонового импорта ${groupsToAdd.length} групп в TS${slot}...`;
+      bmModalStatusText.textContent = window.t
+        ? window.t("bmtg_static.bg_import_starting", { count: groupsToAdd.length, slot })
+        : `Starting background import of ${groupsToAdd.length} groups to TS${slot}...`;
     }
 
     try {
@@ -1704,7 +2010,17 @@ if (btnConfirmFileImport) {
           filename: fileName
         })
       });
-      const res = await resp.json();
+      const rawText = await resp.text().catch(() => "");
+      let res;
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch (_) {
+        res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+      }
+      if (!resp.ok && res.status !== "error") {
+        res.status = "error";
+        if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+      }
       if (res.status === "ok" && res.task) {
         currentBmImportTask = res.task;
         updateBmImportUI(currentBmImportTask);
@@ -1714,14 +2030,15 @@ if (btnConfirmFileImport) {
           currentBmImportTask = res.task;
           updateBmImportUI(res.task);
         }
-        showBmTgAlert(res.message || "Импорт уже выполняется", "info");
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.import_busy") : "Import is already running"), "info");
       } else {
         const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
         const { netShort } = resolveNetworkInfo(curHs);
-        showBmTgAlert("Ошибка запуска импорта: " + (res.detail || res.message || `Неизвестная ошибка ${netShort}`), "error");
+        const errDetail = res.detail || res.message || (window.t ? window.t("bmtg_static.err_unknown_net", { net: netShort }) : `Unknown error ${netShort}`);
+        showBmTgAlert(window.t ? window.t("bmtg_static.err_start_import", { err: errDetail }) : errDetail, "error");
       }
     } catch (err) {
-      showBmTgAlert("Сетевая ошибка при запуске импорта: " + err, "error");
+      showBmTgAlert(window.t ? window.t("bmtg_static.net_err_import", { err }) : `Network error: ${err}`, "error");
     }
   });
 }
@@ -1750,8 +2067,9 @@ document.addEventListener("keydown", (e) => {
 if (btnMinimizeBmImport) {
   btnMinimizeBmImport.addEventListener("click", () => {
     closeBmTgStaticModal();
-    const act = (currentBmImportTask && currentBmImportTask.action === "delete") ? "Удаление" : "Импорт";
-    showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_action_continue", { action: act }, `${act} продолжается в фоновом режиме. Статус отображается в шапке.`) : `${act} продолжается в фоновом режиме. Статус отображается в шапке.`, 3000);
+    const isDel = Boolean(currentBmImportTask && currentBmImportTask.action === "delete");
+    const act = window.t ? window.t(isDel ? "bmtg.action_delete" : "bmtg.action_import", {}, isDel ? "Deletion" : "Import") : (isDel ? "Deletion" : "Import");
+    showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_action_continue", { action: act }, `${act} continues in background.`) : `${act} continues in background.`, 3000);
   });
 }
 
@@ -1762,7 +2080,7 @@ if (btnCancelBmImport) {
       return;
     }
     btnCancelBmImport.disabled = true;
-    btnCancelBmImport.textContent = "Отмена...";
+    btnCancelBmImport.textContent = window.t ? window.t("bmtg_static.cancelling_btn", {}, "Cancelling...") : "Cancelling...";
     try {
       const resp = await fetch("/api/bm/static-groups/import/cancel", {
         method: "POST",
@@ -1798,28 +2116,37 @@ function renderDynamicSlotList(slot) {
 
   if (items.length === 0) {
     const emptyKey = isSlot1 ? "bmtg.dyn_empty_ts1" : "bmtg.dyn_empty_ts2";
-    const defMsg = isSlot1 ? "Нет динамических групп на TS1" : "Нет динамических групп на TS2";
-    listEl.innerHTML = `<div class="bm-empty-msg">${window.t ? window.t(emptyKey) : defMsg}</div>`;
+    const defMsg = isSlot1 ? "No dynamic talkgroups on TS1" : "No dynamic talkgroups on TS2";
+    listEl.innerHTML = `<div class="bm-empty-msg">${window.t ? window.t(emptyKey, {}, defMsg) : defMsg}</div>`;
     return;
   }
 
   const curHs = (window.currentHotspots || []).find(h => h.id === (currentStaticModalHotspotId || window.activeHotspotId)) || null;
-  const { netType, isTgif, isFreeDmr, isXlx } = resolveNetworkInfo(curHs);
+  const { netType, isTgif, isFreeDmr, isAdn, isXlx, isDmrPlus } = resolveNetworkInfo(curHs);
 
   listEl.innerHTML = "";
   items.forEach(item => {
     const tg = item.talkgroup;
     const defTgName = isTgif
-      ? (window.t ? window.t("bmtg_static.default_group_name_tgif", {}, "Группа TGIF") : "Группа TGIF")
+      ? (window.t ? window.t("bmtg_static.default_group_name_tgif", {}, "TGIF TalkGroup") : "TGIF TalkGroup")
       : (isFreeDmr
-        ? (window.t ? window.t("bmtg_static.default_group_name_freedmr", {}, "Группа FreeDMR") : "Группа FreeDMR")
-        : (isXlx
-          ? (window.t ? window.t("bmtg_static.default_group_name_xlx", {}, "Модуль XLX") : "Модуль XLX")
-          : (window.t ? window.t("bmtg_static.default_group_name", {}, "Группа BM") : "Группа BM")));
-    const rawLookup = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
-      ? window.getNetworkRawTgName(tg, netType)
-      : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]));
-    const tgName = item.name || rawLookup || defTgName;
+        ? (window.t ? window.t("bmtg_static.default_group_name_freedmr", {}, "FreeDMR TalkGroup") : "FreeDMR TalkGroup")
+        : (isAdn
+          ? (window.t ? window.t("bmtg_static.default_group_name_adn", {}, "ADN TalkGroup") : "ADN TalkGroup")
+          : (isXlx
+            ? (window.t ? window.t("bmtg_static.default_group_name_xlx", {}, "XLX Module") : "XLX Module")
+            : (isDmrPlus
+              ? (window.t ? window.t("bmtg_static.default_group_name_dmrplus", {}, "DMR+ TalkGroup") : "DMR+ TalkGroup")
+              : (window.t ? window.t("bmtg_static.default_group_name", {}, "BM TalkGroup") : "BM TalkGroup")))));
+    const rawLookup = (isDmrPlus && typeof window !== "undefined" && window.DMRPLUS_TG_NAMES && window.DMRPLUS_TG_NAMES[tg])
+      ? window.DMRPLUS_TG_NAMES[tg]
+      : ((typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
+        ? window.getNetworkRawTgName(tg, netType)
+        : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (isAdn ? (window.ADN_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]))));
+    const cleanLookup = (typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+      ? window.getCleanTgDesc(tg, item.name || rawLookup, null, netType)
+      : "";
+    const tgName = item.name || (isDmrPlus ? rawLookup : cleanLookup) || cleanLookup || rawLookup || defTgName;
     const tuneText = window.t ? window.t("bmtg.btn_tune", {}, "--->PTT") : "--->PTT";
 
     const row = document.createElement("div");
@@ -1830,7 +2157,7 @@ function renderDynamicSlotList(slot) {
         <span class="bm-tg-num">TG ${tg}</span>
         <span class="bm-tg-name" data-tg="${tg}" title="${tgName}">${tgName}</span>
       </div>
-      <button type="button" class="btn-dyn-tune" data-slot="${slot}" data-tg="${tg}" title="Установить TG ${tg} (TS${slot}) целью передачи (PTT)">
+      <button type="button" class="btn-dyn-tune" data-slot="${slot}" data-tg="${tg}" title="${window.t ? window.t("bmtg.tune_title", { tg, slot }, `Set TG ${tg} (TS${slot}) as PTT target`) : `Set TG ${tg} (TS${slot}) as PTT target`}">
         ${tuneText}
       </button>
     `;
@@ -1864,6 +2191,14 @@ function renderDynamicSlotList(slot) {
               if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
               window.TGIF_TG_NAMES[tg] = resolvedName;
               try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (e) {}
+            } else if (netType === "freedmr") {
+              if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+              window.FREEDMR_TG_NAMES[tg] = resolvedName;
+              try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (e) {}
+            } else if (netType === "adn") {
+              if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+              window.ADN_TG_NAMES[tg] = resolvedName;
+              try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (e) {}
             } else {
               (window.TG_NAMES || {})[tg] = resolvedName;
               try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (e) {}
@@ -1891,7 +2226,9 @@ function tuneToTalkgroup(tg, slot) {
     setHotspotTg(hid, s, tg, true);
   }
   if (bmModalStatusText) {
-    bmModalStatusText.textContent = `Трансивер настроен на TG ${tg} (TS${s})`;
+    bmModalStatusText.textContent = window.t
+      ? window.t("bmtg_static.tuned_status", { tg, slot: s })
+      : `Transceiver tuned to TG ${tg} (TS${s})`;
   }
 }
 
@@ -1899,7 +2236,8 @@ async function executeDropDynamic(slot = 0, btn = null) {
   const hid = currentStaticModalHotspotId || window.activeHotspotId;
   const origHtml = btn ? btn.innerHTML : "";
   if (btn) {
-    btn.innerHTML = '⏳ <span>Сброс...</span>';
+    const dropTxt = window.t ? window.t("bmtg.dropping", {}, "Dropping...") : "Dropping...";
+    btn.innerHTML = `⏳ <span>${dropTxt}</span>`;
     btn.disabled = true;
   }
 
@@ -1917,25 +2255,27 @@ async function executeDropDynamic(slot = 0, btn = null) {
 
     if (res.status === "ok") {
       if (btn) {
-        btn.innerHTML = '✅ <span>Сброшено!</span>';
+        const droppedTxt = window.t ? window.t("bmtg.dropped_btn", {}, "Dropped!") : "Dropped!";
+        btn.innerHTML = `✅ <span>${droppedTxt}</span>`;
         setTimeout(() => {
           btn.innerHTML = origHtml;
           btn.disabled = false;
         }, 1500);
       }
       if (bmModalStatusText) {
-        bmModalStatusText.textContent = window.t ? window.t("bmtg.dyn_dropped") : "Динамические группы сброшены";
+        bmModalStatusText.textContent = window.t ? window.t("bmtg.dyn_dropped") : "Dynamic groups dropped";
       }
       await loadBmTgStaticGroups(hid);
     } else {
-      showBmTgAlert("Ошибка сброса: " + (res.detail || "Неизвестная ошибка"), "error");
+      const unk = window.t ? window.t("common.unknown_error", {}, "Unknown error") : "Unknown error";
+      showBmTgAlert(window.t ? window.t("bmtg.err_drop", { err: res.detail || unk }) : `Drop error: ${res.detail || unk}`, "error");
       if (btn) {
         btn.innerHTML = origHtml;
         btn.disabled = false;
       }
     }
   } catch (err) {
-    showBmTgAlert("Сетевая ошибка при сбросе: " + err, "error");
+    showBmTgAlert(window.t ? window.t("bmtg.net_err_drop", { err }) : `Network error: ${err}`, "error");
     if (btn) {
       btn.innerHTML = origHtml;
       btn.disabled = false;
@@ -2078,4 +2418,20 @@ if (typeof window !== "undefined") {
 
   // Immediate check on script load
   checkBmImportStatus();
+
+  window.addEventListener("languageChanged", () => {
+    const hsList = Array.isArray(window.currentHotspots) ? window.currentHotspots : [];
+    const hs = hsList.find(h => h.id === currentStaticModalHotspotId) || hsList[0] || null;
+    const netType = ((hs && hs.network_type) || "bm").toLowerCase();
+    applyManagerNetworkBranding(netType, hs);
+    if (bmTgStaticModal && bmTgStaticModal.classList.contains("active")) {
+      renderSlotList(1);
+      renderSlotList(2);
+      renderDynamicSlotList(1);
+      renderDynamicSlotList(2);
+    }
+    if (currentBmImportTask) {
+      updateBmImportUI(currentBmImportTask);
+    }
+  });
 }

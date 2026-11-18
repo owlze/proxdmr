@@ -67,7 +67,8 @@ export function setHapticDuration(duration, syncServer = true) {
     const slider = document.getElementById("optHapticDuration");
     if (slider && parseInt(slider.value, 10) !== val) slider.value = String(val);
     const label = document.getElementById("hapticDurationVal");
-    if (label) label.textContent = `${val} мс`;
+    const msUnit = ((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms", {}, "ms") : "ms");
+    if (label) label.textContent = `${val} ${msUnit}`;
 
     if (window.AndroidBridge && typeof window.AndroidBridge.setHapticDuration === "function") {
       try { window.AndroidBridge.setHapticDuration(val); } catch (_) {}
@@ -140,14 +141,15 @@ export function initHapticSettingsUI() {
   }
 
   if (slider) {
+    const _msUnit = () => ((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms", {}, "ms") : "ms");
     slider.value = String(duration);
-    if (label) label.textContent = `${duration} мс`;
+    if (label) label.textContent = `${duration} ${_msUnit()}`;
 
     if (!slider._wired) {
       slider._wired = true;
       slider.addEventListener("input", () => {
         const val = parseInt(slider.value, 10) || 45;
-        if (label) label.textContent = `${val} мс`;
+        if (label) label.textContent = `${val} ${_msUnit()}`;
       });
       slider.addEventListener("change", () => {
         const val = parseInt(slider.value, 10) || 45;

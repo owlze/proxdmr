@@ -1,7 +1,7 @@
-import { getCountryInfo, getFlagBadgeHtml, cleanName, getCleanTgDesc, escapeHtml, getHotspotNetworkType, getNetworkRawTgName } from '../core/formatters.js?v=2.9.367';
-import { showToast } from '../core/toast.js';
-import { showLongPressEffect } from '../ui/long-press.js';
-import { resolveHotspotId, pushNavState, notifyNavClosed, getHotspotSlot } from '../core/state.js';
+import { getCountryInfo, getFlagBadgeHtml, cleanName, getCleanTgDesc, escapeHtml, getHotspotNetworkType, getNetworkRawTgName } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
+import { showLongPressEffect } from '../ui/long-press.js?v=2.9.711';
+import { resolveHotspotId, pushNavState, notifyNavClosed, getHotspotSlot } from '../core/state.js?v=2.9.698';
 
 /**
  * ProxDMR Quick Assign & BrandMeister Extended Info Module
@@ -18,7 +18,7 @@ function getHotspotDisplayName(hid) {
   if (typeof window.getHotspotDisplayName === "function") {
     return window.getHotspotDisplayName(hid);
   }
-  return "Main 📻";
+  return `${window.t ? window.t("hotspots.default_name", {}, "Main") : "Main"} 📻`;
 }
 
 function setTg(tg, slot, hid) {
@@ -108,7 +108,7 @@ function hasHotspotTranscribeActive(card, hid) {
   const c = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`);
   const ts1 = (typeof window.isSlotTranscribeActive === "function" && window.isSlotTranscribeActive(cid, 1)) ||
     localStorage.getItem(`proxdmr_transcribe_${cid}_ts1`) === "1" ||
-    Boolean(c && c.querySelector(".vfo-ts1-row.has-transcribe"));
+    Boolean(c && c.querySelector(".vfo-ts1-row.has-transcribe, .vfo-allstar-row.has-transcribe, .vfo-ysf-row.has-transcribe"));
   const ts2 = (typeof window.isSlotTranscribeActive === "function" && window.isSlotTranscribeActive(cid, 2)) ||
     localStorage.getItem(`proxdmr_transcribe_${cid}_ts2`) === "1" ||
     Boolean(c && c.querySelector(".vfo-ts2-row.has-transcribe"));
@@ -146,9 +146,9 @@ function closeSearchTgIdModal() {
   }
 }
 
-function openContactEditModal(node, parentId, type) {
+function openContactEditModal(node, parentId, type, contextOpts = null) {
   if (typeof window.openContactEditModal === "function") {
-    return window.openContactEditModal(node, parentId, type);
+    return window.openContactEditModal(node, parentId, type, contextOpts);
   }
 }
 
@@ -231,10 +231,14 @@ function extractTgOrIdFromElement(target) {
   const cardEl = target.closest(".radio-container");
   const hotspotId = cardEl ? resolveHotspotId(cardEl.dataset.hotspotId) : resolveHotspotId(window.activeHotspotId);
   const netType = getHotspotNetworkType(cardEl || hotspotId);
+  const netLower = String(netType || "").toLowerCase();
 
   // A. Check if clicked on/in TalkGroup element (VFO, Heard Calls, Quick Tune, etc.)
   const tgEl = target.closest(".ts-tg-pill, .vfo-tg-pill, .ts-tg-text, .vfo-tg-text, .ts-tg-desc, .vfo-tg-desc, .btn-quick-tune-tg, .mobile-tg-pill, .tg-plain-link, .cell-tg");
   if (tgEl) {
+    if (netLower === "ysf" || netLower === "allstar" || tgEl.closest(".is-ysf-room, .is-asl-node")) {
+      return null;
+    }
     const pill = tgEl.closest("[data-tg]") || tgEl.querySelector("[data-tg]") || tgEl.closest("[data-tg-id]") || tgEl.querySelector("[data-tg-id]") || tgEl;
     let rawTg = pill.dataset.tg || pill.dataset.tgId;
     if (!rawTg) {
@@ -258,6 +262,9 @@ function extractTgOrIdFromElement(target) {
   // B. Check if clicked on/in Caller ID / Callsign element (VFO, Heard Calls, etc.)
   const idEl = target.closest(".ts-caller-id, .vfo-caller-id, .ts-caller-call, .vfo-caller-call, .cell-station, .station-text, .station-text-mobile");
   if (idEl) {
+    if (netLower === "ysf" || netLower === "allstar") {
+      return null;
+    }
     const withData = idEl.closest("[data-radio-id]") || idEl.querySelector("[data-radio-id]") || idEl.closest("[data-id]") || idEl;
     let rawId = withData.dataset.radioId;
     if (!rawId && withData.dataset.id && /^\d+$/.test(withData.dataset.id)) {
@@ -272,8 +279,11 @@ function extractTgOrIdFromElement(target) {
       let callsign = withData.dataset.callsign || "";
       let name = withData.dataset.name || "";
       if (!callsign && !name) {
+        const isStandbyEl = idEl?.dataset?.standby === "1";
         const txt = idEl.textContent.replace(/\(\d+\)/g, "").trim();
-        if (txt && !txt.includes("Ожидание") && !txt.includes("...")) {
+        const isStandbyTxt = !txt || txt.includes("Ожидание") || txt.includes("...") ||
+          (window.i18n && typeof window.i18n.isTranslationOf === "function" && window.i18n.isTranslationOf("vfo.standby", txt));
+        if (!isStandbyEl && !isStandbyTxt) {
           callsign = txt;
         }
       }
@@ -335,6 +345,8 @@ function getCardPttTarget(card) {
 
   return {
     cid: cid,
+    hotspotId: cid,
+    network_type: netType,
     slot: activeCardSlot,
     value: curTg,
     type: isCaller ? "ID" : "TG",
@@ -352,8 +364,10 @@ function getQuickMemory(slotNum, hid) {
     const perHsRaw = localStorage.getItem(`proxdmr_quick_mem_hs_${cid}_${slotNum}`);
     if (perHsRaw) return JSON.parse(perHsRaw);
 
-    // Fallback for primary/default hotspot to legacy key
-    const isPrimary = !hid || cid === "default" || (window.currentHotspots && window.currentHotspots[0] && String(window.currentHotspots[0].id) === cid);
+    // Fallback for legacy/default hotspot ONLY
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(hsList) && hsList.some(h => h && String(h.id) === "default");
+    const isPrimary = !hid || cid === "default" || (!hasRealDefault && hsList[0] && String(hsList[0].id) === cid);
     if (isPrimary) {
       const legacyRaw = localStorage.getItem(`proxdmr_quick_mem_${slotNum}`);
       if (legacyRaw) return JSON.parse(legacyRaw);
@@ -365,17 +379,23 @@ function getQuickMemory(slotNum, hid) {
 function saveQuickMemory(slotNum, target, hid) {
   try {
     const cid = resolveHotspotId(hid || window.activeHotspotId);
+    const uid = (typeof window !== "undefined" && window.currentUserId) ? window.currentUserId : null;
     const data = {
       id: target.value,
       type: target.type || "TG",
       name: target.name || "",
       timestamp: Date.now()
     };
-    localStorage.setItem(`proxdmr_quick_mem_hs_${cid}_${slotNum}`, JSON.stringify(data));
+    const colKey = `hs_${cid}_${slotNum}`;
+    localStorage.setItem(`proxdmr_quick_mem_${colKey}`, JSON.stringify(data));
+    if (uid) localStorage.setItem(`proxdmr_u${uid}_quick_mem_${colKey}`, JSON.stringify(data));
 
-    const isPrimary = cid === "default" || (window.currentHotspots && window.currentHotspots[0] && String(window.currentHotspots[0].id) === cid);
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(hsList) && hsList.some(h => h && String(h.id) === "default");
+    const isPrimary = cid === "default" || (!hasRealDefault && hsList[0] && String(hsList[0].id) === cid);
     if (isPrimary) {
       localStorage.setItem(`proxdmr_quick_mem_${slotNum}`, JSON.stringify(data));
+      if (uid) localStorage.setItem(`proxdmr_u${uid}_quick_mem_${slotNum}`, JSON.stringify(data));
     }
 
     renderQuickMemButtons(cid);
@@ -383,9 +403,16 @@ function saveQuickMemory(slotNum, target, hid) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: "set_quick_mem",
-        key: `hs_${cid}_${slotNum}`,
+        key: colKey,
         data: data
       }));
+    } else if (!window.isDemoMode) {
+      fetch(`/api/collections/quick_mem/${encodeURIComponent(colKey)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({ value: data })
+      }).catch(() => {});
     }
     return data;
   } catch (e) {
@@ -397,11 +424,17 @@ function saveQuickMemory(slotNum, target, hid) {
 function clearQuickMemory(slotNum, hid) {
   try {
     const cid = resolveHotspotId(hid || window.activeHotspotId);
-    localStorage.removeItem(`proxdmr_quick_mem_hs_${cid}_${slotNum}`);
+    const uid = (typeof window !== "undefined" && window.currentUserId) ? window.currentUserId : null;
+    const colKey = `hs_${cid}_${slotNum}`;
+    localStorage.removeItem(`proxdmr_quick_mem_${colKey}`);
+    if (uid) localStorage.removeItem(`proxdmr_u${uid}_quick_mem_${colKey}`);
 
-    const isPrimary = cid === "default" || (window.currentHotspots && window.currentHotspots[0] && String(window.currentHotspots[0].id) === cid);
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const hasRealDefault = Array.isArray(hsList) && hsList.some(h => h && String(h.id) === "default");
+    const isPrimary = cid === "default" || (!hasRealDefault && hsList[0] && String(hsList[0].id) === cid);
     if (isPrimary) {
       localStorage.removeItem(`proxdmr_quick_mem_${slotNum}`);
+      if (uid) localStorage.removeItem(`proxdmr_u${uid}_quick_mem_${slotNum}`);
     }
 
     renderQuickMemButtons(cid);
@@ -409,9 +442,14 @@ function clearQuickMemory(slotNum, hid) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: "set_quick_mem",
-        key: `hs_${cid}_${slotNum}`,
+        key: colKey,
         data: null
       }));
+    } else if (!window.isDemoMode) {
+      fetch(`/api/collections/quick_mem/${encodeURIComponent(colKey)}`, {
+        method: "DELETE",
+        keepalive: true
+      }).catch(() => {});
     }
     return true;
   } catch (e) {
@@ -447,6 +485,11 @@ function renderQuickMemButtons(modalHid) {
           btn.title = window.t ? window.t("quick_mem.btn_empty", { slot }, `M${slot}: Пусто (Удержание: сохранить текущую ноду)`) : `M${slot}: Пусто (Удержание: сохранить текущую ноду)`;
         }
       }
+      return;
+    }
+
+    if (netType === "ysf") {
+      // Строка памяти M1-M5 для YSF скрыта (используется матрица комнат)
       return;
     }
 
@@ -563,17 +606,21 @@ function executeSingleClickMem(cardMemBtn, slot, card, cid) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "allstar_connect_node", hotspot_id: cid, node: savedNode }));
       }
-      showToast(`📻 [${hsName}] M${slot}: подключение к ноде #${savedNode}...`, 2500);
+      showToast(window.t ? window.t("asl.mem_connecting_toast", { name: hsName, slot, node: savedNode }, `📻 [${hsName}] M${slot}: connecting to node #${savedNode}...`) : `📻 [${hsName}] M${slot}: connecting to node #${savedNode}...`, 2500);
     } else {
-      showToast(`💡 [${hsName}] M${slot} пуста. Зажмите M${slot} для сохранения текущей ноды`, 3000);
+      showToast(window.t ? window.t("asl.mem_empty_toast", { name: hsName, slot }, `💡 [${hsName}] M${slot} is empty. Long press M${slot} to save current node`) : `💡 [${hsName}] M${slot} is empty. Long press M${slot} to save current node`, 3000);
     }
+    return;
+  }
+
+  if (netType === "ysf") {
     return;
   }
 
   const mem = getQuickMemory(slot, cid);
 
   if (!mem || !mem.id) {
-    showToast(`💡 [${hsName}] Ячейка M${slot} пуста. Зажмите M${slot} долгим нажатием для записи ID из PTT.`, 3500);
+    showToast(window.t ? window.t("mem.empty_toast", { name: hsName, slot }, `💡 [${hsName}] Memory M${slot} is empty. Long press M${slot} to save ID from PTT`) : `💡 [${hsName}] Memory M${slot} is empty. Long press M${slot} to save ID from PTT`, 3500);
     return;
   }
 
@@ -584,7 +631,7 @@ function executeSingleClickMem(cardMemBtn, slot, card, cid) {
 
   const cleanDesc = mem.type === "ID" ? (mem.name || "") : getCleanTgDesc(mem.id, mem.name, undefined, netType);
   const displayStr = `${mem.type || 'TG'} ${mem.id}${cleanDesc ? ' (' + cleanDesc + ')' : ''}`;
-  showToast(`📻 [${hsName}] M${slot}: выбран ${displayStr} (TS${activeCardSlot})`, 3000);
+  showToast(window.t ? window.t("mem.selected_toast", { name: hsName, slot, target: displayStr, ts: activeCardSlot }, `📻 [${hsName}] M${slot}: selected ${displayStr} (TS${activeCardSlot})`) : `📻 [${hsName}] M${slot}: selected ${displayStr} (TS${activeCardSlot})`, 3000);
 }
 
 function handleMemDoubleClick(cardMemBtn, slot, card, cid) {
@@ -592,10 +639,28 @@ function handleMemDoubleClick(cardMemBtn, slot, card, cid) {
   const netType = getHotspotNetworkType(card || cid);
 
   if (netType === "allstar") {
-    localStorage.removeItem(`proxdmr_asl_mem_${cid}_M${slot}`);
+    const colKey = `${cid}_M${slot}`;
+    localStorage.removeItem(`proxdmr_asl_mem_${colKey}`);
     localStorage.removeItem(`proxdmr_asl_mem_M${slot}`);
     renderQuickMemButtons(cid);
-    showToast(`🗑️ [${hsName}] Память M${slot} очищена`, 2000);
+    const ws = (typeof getWs === "function" ? getWs() : window.ws);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "set_asl_mem",
+        key: colKey,
+        data: null
+      }));
+    } else if (!window.isDemoMode) {
+      fetch(`/api/collections/asl_mem/${encodeURIComponent(colKey)}`, {
+        method: "DELETE",
+        keepalive: true
+      }).catch(() => {});
+    }
+    showToast(window.t ? window.t("asl.mem_cleared_toast", { name: hsName, slot }, `🗑️ [${hsName}] Memory M${slot} cleared`) : `🗑️ [${hsName}] Memory M${slot} cleared`, 2000);
+    return;
+  }
+
+  if (netType === "ysf") {
     return;
   }
 
@@ -619,9 +684,10 @@ function handleMemDoubleClick(cardMemBtn, slot, card, cid) {
   if (oldMem && oldMem.id) {
     const cleanDesc = oldMem.type === "ID" ? (oldMem.name || "") : getCleanTgDesc(oldMem.id, oldMem.name, undefined, netType);
     const descStr = cleanDesc ? ` (${cleanDesc})` : "";
-    showToast(`🗑️ [${hsName}] Ячейка M${slot} очищена (было: ${oldMem.type || 'TG'} ${oldMem.id}${descStr})`, 3200);
+    const oldStr = `${oldMem.type || 'TG'} ${oldMem.id}${descStr}`;
+    showToast(window.t ? window.t("mem.cleared_toast", { name: hsName, slot, old: oldStr }, `🗑️ [${hsName}] Memory M${slot} cleared (was: ${oldStr})`) : `🗑️ [${hsName}] Memory M${slot} cleared (was: ${oldStr})`, 3200);
   } else {
-    showToast(`🗑️ [${hsName}] Ячейка M${slot} уже пуста`, 2000);
+    showToast(window.t ? window.t("mem.already_empty_toast", { name: hsName, slot }, `🗑️ [${hsName}] Memory M${slot} is already empty`) : `🗑️ [${hsName}] Memory M${slot} is already empty`, 2000);
   }
 }
 
@@ -748,12 +814,17 @@ function handleTgActionContact() {
   if (typeof closeSearchTgIdModal === "function") closeSearchTgIdModal();
   if (typeof closeCallIdModal === "function") closeCallIdModal();
 
+  const targetHid = resolveHotspotId(target.hotspotId || target.hotspot_id || currentModalQuickMemHid || window.activeHotspotId || "default");
+  const targetNet = String(target.network_type || getHotspotNetworkType(targetHid) || "bm").trim().toLowerCase();
   const isId = (target.type === "ID");
   const val = target.value;
   const callsignVal = target.callsign || "";
   let nameVal = target.name || "";
 
-  openContactEditModal(null, null, isId ? "person" : "tg");
+  openContactEditModal(null, null, isId ? "person" : "tg", {
+    hotspotId: targetHid,
+    network_type: targetNet
+  });
 
   const contactEditDmrId = document.getElementById("contactEditDmrId");
   const contactEditCallsign = document.getElementById("contactEditCallsign");
@@ -764,7 +835,10 @@ function handleTgActionContact() {
 
   if (isId) {
     if (contactEditDmrId) contactEditDmrId.value = val;
-    if (contactEditCallsign) contactEditCallsign.value = callsignVal;
+    if (contactEditCallsign) {
+      contactEditCallsign.value = callsignVal;
+      contactEditCallsign.dispatchEvent(new Event("input"));
+    }
     if (contactEditName) contactEditName.value = nameVal;
     if (target.city && contactEditCity) contactEditCity.value = target.city;
   } else {
@@ -800,7 +874,8 @@ function applyTgIdToPtt(target) {
       try { localStorage.setItem("proxdmr_user_callsigns_cache", JSON.stringify((window.USER_CALLSIGNS || {}))); } catch (_) {}
     }
     selectHotspotTargetId(targetCard, targetHid, targetSlot, targetVal, "CALLER");
-    showToast(`🎙️ [${hsName}] PTT переписан на ID: ${targetVal}${target.name ? ' (' + target.name + ')' : ''}`, 3000);
+    const targetStr = `${targetVal}${target.name ? ' (' + target.name + ')' : ''}`;
+    showToast(window.t ? window.t("mem.ptt_assigned_id_toast", { name: hsName, target: targetStr }, `🎙️ [${hsName}] PTT set to ID: ${targetStr}`) : `🎙️ [${hsName}] PTT set to ID: ${targetStr}`, 3000);
   } else {
     if (target.name) {
       if (netType === "tgif") {
@@ -813,7 +888,8 @@ function applyTgIdToPtt(target) {
       }
     }
     selectHotspotTargetId(targetCard, targetHid, targetSlot, targetVal, "TG");
-    showToast(`🎙️ [${hsName}] PTT переписан на TG: ${targetVal}${target.name ? ' (' + target.name + ')' : ''}`, 3000);
+    const targetStr = `${targetVal}${target.name ? ' (' + target.name + ')' : ''}`;
+    showToast(window.t ? window.t("mem.ptt_assigned_tg_toast", { name: hsName, target: targetStr }, `🎙️ [${hsName}] PTT set to TG: ${targetStr}`) : `🎙️ [${hsName}] PTT set to TG: ${targetStr}`, 3000);
   }
 }
 
@@ -862,7 +938,7 @@ function openQuickMemPicker(target) {
 
   const hsList = (Array.isArray(window.currentHotspots) && window.currentHotspots.length > 0)
     ? window.currentHotspots.filter(h => !h.hidden)
-    : [{ id: "default", name: "Основной хотспот", status: "ONLINE", callsign: "", dmr_id: "" }];
+    : [{ id: "default", name: window.t ? window.t("hotspots.default_main_name", {}, "Main Hotspot") : "Main Hotspot", status: "ONLINE", callsign: "", dmr_id: "" }];
 
   const tabsWrap = document.getElementById("quickMemPickerHsWrap");
   if (tabsWrap) {
@@ -883,7 +959,7 @@ function openQuickMemPicker(target) {
         };
       });
     } else {
-      tabsWrap.innerHTML = `<span class="quick-mem-single-hs">${hsList[0]?.name || 'Основной хотспот'}</span>`;
+      tabsWrap.innerHTML = `<span class="quick-mem-single-hs">${safeEscapeHtml(hsList[0]?.name || (window.t ? window.t("hotspots.default_main_name", {}, "Main Hotspot") : "Main Hotspot"))}</span>`;
     }
   }
 
@@ -930,7 +1006,7 @@ function renderPickerMemButtons(hid) {
         const u = (window.USER_CALLSIGNS || {})[data.id];
         desc = `${u.callsign || ""} ${u.name || ""}`.trim();
       }
-      descText = desc || "Без имени";
+      descText = desc || (window.t ? window.t("mem.untitled", {}, "Untitled") : "Untitled");
     }
 
     html += `
@@ -952,7 +1028,12 @@ function renderPickerMemButtons(hid) {
       saveQuickMemory(slot, target, effectiveModalHid);
       const currentHsTitle = getHotspotDisplayName(effectiveModalHid);
       const displayStr = `${target.type || 'TG'} ${target.value}${target.name ? ' (' + target.name + ')' : ''}`;
-      showToast(`💾 [${currentHsTitle}] Записано в память M${slot}: ${displayStr}`, 3500);
+      showToast(
+        window.t
+          ? window.t("mem.saved_picker_toast", { hs: currentHsTitle, slot, val: displayStr }, `💾 [${currentHsTitle}] Saved to memory M${slot}: ${displayStr}`)
+          : `💾 [${currentHsTitle}] Saved to memory M${slot}: ${displayStr}`,
+        3500
+      );
       closeQuickMemPicker();
     };
   });
@@ -1016,7 +1097,7 @@ function openDirectCallModal(target) {
 
   const allHs = (Array.isArray(window.currentHotspots) && window.currentHotspots.length > 0)
     ? window.currentHotspots.filter(hs => !hs.hidden)
-    : [{ id: "default", name: "Основной хотспот", status: "ONLINE", callsign: "", dmr_id: "", network_type: sourceNet }];
+    : [{ id: "default", name: (window.t ? window.t("hotspots.default_main_name", {}, "Main Hotspot") : "Main Hotspot"), status: "ONLINE", callsign: "", dmr_id: "", network_type: sourceNet }];
 
   // Directive call / channel transfer can ONLY be performed within the SAME network!
   const sameNetHs = allHs.filter(hs => (hs.network_type || "bm").toLowerCase() === sourceNet);
@@ -1051,8 +1132,10 @@ function openDirectCallModal(target) {
 
     if (netType !== sourceNet) {
       isOk = false;
-      reasonTitle = (window.t ? window.t("direct_call.error_not_bm_title") : "Несовпадение сетей");
-      reasonDesc = `Выбранный хотспот находится в сети ${netType.toUpperCase()}, а источник вызова — в ${sourceNet.toUpperCase()}. Перевод возможен только внутри одной сети.`;
+      reasonTitle = (window.t ? window.t("direct_call.error_network_mismatch_title", {}, "Network Mismatch") : "Network Mismatch");
+      reasonDesc = window.t
+        ? window.t("direct_call.error_network_mismatch_desc", { targetNet: netType.toUpperCase(), sourceNet: sourceNet.toUpperCase() }, `Selected hotspot is on ${netType.toUpperCase()}, while call source is on ${sourceNet.toUpperCase()}. Transfer is only possible within the same network.`)
+        : `Selected hotspot is on ${netType.toUpperCase()}, while call source is on ${sourceNet.toUpperCase()}. Transfer is only possible within the same network.`;
     } else if (netType === "bm") {
       if (!hasKey) {
         isOk = false;
@@ -1066,8 +1149,8 @@ function openDirectCallModal(target) {
     } else if (netType === "tgif") {
       if (!hasKey) {
         isOk = false;
-        reasonTitle = (window.t ? window.t("direct_call.error_not_bm_title") : "Не настроен API TGIF");
-        reasonDesc = "У выбранного хотспота TGIF не указан API-ключ в настройках.";
+        reasonTitle = (window.t ? window.t("direct_call.error_no_tgif_api_title", {}, "TGIF API Not Configured") : "TGIF API Not Configured");
+        reasonDesc = (window.t ? window.t("direct_call.error_no_tgif_api_desc", {}, "Selected TGIF hotspot has no API key set in settings.") : "Selected TGIF hotspot has no API key set in settings.");
       }
     }
 
@@ -1183,6 +1266,8 @@ function handleTgActionInfo() {
     callsign = window.USER_CALLSIGNS[rid].callsign;
   }
   const detectedType = target.type || (targetIdStr.length >= 7 ? "ID" : "TG");
+  const infoHid = resolveHotspotId(target.hotspotId || target.hotspot_id || window.activeHotspotId || "default");
+  const infoNet = String(target.network_type || getHotspotNetworkType(infoHid) || "bm").trim().toLowerCase();
 
   openBmInfoModal("auto", {
     value: target.value,
@@ -1191,7 +1276,9 @@ function handleTgActionInfo() {
     country: target.country,
     city: target.city,
     type: detectedType,
-    hotspotId: target.hotspotId
+    hotspotId: infoHid,
+    network_type: infoNet,
+    slot: target.slot
   });
 }
 
@@ -1213,23 +1300,28 @@ function closeQuickAssignModal(clearTarget = true) {
 // ==========================================================
 // QUICK ASSIGN MODAL: CONTACT INTEGRATION
 // ==========================================================
-function findContactByTarget(type, value) {
+function findContactByTarget(type, value, netType = null) {
   if (!value || typeof window.contactsTree === "undefined" || !Array.isArray(window.contactsTree)) return null;
   const isId = (type === "ID");
   const targetStr = String(value).trim();
   const targetNum = parseInt(value, 10);
+  const targetNet = String(netType || (currentQuickAssignTarget && currentQuickAssignTarget.network_type) || getHotspotNetworkType(currentQuickAssignTarget && currentQuickAssignTarget.hotspotId) || "bm").trim().toLowerCase();
 
   function search(nodes) {
     if (!Array.isArray(nodes)) return null;
     for (const n of nodes) {
+      const nNet = String(n.network_type || (n.type === "allstar_node" || n.type === "asl_macro" ? "allstar" : "bm")).trim().toLowerCase();
       if (n.type === "folder") {
-        if (n.children && n.children.length > 0) {
+        if (nNet === targetNet && n.children && n.children.length > 0) {
           const found = search(n.children);
           if (found) return found;
         }
       } else {
+        if (nNet !== targetNet) continue;
         if (isId) {
-          if (n.dmr_id != null && (String(n.dmr_id).trim() === targetStr || parseInt(n.dmr_id, 10) === targetNum)) {
+          const idsObj = n.identities || {};
+          const rawId = n.dmr_id != null ? n.dmr_id : idsObj.dmr_id;
+          if (rawId != null && (String(rawId).trim() === targetStr || parseInt(rawId, 10) === targetNum)) {
             return n;
           }
         } else {
@@ -1247,6 +1339,8 @@ function findContactByTarget(type, value) {
 function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
   if (!quickContactSection || !tgOrIdInfo || !tgOrIdInfo.value) return;
 
+  const targetHid = resolveHotspotId(tgOrIdInfo.hotspotId || tgOrIdInfo.hotspot_id || window.activeHotspotId || "default");
+  const targetNet = String(tgOrIdInfo.network_type || getHotspotNetworkType(targetHid) || "bm").trim().toLowerCase();
   const isIdTarget = (tgOrIdInfo.type === "ID");
   const val = String(tgOrIdInfo.value).trim();
 
@@ -1258,7 +1352,7 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
     }
   }
 
-  const existingNode = findContactByTarget(tgOrIdInfo.type, val);
+  const existingNode = findContactByTarget(tgOrIdInfo.type, val, targetNet);
 
   if (existingNode) {
     // Show Already in Contacts box
@@ -1266,16 +1360,19 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
     if (quickContactAddBox) quickContactAddBox.style.display = "none";
 
     if (quickContactStatusBadge) {
-      quickContactStatusBadge.textContent = "В контактах";
+      quickContactStatusBadge.textContent = window.t ? window.t("quick_contact.in_contacts_badge", {}, "In Contacts") : "In Contacts";
       quickContactStatusBadge.className = "quick-contact-badge is-saved";
       quickContactStatusBadge.style.display = "inline-block";
     }
 
     if (quickContactExistsMsg) {
       const parent = findParentNodeInTree(window.contactsTree, existingNode.id);
-      const folderHtml = parent ? ` <span class="quick-contact-folder-pill">📁 ${escapeHtml(parent.name)}</span>` : "";
-      const titleText = escapeHtml(existingNode.name || existingNode.callsign || (existingNode.tg ? `TG ${existingNode.tg}` : `ID ${existingNode.dmr_id}`));
-      quickContactExistsMsg.innerHTML = `В книге: <strong>${titleText}</strong>${folderHtml}`;
+      const parentName = parent ? (typeof window.getLocalizedContactName === "function" ? window.getLocalizedContactName(parent) : parent.name) : "";
+      const folderHtml = parent ? ` <span class="quick-contact-folder-pill">📁 ${escapeHtml(parentName)}</span>` : "";
+      const nodeDisplayName = existingNode.name || existingNode.callsign || (existingNode.tg ? `TG ${existingNode.tg}` : `ID ${existingNode.dmr_id}`);
+      const titleText = escapeHtml(typeof window.getLocalizedContactName === "function" ? window.getLocalizedContactName(existingNode) : nodeDisplayName);
+      const inBookPrefix = window.t ? window.t("quick_contact.in_book_prefix", {}, "Saved as:") : "Saved as:";
+      quickContactExistsMsg.innerHTML = `${escapeHtml(inBookPrefix)} <strong>${titleText}</strong>${folderHtml}`;
     }
 
     if (btnQuickContactEditExisting) {
@@ -1283,7 +1380,10 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
         e.preventDefault();
         e.stopPropagation();
         const parent = findParentNodeInTree(window.contactsTree, existingNode.id);
-        openContactEditModal(existingNode, parent ? parent.id : null);
+        openContactEditModal(existingNode, parent ? parent.id : null, undefined, {
+          hotspotId: targetHid,
+          network_type: targetNet
+        });
       };
     }
   } else {
@@ -1292,21 +1392,25 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
     if (quickContactAddBox) quickContactAddBox.style.display = "block";
 
     if (quickContactStatusBadge) {
-      quickContactStatusBadge.textContent = "Не в книге";
+      quickContactStatusBadge.textContent = window.t ? window.t("quick_contact.not_in_contacts_badge", {}, "Not saved") : "Not saved";
       quickContactStatusBadge.className = "quick-contact-badge is-new";
       quickContactStatusBadge.style.display = "inline-block";
     }
 
     // Populate folders
     if (quickContactFolder) {
-      quickContactFolder.innerHTML = `<option value="">📁 [Корневой уровень]</option>`;
+      const rootOptLabel = window.t ? window.t("quick_contact.root_folder_opt", {}, "📁 [Root level]") : "📁 [Root level]";
+      quickContactFolder.innerHTML = `<option value="">${escapeHtml(rootOptLabel)}</option>`;
       function addFolderOptions(nodes, depth = 1) {
         if (!Array.isArray(nodes)) return;
         for (const n of nodes) {
           if (n.type === "folder") {
+            const folderNet = String(n.network_type || "bm").trim().toLowerCase();
+            if (folderNet !== targetNet) continue;
             const opt = document.createElement("option");
             opt.value = n.id;
-            opt.textContent = `${"— ".repeat(depth - 1)}📁 ${n.name}`;
+            const dispName = typeof window.getLocalizedContactName === "function" ? window.getLocalizedContactName(n) : n.name;
+            opt.textContent = `${"— ".repeat(depth - 1)}📁 ${dispName}`;
             quickContactFolder.appendChild(opt);
             if (n.children) addFolderOptions(n.children, depth + 1);
           }
@@ -1314,18 +1418,21 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
       }
       addFolderOptions(window.contactsTree, 1);
 
-      // Smart select folder based on target type
+      // Smart select folder strictly within target network
       function findSmartFolder(nodes) {
         if (!Array.isArray(nodes)) return "";
         for (const n of nodes) {
           if (n.type === "folder") {
-            const lower = (n.name || "").toLowerCase();
+            const folderNet = String(n.network_type || "bm").trim().toLowerCase();
+            if (folderNet !== targetNet) continue;
+            const dispName = typeof window.getLocalizedContactName === "function" ? window.getLocalizedContactName(n) : (n.name || "");
+            const lower = ((n.name || "") + " " + dispName).toLowerCase();
             if (isIdTarget) {
-              if (lower.includes("контакт") || lower.includes("люди") || lower.includes("пользовател") || lower.includes("радиолюбител") || lower.includes("users")) {
+              if (n.id === "people_root" || /contact|person|people|operator|users|контакт|люди|пользовател|радиолюбител|kontak|benutzer|contacto|usuario|utilisateur|contatt|utent|gebruiker/.test(lower)) {
                 return n.id;
               }
             } else {
-              if (lower.includes("групп") || lower.includes("tg") || lower.includes("talkgroup") || lower.includes("разговорн")) {
+              if (n.id === "groups_root" || /group|talkgroup|\btg\b|канал|групп|разговорн|gruppe|grupo|groupe|grupp|groep/.test(lower)) {
                 return n.id;
               }
             }
@@ -1365,11 +1472,12 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
         const nameVal = (quickContactName && quickContactName.value.trim()) || (isIdTarget ? (targetCallsign || `ID ${val}`) : `TG ${val}`);
         const parentId = (quickContactFolder && quickContactFolder.value) || null;
         const callsignVal = isIdTarget ? ((quickContactCallsign && quickContactCallsign.value.trim().toUpperCase()) || targetCallsign) : "";
-        const slotVal = (currentSlot === 1 || currentSlot === 2) ? currentSlot : 0;
+        const slotVal = (targetNet === "xlx") ? 2 : ((currentSlot === 1 || currentSlot === 2) ? currentSlot : 0);
 
         const newNode = {
           id: "c_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
           type: isIdTarget ? "person" : "tg",
+          network_type: targetNet,
           name: nameVal,
           city: "",
           comment: "",
@@ -1377,8 +1485,10 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
         };
 
         if (isIdTarget) {
+          const parsedDmrId = parseInt(val, 10) || val;
           newNode.callsign = callsignVal;
-          newNode.dmr_id = parseInt(val, 10) || val;
+          newNode.dmr_id = parsedDmrId;
+          newNode.identities = { dmr_id: parsedDmrId };
           if (callsignVal || nameVal) {
             const dmrNum = parseInt(val, 10);
             if (dmrNum > 0) {
@@ -1394,14 +1504,20 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
           newNode.tg = parseInt(val, 10) || val;
           const tgNum = parseInt(val, 10);
           if (tgNum > 0 && nameVal) {
-            (window.TG_NAMES || {})[tgNum] = nameVal;
-            try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
+            if (targetNet === "tgif") {
+              if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+              window.TGIF_TG_NAMES[tgNum] = nameVal;
+              try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+            } else {
+              (window.TG_NAMES || {})[tgNum] = nameVal;
+              try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
+            }
           }
         }
 
         if (parentId) {
           const parent = findNodeInTree(window.contactsTree, parentId);
-          if (parent) {
+          if (parent && String(parent.network_type || "bm").trim().toLowerCase() === targetNet) {
             if (!Array.isArray(parent.children)) parent.children = [];
             parent.children.push(newNode);
           } else {
@@ -1413,7 +1529,12 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
 
         saveContactsToServer();
         renderContactsTree(contactsSearchInput ? contactsSearchInput.value.trim() : "");
-        showToast(`✅ «${nameVal}» сохранена в Контакты!`, 2500);
+        showToast(
+          window.t
+            ? window.t("quick_contact.saved_toast", { name: nameVal }, `✅ "${nameVal}" saved to Contacts!`)
+            : `✅ "${nameVal}" saved to Contacts!`,
+          2500
+        );
         setupQuickAssignContactUI(tgOrIdInfo, currentSlot);
       };
     }
@@ -1429,7 +1550,10 @@ function setupQuickAssignContactUI(tgOrIdInfo, currentSlot = 1) {
         const callsignVal = isIdTarget ? ((quickContactCallsign && quickContactCallsign.value.trim().toUpperCase()) || targetCallsign) : "";
         const slotVal = (currentSlot === 1 || currentSlot === 2) ? currentSlot : 0;
 
-        openContactEditModal(null, parentId, isIdTarget ? "person" : "tg");
+        openContactEditModal(null, parentId, isIdTarget ? "person" : "tg", {
+          hotspotId: targetHid,
+          network_type: targetNet
+        });
         const contactEditName = document.getElementById("contactEditName");
         const contactEditCallsign = document.getElementById("contactEditCallsign");
         const contactEditDmrId = document.getElementById("contactEditDmrId");
@@ -1605,7 +1729,7 @@ async function loadBmSummary(targetType, targetId, callsign, hotspotId, forceRef
   bodyEl.innerHTML = `
     <div class="bm-summary-loading">
       <span class="bm-summary-spinner"></span>
-      <span>Загрузка данных BM...</span>
+      <span>${safeEscapeHtml(window.t ? window.t("bm_info.summary_loading", {}, "Loading BM data...") : "Loading BM data...")}</span>
     </div>
   `;
   adjustQuickAssignModalBounds();
@@ -1628,7 +1752,7 @@ async function loadBmSummary(targetType, targetId, callsign, hotspotId, forceRef
       bmSummaryCache.set(cacheKey, { data, time: Date.now() });
       renderInlineBmSummary(data, cleanType, cleanId, hid);
     } else {
-      const msg = data?.detail || data?.error || "Данные не найдены";
+      const msg = data?.detail || data?.error || (window.t ? window.t("bm_info.no_data", {}, "No data found") : "No data found");
       bodyEl.innerHTML = `
         <div class="bm-summary-empty">
           <span>⚠️ BM: ${safeEscapeHtml(msg)}</span>
@@ -1638,9 +1762,12 @@ async function loadBmSummary(targetType, targetId, callsign, hotspotId, forceRef
     }
   } catch (err) {
     console.warn("[BM_SUMMARY] Error fetching BrandMeister summary:", err);
+    const loadFailTxt = window.t
+      ? window.t("bm_info.summary_load_failed", { error: err.message || err }, `⚠️ Failed to load BM data (${err.message || err})`)
+      : `⚠️ Failed to load BM data (${err.message || err})`;
     bodyEl.innerHTML = `
       <div class="bm-summary-empty">
-        <span>⚠️ Не удалось загрузить данные BM (${safeEscapeHtml(err.message || err)})</span>
+        <span>${safeEscapeHtml(loadFailTxt)}</span>
       </div>
     `;
     adjustQuickAssignModalBounds();
@@ -1670,7 +1797,7 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
         <div class="bm-summary-card">
           <div class="bm-id-lead">
             <span class="bm-id-badge">ID: ${safeEscapeHtml(targetId)}</span>
-            <span class="bm-user-loc">Данные в BM не найдены (404)</span>
+            <span class="bm-user-loc">${safeEscapeHtml(window.t ? window.t("bm_info.summary_not_found", {}, "Not found in BM (404)") : "Not found in BM (404)")}</span>
           </div>
         </div>
       `;
@@ -1702,16 +1829,20 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
         `;
       }).join("");
     } else {
-      devChipsHtml = `<div class="bm-summary-empty" style="padding:6px 10px;">Хотспоты / ретрансляторы позывного не найдены</div>`;
+      devChipsHtml = `<div class="bm-summary-empty" style="padding:6px 10px;">${safeEscapeHtml(window.t ? window.t("bm_info.summary_no_devices", {}, "No hotspots / repeaters found for callsign") : "No hotspots / repeaters found for callsign")}</div>`;
     }
 
     let staticSubsHtml = "";
     if (staticTgs.total > 0) {
+      const slot1Word = window.t ? window.t("bm_info.slot_1", {}, "Slot 1") : "Slot 1";
+      const slot2Word = window.t ? window.t("bm_info.slot_2", {}, "Slot 2") : "Slot 2";
+      const profStaticTitle = window.t ? window.t("bm_info.summary_profile_static", {}, "Profile static groups") : "Profile static groups";
+      const totalLbl = window.t ? window.t("bm_info.total_count", { count: staticTgs.total }, `Total: ${staticTgs.total}`) : `Total: ${staticTgs.total}`;
       staticSubsHtml = `
         <div class="bm-summary-section" style="margin-top: 6px;">
           <div class="bm-summary-subhead">
-            <span>Статические группы профиля</span>
-            <span class="bm-summary-count">Всего: ${staticTgs.total}</span>
+            <span>${safeEscapeHtml(profStaticTitle)}</span>
+            <span class="bm-summary-count">${safeEscapeHtml(totalLbl)}</span>
           </div>
           <div class="bm-static-slots-grid ${ts1.length > 0 && ts2.length > 0 ? 'has-both-slots' : ''}">
             ${ts1.length > 0 ? `
@@ -1719,7 +1850,7 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
                 <div class="bm-slot-box-header">
                   <div class="bm-slot-box-title">
                     <span class="bm-slot-badge">TS1</span>
-                    <span class="bm-slot-label">Слот 1</span>
+                    <span class="bm-slot-label">${safeEscapeHtml(slot1Word)}</span>
                   </div>
                   <span class="bm-slot-count">${ts1.length} TG</span>
                 </div>
@@ -1735,7 +1866,7 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
                 <div class="bm-slot-box-header">
                   <div class="bm-slot-box-title">
                     <span class="bm-slot-badge ts2">TS2</span>
-                    <span class="bm-slot-label ts2">Слот 2</span>
+                    <span class="bm-slot-label ts2">${safeEscapeHtml(slot2Word)}</span>
                   </div>
                   <span class="bm-slot-count">${ts2.length} TG</span>
                 </div>
@@ -1751,8 +1882,12 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
       `;
     }
 
-    const bmDateLabel = data.bm_created ? `<span class="bm-user-date" title="Дата регистрации в BM">📅 BM: ${formatBmDate(data.bm_created)}</span>` : '';
-    const lastHeardLabel = (data.radioid && data.radioid.lastheard) ? `<span class="bm-user-lastheard" title="Последняя активность в DMR: TG ${data.radioid.lasttg || '—'}">🎙️ ${formatBmDate(data.radioid.lastheard, true)}</span>` : '';
+    const regTitle = window.t ? window.t("quick_mem.bm_reg_date", {}, "BM Registration Date") : "BM Registration Date";
+    const lastHeardTitle = (data.radioid && data.radioid.lastheard)
+      ? (window.t ? window.t("quick_mem.bm_last_heard", { tg: data.radioid.lasttg || "—" }, `Last DMR activity: TG ${data.radioid.lasttg || "—"}`) : `Last DMR activity: TG ${data.radioid.lasttg || "—"}`)
+      : "";
+    const bmDateLabel = data.bm_created ? `<span class="bm-user-date" title="${safeEscapeHtml(regTitle)}">📅 BM: ${formatBmDate(data.bm_created)}</span>` : '';
+    const lastHeardLabel = (data.radioid && data.radioid.lastheard) ? `<span class="bm-user-lastheard" title="${safeEscapeHtml(lastHeardTitle)}">🎙️ ${formatBmDate(data.radioid.lastheard, true)}</span>` : '';
 
     bodyEl.innerHTML = `
       <div class="bm-summary-card">
@@ -1766,7 +1901,7 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
         </div>
         <div class="bm-summary-section">
           <div class="bm-summary-subhead">
-            <span>Устройства позывного</span>
+            <span>${safeEscapeHtml(window.t ? window.t("bm_info.summary_callsign_devices", {}, "Callsign devices") : "Callsign devices")}</span>
             <span class="bm-summary-count">${devices.length}</span>
           </div>
           <div class="bm-device-chips-grid">
@@ -1784,11 +1919,11 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
     const tgNum = parseInt(targetId, 10) || 0;
     const netType = String(data.network_type || getHotspotNetworkType(hotspotId) || "bm").toLowerCase();
     const isBmNet = (netType === "bm");
-    const netLabel = netType === "tgif" ? "TGIF" : (netType === "freedmr" ? "FreeDMR" : (netType === "dmrplus" ? "DMR+" : (netType === "xlx" ? "XLX" : "BM")));
+    const netLabel = netType === "tgif" ? "TGIF" : (netType === "freedmr" ? "FreeDMR" : (netType === "adn" ? "ADN" : (netType === "dmrplus" ? "DMR+" : (netType === "xlx" ? "XLX" : "BM"))));
     const tgName = data.tg_name || "";
     const isReg = !!data.is_registered;
     const hs = data.hotspot || {};
-    const hsName = hs.name || hotspotId || "Хотспот";
+    const hsName = hs.name || hotspotId || (window.t ? window.t("bm_info.hotspot", {}, "Hotspot") : "Hotspot");
     const sub = data.subscription || {};
     const isSubbed = !!sub.is_subscribed;
     const subSlot = sub.slot || 1;
@@ -1798,47 +1933,63 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
 
     let actionHtml = "";
     if (!isBmNet) {
-      actionHtml = `<span style="font-size:0.75rem; color:#8b949e;">Переход в группу по нажатию PTT</span>`;
+      actionHtml = `<span style="font-size:0.75rem; color:#8b949e;">${safeEscapeHtml(window.t ? window.t("bm_info.summary_ptt_dynamic_hint", {}, "Dynamic talkgroup switched on PTT press") : "Dynamic talkgroup switched on PTT press")}</span>`;
     } else if (isSubbed) {
-      const delTitle = window.t ? window.t("quick_mem.del_static_tg", { tg: tgNum, slot: subSlot }, `Удалить TG ${tgNum} из статики TS${subSlot}`) : `Удалить TG ${tgNum} из статики TS${subSlot}`;
+      const delTitle = window.t ? window.t("quick_mem.del_static_tg", { tg: tgNum, slot: subSlot }, `Remove TG ${tgNum} from TS${subSlot} static`) : `Remove TG ${tgNum} from TS${subSlot} static`;
+      const delBtnTxt = window.t ? window.t("bm_info.btn_del_from_ts", { slot: subSlot }, `✕ Remove from TS${subSlot}`) : `✕ Remove from TS${subSlot}`;
       actionHtml = `
         <button type="button" class="btn-bm-act btn-bm-act-del" data-action="delete" data-slot="${subSlot}" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="${delTitle}">
-          ✕ Удалить из TS${subSlot}
+          ${safeEscapeHtml(delBtnTxt)}
         </button>
       `;
     } else {
-      const addTitle1 = window.t ? window.t("quick_mem.add_static_tg", { tg: tgNum, slot: 1 }, `Добавить TG ${tgNum} в статику TS1 хотспота`) : `Добавить TG ${tgNum} в статику TS1 хотспота`;
-      const addTitle2 = window.t ? window.t("quick_mem.add_static_tg", { tg: tgNum, slot: 2 }, `Добавить TG ${tgNum} в статику TS2 хотспота`) : `Добавить TG ${tgNum} в статику TS2 хотспота`;
+      const addTitle1 = window.t ? window.t("quick_mem.add_static_tg", { tg: tgNum, slot: 1 }, `Add TG ${tgNum} to hotspot TS1 static`) : `Add TG ${tgNum} to hotspot TS1 static`;
+      const addTitle2 = window.t ? window.t("quick_mem.add_static_tg", { tg: tgNum, slot: 2 }, `Add TG ${tgNum} to hotspot TS2 static`) : `Add TG ${tgNum} to hotspot TS2 static`;
+      const addBtn1 = window.t ? window.t("bm_info.btn_add_to_ts", { slot: 1 }, "+ To TS1 static") : "+ To TS1 static";
+      const addBtn2 = window.t ? window.t("bm_info.btn_add_to_ts", { slot: 2 }, "+ To TS2 static") : "+ To TS2 static";
       actionHtml = `
         <div class="bm-action-btn-group">
           <button type="button" class="btn-bm-act btn-bm-act-add" data-action="add" data-slot="1" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="${addTitle1}">
-            + В статику TS1
+            ${safeEscapeHtml(addBtn1)}
           </button>
           <button type="button" class="btn-bm-act btn-bm-act-add" data-action="add" data-slot="2" data-tg="${tgNum}" data-hid="${safeEscapeHtml(hotspotId)}" title="${addTitle2}">
-            + В статику TS2
+            ${safeEscapeHtml(addBtn2)}
           </button>
         </div>
       `;
     }
 
+    const unregTxt = window.t ? window.t("bm_info.unregistered_tg", {}, "Local / unlisted") : "Local / unlisted";
+    const catBadgeTxt = isReg
+      ? (window.t ? window.t("bm_info.in_network_catalog", { net: netLabel }, `In ${netLabel} catalog`) : `In ${netLabel} catalog`)
+      : (window.t ? window.t("bm_info.not_in_network_catalog", { net: netLabel }, `Not in ${netLabel} catalog`) : `Not in ${netLabel} catalog`);
+    const hsLblTxt = window.t ? window.t("bm_info.hotspot_label", {}, "Hotspot:") : "Hotspot:";
+    const subStatusTxt = isBmNet
+      ? (isSubbed
+          ? (window.t ? window.t("bm_info.status_in_static", { slot: subSlot }, `● Static on TS${subSlot}`) : `● Static on TS${subSlot}`)
+          : (window.t ? window.t("bm_info.status_not_in_static", {}, "○ Not in static") : "○ Not in static"))
+      : (window.t ? window.t("bm_info.network_badge", { net: netLabel }, `${netLabel} network`) : `${netLabel} network`);
+    const hsStaticTitle = window.t ? window.t("bm_info.summary_hs_static", {}, "Hotspot static groups") : "Hotspot static groups";
+    const hsNoStaticTxt = window.t ? window.t("bm_info.summary_hs_no_static", {}, "No static groups configured on hotspot") : "No static groups configured on hotspot";
+
     bodyEl.innerHTML = `
       <div class="bm-summary-card">
         <div class="bm-tg-lead">
           <span class="bm-tg-pill-lg">TG ${tgNum}</span>
-          <span class="bm-tg-official-name" title="${safeEscapeHtml(tgName)}">${safeEscapeHtml(tgName || 'Локальная / не в каталоге')}</span>
-          <span class="bm-badge ${isReg ? 'bm-badge-reg' : 'bm-badge-unreg'}">${isReg ? `В каталоге ${netLabel}` : `Не в каталоге ${netLabel}`}</span>
+          <span class="bm-tg-official-name" title="${safeEscapeHtml(tgName)}">${safeEscapeHtml(tgName || unregTxt)}</span>
+          <span class="bm-badge ${isReg ? 'bm-badge-reg' : 'bm-badge-unreg'}">${safeEscapeHtml(catBadgeTxt)}</span>
         </div>
 
         <div class="bm-hs-sub-box">
           <div class="bm-hs-sub-info">
-            <span class="bm-hs-label">Хотспот:</span>
+            <span class="bm-hs-label">${safeEscapeHtml(hsLblTxt)}</span>
             <strong class="bm-hs-name">${safeEscapeHtml(hsName)}</strong>
             ${isBmNet ? `
               <span class="bm-badge ${isSubbed ? 'bm-badge-sub' : 'bm-badge-notsub'}">
-                ${isSubbed ? `● В статике на TS${subSlot}` : '○ Не в статике'}
+                ${safeEscapeHtml(subStatusTxt)}
               </span>
             ` : `
-              <span class="bm-badge bm-badge-reg">Сеть ${netLabel}</span>
+              <span class="bm-badge bm-badge-reg">${safeEscapeHtml(subStatusTxt)}</span>
             `}
           </div>
           ${actionHtml}
@@ -1847,11 +1998,11 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
         ${isBmNet ? `
         <div class="bm-summary-section">
           <div class="bm-summary-subhead">
-            <span>Статические группы хотспота</span>
+            <span>${safeEscapeHtml(hsStaticTitle)}</span>
             <span class="bm-summary-count">TS1: ${ts1.length} • TS2: ${ts2.length}</span>
           </div>
           ${(ts1.length === 0 && ts2.length === 0) ? `
-            <div class="bm-summary-empty" style="padding: 6px 10px;">Статические группы на хотспоте не настроены</div>
+            <div class="bm-summary-empty" style="padding: 6px 10px;">${safeEscapeHtml(hsNoStaticTxt)}</div>
           ` : `
             <div class="bm-static-slots-grid ${ts1.length > 0 && ts2.length > 0 ? 'has-both-slots' : ''}">
               ${ts1.length > 0 ? `
@@ -1859,7 +2010,7 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
                   <div class="bm-slot-box-header">
                     <div class="bm-slot-box-title">
                       <span class="bm-slot-badge">TS1</span>
-                      <span class="bm-slot-label">Слот 1</span>
+                      <span class="bm-slot-label">${safeEscapeHtml(window.t ? window.t("bm_info.slot_1", {}, "Slot 1") : "Slot 1")}</span>
                     </div>
                     <span class="bm-slot-count">${ts1.length} TG</span>
                   </div>
@@ -1875,7 +2026,7 @@ function renderInlineBmSummary(data, targetType, targetId, hotspotId) {
                   <div class="bm-slot-box-header">
                     <div class="bm-slot-box-title">
                       <span class="bm-slot-badge ts2">TS2</span>
-                      <span class="bm-slot-label ts2">Слот 2</span>
+                      <span class="bm-slot-label ts2">${safeEscapeHtml(window.t ? window.t("bm_info.slot_2", {}, "Slot 2") : "Slot 2")}</span>
                     </div>
                     <span class="bm-slot-count">${ts2.length} TG</span>
                   </div>
@@ -1933,9 +2084,15 @@ async function executeInlineBmAction(action, slot, tg, hotspotId, btnEl) {
       });
       const res = await resp.json();
       if (res.status === "ok") {
-        showToast(`✅ TG ${tg} добавлена в статику TS${slot} хотспота!`, 3500);
+        showToast(
+          window.t
+            ? window.t("bm_info.toast_added_static", { tg, slot }, `✅ TG ${tg} added to hotspot TS${slot} static!`)
+            : `✅ TG ${tg} added to hotspot TS${slot} static!`,
+          3500
+        );
       } else {
-        showToast(`⚠️ ${res.detail || "Ошибка добавления группы в BM"}`, 4500);
+        const errMsg = res.detail || (window.t ? window.t("bm_info.err_add_static", {}, "Failed to add group to BM") : "Failed to add group to BM");
+        showToast(`⚠️ ${errMsg}`, 4500);
       }
     } else if (action === "delete") {
       const resp = await fetch("/api/bm/static-groups", {
@@ -1949,9 +2106,15 @@ async function executeInlineBmAction(action, slot, tg, hotspotId, btnEl) {
       });
       const res = await resp.json();
       if (res.status === "ok") {
-        showToast(`✅ TG ${tg} удалена из статики TS${slot}!`, 3500);
+        showToast(
+          window.t
+            ? window.t("bm_info.toast_deleted_static", { tg, slot }, `✅ TG ${tg} removed from TS${slot} static!`)
+            : `✅ TG ${tg} removed from TS${slot} static!`,
+          3500
+        );
       } else {
-        showToast(`⚠️ ${res.detail || "Ошибка удаления группы из BM"}`, 4500);
+        const errMsg = res.detail || (window.t ? window.t("bm_info.err_del_static", {}, "Failed to remove group from BM") : "Failed to remove group from BM");
+        showToast(`⚠️ ${errMsg}`, 4500);
       }
     }
 
@@ -1965,7 +2128,12 @@ async function executeInlineBmAction(action, slot, tg, hotspotId, btnEl) {
     }
   } catch (err) {
     console.warn("[BM_ACTION] Error executing BM action:", err);
-    showToast(`⚠️ Сетевая ошибка при операции с BM: ${err.message || err}`, 4500);
+    showToast(
+      window.t
+        ? window.t("bm_info.err_net_op", { error: err.message || err }, `⚠️ Network error during BM operation: ${err.message || err}`)
+        : `⚠️ Network error during BM operation: ${err.message || err}`,
+      4500
+    );
     if (btnEl) {
       btnEl.disabled = false;
       btnEl.textContent = origText;
@@ -2013,8 +2181,11 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
   const cardsBox = document.getElementById("bmInfoStructuredCards");
 
   const isTg = tgOrIdInfo.type === "TG";
-  const curHid = currentModalQuickMemHid || window.activeHotspotId || "default";
-  const hs = window.currentHotspots.find(h => h.id === curHid) || window.currentHotspots[0] || {};
+  const curHid = resolveHotspotId(tgOrIdInfo.hotspotId || tgOrIdInfo.hotspot_id || currentModalQuickMemHid || window.activeHotspotId || "default");
+  const curNetType = String(tgOrIdInfo.network_type || getHotspotNetworkType(curHid) || "bm").trim().toLowerCase();
+  tgOrIdInfo.hotspotId = curHid;
+  tgOrIdInfo.network_type = curNetType;
+  const hs = window.currentHotspots.find(h => resolveHotspotId(h.id) === curHid) || window.currentHotspots[0] || {};
   const hsDevId = hs.bm_ssid ? `${hs.dmr_id}${String(hs.bm_ssid).padStart(2, '0')}` : (hs.dmr_id || "");
 
   if (titleEl) titleEl.textContent = window.t ? window.t("bm_info.modal_title", {}, "BrandMeister & DMR INFO") : "BrandMeister & DMR INFO";
@@ -2056,7 +2227,7 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
         target_id: String(targetId)
       });
       if (callsign) params.set("callsign", callsign);
-      if (currentModalQuickMemHid || window.activeHotspotId) params.set("hotspot_id", currentModalQuickMemHid || window.activeHotspotId);
+      if (curHid) params.set("hotspot_id", curHid);
       resp = await fetch(`/api/bm/info?${params.toString()}`);
     } else {
       const params = new URLSearchParams({
@@ -2064,7 +2235,7 @@ async function openBmInfoModal(queryType, tgOrIdInfo) {
         target_type: isTg ? "TG" : "ID"
       });
       if (callsign) params.set("callsign", callsign);
-      if (currentModalQuickMemHid || window.activeHotspotId) params.set("hotspot_id", currentModalQuickMemHid || window.activeHotspotId);
+      if (curHid) params.set("hotspot_id", curHid);
       resp = await fetch(`/api/bm/summary?${params.toString()}`);
     }
     const data = await resp.json();
@@ -3041,11 +3212,18 @@ function renderBmInfoCards(cardsBox, queryType, data, targetId, extraInfo) {
     if (btnAddContact) {
       btnAddContact.onclick = () => {
         closeBmInfoModal();
+        const qInfo = currentBmInfoQuery && currentBmInfoQuery.tgOrIdInfo;
+        const targetHid = resolveHotspotId((qInfo && (qInfo.hotspotId || qInfo.hotspot_id)) || currentModalQuickMemHid || window.activeHotspotId || "default");
+        const targetNet = String((qInfo && qInfo.network_type) || getHotspotNetworkType(targetHid) || "bm").trim().toLowerCase();
         const contactItem = {
           type: isOperator ? "ID" : "TG",
           value: targetId,
           callsign: regCall || "",
-          name: opName || (tg && tg.name) || (extraInfo && extraInfo.name) || ""
+          name: opName || (tg && tg.name) || (extraInfo && extraInfo.name) || "",
+          city: (opLoc && opLoc !== "—") ? opLoc : "",
+          hotspotId: targetHid,
+          network_type: targetNet,
+          slot: qInfo && qInfo.slot
         };
         currentTgIdActionTarget = contactItem;
         if (typeof handleTgActionContact === "function") {
@@ -3492,7 +3670,12 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
   if (sourceNetType !== targetNetType) {
     console.warn(`[QUICK_ASSIGN] Aborted direct transfer: network mismatch (${sourceNetType} !== ${targetNetType})`);
     if (typeof showToast === "function") {
-      showToast(`❌ Невозможно перевести вызов: несовпадение сетей (${sourceNetType.toUpperCase()} → ${targetNetType.toUpperCase()})`, 3500);
+      showToast(
+        window.t
+          ? window.t("direct_call.toast_network_mismatch", { sourceNet: sourceNetType.toUpperCase(), targetNet: targetNetType.toUpperCase() }, `❌ Cannot transfer call: network mismatch (${sourceNetType.toUpperCase()} → ${targetNetType.toUpperCase()})`)
+          : `❌ Cannot transfer call: network mismatch (${sourceNetType.toUpperCase()} → ${targetNetType.toUpperCase()})`,
+        3500
+      );
     }
     return;
   }
@@ -3574,8 +3757,9 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
   if (typeof window.syncCollapsedHotspotStacks === "function") {
     window.syncCollapsedHotspotStacks();
   }
-  const expandedCardEl = document.querySelector(`.radio-container[data-hotspot-id="${resolvedTargetHid}"]`)
-    || (resolvedTargetHid === resolveHotspotId("default") ? document.getElementById("radioContainer") : null);
+  const rc = document.getElementById("radioContainer");
+  const rcMatch = rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === resolvedTargetHid) ? rc : null;
+  const expandedCardEl = document.querySelector(`.radio-container[data-hotspot-id="${resolvedTargetHid}"]`) || rcMatch;
   if (expandedCardEl) {
     expandedCardEl.classList.remove("collapsed", "live-collapsed");
     try {
@@ -3632,9 +3816,10 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
   let netLabel = "BM";
   if (netType === "tgif") netLabel = "TGIF";
   else if (netType === "freedmr") netLabel = "FreeDMR";
+  else if (netType === "adn") netLabel = "ADN";
   else if (netType === "xlx") netLabel = "XLX";
 
-  if (netType !== "bm" && netType !== "tgif" && netType !== "freedmr" && netType !== "xlx") {
+  if (netType !== "bm" && netType !== "tgif" && netType !== "freedmr" && netType !== "adn" && netType !== "xlx") {
     if (isIdTarget) {
       showToast(window.t ? window.t("quick_assign.call_activated", { name: hotspotName, slot: targetSlot, id: targetVal }, `✅ [${hotspotName}] TS${targetSlot}: Вызов ID ${targetVal} активирован`) : `✅ [${hotspotName}] TS${targetSlot}: Вызов ID ${targetVal} активирован`, 3500);
     }
@@ -3670,9 +3855,10 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
           const addData = await addResp.json();
           if (addData && addData.status === "ok") {
             if (targetHsObj) targetHsObj.xlx_module = mod;
-            showToast(window.t ? window.t("quick_assign.xlx_module_set_toast", { name: hotspotName, module: mod, tg: targetVal }, `✅ [${hotspotName}] TS2: Подключен модуль XLX ${mod} (TG ${targetVal})`) : `✅ [${hotspotName}] TS2: Подключен модуль XLX ${mod} (TG ${targetVal})`, 4500);
+            showToast(window.t ? window.t("quick_assign.xlx_module_set_toast", { name: hotspotName, module: mod, tg: targetVal }, `✅ [${hotspotName}] TS2: XLX module ${mod} connected (TG ${targetVal})`) : `✅ [${hotspotName}] TS2: XLX module ${mod} connected (TG ${targetVal})`, 4500);
           } else {
-            showToast(`⚠️ [${hotspotName}]: ${addData?.detail || "Ошибка переключения модуля XLX"}`, 5000);
+            const errDetail = addData?.detail || (window.t ? window.t("quick_assign.xlx_switch_err", {}, "Failed to switch XLX module") : "Failed to switch XLX module");
+            showToast(`⚠️ [${hotspotName}]: ${errDetail}`, 5000);
           }
         } else if (targetVal === 4000) {
           await fetch("/api/bm/drop-dynamic", {
@@ -3681,11 +3867,16 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
             body: JSON.stringify({ hotspot_id: resolvedTargetHid, slot: 2 })
           });
           if (targetHsObj) targetHsObj.xlx_module = "";
-          showToast(window.t ? window.t("quick_assign.xlx_module_unlinked", { name: hotspotName }, `✅ [${hotspotName}] TS2: Модуль XLX отключен (TG 4000)`) : `✅ [${hotspotName}] TS2: Модуль XLX отключен (TG 4000)`, 4500);
+          showToast(window.t ? window.t("quick_assign.xlx_module_unlinked", { name: hotspotName }, `✅ [${hotspotName}] TS2: XLX module disconnected (TG 4000)`) : `✅ [${hotspotName}] TS2: XLX module disconnected (TG 4000)`, 4500);
         } else if (targetVal === 9) {
-          showToast(window.t ? window.t("quick_assign.xlx_qso_ready", { name: hotspotName, mod: targetHsObj?.xlx_module || "?" }, `✅ [${hotspotName}] TS2: TG 9 готов к вызову (Модуль ${targetHsObj?.xlx_module || "---"})`) : `✅ [${hotspotName}] TS2: TG 9 готов к вызову (Модуль ${targetHsObj?.xlx_module || "---"})`, 4500);
+          showToast(window.t ? window.t("quick_assign.xlx_qso_ready", { name: hotspotName, mod: targetHsObj?.xlx_module || "?" }, `✅ [${hotspotName}] TS2: TG 9 ready to call (Module ${targetHsObj?.xlx_module || "---"})`) : `✅ [${hotspotName}] TS2: TG 9 ready to call (Module ${targetHsObj?.xlx_module || "---"})`, 4500);
         } else {
-          showToast(`ℹ️ [${hotspotName}] TS2: TG ${targetVal} выбран (в XLX модули A..Z — TG 4001..4026, голос — TG 9)`, 4500);
+          showToast(
+            window.t
+              ? window.t("quick_assign.xlx_tg_hint_toast", { name: hotspotName, tg: targetVal }, `ℹ️ [${hotspotName}] TS2: TG ${targetVal} selected (in XLX, modules A–Z are TG 4001–4026, voice is TG 9)`)
+              : `ℹ️ [${hotspotName}] TS2: TG ${targetVal} selected (in XLX, modules A–Z are TG 4001–4026, voice is TG 9)`,
+            4500
+          );
         }
         if (typeof loadBmTgStaticGroups === "function") {
           try { loadBmTgStaticGroups(resolvedTargetHid); } catch (e) {}
@@ -3796,7 +3987,7 @@ async function handleQuickAssignSelect(targetHid, targetSlot, targetTg, hotspotN
             }
             showToast(window.t ? window.t(`quick_assign.${netLabel.toLowerCase()}_set_toast`, { name: hotspotName, slot: targetSlot, tg: targetVal }, `✅ [${hotspotName}] TS${targetSlot}: TG ${targetVal} установлен в ${netLabel}`) : `✅ [${hotspotName}] TS${targetSlot}: TG ${targetVal} установлен в ${netLabel}`, 4500);
           } else {
-            const errDetail = addData?.detail || addData?.errors?.join("; ") || `Ошибка добавления в ${netLabel}`;
+            const errDetail = addData?.detail || addData?.errors?.join("; ") || (window.t ? window.t("quick_assign.err_add_group_net", { net: netLabel }, `Failed to add to ${netLabel}`) : `Failed to add to ${netLabel}`);
             showToast(`⚠️ [${hotspotName}] TS${targetSlot}: ${errDetail}`, 5000);
           }
         } else {
@@ -3861,9 +4052,34 @@ document.addEventListener("pointerdown", (e) => {
       if (netType === "allstar") {
         const curHs = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []).find(h => h.id === cid);
         const curNode = String((curHs && (curHs.allstar_node || curHs.node_number)) || "1999").trim();
-        localStorage.setItem(`proxdmr_asl_mem_${cid}_M${slot}`, curNode);
+        const colKey = `${cid}_M${slot}`;
+        localStorage.setItem(`proxdmr_asl_mem_${colKey}`, curNode);
         renderQuickMemButtons(cid);
-        showToast(`💾 [${hsName}] M${slot}: сохранена нода #${curNode}`, 3000);
+        const ws = (typeof getWs === "function" ? getWs() : window.ws);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: "set_asl_mem",
+            key: colKey,
+            data: curNode
+          }));
+        } else if (!window.isDemoMode) {
+          fetch(`/api/collections/asl_mem/${encodeURIComponent(colKey)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            keepalive: true,
+            body: JSON.stringify({ value: curNode })
+          }).catch(() => {});
+        }
+        showToast(
+          window.t
+            ? window.t("asl.mem_saved_toast", { hs: hsName, slot, node: curNode }, `💾 [${hsName}] M${slot}: saved node #${curNode}`)
+            : `💾 [${hsName}] M${slot}: saved node #${curNode}`,
+          3000
+        );
+        return;
+      }
+
+      if (netType === "ysf") {
         return;
       }
 
@@ -4264,6 +4480,9 @@ if (typeof window !== "undefined") {
   window.__proxdmr.openBmInfoModal = openBmInfoModal;
   window.__proxdmr.closeBmInfoModal = closeBmInfoModal;
   window.__proxdmr.renderQuickMemButtons = renderQuickMemButtons;
+  window.addEventListener("languageChanged", () => {
+    try { renderQuickMemButtons(); } catch (_) {}
+  });
 }
 
 if (typeof window !== "undefined") { window.safeEscapeHtml = safeEscapeHtml; }

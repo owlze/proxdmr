@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.626">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.752">
   <script>
     window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
@@ -57,6 +57,12 @@
       path: window.SERVER_APK_PATH
     };
     window.DISABLE_UPDATE_NOTIFICATIONS = {{ 'true' if disable_update_notifications else 'false' }};
+    window.__enableNetworkColors = {{ 'true' if (enable_network_colors is not defined or enable_network_colors) else 'false' }};
+    window.__networkBrandColors = {{ network_brand_colors | tojson if network_brand_colors is defined else '{}' }};
+    if (!window.__enableNetworkColors) {
+      document.documentElement.classList.add("no-net-colors");
+      document.addEventListener("DOMContentLoaded", function() { if (document.body) document.body.classList.add("no-net-colors"); });
+    }
     if (typeof window !== "undefined" && window.AndroidBridge) {
       document.documentElement.classList.add("is-apk-mode");
     }
@@ -143,6 +149,16 @@
       }
       var _savedRadius = (window.currentUserId ? localStorage.getItem(_uKey + "border_radius") : null) || localStorage.getItem("proxdmr_border_radius") || "0";
       document.documentElement.style.setProperty("--app-border-radius", _savedRadius + "px");
+      var _tbKeyTop = (_savedTheme === "light") ? "toolbar_bg_top_light" : "toolbar_bg_top";
+      var _tbKeyBottom = (_savedTheme === "light") ? "toolbar_bg_bottom_light" : "toolbar_bg_bottom";
+      var _tbDefTop = (_savedTheme === "light") ? "#f4f7fb" : "#0037b4";
+      var _tbDefBottom = (_savedTheme === "light") ? "#dbe6f4" : "#001b43";
+      var _rawTbTop = (window.currentUserId ? localStorage.getItem(_uKey + _tbKeyTop) : null) || localStorage.getItem("proxdmr_" + _tbKeyTop) || _tbDefTop;
+      var _rawTbBottom = (window.currentUserId ? localStorage.getItem(_uKey + _tbKeyBottom) : null) || localStorage.getItem("proxdmr_" + _tbKeyBottom) || _tbDefBottom;
+      var _tbTop = /^#[0-9a-fA-F]{6}$/.test(_rawTbTop) ? _rawTbTop : _tbDefTop;
+      var _tbBottom = /^#[0-9a-fA-F]{6}$/.test(_rawTbBottom) ? _rawTbBottom : _tbDefBottom;
+      document.documentElement.style.setProperty("--toolbar-bg-top", _tbTop);
+      document.documentElement.style.setProperty("--toolbar-bg-bottom", _tbBottom);
       function updateVuMeterGrid() {
         var dpr = window.devicePixelRatio || 1;
         var isSmartphone = window.innerWidth <= 768 || (window.matchMedia && window.matchMedia('(pointer: coarse) and (max-width: 960px), (pointer: coarse) and (max-height: 540px)').matches) || Boolean(window.AndroidBridge);
@@ -464,101 +480,128 @@
   </div>
 
   <div class="app-dashboard">
-    <!-- Android Client APK Download Banner (Web Version Only) -->
-    <div id="androidApkBanner" class="android-apk-banner" style="display: none;" role="alert">
-      <div class="apk-banner-inner">
-        <div class="apk-banner-lead">
-          <span class="apk-banner-icon">📱</span>
-          <div class="apk-banner-info">
-            <span class="apk-banner-title" data-i18n="apk.banner_title">Приложение ProxDMR для Android</span>
-            <span class="apk-banner-sub" data-i18n="apk.banner_sub">Фоновый прием, автоподключение VPN и кнопка PTT</span>
+    <div id="hotspotsColumn" class="hotspots-column">
+      <!-- Top Control Toolbar (PROXDMR Logo + 7 Hotspot Slots + Archive Modal Trigger + Theme + Fullscreen/Exit) -->
+      <div id="proxdmrTopToolbar" class="proxdmr-top-toolbar" role="toolbar" aria-label="Панель управления ProxDMR" data-i18n-aria-label="toolbar.aria_label">
+        <div class="toolbar-left-cluster">
+          <div class="brand-logo-wrap" tabindex="0">
+            <img src="/static/img/Logo_light.png?v=2.9.698" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
+            <img src="/static/img/Logo_dark.png?v=2.9.698" alt="ProxDMR" class="brand-logo-img brand-logo-light">
+            <span class="brand-logo-hint" data-i18n="about.logo_hint">Длинный тап — вызов About</span>
           </div>
         </div>
-        <div class="apk-banner-actions">
-          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkBanner" class="btn-apk-download" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" data-i18n="apk.btn_download">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
+
+        <div class="toolbar-middle-cluster" id="toolbarMiddleCluster" role="group" aria-label="Слоты хотспотов и архив" data-i18n-aria-label="toolbar.slots_aria">
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="0" aria-label="Slot 1" data-i18n-aria-label="toolbar.slot_aria_1"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="1" aria-label="Slot 2" data-i18n-aria-label="toolbar.slot_aria_2"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="2" aria-label="Slot 3" data-i18n-aria-label="toolbar.slot_aria_3"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="3" aria-label="Slot 4" data-i18n-aria-label="toolbar.slot_aria_4"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="4" aria-label="Slot 5" data-i18n-aria-label="toolbar.slot_aria_5"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="5" aria-label="Slot 6" data-i18n-aria-label="toolbar.slot_aria_6"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" class="toolbar-hs-slot is-empty" data-slot-index="6" aria-label="Slot 7" data-i18n-aria-label="toolbar.slot_aria_7"><span class="slot-empty-dot" aria-hidden="true"></span></button>
+          <button type="button" id="btnOpenHotspotArchiveModal" class="btn-toolbar-archive" title="Список и архив хотспотов" aria-label="Список и архив хотспотов" data-i18n-title="toolbar.archive_btn_title" data-i18n-aria-label="toolbar.archive_btn_title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="4" rx="1"></rect>
+              <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path>
+              <line x1="10" y1="12" x2="14" y2="12"></line>
             </svg>
-            <span data-i18n="nav.download_apk">Скачать APK</span>
-          </a>
-          <button type="button" id="btnDismissApkBanner" class="btn-apk-close" title="Закрыть" aria-label="Закрыть" data-i18n-title="common.close" data-i18n-aria-label="common.close">✕</button>
+          </button>
+        </div>
+
+        <div class="toolbar-right-cluster" id="toolbarRightCluster">
+          <!-- Day / Night Theme Switcher (Click/tap to toggle) -->
+          <button type="button" id="themeToggleBtn" class="theme-toggle-btn" title="Смена темы: День / Ночь (нажмите для переключения)" aria-label="Смена темы оформления" data-i18n-title="theme.toggle_title" data-i18n-aria-label="theme.toggle_title">
+            <svg class="theme-icon icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="theme-icon icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
+
+          <!-- Fullscreen Toggle Button (Web) / Replaced with Close X in APK mode -->
+          <button type="button" class="fullscreen-toggle-btn" title="Развернуть на весь экран" aria-label="Полный экран" data-i18n-title="vfo.fullscreen_enter_title" data-i18n-aria-label="vfo.fullscreen_enter_title">
+            <svg class="fullscreen-icon enter" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            <svg class="fullscreen-icon exit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+              <path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M10 4v6m0 0H4m6 0L3 3m10 7h6m-6 0V4m0 6l7-7"/>
+            </svg>
+          </button>
         </div>
       </div>
-    </div>
 
-    <div class="radios-grid" id="radiosGrid">
-      <div class="radio-container active-hotspot card-net-bm" id="radioContainer" data-hotspot-id="default" data-network-type="bm">
-        <!-- Top Header -->
-        <header class="radio-header">
-          <!-- Line 1: Stylish Logo, Version, Station Clocks (LOC / UTC) -->
-          <div class="header-brand-row">
-            <!-- Hotspot Collapse / Expand Toggle Button (extreme left) -->
-            <button type="button" class="hotspot-collapse-btn" title="Свернуть / развернуть этот хотспот" aria-label="Свернуть хотспот" data-i18n-title="vfo.hotspot_collapse_title" data-i18n-aria-label="vfo.hotspot_collapse_title">
-              <svg class="collapse-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            </button>
-
-            <div class="brand-title">
-              <div class="brand-logo-wrap" tabindex="0">
-                <img src="/static/img/Logo_light.png?v=2.9.367" alt="ProxDMR" class="brand-logo-img brand-logo-dark">
-                <img src="/static/img/Logo_dark.png?v=2.9.367" alt="ProxDMR" class="brand-logo-img brand-logo-light">
-                <span class="brand-logo-hint" data-i18n="about.logo_hint">Длинный тап — вызов About</span>
-              </div>
-              <span class="brand-version hotspot-name-badge">Main 📻</span>
-              <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
+      <!-- Android Client APK Download Banner (Web Version Only) -->
+      <div id="androidApkBanner" class="android-apk-banner" style="display: none;" role="alert">
+        <div class="apk-banner-inner">
+          <div class="apk-banner-lead">
+            <span class="apk-banner-icon">📱</span>
+            <div class="apk-banner-info">
+              <span class="apk-banner-title" data-i18n="apk.banner_title">Приложение ProxDMR для Android</span>
+              <span class="apk-banner-sub" data-i18n="apk.banner_sub">Фоновый прием, автоподключение VPN и кнопка PTT</span>
             </div>
-
-            <!-- Day / Night Theme Switcher (Click/tap to toggle) -->
-            <button type="button" id="themeToggleBtn" class="theme-toggle-btn" title="Смена темы: День / Ночь (нажмите для переключения)" aria-label="Смена темы оформления" data-i18n-title="theme.toggle_title" data-i18n-aria-label="theme.toggle_title">
-              <svg class="theme-icon icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-              </svg>
-              <svg class="theme-icon icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                <circle cx="12" cy="12" r="5"></circle>
-                <line x1="12" y1="1" x2="12" y2="3"></line>
-                <line x1="12" y1="21" x2="12" y2="23"></line>
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                <line x1="1" y1="12" x2="3" y2="12"></line>
-                <line x1="21" y1="12" x2="23" y2="12"></line>
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-              </svg>
-            </button>
-            <!-- Hotspot Offline Transcribe Button (t) -->
-            <button type="button" id="headerOfflineTranscribeBtn" class="header-transcribe-btn btn-hs-transcribe transcribe-off" data-hotspot-id="default" title="Офлайн-транскрибация записей (Google AI)" aria-label="Офлайн-транскрибация" data-i18n-title="recordings.offline_transcribe_title" data-i18n-aria-label="recordings.offline_transcribe_title" style="display: none;">
-              <span class="transcribe-letter">t</span>
-            </button>
-            <!-- Hotspot Recording Button (R) -->
-            <button type="button" id="headerMasterRecBtn" class="header-rec-btn btn-hs-rec rec-standby" data-hotspot-id="default" title="Автозапись TS1/2: вкл/выкл" aria-label="Автозапись разговора" data-i18n-title="recordings.autorec_title" data-i18n-aria-label="recordings.autorec_title">
-              <span class="rec-letter">R</span>
-            </button>
-            <!-- BM Upload Background Task Indicator -->
-            <div id="headerBmUploadIndicator" class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" data-i18n-title="header.bm_upload_indicator_title" data-i18n-title="header.bm_upload_indicator_title" role="button" tabindex="0">
-              <img src="/static/img/BM_Upload.png?v=2.9.367" alt="BM Upload" class="bm-upload-img">
-              <span id="headerBmUploadPercent" class="bm-upload-percent">0%</span>
-            </div>
-
-            <!-- TTS Voice Upload Background Task Indicator -->
-            <div id="headerTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0">
-              <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
-              <span id="headerTtsUploadPercent" class="tts-upload-percent">0%</span>
-            </div>
-
-            <!-- Fullscreen Toggle Button -->
-            <button type="button" class="fullscreen-toggle-btn" title="Развернуть на весь экран" aria-label="Полный экран" data-i18n-title="vfo.fullscreen_enter_title" data-i18n-aria-label="vfo.fullscreen_enter_title">
-              <svg class="fullscreen-icon enter" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-              </svg>
-              <svg class="fullscreen-icon exit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                <path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M10 4v6m0 0H4m6 0L3 3m10 7h6m-6 0V4m0 6l7-7"/>
-              </svg>
-            </button>
           </div>
-        </header>
+          <div class="apk-banner-actions">
+            <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkBanner" class="btn-apk-download" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" data-i18n="apk.btn_download">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span data-i18n="nav.download_apk">Скачать APK</span>
+            </a>
+            <button type="button" id="btnDismissApkBanner" class="btn-apk-close" title="Закрыть" aria-label="Закрыть" data-i18n-title="common.close" data-i18n-aria-label="common.close">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="radios-grid" id="radiosGrid">
+        <div class="radio-container active-hotspot card-net-bm" id="radioContainer" data-hotspot-id="default" data-network-type="bm">
+          <!-- Top Header -->
+          <header class="radio-header">
+            <!-- Line 1: Collapse Chevron, Hotspot Name, Network Badge, Process Indicators -->
+            <div class="header-brand-row">
+              <!-- Hotspot Collapse / Expand Toggle Button (extreme left) -->
+              <button type="button" class="hotspot-collapse-btn" title="Свернуть / развернуть этот хотспот" aria-label="Свернуть хотспот" data-i18n-title="vfo.hotspot_collapse_title" data-i18n-aria-label="vfo.hotspot_collapse_title">
+                <svg class="collapse-icon" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
+
+              <div class="brand-title">
+                <span class="brand-version hotspot-name-badge">Main 📻</span>
+                <span class="hotspot-network-badge net-type-bm" data-network-type="bm" role="button" tabindex="0" title="Сеть: BrandMeister (клик — настройки хотспота)" data-i18n-title="hotspots.net_badge_title"><span class="net-badge-icon" aria-hidden="true"></span><span class="net-badge-label">BM</span></span>
+              </div>
+
+              <!-- Hotspot Offline Transcribe Button (t) -->
+              <button type="button" id="headerOfflineTranscribeBtn" class="header-transcribe-btn btn-hs-transcribe transcribe-off" data-hotspot-id="default" title="Офлайн-транскрибация записей (Google AI)" aria-label="Офлайн-транскрибация" data-i18n-title="recordings.offline_transcribe_title" data-i18n-aria-label="recordings.offline_transcribe_title" style="display: none;">
+                <span class="transcribe-letter">t</span>
+              </button>
+              <!-- Hotspot Recording Button (R) -->
+              <button type="button" id="headerMasterRecBtn" class="header-rec-btn btn-hs-rec rec-standby" data-hotspot-id="default" title="Автозапись TS1/2: вкл/выкл" aria-label="Автозапись разговора" data-i18n-title="recordings.autorec_title" data-i18n-aria-label="recordings.autorec_title">
+                <span class="rec-letter">R</span>
+              </button>
+              <!-- BM Upload Background Task Indicator -->
+              <div id="headerBmUploadIndicator" class="header-bm-upload-indicator" style="display: none;" title="Операция TalkGroups в BrandMeister (нажмите для подробностей)" data-i18n-title="header.bm_upload_indicator_title" role="button" tabindex="0">
+                <img src="/static/img/BM_Upload.png?v=2.9.367" alt="BM Upload" class="bm-upload-img">
+                <span id="headerBmUploadPercent" class="bm-upload-percent">0%</span>
+              </div>
+
+              <!-- TTS Voice Upload Background Task Indicator -->
+              <div id="headerTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0">
+                <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
+                <span id="headerTtsUploadPercent" class="tts-upload-percent">0%</span>
+              </div>
+            </div>
+          </header>
 
         <!-- BM Server Info Banner: Flag + Short Name + SVG Ping Sparkline + Ping Value -->
         <div id="bmInfoBanner" class="bm-info-banner" title="Сервер BM и график пинга" data-i18n-title="bm.banner_title">
@@ -617,6 +660,7 @@
                 </div>
               </div>
               <div class="screen-clock-item screen-clock-utc" title="Время по Гринвичу (UTC)" data-i18n-title="clocks.utc_title"><span class="clock-label">UTC:</span> <span id="utcTimeDisplay" class="clock-val utc-time-display">--:--</span></div>
+              <div class="asl-proc-clock-banner" aria-live="polite" aria-hidden="true"><span class="asl-proc-clock-text"></span></div>
             </div>
 
             <div class="screen-top-bar">
@@ -634,7 +678,7 @@
               <button type="button" id="btnPanTs1" class="vfo-pan-btn btn-pan-ts1 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
               <span id="vfoTs1LangBadge" class="vfo-lang-badge" role="button" tabindex="0" title="Транскрибатор TS1: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts1_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
               <span id="vfoTs1TtsBadge" class="vfo-tts-badge" role="button" tabindex="0" title="Озвучка речи TS1: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts1_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-              <button type="button" id="btnMuteTs1" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+              <button type="button" id="btnMuteTs1" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap" data-icon-state="active"><svg class="vfo-mute-svg vfo-mute-svg-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.9"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
               <!-- AI Pipeline Stage Indicators -->
               <div class="vfo-pipeline-stage">
                 <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
@@ -667,6 +711,7 @@
                 <div class="vfo-caller-row">
                   <span id="vfoTs1CallerFlag" class="vfo-flag ts-caller-flag"><span class="flag-badge flag-global" title="Global"><svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span></span>
                   <span id="vfoTs1CallerCall" class="vfo-caller-call ts-caller-call" data-i18n="vfo.standby">Ожидание вызова...</span>
+                  <button type="button" id="btnTs1CallerMap" class="btn-caller-map" style="display: none;" title="Show caller coordinates on map" aria-label="Map" data-i18n-title="vfo.caller_map_title" data-i18n-aria-label="vfo.caller_map_aria">📍</button>
                 </div>
                 <div class="vfo-caller-subrow">
                   <span id="vfoTs1CallerId" class="vfo-caller-id ts-caller-id"></span>
@@ -688,7 +733,7 @@
               <button type="button" id="btnPanTs2" class="vfo-pan-btn btn-pan-ts2 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
               <span id="vfoTs2LangBadge" class="vfo-lang-badge" role="button" tabindex="0" title="Транскрибатор TS2: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts2_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
               <span id="vfoTs2TtsBadge" class="vfo-tts-badge" role="button" tabindex="0" title="Озвучка речи TS2: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts2_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-              <button type="button" id="btnMuteTs2" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+              <button type="button" id="btnMuteTs2" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap" data-icon-state="active"><svg class="vfo-mute-svg vfo-mute-svg-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.9"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
               <!-- AI Pipeline Stage Indicators -->
               <div class="vfo-pipeline-stage">
                 <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
@@ -721,6 +766,7 @@
                 <div class="vfo-caller-row">
                   <span id="vfoTs2CallerFlag" class="vfo-flag ts-caller-flag"></span>
                   <span id="vfoTs2CallerName" class="vfo-caller-call ts-caller-call" data-i18n="vfo.standby">Ожидание вызова...</span>
+                  <button type="button" id="btnTs2CallerMap" class="btn-caller-map" style="display: none;" title="Show caller coordinates on map" aria-label="Map" data-i18n-title="vfo.caller_map_title" data-i18n-aria-label="vfo.caller_map_aria">📍</button>
                 </div>
                 <div class="vfo-caller-subrow">
                   <span id="vfoTs2CallerId" class="vfo-caller-id ts-caller-id"></span>
@@ -742,9 +788,9 @@
                 <!-- Line 1: Status badges on left, Mic loop & AGC on right -->
                 <div class="status-badges-row">
                   <div class="status-badges-group">
-                    <div id="gwStatusRow" class="status-badge-item status-interactive gw-status-row" role="button" tabindex="0" title="Шлюз ProxDMR: нажмите для подключения / отключения" data-i18n-title="status.gw_title" data-i18n-title="status.gw_title">
+                    <div id="gwStatusRow" class="status-badge-item status-interactive gw-status-row" role="button" tabindex="0" title="ProxDMR Gateway: click to connect / disconnect" data-i18n-title="status.gw_title">
                       <span id="gwStatusBadge" class="status-badge bm-badge bm-online gw-status-badge">GW:ONLINE</span>
-                      <span id="gwDetailText" class="status-comment gw-detail-text" style="display: none;">localhost:8266 (WSS активен)</span>
+                      <span id="gwDetailText" class="status-comment gw-detail-text" style="display: none;" data-i18n="status.gw_wss_active_default">localhost:8266 (WSS active)</span>
                     </div>
 
                     <div id="bmStatusToggleBtn" class="status-badge-item status-interactive bm-status-toggle" role="button" tabindex="0" title="BM: нажмите для подключения / отключения" data-i18n-title="status.bm_title">
@@ -760,6 +806,16 @@
 
                   <!-- Right side: TS Audio Mode (Solo/Auto) -->
                   <div class="status-toggles-group">
+                    <button type="button" class="btn-adn-dice" style="display: none;" title="Случайная активная TG ADN (клик — старт/стоп, удержание/ПКМ — настройки)" data-i18n-title="adn.dice_btn_title" aria-label="Случайная активная TG ADN" data-i18n-aria-label="adn.dice_btn_title">
+                      <svg class="asl-dice-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect class="dice-border" x="3" y="3" width="18" height="18" rx="3.5" fill="currentColor" fill-opacity="0.14"/>
+                        <circle class="dice-dot dot-1" cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+                        <circle class="dice-dot dot-2" cx="16" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+                        <circle class="dice-dot dot-3" cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+                        <circle class="dice-dot dot-4" cx="8" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+                        <circle class="dice-dot dot-5" cx="16" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+                      </svg>
+                    </button>
                     <div id="tsAudioModeToggleBtn" class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима" data-i18n-title="ts_mode.solo_title">
                       <span id="tsAudioModeBadge" class="status-badge bm-badge ts-audio-mode-badge ts-mode-solo">TS1/2 Solo</span>
                     </div>
@@ -874,6 +930,9 @@
               <button type="button" class="btn-ptt-side-half btn-asl-nodes-dir" style="display: none;" title="Справочник узлов AllStarLink" data-i18n-title="buttons.asl_directory_title">
                 <strong data-i18n="buttons.asl_directory">Справочник</strong>
               </button>
+              <button type="button" class="btn-ptt-side-half btn-ysf-rooms-dir" style="display: none;" title="Справочник комнат YSF (1600+ рефлекторов)" data-i18n-title="buttons.ysf_directory_title">
+                <strong data-i18n="buttons.ysf_directory">Каталог YSF</strong>
+              </button>
               <div class="quick-tg-box" title="Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)" data-i18n-title="ptt.quick_tg_box_title">
                 <input type="text" class="quick-tg-input" placeholder="TG #" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
                 <button type="button" class="btn-quick-tg-apply" title="Установить TalkGroup для передачи" data-i18n-title="ptt.quick_tg_apply_title">TX ⏎</button>
@@ -914,6 +973,18 @@
               </button>
             </div>
           </div>
+
+          <!-- YSF DG-ID Selector Bar (compact, inline, visible only on .card-net-ysf) -->
+          <div class="ysf-dgid-bar" style="display: none;">
+            <span class="ysf-dgid-hub-tag" title="DG-ID channel mode (YSFO)" data-i18n-title="ysf.dgid_mode_single_title">DG-ID</span>
+            <span class="ysf-rx-dgid-live" style="display: none;" title="DG-ID of current receiving station" data-i18n-title="ysf.dgid_live_rx_title"></span>
+            <div class="ysf-dgid-rx-wrap">
+              <input type="text" class="ysf-dgid-rx-input" placeholder="00 / 01;90;" maxlength="36" autocomplete="off" spellcheck="false" title="RX DG-ID subscription (YSFO): 00 (ALL), 90; or up to 12 IDs separated by ;" data-i18n-title="ysf.dgid_rx_input_title">
+              <button type="button" class="btn-ysf-dgid-presets" title="DG-ID presets (12 popular / 00 ALL / channels)" data-i18n-title="ysf.dgid_presets_btn_title">▾</button>
+              <button type="button" class="btn-ysf-dgid-apply" title="Apply DG-ID subscription (YSFO without reconnect)" data-i18n-title="ysf.dgid_apply_btn_title">✓</button>
+            </div>
+            <button type="button" class="btn-ysf-tx-dgid" title="Select or clear TX DG-ID" data-i18n-title="ysf.dgid_tx_btn_title">TX: <span class="ysf-tx-dgid-val">00</span></button>
+          </div>
         </div>
 
         <!-- Quick Memory Buttons Bar (M1 - M5) -->
@@ -942,6 +1013,14 @@
       </div>
     </div>
 
+      <!-- Shown only when all hotspots are archived (hidden: true) -->
+      <div id="archivedWorkspaceEmptyHint" class="archived-empty-workspace-card" style="display: none;">
+        <div class="archived-empty-title" data-i18n="archive.empty_workspace_title">Все хотспоты в архиве</div>
+        <div class="archived-empty-desc" data-i18n="archive.empty_workspace_desc">Откройте список архива, чтобы вернуть нужные хотспоты на панель управления или создать новый.</div>
+        <button type="button" id="btnEmptyArchiveOpen" class="btn-primary archived-empty-open-btn" data-i18n="archive.open_modal_btn">📦 Открыть архив хотспотов</button>
+      </div>
+    </div><!-- /#hotspotsColumn -->
+
   <!-- Right Column: BM Live Activity Monitor (Integrated Realtime Dashboard) -->
   <section id="liveMonitorPanel" class="live-monitor-container hidden">
     <div class="live-monitor-header">
@@ -959,7 +1038,7 @@
       <div class="live-monitor-actions">
         <!-- 1. Audio Recordings Archive & Player Button -->
         <button type="button" id="openRecordingsBtn" class="log-recordings-btn" title="Архив записей и аудиоплеер" aria-label="Архив записей" data-i18n-title="recordings.open_btn_title" data-i18n-aria-label="recordings.open_btn_title">
-          <img src="/static/img/Player_Off.png?v=2.9.367" alt="Архив записей" class="btn-icon-img cassette-btn-img player-btn-img">
+          <img src="/static/img/Player_Off.png?v=2.9.367" alt="Recordings archive" data-i18n-alt="recordings.archive_alt" class="btn-icon-img cassette-btn-img player-btn-img">
         </button>
         <!-- 2. TS Filter Cycle Button (1+2 -> TS1 -> TS2) -->
         <button type="button" id="logFilterTsCycleBtn" class="log-filter-ts-cycle-btn" title="Фильтр TS: оба TS (клик: переключить на TS1)" aria-label="Фильтр таймслотов" data-i18n-title="log.filter_ts_both_title" data-i18n-aria-label="log.filter_ts_aria">
@@ -1027,6 +1106,10 @@
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
             </button>
+            <button type="button" id="recTxToggleBtn" class="rec-tool-btn rec-tx-toggle-btn" title="Режим передачи записи в эфир (TX: макс. 1 трек / 60 сек)" aria-label="TX Mode" data-i18n-title="player.tx_toggle_title">
+              <span class="rec-tx-dot"></span>
+              <span class="rec-tx-label">TX</span>
+            </button>
             <button type="button" id="recOfflineTranscribeBtn" class="rec-tool-btn rec-transcribe-btn" title="Офлайн-транскрибация записей (Google AI)" aria-label="Транскрибация" data-i18n-title="recordings.offline_transcribe_title" data-i18n-aria-label="recordings.offline_transcribe_title">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -1037,23 +1120,29 @@
             <button type="button" id="recSoloBtn" class="rec-tool-btn rec-solo-btn active" title="Режим Solo: во время воспроизведения эфир DMR приглушается" aria-label="Solo" data-i18n-title="log.solo_mode_title">
               <span class="rec-solo-text">S</span>
             </button>
-            <button type="button" id="recTtsBtn" class="rec-tool-btn rec-tts-btn" title="Озвучить перевод записи синтезатором речи (удержание: настройки)" aria-label="TTS Translate" data-i18n-title="recordings.tts_play_title">
+            <button type="button" id="recTtsBtn" class="rec-tool-btn rec-tts-btn" title="Speak recording translation with speech synthesizer (hold: settings)" aria-label="TTS Translate" data-i18n-title="recordings.tts_play_title_default">
               <span class="rec-tts-spk">🔊</span>
               <span class="rec-tts-lang">RUS</span>
             </button>
+            <div class="rec-tx-target-wrap">
+              <button type="button" id="recTxTargetBtn" class="rec-tool-btn rec-tx-target-btn" title="Выбрать целевой хотспот и тайм-слот для передачи записи" aria-label="TX Target" data-i18n-title="player.tx_target_title">
+                <span id="recTxTargetLabel">#1•TS2</span>
+                <span class="rec-tx-caret">▾</span>
+              </button>
+              <div id="recTxTargetMenu" class="rec-tx-target-menu" style="display: none;">
+                <div class="rec-tx-menu-title" data-i18n="player.tx_menu_title">Куда передать запись:</div>
+                <div id="recTxHotspotList" class="rec-tx-hs-list"></div>
+                <div id="recTxSlotRow" class="rec-tx-slot-row">
+                  <button type="button" class="rec-tx-slot-btn" data-slot="1">TS1</button>
+                  <button type="button" class="rec-tx-slot-btn active" data-slot="2">TS2</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Right Column: Transport Buttons + Quota Bar -->
           <div class="rec-player-col">
             <div class="rec-transport-group">
-            <!-- -10s -->
-            <button type="button" id="recSkipBackBtn" class="rec-ctrl-btn btn-back10" title="Назад на 10 секунд" data-i18n-title="log.skip_back_10">
-              <svg viewBox="0 0 100 100">
-                <circle class="player-btn-circle" cx="50" cy="50" r="50"/>
-                <text class="player-btn-icon" x="48" y="54" text-anchor="middle" dominant-baseline="middle" style="fill:#FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 800; font-size: 36px; letter-spacing: -2px;">-10s</text>
-              </svg>
-            </button>
-
             <!-- Previous -->
             <button type="button" id="recPrevTrackBtn" class="rec-ctrl-btn btn-prev" title="Предыдущая запись в истории" data-i18n-title="log.prev_track">
               <svg viewBox="398.723 53.367 172 172">
@@ -1092,22 +1181,21 @@
                 <path class="player-btn-icon" d="M832.056,174.092L832.056,174.092c-3.945,0-7.143-3.198-7.143-7.143v-55.163 c0-3.945,3.198-7.143,7.143-7.143l0,0c3.945,0,7.143,3.198,7.143,7.143v55.163C839.199,170.894,836.001,174.092,832.056,174.092z"/>
               </svg>
             </button>
-
-            <!-- +10s -->
-            <button type="button" id="recSkipFwdBtn" class="rec-ctrl-btn btn-fwd10" title="Вперед на 10 секунд" data-i18n-title="log.skip_fwd_10">
-              <svg viewBox="0 0 100 100">
-                <circle class="player-btn-circle" cx="50" cy="50" r="50"/>
-                <text class="player-btn-icon" x="51" y="54" text-anchor="middle" dominant-baseline="middle" style="fill:#FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 800; font-size: 36px; letter-spacing: -2px;">+10s</text>
-              </svg>
-            </button>
             </div> <!-- End rec-transport-group -->
             
             <!-- Quota Bar directly under buttons -->
-            <div class="rec-quota-info">
-              <div class="rec-quota-bar" id="recQuotaBar" title="Использование дисковой квоты записей" data-i18n-title="log.quota_bar_title">
-                <span id="recordingsQuotaBadge" class="rec-quota-text">-- MB / -- MB</span>
+            <div class="rec-quota-info" style="position: relative;">
+              <div class="rec-quota-bar" id="recQuotaBar" title="Занятое место (удержание: очистить аудиозаписи)" data-i18n-title="log.quota_bar_title">
+                <span id="recordingsQuotaBadge" class="rec-quota-text">0 MB (0%)</span>
                 <div class="rec-quota-fill" id="recQuotaFill" style="width: 0%;">
-                  <span id="recordingsQuotaBadgeFilled" class="rec-quota-text rec-quota-text-filled">-- MB / -- MB</span>
+                  <span id="recordingsQuotaBadgeFilled" class="rec-quota-text rec-quota-text-filled">0 MB (0%)</span>
+                </div>
+              </div>
+              <div id="recQuotaClearMenu" class="rec-quota-clear-menu" style="display: none;">
+                <div class="rec-quota-clear-text" data-i18n="player.quota_clear_prompt">Удалить все аудиозаписи? (Лог вызовов и тексты транскрибации сохранятся)</div>
+                <div class="rec-quota-clear-actions">
+                  <button type="button" id="btnConfirmQuotaClear" class="rec-quota-clear-confirm" data-i18n="player.btn_delete_audio">Удалить аудио</button>
+                  <button type="button" id="btnCancelQuotaClear" class="rec-quota-clear-cancel" data-i18n="buttons.cancel">Отмена</button>
                 </div>
               </div>
             </div>
@@ -1227,7 +1315,7 @@
         <div class="header-brand-row">
           <!-- Hotspot Collapse / Expand Toggle Button (extreme left) -->
           <button type="button" class="hotspot-collapse-btn" title="Свернуть / развернуть этот хотспот" aria-label="Свернуть хотспот" data-i18n-title="vfo.hotspot_collapse_title" data-i18n-aria-label="vfo.hotspot_collapse_title">
-            <svg class="collapse-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="collapse-icon" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
           </button>
@@ -1258,16 +1346,6 @@
             <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
             <span class="tts-upload-percent">0%</span>
           </div>
-
-            <!-- Fullscreen Toggle Button -->
-            <button type="button" class="fullscreen-toggle-btn" title="Развернуть на весь экран" aria-label="Полный экран" data-i18n-title="vfo.fullscreen_enter_title" data-i18n-aria-label="vfo.fullscreen_enter_title">
-              <svg class="fullscreen-icon enter" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-              </svg>
-              <svg class="fullscreen-icon exit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                <path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M10 4v6m0 0H4m6 0L3 3m10 7h6m-6 0V4m0 6l7-7"/>
-              </svg>
-            </button>
         </div>
       </header>
 
@@ -1326,6 +1404,7 @@
               </div>
             </div>
             <div class="screen-clock-item screen-clock-utc" title="Время по Гринвичу (UTC)" data-i18n-title="clocks.utc_title"><span class="clock-label">UTC:</span> <span class="clock-val utc-time-display">--:--</span></div>
+            <div class="asl-proc-clock-banner" aria-live="polite" aria-hidden="true"><span class="asl-proc-clock-text"></span></div>
           </div>
 
           <div class="screen-top-bar">
@@ -1340,7 +1419,7 @@
             <button type="button" class="vfo-pan-btn btn-pan-ts1 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
             <span class="vfo-lang-badge vfo-hs-lang-ts1" role="button" tabindex="0" title="Транскрибатор TS1: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts1_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
             <span class="vfo-tts-badge vfo-hs-tts-ts1" role="button" tabindex="0" title="Озвучка речи TS1: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts1_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-            <button type="button" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+            <button type="button" class="vfo-mute-btn btn-mute-ts1" title="TS1 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts1_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap" data-icon-state="active"><svg class="vfo-mute-svg vfo-mute-svg-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.9"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
               <!-- AI Pipeline Stage Indicators -->
               <div class="vfo-pipeline-stage">
                 <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
@@ -1393,7 +1472,7 @@
             <button type="button" class="vfo-pan-btn btn-pan-ts2 pan-state-lr" title="Стерео: L+R (оба канала)" data-pan="LR" data-i18n-title="vfo.pan_title_lr"><span class="pan-l">L</span><span class="pan-sep">+</span><span class="pan-r">R</span></button>
             <span class="vfo-lang-badge vfo-hs-lang-ts2" role="button" tabindex="0" title="Транскрибатор TS2: клик — вкл/выкл, удержание — параметры" data-i18n-title="vfo.transcriber_badge_ts2_title"><span class="lang-icon-mic">🎙️</span><span class="lang-code-text">TXT</span></span>
             <span class="vfo-tts-badge vfo-hs-tts-ts2" role="button" tabindex="0" title="Озвучка речи TS2: клик — вкл/выкл" data-i18n-title="vfo.tts_badge_ts2_title"><span class="tts-icon-spk">🔊</span><span class="tts-lang-code">RUS</span></span>
-            <button type="button" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap">🔊</span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
+            <button type="button" class="vfo-mute-btn btn-mute-ts2" title="TS2 [L+R]: Клик — заглушить, удержание — переключение L / R / L+R" data-pan="LR" data-muted="false" data-i18n-title="vfo.mute_ts2_title"><span class="vfo-pan-tag tag-l active" data-pan-target="L" title="Левый канал (L)" data-i18n-title="vfo.pan_l_hint">L</span><span class="vfo-mute-speaker-wrap" data-icon-state="active"><svg class="vfo-mute-svg vfo-mute-svg-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.9"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></span><span class="vfo-pan-tag tag-r active" data-pan-target="R" title="Правый канал (R)" data-i18n-title="vfo.pan_r_hint">R</span></button>
               <!-- AI Pipeline Stage Indicators -->
               <div class="vfo-pipeline-stage">
                 <div class="vfo-pipeline-icon icon-mic" title="Транскрибация речи (ASR)" data-i18n-title="vfo.pipeline_asr_title">
@@ -1446,9 +1525,9 @@
               <!-- Line 1: Status badges on left, Mic loop & AGC on right -->
               <div class="status-badges-row">
                 <div class="status-badges-group">
-                  <div class="status-badge-item status-interactive gw-status-row" role="button" tabindex="0" title="Шлюз ProxDMR: нажмите для подключения / отключения" data-i18n-title="status.gw_title">
+                  <div class="status-badge-item status-interactive gw-status-row" role="button" tabindex="0" title="ProxDMR Gateway: click to connect / disconnect" data-i18n-title="status.gw_title">
                     <span class="status-badge bm-badge bm-online gw-status-badge">GW:ONLINE</span>
-                    <span class="status-comment gw-detail-text" style="display: none;">localhost:8266 (WSS активен)</span>
+                    <span class="status-comment gw-detail-text" style="display: none;" data-i18n="status.gw_wss_active_default">localhost:8266 (WSS active)</span>
                   </div>
 
                   <div class="status-badge-item status-interactive bm-status-toggle" role="button" tabindex="0" title="BM: нажмите для подключения / отключения" data-i18n-title="status.bm_title">
@@ -1464,6 +1543,16 @@
 
                 <!-- Right side: TS Audio Mode (Solo/Auto) -->
                 <div class="status-toggles-group">
+                  <button type="button" class="btn-adn-dice" style="display: none;" title="Случайная активная TG ADN (клик — старт/стоп, удержание/ПКМ — настройки)" data-i18n-title="adn.dice_btn_title" aria-label="Случайная активная TG ADN" data-i18n-aria-label="adn.dice_btn_title">
+                    <svg class="asl-dice-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect class="dice-border" x="3" y="3" width="18" height="18" rx="3.5" fill="currentColor" fill-opacity="0.14"/>
+                      <circle class="dice-dot dot-1" cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+                      <circle class="dice-dot dot-2" cx="16" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+                      <circle class="dice-dot dot-3" cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+                      <circle class="dice-dot dot-4" cx="8" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+                      <circle class="dice-dot dot-5" cx="16" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+                    </svg>
+                  </button>
                   <div class="status-badge-item status-interactive ts-audio-mode-btn" role="button" tabindex="0" title="Режим: Solo — звучит только один таймслот (TS1 и TS2 взаимно исключают друг друга). Клик для смены режима" data-i18n-title="ts_mode.solo_title">
                     <span class="status-badge bm-badge ts-audio-mode-badge ts-mode-solo">TS1/2 Solo</span>
                   </div>
@@ -1577,6 +1666,9 @@
             <button type="button" class="btn-ptt-side-half btn-asl-nodes-dir" style="display: none;" title="Справочник узлов AllStarLink" data-i18n-title="buttons.asl_directory_title">
                 <strong data-i18n="buttons.asl_directory">Справочник</strong>
             </button>
+            <button type="button" class="btn-ptt-side-half btn-ysf-rooms-dir" style="display: none;" title="Справочник комнат YSF (1600+ рефлекторов)" data-i18n-title="buttons.ysf_directory_title">
+                <strong data-i18n="buttons.ysf_directory">Каталог YSF</strong>
+            </button>
             <div class="quick-tg-box" title="Быстрый набор TG на передачу (введите номер и нажмите Enter или кнопку)" data-i18n-title="ptt.quick_tg_box_title">
               <input type="text" class="quick-tg-input" placeholder="TG #" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
               <button type="button" class="btn-quick-tg-apply" title="Установить TalkGroup для передачи" data-i18n-title="ptt.quick_tg_apply_title">TX ⏎</button>
@@ -1616,6 +1708,18 @@
               <span class="ptt-side-label" data-i18n="buttons.log">История</span>
             </button>
           </div>
+        </div>
+
+        <!-- YSF DG-ID Selector Bar (compact, inline, visible only on .card-net-ysf) -->
+        <div class="ysf-dgid-bar" style="display: none;">
+          <span class="ysf-dgid-hub-tag" title="DG-ID channel mode (YSFO)" data-i18n-title="ysf.dgid_mode_single_title">DG-ID</span>
+          <span class="ysf-rx-dgid-live" style="display: none;" title="DG-ID of current receiving station" data-i18n-title="ysf.dgid_live_rx_title"></span>
+          <div class="ysf-dgid-rx-wrap">
+            <input type="text" class="ysf-dgid-rx-input" placeholder="00 / 01;90;" maxlength="36" autocomplete="off" spellcheck="false" title="RX DG-ID subscription (YSFO): 00 (ALL), 90; or up to 12 IDs separated by ;" data-i18n-title="ysf.dgid_rx_input_title">
+            <button type="button" class="btn-ysf-dgid-presets" title="DG-ID presets (12 popular / 00 ALL / channels)" data-i18n-title="ysf.dgid_presets_btn_title">▾</button>
+            <button type="button" class="btn-ysf-dgid-apply" title="Apply DG-ID subscription (YSFO without reconnect)" data-i18n-title="ysf.dgid_apply_btn_title">✓</button>
+          </div>
+          <button type="button" class="btn-ysf-tx-dgid" title="Select or clear TX DG-ID" data-i18n-title="ysf.dgid_tx_btn_title">TX: <span class="ysf-tx-dgid-val">00</span></button>
         </div>
       </div>
 
@@ -1931,32 +2035,29 @@
       <!-- Tab 2: Hotspot Editor (BM Net) -->
       <div id="tab-edit-hs" class="tab-content">
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label for="editHsSelect" style="font-size: 0.95rem; font-weight: bold; color: #ffffff; margin: 0; display: block;" data-i18n="hs_edit.hotspot_label">Хотспот:</label>
+          <label for="editHsSelect" style="font-size: 0.95rem; font-weight: bold; color: #ffffff; margin: 0; display: block;" data-i18n="hs_edit.hotspot_label">Список хотспотов, добавление нового</label>
           <!-- Hotspots Management Toolbar -->
-          <div class="hs-manager-toolbar" style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px; display: flex; align-items: center; gap: 6px;">
-              <div id="editHsCustomDropdown" class="hs-custom-dropdown" style="flex: 1; min-width: 130px; position: relative;">
-                <select id="editHsSelect" class="form-input" style="display: none;">
-                  <!-- Populated dynamically -->
-                </select>
-                <div id="editHsCustomTrigger" class="hs-custom-dropdown-trigger" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="hs-custom-dropdown-label" id="editHsCustomLabel">...</span>
-                  <span class="hs-custom-dropdown-arrow" aria-hidden="true">▾</span>
-                </div>
-                <div id="editHsCustomMenu" class="hs-custom-dropdown-menu" role="listbox" style="display: none;">
-                  <!-- Populated dynamically -->
-                </div>
+          <div class="hs-manager-toolbar" style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); flex-wrap: nowrap; width: 100%; box-sizing: border-box;">
+            <button type="button" id="btnAddNewHotspot" class="btn-secondary btn-add-new-hs" style="flex: 0 0 auto; width: auto !important; font-size: 0.82rem; font-weight: 600; padding: 6px 10px; white-space: nowrap; cursor: pointer; border-radius: var(--app-border-radius, 0px); display: inline-flex; align-items: center; transition: all 0.2s;" title="Добавить новый хотспот" data-i18n-title="hotspots.btn_add_title" data-i18n="hotspots.new_opt_btn">
+              Новый хотспот
+            </button>
+            <div id="editHsCustomDropdown" class="hs-custom-dropdown" style="flex: 1 1 0%; min-width: 0; width: auto; max-width: 100%; position: relative;">
+              <select id="editHsSelect" class="form-input" style="display: none;">
+                <!-- Populated dynamically -->
+              </select>
+              <div id="editHsCustomTrigger" class="hs-custom-dropdown-trigger" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false">
+                <span class="hs-custom-dropdown-label" id="editHsCustomLabel">...</span>
+                <span class="hs-custom-dropdown-arrow" aria-hidden="true">▾</span>
               </div>
-              <button type="button" id="btnOpenHsOrderModal" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 11px; cursor: pointer; border-radius: var(--app-border-radius, 0px); white-space: nowrap; flex-shrink: 0;" title="Менеджер последовательности хотспотов" data-i18n-title="hotspots.order_manager_title" data-i18n="hotspots.order_btn">⇅ Порядок</button>
+              <div id="editHsCustomMenu" class="hs-custom-dropdown-menu" role="listbox" style="display: none;">
+                <!-- Populated dynamically -->
+              </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-              <button type="button" id="btnAddNewHotspot" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 12px; color: #4884FF; border-color: rgba(72, 132, 255, 0.4); background: rgba(72, 132, 255, 0.1); font-weight: 600; cursor: pointer; transition: all 0.2s;" title="Добавить новый хотспот" data-i18n-title="hotspots.btn_add_title" data-i18n="buttons.add">
-                Добавить
-              </button>
-              <button type="button" id="btnDeleteCurrentHotspot" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 12px; color: #FFD231; border-color: rgba(255, 210, 49, 0.4); background: rgba(255, 210, 49, 0.1); font-weight: 600; cursor: pointer; transition: all 0.2s;" title="Удалить выбранный хотспот" data-i18n-title="hotspots.btn_del_title" data-i18n="buttons.delete">
+            <div class="hs-toolbar-actions-right" style="display: flex; align-items: center; gap: 6px; flex: 0 0 auto;">
+              <button type="button" id="btnDeleteCurrentHotspot" class="btn-secondary" style="flex: 0 0 auto; font-size: 0.82rem; padding: 6px 10px; color: #FFD231; border-color: rgba(255, 210, 49, 0.4); background: rgba(255, 210, 49, 0.1); font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap;" title="Удалить выбранный хотспот" data-i18n-title="hotspots.btn_del_title" data-i18n="buttons.delete">
                 Удалить
               </button>
-              <button type="button" id="btnToggleHsConnection" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 14px; font-weight: 600; white-space: nowrap; cursor: pointer; color: #f85149; border-color: rgba(248, 81, 73, 0.4); background: rgba(248, 81, 73, 0.08); transition: all 0.2s;" title="Подключить к BrandMeister" data-i18n-title="hotspots.connect_bm_title">
+              <button type="button" id="btnToggleHsConnection" class="btn-secondary" style="flex: 0 0 auto; font-size: 0.82rem; padding: 6px 12px; font-weight: 600; white-space: nowrap; cursor: pointer; color: #f85149; border-color: rgba(248, 81, 73, 0.4); background: rgba(248, 81, 73, 0.08); transition: all 0.2s;" title="Подключить к BrandMeister" data-i18n-title="hotspots.connect_bm_title">
                 Connect
               </button>
             </div>
@@ -1973,7 +2074,9 @@
             <select id="editHsNetworkType" class="form-input" style="cursor: pointer; font-weight: 600;">
               <option value="bm" data-i18n="hs_edit.net_bm">🟠 BrandMeister (BM) — глобальная сеть + API v2</option>
               <option value="tgif" data-i18n="hs_edit.net_tgif">🩵 TGIF Network — 30 000+ тематических TalkGroups</option>
-              <option value="freedmr" data-i18n="hs_edit.net_freedmr">🟢 FreeDMR / ADN Systems — открытая сеть (RPTO)</option>
+              <option value="freedmr" data-i18n="hs_edit.net_freedmr">🟢 FreeDMR — открытая сеть (RPTO)</option>
+              <option value="adn" data-i18n="hs_edit.net_adn">🌐 ADN Systems — открытая сеть DMR (RPTO)</option>
+              <option value="ysf" data-i18n="hs_edit.net_ysf">🔴 Yaesu System Fusion (YSF / C4FM) — рефлекторы и комнаты</option>
               <option value="dmrplus" data-i18n="hs_edit.net_dmrplus">🟣 DMR+ / IPSC2 — рефлекторы и региональные TG (RPTO)</option>
               <option value="xlx" data-i18n="hs_edit.net_xlx">🟡 XLX Reflector — мультипротокольные модули A–Z</option>
               <option value="allstar" data-i18n="hs_edit.net_allstar">🔵 AllStarLink (ASL / IAX2) — аналоговые репитеры и хабы</option>
@@ -1991,14 +2094,23 @@
           <div class="form-group-row">
             <div class="form-group" style="flex: 1;">
               <label for="editHsName" data-i18n="hs_edit.name">Название профиля</label>
-              <input type="text" id="editHsName" class="form-input" required value="{{ cfg.name if cfg else 'Основной' }}" placeholder="Например: Hotspot 1" data-i18n-placeholder="hs_edit.name_placeholder">
+              <input type="text" id="editHsName" class="form-input" value="{{ cfg.name if cfg else 'Основной' }}" placeholder="Например: Hotspot 1" data-i18n-placeholder="hs_edit.name_placeholder">
             </div>
             <div class="form-group" id="editHsTalkerAliasGroup" style="flex: 1;">
-              <label for="editHsSendTalkerAlias" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+              <label for="editHsSendTalkerAlias" id="editHsTalkerAliasLabel" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                 <input type="checkbox" id="editHsSendTalkerAlias" style="cursor: pointer; width: 14px; height: 14px; accent-color: #58a6ff; margin: 0;" {% if not cfg or cfg.send_talker_alias is not defined or cfg.send_talker_alias %}checked{% endif %}>
-                <span data-i18n="hs_edit.talker_alias">Передавать Talker Alias</span>
+                <span id="editHsTalkerAliasText" data-i18n="hs_edit.talker_alias">Передавать Talker Alias</span>
               </label>
               <input type="text" id="editHsTalkerAlias" class="form-input" maxlength="27" value="{{ cfg.talker_alias if cfg else '' }}" placeholder="например: CALLSIGN Name" data-i18n-placeholder="hs_edit.talker_alias_placeholder">
+            </div>
+          </div>
+          <div class="form-group-row" id="editHsLocationRow" style="display: none;">
+            <div class="form-group" id="editHsLocatorGroup" style="flex: 1;">
+              <label for="editHsLocator" id="editHsLocatorLabel" data-i18n="hs_edit.qth_locator">QTH-локатор (Maidenhead Grid)</label>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="text" id="editHsLocator" class="form-input" maxlength="6" style="text-transform: uppercase;" value="{{ cfg.qth_locator if cfg else '' }}" placeholder="KO85TS" data-i18n-placeholder="hs_edit.locator_placeholder" title="6-character station QTH grid square" data-i18n-title="hs_edit.locator_title">
+                <button type="button" id="btnGetGpsLocation" class="btn-secondary btn-sm btn-gps-location" style="white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; font-size: 0.76rem;" title="Detect via device GPS" data-i18n-title="hs_edit.btn_gps_title">📍 <span data-i18n="hs_edit.btn_gps">GPS</span></button>
+              </div>
             </div>
           </div>
           <div class="form-group-row" id="editHsDmrIdentifiersRow">
@@ -2017,16 +2129,22 @@
           </div>
           <div class="form-group" id="editHsPasswordGroup">
             <label for="editHsPassword" id="editHsPasswordLabel" data-i18n="hs_edit.password">Пароль хотспота (BM SelfCare)</label>
-            <div style="position: relative; display: flex; align-items: center; width: 100%;">
-              <input type="password" id="editHsPassword" class="form-input" style="width: 100%; box-sizing: border-box; padding-right: 42px;" value="{{ cfg.bm_password if cfg else '' }}" placeholder="Пароль безопасности хотспота" data-i18n-placeholder="hs_edit.password_placeholder">
-              <button type="button" id="btnToggleHsPassword" style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); padding: 4px;" title="Показать/скрыть пароль" data-i18n-title="hs_edit.password_toggle_title">👁️</button>
+            <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+              <div style="position: relative; flex: 1; display: flex; align-items: center;">
+                <input type="password" id="editHsPassword" class="form-input" style="width: 100%; box-sizing: border-box; padding-right: 42px;" value="{{ cfg.bm_password if cfg else '' }}" placeholder="Пароль безопасности хотспота" data-i18n-placeholder="hs_edit.password_placeholder">
+                <button type="button" id="btnToggleHsPassword" style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); padding: 4px;" title="Показать/скрыть пароль" data-i18n-title="hs_edit.password_toggle_title">👁️</button>
+              </div>
+              <button type="button" id="btnTestHsPassword" class="btn-test-credential" title="Проверить соединение с сервером по паролю" data-i18n-title="hs_edit.btn_test_pwd_title" data-i18n="hs_edit.btn_test">Test</button>
             </div>
           </div>
           <div class="form-group" id="editHsApiKeyGroup">
             <label for="editHsApiKey" id="editHsApiKeyLabel" data-i18n="hs_edit.api_key">BM API Key (v2)</label>
-            <div style="position: relative; display: flex; align-items: center; width: 100%;">
-              <input type="password" id="editHsApiKey" class="form-input" style="width: 100%; box-sizing: border-box; padding-right: 42px;" value="{{ cfg.bm_api_key if cfg else '' }}" placeholder="Вставьте JWT-токен из профиля BM..." data-i18n-placeholder="hs_edit.api_key_placeholder">
-              <button type="button" id="btnToggleHsApiKey" style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); padding: 4px;" title="Показать/скрыть API-ключ" data-i18n-title="hs_edit.api_key_toggle_title">👁️</button>
+            <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+              <div style="position: relative; flex: 1; display: flex; align-items: center;">
+                <input type="password" id="editHsApiKey" class="form-input" style="width: 100%; box-sizing: border-box; padding-right: 42px;" value="{{ cfg.bm_api_key if cfg else '' }}" placeholder="Вставьте JWT-токен из профиля BM..." data-i18n-placeholder="hs_edit.api_key_placeholder">
+                <button type="button" id="btnToggleHsApiKey" style="position: absolute; right: 8px; background: transparent; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); padding: 4px;" title="Показать/скрыть API-ключ" data-i18n-title="hs_edit.api_key_toggle_title">👁️</button>
+              </div>
+              <button type="button" id="btnTestHsApiKey" class="btn-test-credential" title="Проверить валидность API-ключа на сервере" data-i18n-title="hs_edit.btn_test_api_title" data-i18n="hs_edit.btn_test">Test</button>
             </div>
             <div class="form-hint-row">
               <small class="form-hint" id="editHsApiKeyHint" data-i18n="hs_edit.api_key_hint">Необходим для удаленного управления TalkGroups и сброса динамических групп на стороне BM</small>
@@ -2092,7 +2210,8 @@
           <div class="form-group" id="editHsRptoGroup" style="display: none;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
               <label for="editHsRptoOptions" id="editHsRptoLabel" data-i18n="hs_edit.rpto_label" style="margin-bottom: 0;">Опции HomeBrew (RPTO) — статические TG и рефлекторы</label>
-              <button type="button" onclick="const h = document.getElementById('freedmrHelpBox'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="background:none; border:none; color:#34d399; font-size:0.75rem; cursor:pointer; text-decoration:underline; padding:0;" data-i18n="freedmr_help_toggle">❓ Инструкция FreeDMR</button>
+              <button type="button" id="btnFreedmrHelpToggle" onclick="const h = document.getElementById('freedmrHelpBox'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="background:none; border:none; color:#34d399; font-size:0.75rem; cursor:pointer; text-decoration:underline; padding:0;" data-i18n="freedmr_help_toggle">❓ Инструкция FreeDMR</button>
+              <button type="button" id="btnAdnHelpToggle" onclick="const h = document.getElementById('adnHelpBox'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="display:none; background:none; border:none; color:#00b4d8; font-size:0.75rem; cursor:pointer; text-decoration:underline; padding:0;" data-i18n="adn_help_toggle">❓ Инструкция ADN</button>
             </div>
             <div style="display: flex; gap: 6px; align-items: center;">
               <input type="text" id="editHsRptoOptions" class="form-input" maxlength="255" style="flex: 1;" value="{{ cfg.rpto_options if cfg and cfg.rpto_options is defined else '' }}" placeholder="TS1=2501;TS2=250,2505;DIAL=0;" data-i18n-placeholder="hs_edit.rpto_placeholder">
@@ -2108,6 +2227,16 @@
                     <li data-i18n="freedmr_help_step3"><b>Дополнительные параметры RPTO:</b> <code>TIMER=10</code> (таймаут динамических TG в мин.), <code>SINGLE=1</code> (режим одной активной TG), <code>VOICE=0/1</code> (голосовые подсказки), <code>DIAL=0</code> (TG по умолчанию).</li>
                     <li data-i18n="freedmr_help_step4"><b>Сброс динамических TG:</b> отправка вызова на <code>TG 4000</code> или кнопка сброса в менеджере TG.</li>
                     <li data-i18n="freedmr_help_step5"><b>Голосовой маяк:</b> <code>VOICE=0</code> отключает 15-минутную голосовую идентификацию сервера и озвучку переключений (рекомендуется для ProxDMR, чтобы не засорять запись и транскрипцию). Для тональной отбивки без голоса можно указать <code>LANG=CW</code>.</li>
+                </ul>
+            </div>
+            <div id="adnHelpBox" style="display:none; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.35); border-left:2px solid #00b4d8; border-radius: var(--app-border-radius, 0px); font-size:0.75rem; color:var(--text-secondary); line-height:1.45;">
+                <div style="font-weight:700; color:#00b4d8; margin-bottom:4px;" data-i18n="adn_help_title">Настройка хотспота в сети ADN Systems:</div>
+                <ul style="margin:0; padding-left:16px;">
+                    <li data-i18n="adn_help_step1"><b>Пароль хотспота:</b> по умолчанию большинство узлов ADN принимают <code>passw0rd</code>, либо ваш персональный пароль безопасности из портала <a href="https://selfcare.adn.systems/" target="_blank" rel="noopener noreferrer" style="color:#00b4d8; text-decoration:underline;">ADN SelfCare</a>.</li>
+                    <li data-i18n="adn_help_step2"><b>Статические группы (TS1 / TS2):</b> настраиваются в строке RPTO ИЛИ через визуальный менеджер по кнопке <b>«⚡ Управление TG»</b> на карточке хотспота.</li>
+                    <li data-i18n="adn_help_step3"><b>Параметры RPTO:</b> <code>TIMER=10</code> (таймаут динамики в мин.), <code>SINGLE=1</code>, <code>VOICE=0</code> (отключение маяка), <code>PASS=...</code> (пароль SelfCare, если задан в опциях).</li>
+                    <li data-i18n="adn_help_step4"><b>Сброс динамических TG:</b> вызов на <code>TG 4000</code> или кнопка сброса в менеджере TG.</li>
+                    <li data-i18n="adn_help_step5"><b>Голосовой маяк:</b> параметр <code>VOICE=0</code> отключает периодический голосовой маяк сервера ADN, чтобы не засорять эфир и транскрипцию.</li>
                 </ul>
             </div>
           </div>
@@ -2184,31 +2313,60 @@
               <input type="number" id="editHsPort" class="form-input" value="{{ cfg.bm_master_port if cfg else 62031 }}">
             </div>
           </div>
-          <div class="form-group-row bm-tg-test-row" id="editHsTgRow" style="align-items: flex-end;">
-            <div class="form-group" id="editHsTgTs1Group" style="flex: 1;">
-              <label for="editHsTgTs1" id="editHsTgTs1Label" data-i18n="hs_edit.tg_ts1">Стартовая TG (Слот 1)</label>
-              <input type="number" id="editHsTgTs1" class="form-input" value="{{ cfg.default_tg_ts1 if cfg else 4010018 }}">
-            </div>
-            <div class="form-group" id="editHsTgTs2Group" style="flex: 1;">
-              <label for="editHsTgTs2" id="editHsTgTs2Label" data-i18n="hs_edit.tg_ts2">Стартовая TG (Слот 2)</label>
-              <input type="number" id="editHsTgTs2" class="form-input" value="{{ cfg.default_tg_ts2 if cfg else 2502059 }}">
-            </div>
-            <div class="form-group" id="editHsTestServersCol" style="flex: 1; min-width: 140px;">
-              <button type="button" id="btnTestBmServers" class="btn-bm-benchmark" title="Тестирование пинга всех серверов BrandMeister" data-i18n-title="bm_bench.btn_test_title">
-                <span class="btn-icon">⚡</span>
-                <span data-i18n="bm_bench.btn_test">Тест серверов</span>
-              </button>
-            </div>
-          </div>
           <div class="form-group-checkbox" id="editHsAutoTgBmGroup">
             <label>
               <input type="checkbox" id="editHsAutoTgBm" {% if not cfg or cfg.auto_tg_bm %}checked{% endif %}> <span id="editHsAutoTgBmText" data-i18n="hs_edit.auto_tg_bm">Автонастройка TG BM</span>
             </label>
           </div>
+
+          <!-- Network Brand Color Pickers (Dark / Light) -->
+          <div class="hs-brand-color-section" id="editHsBrandColorSection" style="margin-top: 10px; padding: 10px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--app-border-radius, 0px);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                <span>🎨</span> <span id="editHsBrandColorTitle" data-i18n="hs_edit.brand_color_title">Выбор фирменного цвета</span>
+              </span>
+              <button type="button" id="btnResetHsBrandColor" class="btn-secondary" style="font-size: 0.74rem; padding: 3px 8px; cursor: pointer;" title="Сбросить к стандартному цвету сети" data-i18n-title="hs_edit.btn_reset_color_title" data-i18n="hs_edit.btn_reset_color">↺ Сбросить</button>
+            </div>
+            <div id="editHsBrandColorDisabledHint" style="display: none; font-size: 0.74rem; color: #f85149; margin-bottom: 6px;" data-i18n="hs_edit.colors_disabled_globally">
+              ⚠️ Отключено глобальной настройкой разделения цветов
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="editHsBrandColorDark" style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; display: block;" data-i18n="hs_edit.color_dark_theme">🌙 Тёмная тема:</label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <input type="color" id="editHsBrandColorDark" class="color-picker-input" style="width: 34px; height: 30px; padding: 0; border: none; cursor: pointer; background: transparent; border-radius: var(--app-border-radius, 0px);">
+                  <input type="text" id="editHsBrandColorDarkHex" class="form-input" maxlength="7" style="font-family: monospace; font-size: 0.76rem; text-transform: uppercase; padding: 4px 6px;" value="#C45C2E">
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="editHsBrandColorLight" style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 3px; display: block;" data-i18n="hs_edit.color_light_theme">☀️ Светлая тема:</label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <input type="color" id="editHsBrandColorLight" class="color-picker-input" style="width: 34px; height: 30px; padding: 0; border: none; cursor: pointer; background: transparent; border-radius: var(--app-border-radius, 0px);">
+                  <input type="text" id="editHsBrandColorLightHex" class="form-input" maxlength="7" style="font-family: monospace; font-size: 0.76rem; text-transform: uppercase; padding: 4px 6px;" value="#EA580C">
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="modal-footer" id="editHsSubmitFooter" style="padding-top: 10px; display: none;">
             <button type="submit" id="btnSaveHotspotSubmit" class="btn-primary" data-i18n="hs_edit.btn_save">Сохранить хотспот</button>
           </div>
         </form>
+
+        <!-- Global Option: Network Color Separation Checkbox (Below Hotspot Form) -->
+        <div class="settings-action-block" id="networkColorsGlobalFrame" style="margin-top: 12px; padding: 12px 14px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--app-border-radius, 0px);">
+          <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; user-select: none;">
+            <input type="checkbox" id="optEnableNetworkColors" class="form-checkbox" style="width: 18px; height: 18px; margin-top: 2px; accent-color: #58a6ff; cursor: pointer;" {% if enable_network_colors is not defined or enable_network_colors %}checked{% endif %}>
+            <div>
+              <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-primary);" data-i18n="hs_edit.network_colors_enabled">
+                Цветовое разделение типов сети
+              </div>
+              <div style="font-size: 0.75rem; color: #8b949e; line-height: 1.35; margin-top: 3px;" data-i18n="hs_edit.network_colors_hint">
+                Включает индивидуальное цветовое оформление для каждого типа сети. При отключении все хотспоты отображаются в нейтральном сером цвете.
+              </div>
+            </div>
+          </label>
+        </div>
       </div>
 
         <!-- Tab 5: Telegram Alerts & Watchdog -->
@@ -2219,7 +2377,7 @@
               <h4 style="margin: 0; font-size: 15px; color: #58a6ff; display: flex; align-items: center; gap: 8px;">
                 <span data-i18n="alerts.watchdog_card_title">Служба Watchdog</span>
               </h4>
-              <span id="alertsWdBadge" class="badge" style="padding: 3px 8px; border-radius: var(--app-border-radius, 0px); font-size: 12px; font-weight: 600; background: #30363d; color: #8b949e;">...</span>
+              <span id="alertsWdBadge" class="badge" style="padding: 3px 8px; border-radius: 0 !important; font-size: 12px; font-weight: 600; background: #30363d; color: #8b949e;">...</span>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; font-size: 12px; color: #c9d1d9;">
               <div><span style="color: #8b949e;" data-i18n="alerts.version">Версия</span>: <strong id="alertsWdVersion">-</strong></div>
@@ -2483,6 +2641,16 @@
           </small>
         </div>
 
+        <!-- Single Hotspot Audio Option -->
+        <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
+          <label style="cursor: pointer;">
+            <input type="checkbox" id="optSingleHotspotAudio" {% if single_hotspot_audio is defined and single_hotspot_audio %}checked{% endif %}> <strong data-i18n="general.single_hotspot_audio">Звук исходит только из одной точки.</strong>
+          </label>
+          <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="general.single_hotspot_audio_hint">
+            Запрещает одновременное звучание более одного хотспота. Звучит только активная точка, остальные продолжают прием, индикацию и запись.
+          </small>
+        </div>
+
         <!-- BLE PTT (Bluetooth button) — Collapsible Frame (APK only) -->
         <div class="apikeys-frame collapsed" id="blePttPanel" style="display: none; margin-bottom: 8px;">
           <div class="apikeys-frame-header" id="blePttToggle">
@@ -2557,6 +2725,47 @@
               </small>
             </div>
 
+            <!-- Hardware PTT Button (Smartphone physical keys — APK only) -->
+            <div id="groupHardwarePtt" style="display: block; padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+              <label for="optHardwarePttMode" style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; margin-bottom: 6px;">
+                <span>📻</span>
+                <strong data-i18n="android.hw_ptt_title">Аппаратная кнопка PTT (смартфон)</strong>
+              </label>
+              <select id="optHardwarePttMode" class="form-select" style="width: 100%; font-size: 0.84rem; padding: 6px 8px;">
+                <option value="volume_up" data-i18n="android.hw_ptt_mode_vol_up">Громкость + (Vol+)</option>
+                <option value="volume_down" data-i18n="android.hw_ptt_mode_vol_down">Громкость − (Vol−)</option>
+                <option value="volume_both" data-i18n="android.hw_ptt_mode_vol_both">Обе кнопки громкости (Vol+ / Vol−)</option>
+                <option value="custom" data-i18n="android.hw_ptt_mode_custom">Своя аппаратная кнопка (PTT / боковая)</option>
+                <option value="off" data-i18n="android.hw_ptt_mode_off">Выключено (только громкость)</option>
+              </select>
+
+              <!-- Custom physical key capture row -->
+              <div id="hwPttCustomRow" style="display: none; margin-top: 8px; padding: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: var(--app-border-radius, 0px);">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 0.8rem;">
+                  <span style="color: var(--text-secondary, #8b949e);" data-i18n="android.hw_ptt_assigned_label">Назначенная кнопка:</span>
+                  <span id="hwPttCustomKeyLabel" style="font-weight: 700; color: #58a6ff; font-family: monospace; text-align: right; word-break: break-word;">—</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <button type="button" id="btnHwPttCapture" class="btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                    🎯 Назначить кнопку
+                  </button>
+                  <button type="button" id="btnHwPttClear" class="btn-secondary" title="Сбросить назначенную кнопку" data-i18n-title="android.hw_ptt_clear_title" style="display: none; padding: 6px 10px; font-size: 0.82rem; color: #f85149; border-color: rgba(248, 81, 73, 0.35); cursor: pointer;">
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <small id="hintHwPttVolBoth" class="form-hint" style="display: none; color: #d29922; margin-top: 5px;" data-i18n="android.hw_ptt_vol_both_warn">
+                ⚠️ Обе клавиши громкости заняты под PTT — регулируйте громкость ползунком в интерфейсе ProxDMR.
+              </small>
+              <small id="hintHwPttOldApk" class="form-hint" style="display: none; color: #d29922; margin-top: 5px;" data-i18n="android.hw_ptt_old_apk_hint">
+                ℹ️ Для настройки аппаратной кнопки PTT обновите приложение ProxDMR APK до версии 1.35+.
+              </small>
+              <small class="form-hint" style="display: block; margin-top: 4px;" data-i18n="android.hw_ptt_hint">
+                Работает в режиме PTT выбранного хотспота (Удержание / Нажатие) при активном окне. Кнопка питания заблокирована ОС Android и не может использоваться для PTT.
+              </small>
+            </div>
+
             <!-- Haptic Feedback (Vibration confirmation) -->
             <div id="groupHapticFeedback" class="form-group-checkbox" style="display: block; padding-top: 6px; margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
               <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
@@ -2572,7 +2781,7 @@
                 <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem;">
                   <span style="color: var(--text-secondary, #8b949e);" data-i18n="android.haptic_duration">Длительность / сила вибры:</span>
                   <div style="display: flex; align-items: center; gap: 8px;">
-                    <span id="hapticDurationVal" style="font-weight: 700; color: #58a6ff; font-family: monospace;">{{ haptic_duration | default(45) }} мс</span>
+                    <span id="hapticDurationVal" style="font-weight: 700; color: #58a6ff; font-family: monospace;">{{ haptic_duration | default(45) }} <span data-i18n="ping.unit_ms">ms</span></span>
                     <button type="button" id="btnTestHaptic" title="Проверить виброотклик" data-i18n-title="android.haptic_test_title" style="padding: 2px 8px; font-size: 0.78rem; border-radius: var(--app-border-radius, 0px); border: 1px solid var(--border-color, rgba(255,255,255,0.15)); background: var(--bg-tertiary, rgba(255,255,255,0.06)); color: var(--text-primary); cursor: pointer; white-space: nowrap;" data-i18n="android.haptic_test">📳 Тест</button>
                   </div>
                 </div>
@@ -2650,106 +2859,199 @@
           </a>
         </div>
 
-        <!-- Wallpaper & Background (Collapsible Frame) -->
-        <div class="apikeys-frame collapsed" id="wallpaperSettingsFrame" style="margin-bottom: 8px;">
-          <div class="apikeys-frame-header" id="wallpaperSettingsToggle">
+        <!-- Interface Elements Unified Collapsible Module -->
+        <div class="apikeys-frame collapsed" id="interfaceElementsSettingsFrame" style="margin-bottom: 8px;">
+          <div class="apikeys-frame-header" id="interfaceElementsSettingsToggle" style="cursor: pointer;">
             <span class="apikeys-frame-title">
-              <span>🖼️</span> <span data-i18n="general.bg_wallpaper_title">Фоновое оформление:</span>
+              <span>🎨</span> <span data-i18n="general.interface_elements_title">Interface elements</span>
             </span>
             <span class="apikeys-frame-actions">
-              <div class="theme-bg-mode-tabs" role="tablist" onclick="event.stopPropagation()">
-                <button type="button" class="theme-bg-tab active" id="themeBgTabDark" data-theme-target="dark" title="Настройки фона для тёмной темы" data-i18n-title="general.bg_tab_dark_title">
-                  <span>🌙</span> <span data-i18n="general.bg_tab_dark">Тёмная тема</span>
-                </button>
-                <button type="button" class="theme-bg-tab" id="themeBgTabLight" data-theme-target="light" title="Настройки фона для светлой темы" data-i18n-title="general.bg_tab_light_title">
-                  <span>☀️</span> <span data-i18n="general.bg_tab_light">Светлая тема</span>
-                </button>
-              </div>
-              <span class="apikeys-chevron" id="wallpaperSettingsChevron">▼</span>
+              <span class="apikeys-chevron" id="interfaceElementsSettingsChevron">▼</span>
             </span>
           </div>
-          <div class="apikeys-frame-body" id="wallpaperSettingsBody" style="padding: 10px 12px 8px;">
-            <div class="bg-selection-grid">
-              <!-- Option 1: Theme Radio Pattern -->
-              <label class="bg-option-card active" id="bgCardPattern" title="Нажмите для выбора графического файла с устройства (ПК или смартфон)" data-i18n-title="general.bg_pattern_title">
-                <input type="radio" name="optBgType" id="optBgPattern" value="pattern" checked>
-                <div class="bg-option-preview bg-preview-pattern" id="bgPatternPreview" title="Нажмите для выбора графического файла с устройства (ПК или смартфон)" data-i18n-title="general.bg_select_file_hint">
-                  <span class="pattern-picker-icon" style="font-size: 1.1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8)); pointer-events: none;">📁</span>
+          <div class="apikeys-frame-body" id="interfaceElementsSettingsBody" style="padding: 10px 10px 8px;">
+            <!-- 1. Wallpaper & Background (Collapsible Frame) -->
+            <div class="apikeys-frame collapsed" id="wallpaperSettingsFrame" style="margin-bottom: 8px;">
+              <div class="apikeys-frame-header" id="wallpaperSettingsToggle">
+                <span class="apikeys-frame-title">
+                  <span>🖼️</span> <span data-i18n="general.bg_wallpaper_title">Фоновое оформление:</span>
+                </span>
+                <span class="apikeys-frame-actions">
+                  <div class="theme-bg-mode-tabs" role="tablist" onclick="event.stopPropagation()">
+                    <button type="button" class="theme-bg-tab active" id="themeBgTabDark" data-theme-target="dark" title="Настройки фона для тёмной темы" data-i18n-title="general.bg_tab_dark_title">
+                      <span>🌙</span> <span data-i18n="general.bg_tab_dark">Тёмная тема</span>
+                    </button>
+                    <button type="button" class="theme-bg-tab" id="themeBgTabLight" data-theme-target="light" title="Настройки фона для светлой темы" data-i18n-title="general.bg_tab_light_title">
+                      <span>☀️</span> <span data-i18n="general.bg_tab_light">Светлая тема</span>
+                    </button>
+                  </div>
+                  <span class="apikeys-chevron" id="wallpaperSettingsChevron">▼</span>
+                </span>
+              </div>
+              <div class="apikeys-frame-body" id="wallpaperSettingsBody" style="padding: 10px 12px 8px;">
+                <div class="bg-selection-grid">
+                  <!-- Option 1: Theme Radio Pattern -->
+                  <label class="bg-option-card active" id="bgCardPattern" title="Нажмите для выбора графического файла с устройства (ПК или смартфон)" data-i18n-title="general.bg_pattern_title">
+                    <input type="radio" name="optBgType" id="optBgPattern" value="pattern" checked>
+                    <div class="bg-option-preview bg-preview-pattern" id="bgPatternPreview" title="Нажмите для выбора графического файла с устройства (ПК или смартфон)" data-i18n-title="general.bg_select_file_hint">
+                      <span class="pattern-picker-icon" style="font-size: 1.1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8)); pointer-events: none;">📁</span>
+                    </div>
+                    <span class="bg-option-title" data-i18n="general.bg_pattern">Радио-паттерн</span>
+                  </label>
+
+                  <!-- Option 2: Solid Color Picker -->
+                  <label class="bg-option-card" id="bgCardColor" title="Сплошной цвет из палитры" data-i18n-title="general.bg_color_title">
+                    <input type="radio" name="optBgType" id="optBgColor" value="color">
+                    <div class="bg-option-preview bg-preview-color" id="bgColorPreview" title="Нажмите для выбора цвета" data-i18n-title="general.bg_color_click">
+                      <span class="color-picker-icon" style="font-size: 1.1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8)); pointer-events: none;">🎨</span>
+                      <input type="color" id="optBgColorPicker" value="#0f1115" title="Выбрать цвет из палитры" data-i18n-title="general.bg_color_picker_title">
+                    </div>
+                    <span class="bg-option-title" data-i18n="general.bg_color">Цвет из палитры</span>
+                  </label>
                 </div>
-                <span class="bg-option-title" data-i18n="general.bg_pattern">Радио-паттерн</span>
-              </label>
-
-              <!-- Option 2: Solid Color Picker -->
-              <label class="bg-option-card" id="bgCardColor" title="Сплошной цвет из палитры" data-i18n-title="general.bg_color_title">
-                <input type="radio" name="optBgType" id="optBgColor" value="color">
-                <div class="bg-option-preview bg-preview-color" id="bgColorPreview" title="Нажмите для выбора цвета" data-i18n-title="general.bg_color_click">
-                  <span class="color-picker-icon" style="font-size: 1.1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8)); pointer-events: none;">🎨</span>
-                  <input type="color" id="optBgColorPicker" value="#0f1115" title="Выбрать цвет из палитры" data-i18n-title="general.bg_color_picker_title">
+                <div class="bg-custom-actions" id="bgCustomActions">
+                  <input type="file" id="optBgFileInput" accept="image/*" style="display: none;">
+                  <button type="button" class="btn-bg-action btn-bg-upload" id="btnUploadBgFile" title="Выбрать фоновое изображение с вашего устройства (смартфона или ПК)" data-i18n-title="general.bg_upload_title">
+                    <span data-i18n="general.bg_upload">📁 Загрузить картинку с устройства...</span>
+                  </button>
+                  <button type="button" class="btn-bg-action btn-bg-reset" id="btnResetBgFile" title="Сбросить на стандартный паттерн темы" data-i18n-title="general.bg_reset_custom_title" style="display: none;">
+                    <span data-i18n="general.bg_reset_custom">✕ Сбросить на стандарт</span>
+                  </button>
                 </div>
-                <span class="bg-option-title" data-i18n="general.bg_color">Цвет из палитры</span>
-              </label>
-            </div>
-            <div class="bg-custom-actions" id="bgCustomActions">
-              <input type="file" id="optBgFileInput" accept="image/*" style="display: none;">
-              <button type="button" class="btn-bg-action btn-bg-upload" id="btnUploadBgFile" title="Выбрать фоновое изображение с вашего устройства (смартфона или ПК)" data-i18n-title="general.bg_upload_title">
-                <span data-i18n="general.bg_upload">📁 Загрузить картинку с устройства...</span>
-              </button>
-              <button type="button" class="btn-bg-action btn-bg-reset" id="btnResetBgFile" title="Сбросить на стандартный паттерн темы" data-i18n-title="general.bg_reset_custom_title" style="display: none;">
-                <span data-i18n="general.bg_reset_custom">✕ Сбросить на стандарт</span>
-              </button>
-            </div>
 
-            <!-- Interactive Wallpaper Pattern Scale Control -->
-            <div class="bg-scale-control" id="bgScaleControl">
-              <div class="bg-scale-header">
-                <span class="bg-scale-title" data-i18n="general.bg_scale">Масштаб узора:</span>
-                <span class="bg-scale-value" id="bgScaleValueLabel">450 px (50%)</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <input type="range" id="sliderBgScale" min="200" max="900" step="25" value="450" class="form-slider" style="flex: 1; cursor: pointer;">
-              </div>
-              <div class="bg-scale-presets">
-                <button type="button" class="btn-scale-preset" data-scale="300" data-i18n="general.bg_scale_compact">300px (33%)</button>
-                <button type="button" class="btn-scale-preset active" data-scale="450" data-i18n="general.bg_scale_standard">450px (50%)</button>
-                <button type="button" class="btn-scale-preset" data-scale="600">600px (67%)</button>
-                <button type="button" class="btn-scale-preset" data-scale="900" data-i18n="general.bg_scale_large">900px (100%)</button>
+                <!-- Interactive Wallpaper Pattern Scale Control -->
+                <div class="bg-scale-control" id="bgScaleControl">
+                  <div class="bg-scale-header">
+                    <span class="bg-scale-title" data-i18n="general.bg_scale">Масштаб узора:</span>
+                    <span class="bg-scale-value" id="bgScaleValueLabel">450 px (50%)</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="range" id="sliderBgScale" min="200" max="900" step="25" value="450" class="form-slider" style="flex: 1; cursor: pointer;">
+                  </div>
+                  <div class="bg-scale-presets">
+                    <button type="button" class="btn-scale-preset" data-scale="300" data-i18n="general.bg_scale_compact">300px (33%)</button>
+                    <button type="button" class="btn-scale-preset active" data-scale="450" data-i18n="general.bg_scale_standard">450px (50%)</button>
+                    <button type="button" class="btn-scale-preset" data-scale="600">600px (67%)</button>
+                    <button type="button" class="btn-scale-preset" data-scale="900" data-i18n="general.bg_scale_large">900px (100%)</button>
+                  </div>
+                </div>
+
+                <small class="form-hint" style="margin-top: 4px; display: block;" data-i18n="general.bg_wallpaper_hint">
+                  <span data-i18n="general.bg_wallpaper_hint">Замощение свободного пространства интерфейса выбранным паттерном или заливка сплошным цветом для выбранной темы</span>
+                </small>
               </div>
             </div>
 
-            <small class="form-hint" style="margin-top: 4px; display: block;" data-i18n="general.bg_wallpaper_hint">
-              <span data-i18n="general.bg_wallpaper_hint">Замощение свободного пространства интерфейса выбранным паттерном или заливка сплошным цветом для выбранной темы</span>
-            </small>
+            <!-- 2. App Border Radius Control -->
+            <div class="apikeys-frame" id="borderRadiusSettingsFrame" style="margin-bottom: 8px;">
+              <div class="apikeys-frame-header" style="cursor: default;">
+                <span class="apikeys-frame-title">
+                  <span>📐</span> <span data-i18n="general.border_radius_title">Скругление углов элементов</span>
+                </span>
+                <span class="apikeys-frame-actions">
+                  <span id="borderRadiusValueLabel" style="font-family: var(--font-mono, monospace); font-size: 0.84rem; font-weight: 700; color: #58a6ff;">5 px</span>
+                </span>
+              </div>
+              <div class="apikeys-frame-body" style="padding: 10px 12px 10px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <input type="range" id="sliderBorderRadius" min="0" max="20" step="1" value="5" class="form-slider" style="flex: 1; cursor: pointer;">
+                </div>
+                <div style="display: flex; justify-content: space-between; font-family: var(--font-mono, monospace); font-size: 0.68rem; color: var(--text-muted); margin-top: 4px; padding: 0 2px;">
+                  <span data-i18n="general.border_radius_min">0 (прямые)</span>
+                  <span>5</span>
+                  <span>10</span>
+                  <span>15</span>
+                  <span data-i18n="general.border_radius_max">20 (макс)</span>
+                </div>
+                <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="general.border_radius_hint">
+                  Степень закругления элементов интерфейса (кнопки, карточки, поля ввода). Текстовые элементы и бейджи всегда имеют радиус 0 (прямые углы).
+                </small>
+              </div>
+            </div>
+
+            <!-- 3. Toolbar Background Gradient Colors (Dark & Light Themes) -->
+            <div class="apikeys-frame" id="toolbarBgColorsFrame" style="margin-bottom: 0;">
+              <div class="apikeys-frame-header" style="cursor: default;">
+                <span class="apikeys-frame-title">
+                  <span>🌈</span> <span data-i18n="general.toolbar_bg_title">Заливка фона тулбара</span>
+                </span>
+              </div>
+              <div class="apikeys-frame-body" style="padding: 10px 12px 10px;">
+                <!-- Kit 1: Dark Theme -->
+                <div class="toolbar-bg-theme-group" id="toolbarBgGroupDark">
+                  <div class="toolbar-bg-theme-header">
+                    <span class="toolbar-bg-theme-title">
+                      <span>🌙</span> <span data-i18n="general.bg_tab_dark">Тёмная тема</span>
+                    </span>
+                    <button type="button" class="btn-toolbar-bg-reset" id="btnResetToolbarBgDark" title="Сбросить цвета для тёмной темы (#0037b4 → #001b43)" data-i18n-title="general.toolbar_bg_reset_dark_title">
+                      <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
+                    </button>
+                  </div>
+                  <div class="toolbar-bg-preview-bar" id="toolbarBgPreviewBarDark" aria-hidden="true"></div>
+                  <div class="toolbar-bg-pickers-grid">
+                    <label class="toolbar-bg-picker-item" for="optToolbarBgTopPicker">
+                      <span class="toolbar-bg-swatch" id="toolbarBgTopSwatch">
+                        <input type="color" id="optToolbarBgTopPicker" value="#0037b4" title="Верхний цвет тулбара" data-i18n-title="general.toolbar_bg_top">
+                      </span>
+                      <span class="toolbar-bg-meta">
+                        <span class="toolbar-bg-label" data-i18n="general.toolbar_bg_top">Верхний цвет</span>
+                        <span class="toolbar-bg-hex" id="toolbarBgTopHex">#0037b4</span>
+                      </span>
+                    </label>
+                    <label class="toolbar-bg-picker-item" for="optToolbarBgBottomPicker">
+                      <span class="toolbar-bg-swatch" id="toolbarBgBottomSwatch">
+                        <input type="color" id="optToolbarBgBottomPicker" value="#001b43" title="Нижний цвет тулбара" data-i18n-title="general.toolbar_bg_bottom">
+                      </span>
+                      <span class="toolbar-bg-meta">
+                        <span class="toolbar-bg-label" data-i18n="general.toolbar_bg_bottom">Нижний цвет</span>
+                        <span class="toolbar-bg-hex" id="toolbarBgBottomHex">#001b43</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Kit 2: Light Theme -->
+                <div class="toolbar-bg-theme-group" id="toolbarBgGroupLight">
+                  <div class="toolbar-bg-theme-header">
+                    <span class="toolbar-bg-theme-title">
+                      <span>☀️</span> <span data-i18n="general.bg_tab_light">Светлая тема</span>
+                    </span>
+                    <button type="button" class="btn-toolbar-bg-reset" id="btnResetToolbarBgLight" title="Сбросить цвета для светлой темы (#f4f7fb → #dbe6f4)" data-i18n-title="general.toolbar_bg_reset_light_title">
+                      <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
+                    </button>
+                  </div>
+                  <div class="toolbar-bg-preview-bar" id="toolbarBgPreviewBarLight" aria-hidden="true"></div>
+                  <div class="toolbar-bg-pickers-grid">
+                    <label class="toolbar-bg-picker-item" for="optToolbarBgTopLightPicker">
+                      <span class="toolbar-bg-swatch" id="toolbarBgTopLightSwatch">
+                        <input type="color" id="optToolbarBgTopLightPicker" value="#f4f7fb" title="Верхний цвет тулбара" data-i18n-title="general.toolbar_bg_top">
+                      </span>
+                      <span class="toolbar-bg-meta">
+                        <span class="toolbar-bg-label" data-i18n="general.toolbar_bg_top">Верхний цвет</span>
+                        <span class="toolbar-bg-hex" id="toolbarBgTopLightHex">#F4F7FB</span>
+                      </span>
+                    </label>
+                    <label class="toolbar-bg-picker-item" for="optToolbarBgBottomLightPicker">
+                      <span class="toolbar-bg-swatch" id="toolbarBgBottomLightSwatch">
+                        <input type="color" id="optToolbarBgBottomLightPicker" value="#dbe6f4" title="Нижний цвет тулбара" data-i18n-title="general.toolbar_bg_bottom">
+                      </span>
+                      <span class="toolbar-bg-meta">
+                        <span class="toolbar-bg-label" data-i18n="general.toolbar_bg_bottom">Нижний цвет</span>
+                        <span class="toolbar-bg-hex" id="toolbarBgBottomLightHex">#DBE6F4</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <small class="form-hint" style="margin-top: 8px; display: block;" data-i18n="general.toolbar_bg_hint">
+                  Задаёт верхний и нижний цвета вертикального градиента фона верхней панели управления.
+                </small>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- App Border Radius Control -->
-        <div class="apikeys-frame" style="margin-bottom: 8px;">
-          <div class="apikeys-frame-header" style="cursor: default;">
-            <span class="apikeys-frame-title">
-              <span>📐</span> <span data-i18n="general.border_radius_title">Скругление углов элементов</span>
-            </span>
-            <span class="apikeys-frame-actions">
-              <span id="borderRadiusValueLabel" style="font-family: var(--font-mono, monospace); font-size: 0.84rem; font-weight: 700; color: #58a6ff;">5 px</span>
-            </span>
-          </div>
-          <div class="apikeys-frame-body" style="padding: 10px 12px 10px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <input type="range" id="sliderBorderRadius" min="0" max="20" step="1" value="5" class="form-slider" style="flex: 1; cursor: pointer;">
-            </div>
-            <div style="display: flex; justify-content: space-between; font-family: var(--font-mono, monospace); font-size: 0.68rem; color: var(--text-muted); margin-top: 4px; padding: 0 2px;">
-              <span data-i18n="general.border_radius_min">0 (прямые)</span>
-              <span>5</span>
-              <span>10</span>
-              <span>15</span>
-              <span data-i18n="general.border_radius_max">20 (макс)</span>
-            </div>
-            <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="general.border_radius_hint">
-              Степень закругления углов всех прямоугольных элементов программы (кнопки, плашки, карточки, поля ввода)
-            </small>
-          </div>
-        </div>
-
-        <!-- HAM Web Portals Integration Section (Collapsible Frame) -->
+        <!-- HAM Web Portals Integration Section (Standalone Collapsible Frame) -->
         <div class="apikeys-frame collapsed" id="hamQthSettingsFrame" style="margin-bottom: 8px;">
           <div class="apikeys-frame-header" id="hamQthSettingsToggle">
             <span class="apikeys-frame-title">
@@ -2792,7 +3094,7 @@
             </div>
 
             <!-- Sub-card 2: HamQTH.com -->
-            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--app-border-radius, 0px); padding: 10px; margin-bottom: 8px;">
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--app-border-radius, 0px); padding: 10px; margin-bottom: 0;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">2. HamQTH.com</span>
                 <a href="https://www.hamqth.com/register.php" target="_blank" rel="noopener" class="apikeys-get-key-link" style="font-size: 0.75rem;" data-i18n="hamqth.reg_link">Регистрация ↗</a>
@@ -2817,9 +3119,6 @@
                 <div id="hamQthTestStatus" style="font-size: 0.76rem; font-weight: 600; display: none;"></div>
               </div>
             </div>
-
-            
-
           </div>
         </div>
 
@@ -2828,7 +3127,7 @@
           <div class="apikeys-frame-header" id="updateSettingsToggle" style="cursor: pointer;">
             <span class="apikeys-frame-title">
               <span>🔄</span> <span data-i18n="updates.title">Обновление ProxDMR</span>
-              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: var(--app-border-radius, 0px); margin-left: 6px;">NEW</span>
+              <span id="systemUpdateBadgeHeader" class="badge-new-ver" style="display: none; background: #e74c3c; color: #fff; font-size: 0.68rem; font-weight: 700; padding: 1px 6px; border-radius: 0 !important; margin-left: 6px;">NEW</span>
             </span>
             <span class="apikeys-frame-actions">
               <span class="apikeys-chevron" id="updateSettingsChevron">▼</span>
@@ -2858,7 +3157,7 @@
                   <strong style="color: var(--text-primary);" id="systemCurrentVerLabel">v{{ app_version | default('1.41') }}</strong>
                   <span style="font-size: 0.74rem; color: #6e7681;" id="systemCurrentDateLabel">({{ app_version_date | default('') }})</span>
                 </div>
-                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: var(--app-border-radius, 0px); background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
+                <div id="systemUpdateStatusPill" style="font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 0 !important; background: rgba(46, 204, 113, 0.15); color: #2ecc71;">
                   <span data-i18n="updates.up_to_date">✓ Актуальна</span>
                 </div>
               </div>
@@ -2867,7 +3166,7 @@
               <div id="systemUpdateAvailableBlock" style="display: none; background: rgba(231, 76, 60, 0.08); border: 1px solid rgba(231, 76, 60, 0.25); border-radius: var(--app-border-radius, 0px); padding: 8px 10px; margin-top: 8px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                   <div style="font-size: 0.84rem; font-weight: 700; color: #ff7675;">
-                    <span id="systemNewVerLabel">Доступно: v1.42</span>
+                    <span id="systemNewVerLabel"><span data-i18n="updates.available_prefix">Available:</span> v1.42</span>
                     <span style="font-size: 0.75rem; font-weight: normal; color: #a4b0be; margin-left: 4px;" id="systemNewDateLabel"></span>
                   </div>
                 </div>
@@ -3046,7 +3345,7 @@
               <span class="apikeys-frame-title" data-i18n="transcriber.tts_frame_title">🔊 Синтез речи</span>
               <span class="apikeys-frame-actions">
                 <!-- TTS Voice Upload Background Task Indicator (Settings) -->
-                <div id="settingsTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" data-i18n-title="header.tts_upload_indicator_title" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0" onclick="event.stopPropagation();">
+                <div id="settingsTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Uploading Piper TTS voice model" data-i18n-title="header.tts_upload_indicator_title" role="status" tabindex="0" onclick="event.stopPropagation();">
                   <img src="/static/img/TTS_Upload.png?v=2.9.367" alt="TTS Upload" class="tts-upload-img">
                   <span id="settingsTtsUploadPercent" class="tts-upload-percent">0%</span>
                 </div>
@@ -3193,26 +3492,81 @@
   </div>
 </div>
 
-  <!-- Hotspots Sequence / Order Manager Modal -->
-  <div id="hotspotOrderModal" class="modal" style="display: none; z-index: 10050;">
-    <div class="modal-content hs-order-modal-content" style="max-width: 520px; width: 92%;">
-      <div class="modal-header">
-        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
-          <span>⇅</span>
-          <span data-i18n="hotspots.order_modal_title">Последовательность хотспотов</span>
-        </div>
-        <button type="button" id="closeHsOrderModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+  <!-- Modal: Hotspot Type Selector (CSS Modal) -->
+  <div id="hsTypeSelectModal" class="modal hs-type-modal-backdrop" style="display: none; z-index: 12000;">
+    <div class="modal-content hs-type-modal-dialog" style="max-width: 440px; width: 92%; padding: 0; overflow: hidden; background: #161b22; border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7);">
+      <div class="modal-header" style="padding: 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; align-items: center; justify-content: space-between;">
+        <div class="modal-title" style="font-size: 0.95rem; font-weight: 700; color: #ffffff;" data-i18n="hs_edit.type_modal_title">Выбери тип сети</div>
+        <button type="button" id="btnCloseHsTypeModal" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close" style="background: none; border: none; color: #8b949e; font-size: 1.1rem; cursor: pointer;">✕</button>
       </div>
-      <div class="modal-body" style="padding: 14px 16px;">
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0; margin-bottom: 12px;" data-i18n="hotspots.order_modal_hint">
-          Используйте стрелки ▲ и ▼ для изменения порядка хотспотов в меню и на главном экране:
-        </p>
-        <div id="hsOrderList" class="hs-order-list" style="display: flex; flex-direction: column; gap: 8px;">
-          <!-- Populated dynamically -->
+      <div class="modal-body hs-type-modal-body" style="padding: 12px 14px 16px 14px; display: flex; flex-direction: column; gap: 10px;">
+        <!-- Single Frame: All DMR Networks -->
+        <div class="hs-type-frame">
+          <button type="button" class="hs-type-item hs-type-bm" data-net-type="bm">
+            <span class="hs-type-card-badge" style="background: #ea580c;">BM</span>
+            <span class="hs-type-card-name">BrandMeister (BM)</span>
+          </button>
+          <button type="button" class="hs-type-item hs-type-tgif" data-net-type="tgif">
+            <span class="hs-type-card-badge" style="background: #0891b2;">TGIF</span>
+            <span class="hs-type-card-name">TGIF Network</span>
+          </button>
+          <button type="button" class="hs-type-item hs-type-freedmr" data-net-type="freedmr">
+            <span class="hs-type-card-badge" style="background: #059669;">FreeDMR</span>
+            <span class="hs-type-card-name">FreeDMR</span>
+          </button>
+          <button type="button" class="hs-type-item hs-type-adn" data-net-type="adn">
+            <span class="hs-type-card-badge" style="background: #0077b6;">ADN</span>
+            <span class="hs-type-card-name">ADN Systems</span>
+          </button>
+          <button type="button" class="hs-type-item hs-type-dmrplus" data-net-type="dmrplus">
+            <span class="hs-type-card-badge" style="background: #7c3aed;">DMR+</span>
+            <span class="hs-type-card-name">DMR+ / IPSC2</span>
+          </button>
+          <button type="button" class="hs-type-item hs-type-xlx" data-net-type="xlx">
+            <span class="hs-type-card-badge" style="background: #d97706;">XLX</span>
+            <span class="hs-type-card-name">XLX Reflector</span>
+          </button>
+        </div>
+
+        <!-- Section 2: Other Networks -->
+        <div class="hs-type-section-title" style="margin-top: 6px; margin-bottom: 2px;" data-i18n="hs_edit.type_other_group">Другие сети</div>
+        <div class="hs-type-frame">
+          <button type="button" class="hs-type-item hs-type-ysf" data-net-type="ysf">
+            <span class="hs-type-card-badge" style="background: #dc2626;">YSF</span>
+            <span class="hs-type-card-name">Yaesu System Fusion (YSF / C4FM)</span>
+          </button>
+          <button type="button" class="hs-type-item hs-type-allstar" data-net-type="allstar">
+            <span class="hs-type-card-badge" style="background: #0284c7;">ASL</span>
+            <span class="hs-type-card-name">AllStarLink (ASL / IAX2)</span>
+          </button>
         </div>
       </div>
-      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px;">
-        <button type="button" id="btnDoneHsOrder" class="btn-primary" style="padding: 6px 18px;" data-i18n="buttons.done">Готово</button>
+    </div>
+  </div>
+
+  <!-- Hotspot Archive & Full Roster Modal -->
+  <div id="hotspotArchiveModal" class="modal" style="display: none; z-index: 10045;" role="dialog" aria-modal="true" aria-labelledby="hotspotArchiveModalTitle">
+    <div class="modal-content hotspot-archive-modal-content" style="max-width: 540px; width: 94%; max-height: 88vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+        <div class="modal-title" id="hotspotArchiveModalTitle" style="display: flex; align-items: center; gap: 8px; font-weight: 700;">
+          <span>📦</span>
+          <span data-i18n="archive.modal_title">Управление списком и архивом хотспотов</span>
+        </div>
+        <button type="button" id="closeHotspotArchiveModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+      </div>
+      <div class="modal-body hotspot-archive-modal-body" style="padding: 12px 16px; overflow-y: auto; flex: 1 1 auto;">
+        <div class="hs-archive-subtitle" data-i18n="archive.modal_hint">
+          До 7 активных хотспотов могут одновременно работать на верхней панели. Остальные хранятся в архиве:
+        </div>
+        <div id="hsArchiveModalList" class="hs-archive-modal-list">
+          <!-- Populated dynamically by renderHotspotArchiveModal() -->
+        </div>
+      </div>
+      <div class="modal-footer hotspot-archive-modal-footer" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <button type="button" id="btnArchiveAddHotspot" class="btn-secondary" style="padding: 6px 12px;" data-i18n="hotspots.new_hotspot_opt">+ Новый хотспот...</button>
+        </div>
+        <button type="button" id="btnCloseHotspotArchiveFooter" class="btn-primary" style="padding: 6px 18px;" data-i18n="buttons.done">Готово</button>
       </div>
     </div>
   </div>
@@ -3270,9 +3624,9 @@
           <div id="bmImportBarFill" class="bm-import-bar-fill" style="width: 0%;"></div>
         </div>
         <div class="bm-import-progress-meta">
-          <span id="bmImportProgressCount" class="bm-import-meta-item">0 / 0 групп</span>
+          <span id="bmImportProgressCount" class="bm-import-meta-item" data-i18n="bm_import.progress_count">0 / 0 групп</span>
           <span id="bmImportProgressSlot" class="bm-import-meta-item">TS 1</span>
-          <span id="bmImportProgressErrors" class="bm-import-meta-item is-error" style="display: none;">0 ошибок</span>
+          <span id="bmImportProgressErrors" class="bm-import-meta-item is-error" style="display: none;" data-i18n="bm_import.progress_errors">0 ошибок</span>
         </div>
         <div class="bm-import-progress-actions">
           <button type="button" id="btnMinimizeBmImport" class="btn-bm-secondary btn-sm" title="Свернуть окно. Процесс продолжится в фоне, статус отображается в шапке" data-i18n="bm_import.btn_minimize" data-i18n-title="bm_import.btn_minimize_title">Свернуть в фон</button>
@@ -3725,6 +4079,8 @@
         <div id="contactsModalTabsWrap" style="display:inline-flex; align-items:center; gap:6px; margin-left:auto; margin-right:8px;">
           <button type="button" id="btnContactsTabDmr" class="btn-secondary btn-sm active" style="padding:3px 10px; font-size:0.76rem;" data-i18n="contacts.tab_my_contacts">📒 Мои контакты</button>
           <button type="button" id="btnContactsTabAllstar" class="btn-secondary btn-sm" style="padding:3px 10px; font-size:0.76rem;" data-i18n="contacts.tab_asl_catalog">🌐 Каталог ASL</button>
+          <button type="button" id="btnContactsTabYsf" class="btn-secondary btn-sm" style="padding:3px 10px; font-size:0.76rem; display:none;" data-i18n="contacts.tab_ysf_catalog">🌐 Каталог YSF</button>
+          <button type="button" id="btnContactsTabYsfContacts" class="btn-secondary btn-sm" style="padding:3px 10px; font-size:0.76rem; display:none;" data-i18n="contacts.tab_ysf_contacts">⭐ Контакты YSF</button>
         </div>
         <button type="button" id="closeMyContactsModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
       </div>
@@ -3767,6 +4123,34 @@
             <!-- Dynamically populated ASL nodes -->
           </div>
         </div>
+
+        <div id="ysfRoomsView" class="contacts-subview" style="display:none; flex-direction:column; flex:1 1 auto; min-height:0; min-width:0; width:100%; max-width:100%; box-sizing:border-box;">
+          <div class="allstar-nodes-toolbar" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px; width:100%; min-width:0; max-width:100%; box-sizing:border-box;">
+            <div style="display:flex; align-items:center; gap:8px; width:100%; min-width:0; max-width:100%; box-sizing:border-box;">
+              <div class="search-bar-row contacts-search-bar-row" style="flex:1; min-width:0;">
+                <span class="search-bar-icon">🔍</span>
+                <input type="text" id="ysfRoomSearchInput" class="search-main-input" placeholder="Поиск комнаты: номер (25000), название (Russia), страна (RU, Россия), IP..." data-i18n-placeholder="contacts.ysf_search_placeholder" autocomplete="off">
+                <button type="button" id="clearYsfRoomSearchBtn" class="btn-clear-search hidden">&times;</button>
+              </div>
+            </div>
+            <div class="ysf-sort-toolbar" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span style="color:#94a3b8; font-size:0.75rem; margin-right:2px;" data-i18n="contacts.sort_label">Сортировка:</span>
+              <button type="button" class="btn-ysf-sort active" data-sort="id" title="By room number" data-i18n-title="contacts.sort_by_id_title">🔢 <span data-i18n="contacts.sort_by_id">По ID</span> <span class="sort-arrow">▲</span></button>
+              <button type="button" class="btn-ysf-sort" data-sort="country" title="By country" data-i18n-title="contacts.sort_by_country_title">🌍 <span data-i18n="contacts.sort_by_country">По стране</span> <span class="sort-arrow"></span></button>
+              <button type="button" class="btn-ysf-sort" data-sort="name" title="By room name" data-i18n-title="contacts.sort_by_name_title">🔤 <span data-i18n="contacts.sort_by_name">По имени</span> <span class="sort-arrow"></span></button>
+            </div>
+            <div class="ysf-type-filter-toolbar">
+              <button type="button" class="btn-ysf-type-filter active" data-type-filter="all" data-i18n="contacts.ysf_filter_all">Все типы</button>
+              <button type="button" class="btn-ysf-type-filter" data-type-filter="single" data-i18n="contacts.ysf_filter_single">Обычные (1 комн.)</button>
+              <button type="button" class="btn-ysf-type-filter" data-type-filter="multi_standard"><span class="ysf-inline-type-dot ysf-inline-type-dot--standard" aria-hidden="true"></span><span data-i18n="contacts.ysf_filter_standard">YCS / FCS</span></button>
+              <button type="button" class="btn-ysf-type-filter" data-type-filter="multi_mutant"><span class="ysf-inline-type-dot ysf-inline-type-dot--mutant" aria-hidden="true"></span><span data-i18n="contacts.ysf_filter_mutant">Мутанты (DG-ID)</span></button>
+            </div>
+          </div>
+
+          <div id="ysfRoomsListContainer" class="allstar-nodes-list-container ysf-rooms-list-container">
+            <!-- Dynamically populated YSF rooms -->
+          </div>
+        </div>
       </div>
 
       <!-- Expandable Gateway Settings Panel -->
@@ -3797,9 +4181,9 @@
       <div class="modal-footer contacts-modal-footer">
         <div class="contacts-footer-left">
           <div id="dmrFooterControls" style="display:inline-flex; align-items:center; gap:8px;">
-            <button type="button" id="btnContactsGatewayToggle" class="btn-contacts-gw-toggle" title="Стандартный шлюз соединения для вызовов TG" data-i18n-title="contacts.gw_toggle_title">
+            <button type="button" id="btnContactsGatewayToggle" class="btn-contacts-gw-toggle" title="Default connection gateway for TG calls" data-i18n-title="contacts.gw_toggle_title">
               <span class="gw-icon">🌐</span>
-              <span id="contactsGwSummary" class="gw-summary"><span data-i18n="contacts.gw_default_channel">Канал по умолчанию:</span> <span class="gw-channel-name">Хотспот 1 (TS2)</span></span>
+              <span id="contactsGwSummary" class="gw-summary"><span data-i18n="contacts.gw_default_channel">Default channel:</span> <span class="gw-channel-name" data-i18n="contacts.gw_default_channel_val">Hotspot 1 (TS2)</span></span>
               <span class="gw-chevron">▾</span>
             </button>
             <button type="button" id="btnExportContacts" class="btn-icon-square" title="Экспорт контактов в JSON" data-i18n-title="contacts.btn_export_title">
@@ -3830,6 +4214,7 @@
         <div class="modal-title-with-badge">
           <span id="contactEditModalIcon" class="modal-icon">✏️</span>
           <h3 id="contactEditModalTitle" data-i18n="contacts.edit_modal_title">Редактировать запись</h3>
+          <span id="contactEditActiveNetBadge" class="contact-net-badge net-bm">BM</span>
         </div>
         <button type="button" id="closeContactEditModalBtn" class="icon-btn" title="Закрыть" data-i18n-title="buttons.close">✕</button>
       </div>
@@ -3870,11 +4255,13 @@
             <select id="contactEditNetwork" class="form-select">
               <option value="bm">BrandMeister (DMR)</option>
               <option value="freedmr">FreeDMR (DMR)</option>
+              <option value="adn">ADN Systems (DMR)</option>
               <option value="tgif">TGIF Network (DMR)</option>
               <option value="xlx">XLX Reflector (DMR)</option>
               <option value="dmrplus">DMR+ / IPSC2 (DMR)</option>
+              <option value="ysf">YSF / C4FM</option>
               <option value="allstar" data-i18n="contacts.net_allstar">🔵 AllStarLink (ASL / IAX2)</option>
-              <option value="custom" data-i18n="contacts.net_universal">🌐 Все DMR-сети (общий)</option>
+              <option value="custom" data-i18n="contacts.net_universal">Custom MMDVM (DMR)</option>
             </select>
           </div>
 
@@ -3883,6 +4270,7 @@
             <label for="contactEditCallsign" class="form-label" data-i18n="contacts.callsign_label">Позывной (общий идентификатор):</label>
             <input type="text" id="contactEditCallsign" class="form-input" placeholder="Например: W1AW" data-i18n-placeholder="contacts.callsign_placeholder" autocomplete="off" style="text-transform:uppercase; font-weight:700;">
             <small id="contactEditCallsignMergeHint" class="form-hint" style="display:none; color:#38bdf8; margin-top:4px;"></small>
+            <div id="contactEditCrossNetworksBox" class="contact-edit-cross-box" style="display:none;"></div>
           </div>
 
           <!-- Common Field: Name / Folder Name -->
@@ -3893,7 +4281,7 @@
 
           <!-- Field: DMR ID (for person / repeater) -->
           <div class="form-group" id="contactEditDmrIdGroup">
-            <label for="contactEditDmrId" class="form-label" id="contactEditDmrIdLabel" data-i18n="contacts.dmr_id_label">Личный DMR ID (BM / TGIF / FreeDMR / DMR+ / XLX):</label>
+            <label for="contactEditDmrId" class="form-label" id="contactEditDmrIdLabel" data-i18n="contacts.dmr_id_label">Личный DMR ID (BM / TGIF / FreeDMR / ADN / DMR+ / XLX):</label>
             <input type="number" id="contactEditDmrId" class="form-input" placeholder="7-значный ID (например: 2501234)" data-i18n-placeholder="contacts.dmr_id_placeholder" min="1" max="9999999" autocomplete="off">
             <small id="contactEditIdHint" class="form-hint" style="display:none;color:#58a6ff;"></small>
           </div>
@@ -4346,10 +4734,34 @@
     </div>
   </div>
 
-
-
-
-
+  <!-- Modal: YSF TX DG-ID Selection Prompt ("В лоб" при попытке TX на мультикомнатном рефлекторе) -->
+  <div id="ysfTxDgIdModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ysfTxDgIdModalTitle">
+    <div class="modal-content ysf-tx-dgid-modal-content">
+      <div class="modal-header ysf-tx-dgid-modal-header">
+        <div class="modal-title-with-badge">
+          <span style="font-size:1.1rem;">📡</span>
+          <h3 id="ysfTxDgIdModalTitle" data-i18n="ysf.tx_dgid_modal_title">Select DG-ID for Transmission</h3>
+          <span id="ysfTxDgIdHubBadge" class="ysf-multiroom-badge" style="display:none;">YCS</span>
+        </div>
+        <button type="button" id="closeYsfTxDgIdModalBtn" class="icon-btn" title="Close" data-i18n-title="common.close">✕</button>
+      </div>
+      <div class="modal-body ysf-tx-dgid-modal-body">
+        <div id="ysfTxDgIdRoomSubtitle" class="ysf-tx-dgid-room-sub" data-i18n="ysf.tx_dgid_room_sub">Which DG-ID would you like to transmit on?</div>
+        <div class="ysf-tx-dgid-hint" data-i18n="ysf.tx_dgid_hint">The selected channel will be remembered for this room and automatically added to the YSFO receive list so you can hear replies.</div>
+        <div id="ysfTxDgIdLastRxWrap" class="ysf-tx-dgid-lastrx-wrap" style="display:none;"></div>
+        <div id="ysfTxDgIdGrid" class="ysf-tx-dgid-grid"></div>
+        <div class="ysf-tx-dgid-custom-row">
+          <label for="ysfTxDgIdCustomInput" class="ysf-tx-dgid-custom-lbl" data-i18n="ysf.tx_dgid_custom_lbl">Other ID (01–99):</label>
+          <input type="number" id="ysfTxDgIdCustomInput" class="form-input ysf-tx-dgid-custom-inp" min="1" max="99" step="1" placeholder="01–99" inputmode="numeric">
+          <button type="button" id="btnYsfTxDgIdCustomApply" class="btn-primary btn-sm ysf-tx-dgid-custom-btn" data-i18n="ysf.tx_dgid_apply_btn">✓ Select</button>
+        </div>
+      </div>
+      <div class="modal-footer ysf-tx-dgid-modal-footer">
+        <button type="button" id="btnYsfTxDgIdClear" class="btn-secondary btn-sm" style="display:none;" data-i18n="ysf.tx_dgid_clear_btn">Reset TX DG-ID</button>
+        <button type="button" id="btnYsfTxDgIdCancel" class="btn-secondary btn-sm" data-i18n="common.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
 
     <!-- 0. AMBE+2 Vocoder Settings Modal -->
   <div id="ambeModal" class="modal">
@@ -4370,16 +4782,16 @@
         <div class="audio-presets-panel">
           <div class="audio-presets-left">
             <span class="audio-presets-title" data-i18n="ambe.preset_title">ПРЕСЕТЫ AMBE+2:</span>
-            <div class="audio-presets-group" role="group" aria-label="Пресеты вокодера AMBE+2">
+            <div class="audio-presets-group" role="group" aria-label="AMBE+2 vocoder presets" data-i18n-aria-label="ambe.presets_aria">
               <button type="button" class="btn-audio-rx-preset btn-ambe-preset active" data-ambe-preset="1">P1</button>
               <button type="button" class="btn-audio-rx-preset btn-ambe-preset" data-ambe-preset="2">P2</button>
               <button type="button" class="btn-audio-rx-preset btn-ambe-preset" data-ambe-preset="3">P3</button>
             </div>
           </div>
           <div class="audio-presets-right">
-            <button type="button" id="saveAmbePresetBtn" class="btn-preset-save btn-audio-save-preset" title="Сохранить текущие параметры в пресет 1" data-i18n-title="ambe.save_preset_title">
+            <button type="button" id="saveAmbePresetBtn" class="btn-preset-save btn-audio-save-preset" title="Save current vocoder parameters to preset 1" data-i18n-title="ambe.save_preset_p1_title">
               <span class="btn-preset-save-icon">💾</span>
-              <span id="saveAmbePresetText" class="btn-preset-save-text" data-i18n="ambe.btn_save_text">Сохранить в P1</span>
+              <span id="saveAmbePresetText" class="btn-preset-save-text" data-i18n="ambe.save_preset_p1">Save to P1</span>
             </button>
           </div>
         </div>
@@ -4391,7 +4803,7 @@
               <input type="checkbox" id="chkAmbeSpectralEnh" checked style="accent-color: #58a6ff; cursor: pointer;">
               <span class="audio-section-title" data-i18n="ambe.spectral_enh_title">1. СПЕКТРАЛЬНОЕ ФОРМАНТНОЕ ОБОГАЩЕНИЕ</span>
             </label>
-            <span id="badgeAmbeSpectralEnh" class="audio-val-badge">Вкл</span>
+            <span id="badgeAmbeSpectralEnh" class="audio-val-badge" data-i18n="common.on">Вкл</span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="ambe.spectral_enh_desc">
             Сжатие межформантных провалов огибающей гармоник с компенсацией суммарной энергии γ. Выключение переводит синтез в сырой математический режим AMBE+2.
@@ -4402,12 +4814,12 @@
         <div class="audio-section" style="margin-top: 14px;">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="ambe.high_band_gain_title">2. ФОРМАНТНЫЙ ПОДЪЕМ ВЧ ВОКОДЕРА (HIGH-BAND GAIN)</span>
-            <span id="valAmbeHighBandGain" class="audio-val-badge">+2.5 дБ</span>
+            <span id="valAmbeHighBandGain" class="audio-val-badge">+2.5 <span data-i18n="audio.unit_db">dB</span></span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
-            <span class="slider-limit-label">0 дБ</span>
+            <span class="slider-limit-label">0 <span data-i18n="audio.unit_db">dB</span></span>
             <input type="range" id="sliderAmbeHighBandGain" min="0" max="6" step="0.5" value="2.5" class="form-slider" style="flex: 1; cursor: pointer;">
-            <span class="slider-limit-label">+6 дБ</span>
+            <span class="slider-limit-label">+6 <span data-i18n="audio.unit_db">dB</span></span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="ambe.high_band_gain_desc">
             Плавное масштабирование гармоник в полосе 2500..3800 Гц. 0 дБ — нейтральный мягкий звук; +3..+5 дБ — яркий пробивной голос, прорезающий эфирные шумы.
@@ -4418,12 +4830,12 @@
         <div class="audio-section" style="margin-top: 14px;">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="ambe.unvoiced_gain_title">3. БАЛАНС ГЛУХИХ/ШИПЯЩИХ ЗВУКОВ (UNVOICED / WOLA GAIN)</span>
-            <span id="valAmbeUnvoicedGain" class="audio-val-badge">-0.4 дБ</span>
+            <span id="valAmbeUnvoicedGain" class="audio-val-badge">-0.4 <span data-i18n="audio.unit_db">dB</span></span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
-            <span class="slider-limit-label">-4 дБ</span>
+            <span class="slider-limit-label">-4 <span data-i18n="audio.unit_db">dB</span></span>
             <input type="range" id="sliderAmbeUnvoicedGain" min="-4" max="4" step="0.5" value="-0.4" class="form-slider" style="flex: 1; cursor: pointer;">
-            <span class="slider-limit-label">+4 дБ</span>
+            <span class="slider-limit-label">+4 <span data-i18n="audio.unit_db">dB</span></span>
           </div>
           <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="ambe.unvoiced_gain_desc">
             Регулировка множителя амплитуды невокализованных звуков при 256-pt WOLA БПФ-синтезе (согласные «с», «ш», «щ», «ц», «т», «к»).
@@ -4481,7 +4893,7 @@
                 <span data-i18n="audio_rx.eq10_linked">🔗 Связанные</span>
               </label>
             </div>
-            <button type="button" id="btnResetEq10Profile" class="btn-mini-reset" title="Сбросить в эталонный речевой профиль" data-i18n="audio_rx.eq10_reset" data-i18n-title="audio_rx.eq10_reset_title">Сброс EQ</button>
+            <button type="button" id="btnResetEq10Profile" class="btn-mini-reset" title="Сбросить все полосы эквалайзера в 0.0 дБ" data-i18n="audio_rx.eq10_reset" data-i18n-title="audio_rx.eq10_reset_title">Сброс EQ</button>
           </div>
 
           <!-- Горизонтальный рэк 10 вертикальных фейдеров -->
@@ -4557,13 +4969,13 @@
               <span class="custom-checkbox-checkmark"></span>
               <span class="audio-section-title" data-i18n="audio_rx.agc_title">2. Автоматическая регулировка усиления (АРУ)</span>
             </label>
-            <span id="badgeAgcStatus" class="audio-val-badge">18 дБ / 4.5x</span>
+            <span id="badgeAgcStatus" class="audio-val-badge">18 <span data-i18n="audio.unit_db">dB</span> / 4.5x</span>
           </div>
           <div class="audio-two-col-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
             <div class="slider-row" style="margin-top: 0;">
               <div class="slider-label-group" style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                 <span data-i18n="audio_rx.agc_depth">Глубина АРУ:</span>
-                <span id="lblAgcDepth" class="val-highlight">18 дБ</span>
+                <span id="lblAgcDepth" class="val-highlight">18 <span data-i18n="audio.unit_db">dB</span></span>
               </div>
               <input type="range" id="sliderAgcDepth" class="form-slider" min="10" max="24" step="1" value="18" style="width: 100%;">
             </div>
@@ -4690,8 +5102,13 @@
                   <span id="txMicMeterClip" class="tx-meter-dbfs">-∞ dBFS</span>
                 </div>
                 <div class="tx-meter-track-wrap">
-                  <div class="tx-meter-track">
-                    <div id="txMicMeterBar" class="tx-meter-bar"></div>
+                  <div class="tx-meter-tracks-col">
+                    <div class="tx-meter-track">
+                      <div id="txMicMeterBar" class="tx-meter-bar"></div>
+                    </div>
+                    <div class="tx-meter-track tx-parrot-progress-track">
+                      <div id="txParrotProgressBar" class="tx-parrot-progress-bar"></div>
+                    </div>
                   </div>
                   <div id="txMicMeterClipLed" class="tx-clip-led" title="Индикатор перегрузки микрофона (CLIP)" data-i18n-title="audio_tx.clip_title">CLIP</div>
                 </div>
@@ -4699,7 +5116,7 @@
             </div>
 
             <button type="button" id="btnParrotTest" class="btn-parrot-test" title="Эхо-тест попугая: клик — запись (красный), ответ — воспроизведение (зеленый)" data-i18n-title="audio_tx.parrot_test_title">
-              <span id="parrotTestText" class="parrot-btn-label">PARROT<br>TEST</span>
+              <span id="parrotTestText" class="parrot-btn-label">LOCAL<br>ECHO TEST</span>
             </button>
           </div>
         </div>
@@ -4854,6 +5271,14 @@
             <img src="/static/img/avatar.png" alt="Andrei Shilov" class="about-avatar-img">
           </div>
           <div class="about-author-info">
+            <div class="about-made-arm">
+              <div>«Ճանաչել զիմաստութիւն եւ զխրատ, իմանալ զբանս հանճարոյ»</div>
+              <div class="about-made-arm-sub">Խորին հարգանքով՝ Հայաստանին</div>
+            </div>
+            <div class="about-made-in">
+              <span class="flag-badge about-flag-am" title="Armenia"><img src="/static/flags/am.svg" alt="Armenia" class="flag-img" /></span>
+              <span class="about-made-en">Made in Armenia</span>
+            </div>
             <div class="about-author-header-line">
               <span class="about-author-name"><span class="about-author-prefix">author</span> Andrei Shilov</span>
               <div class="about-email-container">
@@ -4861,13 +5286,6 @@
                 <div id="aboutEmailImgBox" class="about-email-img-box" style="display: none;">
                   <img src="/static/img/email.png" alt="proxydmr email" class="about-email-img">
                 </div>
-              </div>
-            </div>
-            <div class="about-made-in">
-              <span class="flag-badge about-flag-am" title="Armenia"><img src="/static/flags/am.svg" alt="Armenia" class="flag-img" /></span>
-              <div class="about-made-text">
-                <span class="about-made-arm">Արտադրված է Հայաստանում</span>
-                <span class="about-made-en">Made in Armenia</span>
               </div>
             </div>
           </div>
@@ -4904,16 +5322,16 @@
               <div class="about-credit-desc" data-i18n="about.desc_allstar">Всемирная сеть узлов и репитеров AllStarLink, протокол IAX2, каталог AllMonDB и серверный движок ASL3 / app_rpt.</div>
             </div>
 
-            <!-- 3. TGIF, FreeDMR, DMR+ & XLX Networks -->
+            <!-- 3. TGIF, FreeDMR, ADN, DMR+ & XLX Networks -->
             <div class="about-credit-card">
               <div class="about-credit-head">
-                <span class="about-lib-name">TGIF, FreeDMR, DMR+ &amp; XLX</span>
+                <span class="about-lib-name">TGIF, FreeDMR, ADN, DMR+ &amp; XLX</span>
                 <a href="https://www.pistar.uk" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://www.pistar.uk">
-                  tgif.network • freedmr.uk • xlxd ↗
+                  tgif.network • freedmr.uk • adn.systems • xlxd ↗
                 </a>
               </div>
               <div class="about-credit-author">TGIF Team, Simon (G7RZU), Jean-Luc (LX3JL), Luc (LX1IQ) &amp; Andy Taylor (MW0MWZ)</div>
-              <div class="about-credit-desc" data-i18n="about.desc_dmr_networks">Открытые радиолюбительские сети TGIF, FreeDMR, DMR+/IPSC2, мультипротокольные рефлекторы XLX и каталоги узлов Pi-Star.</div>
+              <div class="about-credit-desc" data-i18n="about.desc_dmr_networks">Открытые радиолюбительские сети TGIF, FreeDMR, ADN Systems, DMR+/IPSC2, мультипротокольные рефлекторы XLX и каталоги узлов Pi-Star.</div>
             </div>
 
             <!-- 4. mbelib-neo & PFFFT -->
@@ -4932,8 +5350,8 @@
             <div class="about-credit-card">
               <div class="about-credit-head">
                 <span class="about-lib-name">dmr_utils3</span>
-                <a href="https://github.com/anthony-k-60/dmr_utils3" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/anthony-k-60/dmr_utils3">
-                  github.com/anthony-k-60/dmr_utils3 ↗
+                <a href="https://github.com/HBLink-org/dmr_utils3" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/HBLink-org/dmr_utils3">
+                  github.com/HBLink-org/dmr_utils3 ↗
                 </a>
               </div>
               <div class="about-credit-author">Cortney T. Buffington (N0MJS)</div>
@@ -4949,7 +5367,7 @@
                 </a>
               </div>
               <div class="about-credit-author">Jonathan Naylor (G4KLX)</div>
-              <div class="about-credit-desc" data-i18n="about.desc_mmdvm">Протокол HomeBrew Repeater / MMDVM для подключения к серверам BrandMeister, TGIF, FreeDMR, DMR+ и рефлекторам XLX.</div>
+              <div class="about-credit-desc" data-i18n="about.desc_mmdvm">Протокол HomeBrew Repeater / MMDVM для подключения к серверам BrandMeister, TGIF, FreeDMR, ADN Systems, DMR+ и рефлекторам XLX.</div>
             </div>
 
             <!-- 8. RadioID, HamQTH & QRZ.com -->
@@ -4968,8 +5386,8 @@
             <div class="about-credit-card">
               <div class="about-credit-head">
                 <span class="about-lib-name">Piper TTS &amp; ONNX Runtime</span>
-                <a href="https://github.com/rhasspy/piper" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/rhasspy/piper">
-                  github.com/rhasspy/piper ↗
+                <a href="https://github.com/OHF-Voice/piper1-gpl" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/OHF-Voice/piper1-gpl">
+                  github.com/OHF-Voice/piper1-gpl ↗
                 </a>
               </div>
               <div class="about-credit-author">Michael Hansen (synesthesiam), Rhasspy Team &amp; Microsoft ONNX Runtime</div>
@@ -5016,8 +5434,8 @@
             <div class="about-credit-card">
               <div class="about-credit-head">
                 <span class="about-lib-name">llama.cpp &amp; Qwen 2.5</span>
-                <a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/ggerganov/llama.cpp">
-                  github.com/ggerganov/llama.cpp ↗
+                <a href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer" class="about-lib-link" title="https://github.com/ggml-org/llama.cpp">
+                  github.com/ggml-org/llama.cpp ↗
                 </a>
               </div>
               <div class="about-credit-author">Georgi Gerganov &amp; Alibaba Cloud Qwen Team</div>
@@ -5172,7 +5590,7 @@
             </label>
             <div class="tone-pattern-input-row" style="display: flex; align-items: stretch; gap: 6px; width: 100%;">
               <input type="text" id="recSeamBeepPattern" class="rec-text-input" placeholder="600-110-33, 840-50-15" title="До 7 тонов частота-длительность-громкость через запятую" data-i18n-title="recordings.seam_beep_title" style="flex: 1; width: 100%; min-width: 0; box-sizing: border-box; text-align: left; padding: 4px 8px; border-radius: var(--app-border-radius, 0px); font-family: monospace;">
-              <button type="button" id="btnTestSeamBeep" class="tone-test-btn local-demo-allowed" style="flex-shrink: 0;" title="Прослушать звуковой маркер разделения сессий" data-i18n-title="recordings.seam_beep_test_title" aria-label="Тест">
+              <button type="button" id="btnTestSeamBeep" class="tone-test-btn local-demo-allowed" style="flex-shrink: 0;" title="Play session separator beep preview" data-i18n-title="recordings.seam_beep_test_title" aria-label="Test" data-i18n-aria-label="recordings.seam_beep_test_btn">
                 <span class="tone-test-icon">🔊</span>
                 <span class="tone-test-label" data-i18n="recordings.seam_beep_test_btn">Тест</span>
               </button>
@@ -5288,7 +5706,7 @@
     <div class="system-update-banner-header">
       <div class="system-update-banner-title">
         <span class="system-update-banner-icon">🚀</span>
-        <span id="systemBannerVerTitle" data-i18n="updates.banner_title">Доступно обновление ProxDMR</span>
+        <span id="systemBannerVerTitle" data-i18n="updates.banner_title_static">ProxDMR update available</span>
       </div>
       <button type="button" id="btnCloseUpdateBanner" class="system-update-banner-close" title="Закрыть" data-i18n-title="buttons.close" aria-label="Close">&times;</button>
     </div>
@@ -5320,11 +5738,11 @@
       <div class="system-changelog-header">
         <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
           <span style="font-size: 1.2rem;">📋</span>
-          <h3 id="systemChangelogModalTitle" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="updates.modal_title">
-            Что нового в ProxDMR
+          <h3 id="systemChangelogModalTitle" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="updates.modal_title_static">
+            What's new in ProxDMR
           </h3>
         </div>
-        <button type="button" id="btnCloseChangelogModal" class="modal-close-btn" style="background: none; border: none; font-size: 1.5rem; color: #8b949e; cursor: pointer; padding: 0 4px; line-height: 1;">&times;</button>
+        <button type="button" id="btnCloseChangelogModal" class="modal-close-btn" title="Close" data-i18n-title="buttons.close" style="background: none; border: none; font-size: 1.5rem; color: #8b949e; cursor: pointer; padding: 0 4px; line-height: 1;">&times;</button>
       </div>
 
       <!-- Language Selector Bar (7 Languages Pills) -->
@@ -5542,10 +5960,10 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.628"></script>
-  <script src="/static/js/audio-player.js?v=2.9.622"></script>
-  <script src="/static/js/dialog.js?v=2.9.489"></script>
-  <script src="/static/js/auth.js?v=2.9.550"></script>
+  <script src="/static/js/i18n.js?v=2.9.755"></script>
+  <script src="/static/js/audio-player.js?v=2.9.733"></script>
+  <script src="/static/js/dialog.js?v=2.9.711"></script>
+  <script src="/static/js/auth.js?v=2.9.730"></script>
   <style>
     /* Demo Mode Styles */
     .auth-demo-box {
@@ -5800,8 +6218,8 @@
       }
     }
 </style>
-  <script src="/static/js/admin.js?v=2.9.373"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.628"></script>
+  <script src="/static/js/admin.js?v=2.9.711"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.755"></script>
 </body>
 </html>
 

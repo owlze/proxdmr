@@ -4,7 +4,7 @@
  * responsive & mobile fullscreen multilingual changelog modal, and initiates server update.
  */
 
-import { showToast } from "../core/toast.js";
+import { showToast } from "../core/toast.js?v=2.9.699";
 
 let _latestUpdateInfo = null;
 let _selectedLang = "ru";
@@ -23,7 +23,7 @@ const LANG_NAMES = {
 };
 
 function getActiveLanguage() {
-  const current = (window.currentLang || (window.I18N && window.I18N.currentLanguage) || localStorage.getItem("proxdmr_language") || "ru").toLowerCase();
+  const current = (window.currentLang || (window.I18N && (typeof window.I18N.getLanguage === "function" ? window.I18N.getLanguage() : (window.I18N.currentLang || window.I18N.currentLanguage))) || localStorage.getItem("proxdmr_language") || "ru").toLowerCase();
   return SUPPORTED_LANGS.includes(current) ? current : "ru";
 }
 
@@ -38,7 +38,7 @@ function escapeHtml(str) {
 }
 
 function formatMarkdown(text) {
-  if (!text) return '<p style="color:#8b949e;font-style:italic;">Нет описания изменений</p>';
+  if (!text) return `<p style="color:#8b949e;font-style:italic;">${escapeHtml(window.t ? window.t("updates.no_changelog", {}, "Нет описания изменений") : "Нет описания изменений")}</p>`;
 
   const lines = text.split(/\r?\n/);
   let html = "";
@@ -340,6 +340,7 @@ function renderUpdateStatus(data, manual = false) {
 
   if (data.has_update) {
     // Update Available!
+    let availStr = "";
     if (badgeHeader) {
       badgeHeader.style.display = "inline-block";
       badgeHeader.textContent = `v${data.latest_version}`;
@@ -347,7 +348,7 @@ function renderUpdateStatus(data, manual = false) {
     if (statusPill) {
       statusPill.style.background = "rgba(231, 76, 60, 0.18)";
       statusPill.style.color = "#ff7675";
-      const availStr = window.t ? window.t("updates.available_ver", { ver: data.latest_version }, `⚡ Доступна v${data.latest_version}`) : `⚡ Доступна v${data.latest_version}`;
+      availStr = window.t ? window.t("updates.available_ver", { ver: data.latest_version }, `⚡ Доступна v${data.latest_version}`) : `⚡ Доступна v${data.latest_version}`;
       statusPill.textContent = availStr;
     }
     if (availableBlock) availableBlock.style.display = "block";
@@ -394,9 +395,9 @@ function renderUpdateStatus(data, manual = false) {
     if (banner) banner.style.display = "none";
 
     if (manual) {
+      const latestMsg = window.t ? window.t("updates.already_latest", {}, "✓ У вас самая последняя версия") : "✓ У вас самая последняя версия";
       if (checkStatusText) {
         checkStatusText.style.color = "#2ecc71";
-        const latestMsg = window.t ? window.t("updates.already_latest", {}, "✓ У вас самая последняя версия") : "✓ У вас самая последняя версия";
         checkStatusText.textContent = latestMsg;
       }
       showToast(latestMsg, 2500);
@@ -434,7 +435,7 @@ function updateChangelogContent() {
   if (!contentEl) return;
 
   if (!_latestUpdateInfo) {
-    contentEl.innerHTML = '<div style="text-align: center; color: #8b949e; padding: 25px;">Загрузка описания изменений...</div>';
+    contentEl.innerHTML = `<div style="text-align: center; color: #8b949e; padding: 25px;">${escapeHtml(window.t ? window.t("updates.loading_changelog", {}, "Загрузка описания изменений...") : "Загрузка описания изменений...")}</div>`;
     return;
   }
 
@@ -446,7 +447,7 @@ function updateChangelogContent() {
 
 export async function confirmAndApplyUpdate() {
   if (!_latestUpdateInfo || !_latestUpdateInfo.has_update) {
-    showToast("⚠️ Нет доступных обновлений для установки", 2500);
+    showToast(window.t ? window.t("updates.none_available", {}, "⚠️ Нет доступных обновлений для установки") : "⚠️ Нет доступных обновлений для установки", 2500);
     return;
   }
 
@@ -477,7 +478,7 @@ export async function confirmAndApplyUpdate() {
       pollServerRebootAndReload();
     } else {
       hideUpdatingOverlay();
-      showToast(`✕ ${res.message || "Ошибка обновления"}`, 5000);
+      showToast(`✕ ${res.message || (window.t ? window.t("updates.apply_error", {}, "Ошибка обновления") : "Ошибка обновления")}`, 5000);
     }
   } catch (err) {
     // If request failed because server rebooted immediately, poll for reconnection
@@ -558,4 +559,17 @@ if (typeof window !== "undefined") {
   window.checkSystemUpdates = checkUpdates;
   window.openChangelogModal = openChangelogModal;
   window.confirmAndApplyUpdate = confirmAndApplyUpdate;
+  window.refreshSystemUpdaterLocalization = function refreshSystemUpdaterLocalization() {
+    _selectedLang = getActiveLanguage();
+    if (_latestUpdateInfo) {
+      renderUpdateStatus(_latestUpdateInfo, false);
+      updateChangelogContent();
+    } else {
+      const title = document.getElementById("systemChangelogModalTitle");
+      if (title) {
+        const ver = window.APP_VERSION || "";
+        title.textContent = window.t ? window.t("updates.modal_title", { ver }, `Что нового в ProxDMR v${ver}`) : `Что нового в ProxDMR v${ver}`;
+      }
+    }
+  };
 }

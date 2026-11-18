@@ -22,20 +22,19 @@ FREEDMR_HOSTS_TTL_SEC = 24 * 3600
 
 # Verified fallback list with Germany 178.254.30.151 (working, 14ms) first
 FALLBACK_FREEDMR_SERVERS: List[Dict[str, Any]] = [
-    { "id": "FDMR-DE", "country": "DE", "country_name": "Германия", "name": "FreeDMR Германия (2621)", "host": "178.254.30.151", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-EU", "country": "EU", "country_name": "Европа (Хаб)", "name": "FreeDMR Europe (Main Hub)", "host": "freedmreu.gb7fr.org.uk", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-UK", "country": "GB", "country_name": "Великобритания", "name": "FreeDMR UK (2341)", "host": "hotspot.uk.freedmr.link", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-SCT", "country": "GB", "country_name": "Шотландия", "name": "FreeDMR Scotland (2345)", "host": "freedmr.m0xfn.radio", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-BG", "country": "BG", "country_name": "Болгария", "name": "FreeDMR Болгария (2841)", "host": "fdmrbg.ddns.net", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-GR", "country": "GR", "country_name": "Греция", "name": "FreeDMR Греция (2021)", "host": "dmr.freedmr.gr", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-SE", "country": "SE", "country_name": "Швеция", "name": "FreeDMR Швеция (2401)", "host": "2401.freedmrsweden.se", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-NO", "country": "NO", "country_name": "Норвегия", "name": "FreeDMR Норвегия (2421)", "host": "norway.freedmr.no", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-FR", "country": "FR", "country_name": "Франция", "name": "FreeDMR Франция (2082)", "host": "alpes-grenoble.ovh", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-IT", "country": "IT", "country_name": "Италия", "name": "FreeDMR Италия (2221)", "host": "hotspots.freedmr.it", "port": 62031, "password": "PASSWORD" },
-    { "id": "FDMR-US-FL", "country": "US", "country_name": "США (Флорида)", "name": "FreeDMR USA Florida (3109)", "host": "freedmr.dvswitch.org", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-US-SF", "country": "US", "country_name": "США (Сан-Франциско)", "name": "FreeDMR USA West (3103)", "host": "us-sf.freedmr.cc", "port": 62031, "password": "passw0rd" },
-    { "id": "FDMR-BR", "country": "BR", "country_name": "Бразилия", "name": "FreeDMR Бразилия (7242)", "host": "freedmr.network365.com.br", "port": 62031, "password": "passw0rd" },
-    { "id": "ADN-GL", "country": "GLOBAL", "country_name": "ADN Systems", "name": "ADN Global Router", "host": "master.adn.systems", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-DE", "country": "DE", "country_name": "Germany", "name": "FreeDMR Germany (2621)", "host": "178.254.30.151", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-EU", "country": "EU", "country_name": "Europe (Main Hub)", "name": "FreeDMR Europe (Main Hub)", "host": "freedmreu.gb7fr.org.uk", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-UK", "country": "GB", "country_name": "United Kingdom", "name": "FreeDMR UK (2341)", "host": "hotspot.uk.freedmr.link", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-SCT", "country": "GB", "country_name": "Scotland", "name": "FreeDMR Scotland (2345)", "host": "freedmr.m0xfn.radio", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-BG", "country": "BG", "country_name": "Bulgaria", "name": "FreeDMR Bulgaria (2841)", "host": "fdmrbg.ddns.net", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-GR", "country": "GR", "country_name": "Greece", "name": "FreeDMR Greece (2021)", "host": "dmr.freedmr.gr", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-SE", "country": "SE", "country_name": "Sweden", "name": "FreeDMR Sweden (2401)", "host": "2401.freedmrsweden.se", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-NO", "country": "NO", "country_name": "Norway", "name": "FreeDMR Norway (2421)", "host": "norway.freedmr.no", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-FR", "country": "FR", "country_name": "France", "name": "FreeDMR France (2082)", "host": "alpes-grenoble.ovh", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-IT", "country": "IT", "country_name": "Italy", "name": "FreeDMR Italy (2221)", "host": "hotspots.freedmr.it", "port": 62031, "password": "PASSWORD" },
+    { "id": "FDMR-US-FL", "country": "US", "country_name": "USA Florida", "name": "FreeDMR USA Florida (3109)", "host": "freedmr.dvswitch.org", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-US-SF", "country": "US", "country_name": "USA San Francisco", "name": "FreeDMR USA West (3103)", "host": "us-sf.freedmr.cc", "port": 62031, "password": "passw0rd" },
+    { "id": "FDMR-BR", "country": "BR", "country_name": "Brazil", "name": "FreeDMR Brazil (7242)", "host": "freedmr.network365.com.br", "port": 62031, "password": "passw0rd" },
 ]
 
 # Country code detection for common countries in FreeDMR_Hosts.txt
@@ -131,18 +130,6 @@ def parse_freedmr_hosts_text(raw_text: str) -> List[Dict[str, Any]]:
             "host": host,
             "port": port,
             "password": password or "passw0rd",
-        })
-
-    # Always ensure ADN Global Router is present at the end if not in official list
-    if not any(s["host"].lower() == "master.adn.systems" for s in servers):
-        servers.append({
-            "id": "ADN-GL",
-            "country": "GLOBAL",
-            "country_name": "ADN Systems",
-            "name": "ADN Global Router",
-            "host": "master.adn.systems",
-            "port": 62031,
-            "password": "passw0rd",
         })
 
     return servers

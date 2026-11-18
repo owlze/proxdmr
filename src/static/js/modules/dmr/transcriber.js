@@ -1,10 +1,10 @@
-import { formatCallerDisplay } from '../core/formatters.js?v=2.9.367';
-import { showToast } from '../core/toast.js';
+import { formatCallerDisplay } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 import {
   formatCaptionHtml,
   renderTranscriptionSummary,
   updateLogTranscriptionPopoverIfActive
-} from './transcription.js?v=2.9.547';
+} from './transcription.js?v=2.9.738';
 import {
   getHotspotMute,
   getPersistentHotspotMute,
@@ -14,7 +14,7 @@ import {
   updateHotspotCardMuteUI,
   getHotspotTsAudioMode,
   setHotspotTsAudioMode
-} from '../audio/routing.js';
+} from '../audio/routing.js?v=2.9.729';
 
 /**
  * ProxDMR AI Speech Transcriber & Teleprompter Module
@@ -272,10 +272,13 @@ export function cleanTextForClientTts(text, lang = "ru") {
   if (!text) return "";
   let s = String(text);
   s = s.replace(/<call>[^<]*<\/call>/gi, "");
-  const l = (lang || "ru").substring(0, 2).toLowerCase();
-  if (l === "ru" || l === "uk" || l === "bg") {
+  const l = (lang || "en").substring(0, 2).toLowerCase();
+  if (l === "ru" || l === "bg") {
     s = s.replace(/\b73\b/g, "семьдесят три");
     s = s.replace(/\b88\b/g, "восемьдесят восемь");
+  } else if (l === "uk") {
+    s = s.replace(/\b73\b/g, "сімдесят три");
+    s = s.replace(/\b88\b/g, "вісімдесят вісім");
   } else if (l === "fr") {
     s = s.replace(/\b73\b/g, "soixante-treize");
     s = s.replace(/\b88\b/g, "quatre-vingt-huit");
@@ -288,6 +291,9 @@ export function cleanTextForClientTts(text, lang = "ru") {
   } else if (l === "it") {
     s = s.replace(/\b73\b/g, "settantatré");
     s = s.replace(/\b88\b/g, "ottantotto");
+  } else if (l === "nl") {
+    s = s.replace(/\b73\b/g, "drieënzeventig");
+    s = s.replace(/\b88\b/g, "achtentachtig");
   } else {
     s = s.replace(/\b73\b/g, "seventy-three");
     s = s.replace(/\b88\b/g, "eighty-eight");
@@ -295,6 +301,80 @@ export function cleanTextForClientTts(text, lang = "ru") {
   return s.trim();
 }
 window.cleanTextForClientTts = cleanTextForClientTts;
+
+export function deduplicateRepeatedPhrases(text, minWords = 1, maxWords = 5) {
+  if (!text || typeof text !== "string") return "";
+  let result = text;
+  let changed = true;
+
+  const norm = (w) => (w || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+  while (changed) {
+    changed = false;
+    const tokens = [];
+    const re = /\S+/g;
+    let match;
+    while ((match = re.exec(result)) !== null) {
+      tokens.push({ word: match[0], start: match.index, end: match.index + match[0].length });
+    }
+    if (tokens.length < 2) break;
+
+    const normWords = tokens.map(t => norm(t.word));
+    const nWords = tokens.length;
+    let found = false;
+
+    for (let n = maxWords; n >= minWords; n--) {
+      if (found) break;
+      for (let i = 0; i <= nWords - 2 * n; i++) {
+        const target = normWords.slice(i, i + n);
+        if (!target.some(Boolean)) continue;
+
+        let count = 1;
+        while (i + (count + 1) * n <= nWords) {
+          const next = normWords.slice(i + count * n, i + (count + 1) * n);
+          if (target.every((val, idx) => val === next[idx])) {
+            count++;
+          } else {
+            break;
+          }
+        }
+
+        if (count >= 2) {
+          const startChar = tokens[i].start;
+          const keepEndChar = tokens[i + n - 1].end;
+          const discardEndChar = tokens[i + count * n - 1].end;
+
+          let firstPart = result.substring(startChar, keepEndChar).replace(/[\s,;:–—-]+$/, "");
+          const discardedPart = result.substring(keepEndChar, discardEndChar).trim();
+
+          let tailPunct = "";
+          for (const p of [".", "!", "?", ",", ";"]) {
+            if (discardedPart.endsWith(p) && !firstPart.endsWith(p)) {
+              tailPunct = p;
+              break;
+            }
+          }
+
+          const before = result.substring(0, startChar);
+          const after = result.substring(discardEndChar);
+
+          result = (before + firstPart + tailPunct + after)
+            .replace(/[,:;]\s*([.!?])/g, "$1")
+            .replace(/([.!?])\s*([.!?])/g, "$1")
+            .replace(/,\s*,/g, ",")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          changed = true;
+          found = true;
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+window.deduplicateRepeatedPhrases = deduplicateRepeatedPhrases;
 
 export const BCP47_LANG_MAP = {
   ru: "ru-RU",
@@ -374,26 +454,10 @@ function formatGeminiError(rawError, context = "tts") {
           const trans = window.t("gemini_err.quota_retry", { sec });
           if (trans && trans !== "gemini_err.quota_retry") return trans;
         }
-        const lang = (window.I18N && window.I18N.currentLang) || "ru";
-        if (lang === "en") return `API quota exceeded (retry in ${sec}s)`;
-        if (lang === "uk") return `Вичерпано ліміт API (повтор через ${sec} с)`;
-        if (lang === "de") return `API-Kontingent erschöpft (in ${sec}s wiederholen)`;
-        if (lang === "fr") return `Quota API dépassé (réessayer dans ${sec}s)`;
-        if (lang === "it") return `Quota API esaurita (riprova tra ${sec}s)`;
-        return `Исчерпан лимит API (повтор через ${sec} с)`;
+        return _geminiErrFallback("quota_retry", { sec });
       }
     }
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.quota");
-      if (trans && trans !== "gemini_err.quota") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "API quota exceeded";
-    if (lang === "uk") return "Вичерпано ліміт API";
-    if (lang === "de") return "API-Kontingent erschöpft";
-    if (lang === "fr") return "Quota API dépassé";
-    if (lang === "it") return "Quota API esaurita";
-    return "Исчерпан лимит API";
+    return _geminiErrLocalized("gemini_err.quota", "quota");
   }
 
   // 2. Overloaded server (503 / UNAVAILABLE / high demand)
@@ -404,17 +468,7 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("high demand") ||
     low.includes("temporarily unavailable")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.overloaded");
-      if (trans && trans !== "gemini_err.overloaded") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Server overloaded, please retry later";
-    if (lang === "uk") return "Сервер перевантажений, повторіть пізніше";
-    if (lang === "de") return "Server überlastet, bitte später versuchen";
-    if (lang === "fr") return "Serveur surchargé, réessayez plus tard";
-    if (lang === "it") return "Server sovraccarico, riprova più tardi";
-    return "Сервер перегружен, повторите позже";
+    return _geminiErrLocalized("gemini_err.overloaded", "overloaded");
   }
 
   // 3. Invalid API key (API_KEY_INVALID / 400 / key not valid)
@@ -425,17 +479,7 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("key expired") ||
     low.includes("не указан api ключ")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.invalid_key");
-      if (trans && trans !== "gemini_err.invalid_key") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Invalid API key";
-    if (lang === "uk") return "Невірний ключ API";
-    if (lang === "de") return "Ungültiger API-Schlüssel";
-    if (lang === "fr") return "Clé API invalide";
-    if (lang === "it") return "Chiave API non valida";
-    return "Неверный API ключ";
+    return _geminiErrLocalized("gemini_err.invalid_key", "invalid_key");
   }
 
   // 4. Permission Denied (403 / PERMISSION_DENIED)
@@ -445,17 +489,7 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("access denied") ||
     low.includes("forbidden")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.permission_denied");
-      if (trans && trans !== "gemini_err.permission_denied") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Access denied (check API key)";
-    if (lang === "uk") return "Доступ заборонено (перевірте ключ API)";
-    if (lang === "de") return "Zugriff verweigert (API-Schlüssel prüfen)";
-    if (lang === "fr") return "Accès refusé (vérifiez la clé API)";
-    if (lang === "it") return "Accesso negato (controlla la chiave API)";
-    return "Доступ запрещен (проверьте ключ API)";
+    return _geminiErrLocalized("gemini_err.permission_denied", "permission_denied");
   }
 
   // 5. Model Not Found / Unsupported (404 / NOT_FOUND)
@@ -465,17 +499,7 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("not found") ||
     low.includes("not supported for this model")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.model_not_found");
-      if (trans && trans !== "gemini_err.model_not_found") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Model unavailable or not found";
-    if (lang === "uk") return "Модель недоступна або не знайдена";
-    if (lang === "de") return "Modell nicht verfügbar oder nicht gefunden";
-    if (lang === "fr") return "Modèle indisponible ou introuvable";
-    if (lang === "it") return "Modello non disponibile o non trovato";
-    return "Модель недоступна или не найдена";
+    return _geminiErrLocalized("gemini_err.model_not_found", "model_not_found");
   }
 
   // 6. Timeout (504 / DEADLINE_EXCEEDED / timeout)
@@ -485,17 +509,7 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("timeout") ||
     low.includes("таймаут")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.timeout");
-      if (trans && trans !== "gemini_err.timeout") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Server connection timeout";
-    if (lang === "uk") return "Таймаут з'єднання з сервером";
-    if (lang === "de") return "Server-Verbindungs-Timeout";
-    if (lang === "fr") return "Délai de connexion dépassé";
-    if (lang === "it") return "Timeout connessione al server";
-    return "Таймаут соединения с сервером";
+    return _geminiErrLocalized("gemini_err.timeout", "timeout");
   }
 
   // 7. Network / connection
@@ -508,17 +522,7 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("connection refused") ||
     low.includes("econnrefused")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.network");
-      if (trans && trans !== "gemini_err.network") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Network or connection error";
-    if (lang === "uk") return "Помилка мережі або з'єднання";
-    if (lang === "de") return "Netzwerk- oder Verbindungsfehler";
-    if (lang === "fr") return "Erreur de réseau ou de connexion";
-    if (lang === "it") return "Errore di rete o di connessione";
-    return "Ошибка сети или соединения";
+    return _geminiErrLocalized("gemini_err.network", "network");
   }
 
   // 8. Safety Filter Block
@@ -528,56 +532,102 @@ function formatGeminiError(rawError, context = "tts") {
     low.includes("блокировк") ||
     low.includes("фильтр")
   ) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.safety");
-      if (trans && trans !== "gemini_err.safety") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Blocked by safety filter";
-    if (lang === "uk") return "Заблоковано фільтром безпеки";
-    if (lang === "de") return "Durch Sicherheitsfilter blockiert";
-    if (lang === "fr") return "Bloqué par le filtre de sécurité";
-    if (lang === "it") return "Bloccato dal filtre de sécurité";
-    return "Заблокировано фильтром безопасности";
+    return _geminiErrLocalized("gemini_err.safety", "safety");
   }
 
   // 9. Internal error (500 / INTERNAL)
   if (low.includes("500") || low.includes("internal")) {
-    if (typeof window.t === "function") {
-      const trans = window.t("gemini_err.internal");
-      if (trans && trans !== "gemini_err.internal") return trans;
-    }
-    const lang = (window.I18N && window.I18N.currentLang) || "ru";
-    if (lang === "en") return "Internal Gemini server error";
-    if (lang === "uk") return "Внутрішня помилка сервера Gemini";
-    if (lang === "de") return "Interner Gemini-Serverfehler";
-    if (lang === "fr") return "Erreur interne du serveur Gemini";
-    if (lang === "it") return "Errore interno del server Gemini";
-    return "Внутренняя ошибка сервера Gemini";
+    return _geminiErrLocalized("gemini_err.internal", "internal");
   }
 
   // 10. Default fallback
-  const fallbackKey = (context === "transcribe") ? "gemini_err.transcribe_fail" : "gemini_err.tts_fail";
+  const fbType = (context === "transcribe") ? "transcribe_fail" : "tts_fail";
+  return _geminiErrLocalized(`gemini_err.${fbType}`, fbType);
+}
+function _geminiErrLocalized(i18nKey, fbKey, params = {}) {
   if (typeof window.t === "function") {
-    const trans = window.t(fallbackKey);
-    if (trans && trans !== fallbackKey) return trans;
+    const trans = window.t(i18nKey, params);
+    if (trans && trans !== i18nKey) return trans;
   }
-  const lang = (window.I18N && window.I18N.currentLang) || "ru";
-  if (context === "transcribe") {
-    if (lang === "en") return "Speech recognition error";
-    if (lang === "uk") return "Збій розпізнавання мовлення";
-    if (lang === "de") return "Spracherkennungsfehler";
-    if (lang === "fr") return "Erreur de reconnaissance vocale";
-    if (lang === "it") return "Errore di riconoscimento vocale";
-    return "Сбой транскрибации речи";
-  } else {
-    if (lang === "en") return "Speech synthesis error";
-    if (lang === "uk") return "Збій синтезу мовлення";
-    if (lang === "de") return "Sprachsynthesefehler";
-    if (lang === "fr") return "Échec de la synthèse vocale";
-    if (lang === "it") return "Errore di sintesi vocale";
-    return "Сбой синтеза речи";
-  }
+  return _geminiErrFallback(fbKey, params);
+}
+function _geminiErrFallback(fbKey, params = {}) {
+  const lang = ((typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "en").slice(0, 2).toLowerCase();
+  const sec = params.sec ?? "";
+  const table = {
+    quota_retry: {
+      en: `API quota exceeded (retry in ${sec}s)`, ru: `Исчерпан лимит API (повтор через ${sec} с)`,
+      de: `API-Kontingent erschöpft (in ${sec}s wiederholen)`, es: `Cuota API agotada (reintentar en ${sec}s)`,
+      fr: `Quota API dépassé (réessayer dans ${sec}s)`, it: `Quota API esaurita (riprova tra ${sec}s)`,
+      nl: `API-quotum overschreden (opnieuw proberen over ${sec}s)`, uk: `Вичерпано ліміт API (повтор через ${sec} с)`
+    },
+    quota: {
+      en: "API quota exceeded", ru: "Исчерпан лимит API", de: "API-Kontingent erschöpft",
+      es: "Cuota API agotada", fr: "Quota API dépassé", it: "Quota API esaurita",
+      nl: "API-quotum overschreden", uk: "Вичерпано ліміт API"
+    },
+    overloaded: {
+      en: "Server overloaded, please retry later", ru: "Сервер перегружен, повторите позже",
+      de: "Server überlastet, bitte später versuchen", es: "Servidor sobrecargado, inténtelo más tarde",
+      fr: "Serveur surchargé, réessayez plus tard", it: "Server sovraccarico, riprova più tardi",
+      nl: "Server overbelast, probeer het later opnieuw", uk: "Сервер перевантажений, повторіть пізніше"
+    },
+    invalid_key: {
+      en: "Invalid API key", ru: "Неверный API ключ", de: "Ungültiger API-Schlüssel",
+      es: "Clave API no válida", fr: "Clé API invalide", it: "Chiave API non valida",
+      nl: "Ongeldige API-sleutel", uk: "Невірний ключ API"
+    },
+    permission_denied: {
+      en: "Access denied (check API key)", ru: "Доступ запрещен (проверьте ключ API)",
+      de: "Zugriff verweigert (API-Schlüssel prüfen)", es: "Acceso denegado (verifique la clave API)",
+      fr: "Accès refusé (vérifiez la clé API)", it: "Accesso negato (controlla la chiave API)",
+      nl: "Toegang geweigerd (controleer API-sleutel)", uk: "Доступ заборонено (перевірте ключ API)"
+    },
+    model_not_found: {
+      en: "Model unavailable or not found", ru: "Модель недоступна или не найдена",
+      de: "Modell nicht verfügbar oder nicht gefunden", es: "Modelo no disponible o no encontrado",
+      fr: "Modèle indisponible ou introuvable", it: "Modello non disponibile o non trovato",
+      nl: "Model niet beschikbaar of niet gevonden", uk: "Модель недоступна або не знайдена"
+    },
+    timeout: {
+      en: "Server connection timeout", ru: "Таймаут соединения с сервером",
+      de: "Server-Verbindungs-Timeout", es: "Tiempo de conexión con el servidor agotado",
+      fr: "Délai de connexion dépassé", it: "Timeout connessione al server",
+      nl: "Time-out van serververbinding", uk: "Таймаут з'єднання з сервером"
+    },
+    network: {
+      en: "Network or connection error", ru: "Ошибка сети или соединения",
+      de: "Netzwerk- oder Verbindungsfehler", es: "Error de red o conexión",
+      fr: "Erreur de réseau ou de connexion", it: "Errore di rete o di connessione",
+      nl: "Netwerk- of verbindingsfout", uk: "Помилка мережі або з'єднання"
+    },
+    safety: {
+      en: "Blocked by safety filter", ru: "Заблокировано фильтром безопасности",
+      de: "Durch Sicherheitsfilter blockiert", es: "Bloqueado por el filtro de seguridad",
+      fr: "Bloqué par le filtre de sécurité", it: "Bloccato dal filtro di sicurezza",
+      nl: "Geblokkeerd door veiligheidsfilter", uk: "Заблоковано фільтром безпеки"
+    },
+    internal: {
+      en: "Internal Gemini server error", ru: "Внутренняя ошибка сервера Gemini",
+      de: "Interner Gemini-Serverfehler", es: "Error interno del servidor Gemini",
+      fr: "Erreur interne du serveur Gemini", it: "Errore interno del server Gemini",
+      nl: "Interne Gemini-serverfout", uk: "Внутрішня помилка сервера Gemini"
+    },
+    transcribe_fail: {
+      en: "Speech transcription error", ru: "Сбой транскрибации речи",
+      de: "Spracherkennungsfehler", es: "Error de transcripción de voz",
+      fr: "Erreur de reconnaissance vocale", it: "Errore di riconoscimento vocale",
+      nl: "Fout bij spraaktranscriptie", uk: "Збій розпізнавання мовлення"
+    },
+    tts_fail: {
+      en: "Speech synthesis error", ru: "Сбой синтеза речи",
+      de: "Sprachsynthesefehler", es: "Error de síntesis de voz",
+      fr: "Échec de la synthèse vocale", it: "Errore di sintesi vocale",
+      nl: "Fout bij spraaksynthese", uk: "Збій синтезу мовлення"
+    }
+  };
+  const entry = table[fbKey];
+  return (entry && (entry[lang] || entry.en)) || "";
 }
 window.formatGeminiError = formatGeminiError;
 if (window.__proxdmr) window.__proxdmr.formatGeminiError = formatGeminiError;
@@ -809,13 +859,39 @@ function isSlotTtsActive(hid, slot) {
 }
 
 
+function _isSingleChannelTranscribeContext(elOrHid) {
+  if (elOrHid && typeof elOrHid === "object" && elOrHid.nodeType === 1) {
+    if (elOrHid.classList.contains("vfo-ysf-row") || elOrHid.classList.contains("vfo-allstar-row")) {
+      return true;
+    }
+    const card = elOrHid.closest(".radio-container");
+    if (card) {
+      const cNet = String(card.dataset.networkType || "").toLowerCase();
+      if (card.classList.contains("card-net-ysf") || card.classList.contains("card-net-allstar") || cNet === "ysf" || cNet === "allstar") {
+        return true;
+      }
+      if (cNet && cNet !== "ysf" && cNet !== "allstar") return false;
+      elOrHid = card.dataset.hotspotId || null;
+    }
+  }
+  const hidStr = elOrHid ? resolveHotspotId(elOrHid) : resolveHotspotId(window.activeHotspotId);
+  const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+  const hs = hsList.find(h => h && resolveHotspotId(h.id) === hidStr) || (hidStr === "default" ? hsList[0] : null);
+  const net = String((hs && hs.network_type) || (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(hidStr) : "") || "").toLowerCase();
+  return net === "ysf" || net === "allstar";
+}
+
 // ── AI Pipeline Stage Status Helpers ──────────────────────────────────────────
 function getCardVfoRow(card, slot) {
   if (!card) return null;
-  const isAllStar = card.classList.contains("card-net-allstar") ||
-                    (card.dataset.networkType || "").toLowerCase() === "allstar";
+  const netType = (card.dataset.networkType || "").toLowerCase();
+  const isAllStar = card.classList.contains("card-net-allstar") || netType === "allstar";
   if (isAllStar) {
     return (slot === 1 || slot === "1") ? (card.querySelector(".vfo-allstar-row") || card.querySelector(".vfo-ts1-row")) : null;
+  }
+  const isYsf = card.classList.contains("card-net-ysf") || netType === "ysf";
+  if (isYsf) {
+    return (slot === 1 || slot === "1") ? (card.querySelector(".vfo-ysf-row") || card.querySelector(".vfo-ts1-row")) : null;
   }
   return card.querySelector(slot === 1 || slot === "1" ? ".vfo-ts1-row" : ".vfo-ts2-row");
 }
@@ -866,7 +942,7 @@ function updateSlotPipelineVisibility(row, slot) {
   const stageBox = ensurePipelineStage(row);
   if (!stageBox) return;
 
-  if (row.classList.contains("vfo-allstar-row")) {
+  if (row.classList.contains("vfo-allstar-row") || row.classList.contains("vfo-ysf-row")) {
     stageBox.style.setProperty("display", "flex", "important");
     const iconMic = stageBox.querySelector(".icon-mic");
     const iconTrans = stageBox.querySelector(".icon-trans");
@@ -1034,10 +1110,18 @@ function updateSlotTtsBadge(row, slot, isActive, customLangCode = null) {
   }
 
   ttsBadge.classList.toggle("tts-on", Boolean(isActive));
+  ttsBadge.removeAttribute("data-i18n-title");
   const langTitleStr = lang3 === "RAW" ? "RAW" : lang3;
-  ttsBadge.title = isActive
-    ? (window.t ? window.t("transcriber.tts_badge_active_hint", { slot, lang: langTitleStr }, `Озвучка речи TS${slot} [${langTitleStr}] включена (клик — выключить, удержание — настройки)`) : `Озвучка речи TS${slot} [${langTitleStr}] включена (клик — выключить, удержание — настройки)`)
-    : (window.t ? window.t("transcriber.tts_badge_inactive_hint", { slot, lang: langTitleStr }, `Озвучка речи TS${slot} [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`) : `Озвучка речи TS${slot} [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`);
+  const isSingle = _isSingleChannelTranscribeContext(row);
+  if (isSingle) {
+    ttsBadge.title = isActive
+      ? (window.t ? window.t("transcriber.tts_badge_single_active_hint", { lang: langTitleStr }, `Озвучка речи [${langTitleStr}] включена (клик — выключить, удержание — настройки)`) : `Озвучка речи [${langTitleStr}] включена (клик — выключить, удержание — настройки)`)
+      : (window.t ? window.t("transcriber.tts_badge_single_inactive_hint", { lang: langTitleStr }, `Озвучка речи [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`) : `Озвучка речи [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`);
+  } else {
+    ttsBadge.title = isActive
+      ? (window.t ? window.t("transcriber.tts_badge_active_hint", { slot, lang: langTitleStr }, `Озвучка речи TS${slot} [${langTitleStr}] включена (клик — выключить, удержание — настройки)`) : `Озвучка речи TS${slot} [${langTitleStr}] включена (клик — выключить, удержание — настройки)`)
+      : (window.t ? window.t("transcriber.tts_badge_inactive_hint", { slot, lang: langTitleStr }, `Озвучка речи TS${slot} [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`) : `Озвучка речи TS${slot} [${langTitleStr}]: клик — вкл/выкл, удержание — настройки`);
+  }
 
   updateSlotPipelineVisibility(row, slot);
 }
@@ -1518,35 +1602,37 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
     } catch (_) {}
     if (!sileroVoices || sileroVoices.length === 0) {
       sileroVoices = (cleanLang === "ru") ? [
-        { id: "kseniya", name: "Ксения (Женский, v5)" },
-        { id: "aidar", name: "Айдар (Мужской, v5)" },
-        { id: "baya", name: "Бая (Женский, v5)" },
-        { id: "eugene", name: "Евгений (Мужской, v5)" },
-        { id: "xenia", name: "Ксения 2 (Женский, v5)" }
+        { id: "kseniya", name: "Kseniya (Female, v5)" },
+        { id: "aidar", name: "Aidar (Male, v5)" },
+        { id: "baya", name: "Baya (Female, v5)" },
+        { id: "eugene", name: "Eugene (Male, v5)" },
+        { id: "xenia", name: "Kseniya 2 (Female, v5)" }
       ] : (cleanLang === "uk" ? [
-        { id: "mykyta", name: "Микита (Чоловічий, v4)" }
+        { id: "mykyta", name: "Mykyta (Male, v4)" }
       ] : (cleanLang === "en" ? [
         { id: "en_0", name: "Voice 0 (Female)" },
         { id: "en_1", name: "Voice 1 (Male)" }
       ] : (cleanLang === "de" ? [
-        { id: "eva_k", name: "Eva (Женский)" },
-        { id: "karlsson", name: "Karlsson (Мужской)" },
-        { id: "bernd_ungerer", name: "Bernd (Мужской)" },
-        { id: "friedrich", name: "Friedrich (Мужской)" }
+        { id: "eva_k", name: "Eva (Female)" },
+        { id: "karlsson", name: "Karlsson (Male)" },
+        { id: "bernd_ungerer", name: "Bernd (Male)" },
+        { id: "friedrich", name: "Friedrich (Male)" }
       ] : (cleanLang === "es" ? [
-        { id: "es_0", name: "Voz 0 (Femenino)" }
+        { id: "es_0", name: "Voz 0 (Female)" }
       ] : (cleanLang === "fr" ? [
-        { id: "fr_0", name: "Voix 0 (Féminin)" }
+        { id: "fr_0", name: "Voix 0 (Female)" }
       ] : [])))));
     }
-    const gFemale = window.t ? window.t("transcriber.gender_female", {}, "Женский") : "Женский";
-    const gMale = window.t ? window.t("transcriber.gender_male", {}, "Мужской") : "Мужской";
+    const gFemale = window.t ? window.t("transcriber.gender_female", {}, "Female") : "Female";
+    const gMale = window.t ? window.t("transcriber.gender_male", {}, "Male") : "Male";
     sileroVoices.forEach(v => {
       const opt = document.createElement("option");
       opt.value = v.id;
       let label = v.name || v.id;
       if (typeof label === "string") {
-        label = label.replace(/Женский/g, gFemale).replace(/Мужской/g, gMale);
+        label = label
+          .replace(/Женский|Жіночий|Female|Weiblich|Femenino|Féminin|Femminile|Vrouwelijk/gi, gFemale)
+          .replace(/Мужской|Чоловічий|Male|Männlich|Masculino|Masculin|Maschile|Mannelijk/gi, gMale);
       }
       opt.textContent = label;
       selectEl.appendChild(opt);
@@ -1559,8 +1645,8 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
     if (hintEl) {
       hintEl.style.display = "block";
       hintEl.textContent = window.t
-        ? window.t("transcriber.silero_tts_hint", {}, "Локальный автономный синтез Silero TTS v5 на CPU сервера (с авто-ударениями).")
-        : "Локальный автономный синтез Silero TTS v5 на CPU сервера (с авто-ударениями).";
+        ? window.t("transcriber.silero_tts_hint", {}, "Local offline Silero TTS v5 synthesis on the server CPU (with auto-stress).")
+        : "Local offline Silero TTS v5 synthesis on the server CPU (with auto-stress).";
     }
     return;
   }
@@ -1611,9 +1697,13 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
               const opt = document.createElement("option");
               opt.value = `__download__:${v.id}`;
               const gText = v.gender === "female"
-                ? (window.t ? window.t("transcriber.gender_female", {}, "Женский") : "Жен.")
-                : (v.gender === "male" ? (window.t ? window.t("transcriber.gender_male", {}, "Мужской") : "Муж.") : "");
-              opt.textContent = `⬇️ [Скачать: ${v.name} (${gText ? gText + ", " : ""}${v.quality || "medium"}, ~${v.size_mb || 60} МБ)]`;
+                ? (window.t ? window.t("transcriber.gender_female", {}, "Female") : "Female")
+                : (v.gender === "male" ? (window.t ? window.t("transcriber.gender_male", {}, "Male") : "Male") : "");
+              const metaStr = `${gText ? gText + ", " : ""}${v.quality || "medium"}`;
+              const szVal = v.size_mb || 60;
+              opt.textContent = window.t
+                ? window.t("transcriber.piper_download_voice_opt", { name: v.name, meta: metaStr, size: szVal }, `⬇️ [Download: ${v.name} (${metaStr}, ~${szVal} MB)]`)
+                : `⬇️ [Download: ${v.name} (${metaStr}, ~${szVal} MB)]`;
               selectEl.appendChild(opt);
             });
           }
@@ -1685,10 +1775,17 @@ let _lastTtsDownloadState = { progress: 0, status: "idle", voiceName: "" };
  */
 export function updateTtsUploadIndicator(progress, status = "running", voiceName = "") {
   _lastTtsDownloadState = { progress, status, voiceName };
+  const pct = Math.max(0, Math.min(100, Math.round(Number(progress) || 0)));
+  if (typeof window !== "undefined") {
+    window.__proxdmrTtsUploadState = (status === "running" || status === "completed")
+      ? { progress: pct, status, voiceName }
+      : null;
+    if (typeof window.refreshToolbarProcessIndicators === "function") {
+      window.refreshToolbarProcessIndicators();
+    }
+  }
   const indicators = document.querySelectorAll(".header-tts-upload-indicator, #headerTtsUploadIndicator, #settingsTtsUploadIndicator, #quickTtsUploadIndicator");
   if (!indicators || indicators.length === 0) return;
-
-  const pct = Math.max(0, Math.min(100, Math.round(Number(progress) || 0)));
 
   indicators.forEach(ind => {
     const percentEl = ind.querySelector(".tts-upload-percent, #headerTtsUploadPercent, #settingsTtsUploadPercent");
@@ -1711,6 +1808,12 @@ export function updateTtsUploadIndicator(progress, status = "running", voiceName
       ind._hideTimer = setTimeout(() => {
         ind.style.display = "none";
         ind._hideTimer = null;
+        if (typeof window !== "undefined") {
+          window.__proxdmrTtsUploadState = null;
+          if (typeof window.refreshToolbarProcessIndicators === "function") {
+            window.refreshToolbarProcessIndicators();
+          }
+        }
       }, 2500);
     } else if (status === "error") {
       ind.style.display = "inline-flex";
@@ -1720,6 +1823,12 @@ export function updateTtsUploadIndicator(progress, status = "running", voiceName
       ind._hideTimer = setTimeout(() => {
         ind.style.display = "none";
         ind._hideTimer = null;
+        if (typeof window !== "undefined") {
+          window.__proxdmrTtsUploadState = null;
+          if (typeof window.refreshToolbarProcessIndicators === "function") {
+            window.refreshToolbarProcessIndicators();
+          }
+        }
       }, 3500);
     } else {
       ind.style.display = "none";
@@ -1852,7 +1961,7 @@ async function checkAndPromptPiperModel(lang, onModelDownloaded, onFallbackReque
     });
     const dlData = await dlResp.json();
     if (!dlData || dlData.status !== "ok") {
-      updateTtsUploadIndicator(0, "error", "Ошибка запуска");
+      updateTtsUploadIndicator(0, "error", window.t ? window.t("transcriber.err_start", {}, "Start error") : "Start error");
       return { ok: false, reason: "download_start_failed" };
     }
 
@@ -1875,7 +1984,7 @@ async function checkAndPromptPiperModel(lang, onModelDownloaded, onFallbackReque
               resolve({ ok: true, downloaded: true, voice_id: voiceToDownload });
             } else if (d.status === "error") {
               clearInterval(pollTimer);
-              updateTtsUploadIndicator(0, "error", d.error || "Сбой");
+              updateTtsUploadIndicator(0, "error", d.error || (window.t ? window.t("common.error", {}, "Error") : "Error"));
               resolve({ ok: false, reason: "download_failed", error: d.error });
             } else {
               updateTtsUploadIndicator(d.progress || 0, "running", vName);
@@ -1886,7 +1995,7 @@ async function checkAndPromptPiperModel(lang, onModelDownloaded, onFallbackReque
         }
         if (attempts > 300) { // 5 minutes max
           clearInterval(pollTimer);
-          updateTtsUploadIndicator(0, "error", "Таймаут");
+          updateTtsUploadIndicator(0, "error", window.t ? window.t("transcriber.err_timeout", {}, "Timeout") : "Timeout");
           resolve({ ok: false, reason: "timeout" });
         }
       }, 1000);
@@ -1912,20 +2021,24 @@ async function checkAndPromptSileroModel(lang, onFallbackRequested) {
 
   const langUpper = cleanLang.toUpperCase();
   const msg = window.t
-    ? window.t("transcriber.silero_unsupported_confirm", { lang: langUpper }, `Язык «<b>${langUpper}</b>» отсутствует в моделях синтезатора Silero TTS (доступны: RU, UK, EN, DE, ES, FR).<br><br>Переключить синтез речи на <b>Piper TTS</b> (поддерживает офлайн-модели) или <b>Gemini API</b>?`)
-    : `Язык «<b>${langUpper}</b>» отсутствует в моделях синтезатора Silero TTS (доступны: RU, UK, EN, DE, ES, FR).<br><br>Переключить синтез речи на <b>Piper TTS</b> (поддерживает офлайн-модели) или <b>Gemini API</b>?`;
+    ? window.t("transcriber.silero_unsupported_confirm", { lang: langUpper }, `Language “<b>${langUpper}</b>” is not available in Silero TTS models (available: RU, UK, EN, DE, ES, FR).<br><br>Switch speech synthesis to <b>Piper TTS</b> or <b>Gemini API</b>?`)
+    : `Language “<b>${langUpper}</b>” is not available in Silero TTS models (available: RU, UK, EN, DE, ES, FR).<br><br>Switch speech synthesis to <b>Piper TTS</b> or <b>Gemini API</b>?`;
 
   let fallback = "piper";
   if (typeof window.showAppConfirm === "function") {
     const res = await window.showAppConfirm({
-      title: window.t ? window.t("transcriber.silero_unsupported_title", {}, "Язык не поддерживается в Silero TTS") : "Язык не поддерживается в Silero TTS",
+      title: window.t ? window.t("transcriber.silero_unsupported_title", {}, "Language not supported in Silero TTS") : "Language not supported in Silero TTS",
       message: msg,
-      confirmText: window.t ? window.t("transcriber.switch_to_piper", {}, "Переключить на Piper TTS") : "Переключить на Piper TTS",
-      cancelText: window.t ? window.t("transcriber.switch_to_gemini", {}, "Использовать Gemini API") : "Использовать Gemini API"
+      confirmText: window.t ? window.t("transcriber.switch_to_piper", {}, "Switch to Piper TTS") : "Switch to Piper TTS",
+      cancelText: window.t ? window.t("transcriber.switch_to_gemini", {}, "Use Gemini API") : "Use Gemini API"
     });
     fallback = res ? "piper" : "gemini";
   } else {
-    const res = window.confirm(`Язык ${langUpper} не поддерживается в Silero TTS. Переключить на Piper TTS (OK) или Gemini API (Отмена)?`);
+    const res = window.confirm(
+      window.t
+        ? window.t("transcriber.silero_unsupported_prompt", { lang: langUpper }, `Language ${langUpper} is not supported in Silero TTS. Switch to Piper TTS (OK) or Gemini API (Cancel)?`)
+        : `Language ${langUpper} is not supported in Silero TTS. Switch to Piper TTS (OK) or Gemini API (Cancel)?`
+    );
     fallback = res ? "piper" : "gemini";
   }
 
@@ -1970,7 +2083,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   // Header
   const header = document.createElement("div");
   header.className = "tts-quick-header";
-  const titleTxt = (slot != null && slot !== "")
+  const isSingleTtsModal = _isSingleChannelTranscribeContext(row || targetBadge);
+  const titleTxt = (slot != null && slot !== "" && !isSingleTtsModal)
     ? (window.t ? window.t("transcriber.tts_modal_title", { slot }, `Синтез речи TS${slot}`) : `Синтез речи TS${slot}`)
     : (window.t ? window.t("transcriber.tts_settings_title", {}, "Настройки синтеза речи") : "Настройки синтеза речи");
   header.innerHTML = `
@@ -2149,12 +2263,12 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   footer.innerHTML = `
     <div style="display: flex; align-items: center; gap: 8px;">
       <button type="button" class="btn-tts-quick-test" id="btnTtsQuickTest">${window.t ? window.t("transcriber.tts_btn_quick_test", {}, "🔊 Тест") : "🔊 Тест"}</button>
-      <div id="quickTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="Загрузка голосовой модели Piper TTS" role="status" tabindex="0" onclick="event.stopPropagation();">
+      <div id="quickTtsUploadIndicator" class="header-tts-upload-indicator" style="display: none;" title="${window.t ? window.t("transcriber.piper_dl_tooltip", {}, "Downloading Piper TTS voice model") : "Downloading Piper TTS voice model"}" role="status" tabindex="0" onclick="event.stopPropagation();">
         <img src="/static/img/TTS_Upload.png?v=2.9.172" alt="TTS Upload" class="tts-upload-img">
         <span class="tts-upload-percent">0%</span>
       </div>
     </div>
-    <button type="button" class="btn-tts-quick-save" id="btnTtsQuickSave">${window.t ? window.t("transcriber.tts_btn_quick_save", {}, "✓ Сохранить") : "✓ Сохранить"}</button>
+    <button type="button" class="btn-tts-quick-save" id="btnTtsQuickSave">${window.t ? window.t("transcriber.tts_btn_quick_save", {}, "✓ Save") : "✓ Save"}</button>
   `;
 
   popup.appendChild(header);
@@ -2176,8 +2290,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       const pct = Math.max(0, Math.min(100, Math.round(Number(_lastTtsDownloadState.progress) || 0)));
       if (pctEl) pctEl.textContent = `${pct}%`;
       qInd.title = _lastTtsDownloadState.voiceName
-        ? `Загрузка голосовой модели Piper (${_lastTtsDownloadState.voiceName}): ${pct}%`
-        : `Загрузка голосовой модели Piper TTS: ${pct}%`;
+        ? (window.t ? window.t("transcriber.piper_dl_progress", { name: _lastTtsDownloadState.voiceName, pct }, `Downloading Piper voice model (${_lastTtsDownloadState.voiceName}): ${pct}%`) : `Downloading Piper voice model (${_lastTtsDownloadState.voiceName}): ${pct}%`)
+        : (window.t ? window.t("transcriber.piper_dl_progress_generic", { pct }, `Downloading Piper TTS voice model: ${pct}%`) : `Downloading Piper TTS voice model: ${pct}%`);
     }
   }
 
@@ -2417,7 +2531,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       try {
         if (eng === "browser") {
           if (!window.speechSynthesis) {
-            showToast("Web Speech API не поддерживается браузером", 3000);
+            showToast(window.t ? window.t("transcriber.toast_tts_unsupported", {}, "Web Speech API is not supported by your browser") : "Web Speech API is not supported by your browser", 3000);
           } else {
             // Cancel any running speech
             window.speechSynthesis.cancel();
@@ -2460,7 +2574,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             ut.onerror = onTestDone;
 
             window.speechSynthesis.speak(ut);
-            showToast(`🔊 Локальный синтез [${testLang.toUpperCase()}]`, 2000);
+            showToast(window.t ? window.t("transcriber.toast_tts_local", { lang: testLang.toUpperCase() }, `🔊 Local synthesis [${testLang.toUpperCase()}]`) : `🔊 Local synthesis [${testLang.toUpperCase()}]`, 2000);
           }
         } else if (eng === "piper") {
           const checkRes = await checkAndPromptPiperModel(testLang, null, null, testVoice);
@@ -2501,7 +2615,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             showToast(window.t ? window.t("transcriber.piper_toast_test", { lang: testLang.toUpperCase(), voice: testVoice || "default" }, `🔊 Тест Piper TTS [${testLang.toUpperCase()}] (${testVoice || "default"})...`) : `🔊 Тест Piper TTS [${testLang.toUpperCase()}] (${testVoice || "default"})...`, 2500);
           } else {
             console.warn("[TTS] Quick test Piper error:", res);
-            const errDetail = res.message || res.detail || "Ошибка синтеза";
+            const errDetail = res.message || res.detail || (window.t ? window.t("transcriber.err_synth", {}, "Synthesis error") : "Synthesis error");
             showToast(window.t ? window.t("transcriber.toast_tts_piper_err", { error: errDetail }, `⚠️ Piper TTS: ${errDetail}`) : `⚠️ Piper TTS: ${errDetail}`, 3500);
           }
         } else if (eng === "groq") {
@@ -2510,8 +2624,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           if (!activeKeys.length) {
             const all = getEngineKeys("groq");
             const warn = all.length > 0
-              ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ") : "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ")
-              : "⚠️ Укажите API-ключ Groq для проверки звука";
+              ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ Only 1 key in list — add keys from line 2 or enable key 1") : "⚠️ Only 1 key in list — add keys from line 2 or enable key 1")
+              : (window.t ? window.t("transcriber.groq_need_key_test", {}, "⚠️ Specify a Groq API key to test audio") : "⚠️ Specify a Groq API key to test audio");
             showToast(warn, 3500);
             btnTest.disabled = false;
             btnTest.textContent = oldTxt;
@@ -2550,10 +2664,11 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
                 bypassMute: true
               });
             }
-            showToast(`🔊 Тест Groq TTS [${testLang.toUpperCase()}] (${testVoice})...`, 2500);
+            showToast(window.t ? window.t("transcriber.groq_toast_test", { lang: testLang.toUpperCase(), voice: testVoice }, `🔊 Groq TTS Test [${testLang.toUpperCase()}] (${testVoice})...`) : `🔊 Groq TTS Test [${testLang.toUpperCase()}] (${testVoice})...`, 2500);
           } else {
             console.warn("[TTS] Quick test Groq error:", res);
-            showToast(`⚠️ Groq TTS: ${res.message || res.detail || "Ошибка синтеза"}`, 3500);
+            const errDetail = res.message || res.detail || (window.t ? window.t("transcriber.err_synth", {}, "Synthesis error") : "Synthesis error");
+            showToast(window.t ? window.t("transcriber.groq_tts_err", { error: errDetail }, `⚠️ Groq TTS: ${errDetail}`) : `⚠️ Groq TTS: ${errDetail}`, 3500);
           }
         } else {
           const testVoice = (eng === "gemini" && voi === "auto") ? "Puck" : voi;
@@ -2604,7 +2719,12 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
               });
             }
             const engLabel = (eng === "silero") ? "Silero TTS" : "Gemini TTS";
-            showToast(`🔊 Тест ${engLabel} [${testLang.toUpperCase()}] (${testVoice || "default"})...`, 2500);
+            showToast(
+              window.t
+                ? window.t("transcriber.silero_gemini_toast_test", { engine: engLabel, lang: testLang.toUpperCase(), voice: testVoice || "default" }, `🔊 ${engLabel} Test [${testLang.toUpperCase()}] (${testVoice || "default"})...`)
+                : `🔊 ${engLabel} Test [${testLang.toUpperCase()}] (${testVoice || "default"})...`,
+              2500
+            );
           } else {
             console.warn("[TTS] Quick test error:", res);
             showToast(`⚠️ ${formatGeminiError(res.message || res.detail || res, "tts")}`, 3500);
@@ -2727,7 +2847,11 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             const pPct = Math.round(pVal * 100);
             optPauseDck.value = String(pPct);
             const pValEl = document.getElementById("optTtsPauseDuckingVal");
-            if (pValEl) pValEl.textContent = (pPct === 0) ? "0% (тишина)" : (pPct === 100 ? "100% (без приглушения)" : `${pPct}%`);
+            if (pValEl) {
+              pValEl.textContent = (pPct === 0)
+                ? (window.t ? window.t("transcriber.duck_silence", {}, "0% (silence)") : "0% (silence)")
+                : (pPct === 100 ? (window.t ? window.t("transcriber.duck_none", {}, "100% (no ducking)") : "100% (no ducking)") : `${pPct}%`);
+            }
           }
           const optSpd = document.getElementById("optTtsSpeed");
           if (optSpd) {
@@ -2751,18 +2875,18 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             window.ttsAudioQueueManager.syncIdleDucking(0.15);
           }
 
-          showToast("✓ Параметры синтеза речи сохранены", 2500);
+          showToast(window.t ? window.t("transcriber.tts_params_saved", {}, "✓ TTS settings saved") : "✓ TTS settings saved", 2500);
           closeTtsQuickSettingsPopover();
         } else {
-          showToast("⚠️ Ошибка сохранения настроек синтеза", 3000);
+          showToast(window.t ? window.t("transcriber.tts_settings_save_err", {}, "⚠️ Failed to save TTS settings") : "⚠️ Failed to save TTS settings", 3000);
           btnSave.disabled = false;
-          btnSave.textContent = "✓ Сохранить";
+          btnSave.textContent = window.t ? window.t("transcriber.tts_btn_quick_save", {}, "✓ Save") : "✓ Save";
         }
       } catch (err) {
         console.error(err);
-        showToast("⚠️ Ошибка связи с сервером", 3000);
+        showToast(window.t ? window.t("transcriber.net_error", {}, "⚠️ Server connection error") : "⚠️ Server connection error", 3000);
         btnSave.disabled = false;
-        btnSave.textContent = "✓ Сохранить";
+        btnSave.textContent = window.t ? window.t("transcriber.tts_btn_quick_save", {}, "✓ Save") : "✓ Save";
       }
     });
   }
@@ -3156,6 +3280,11 @@ function toggleSlotTts(row, slot) {
       if (vfoAllStar && typeof vfoAllStar.setAslTextView === "function") {
         vfoAllStar.setAslTextView(true);
       }
+    } else if (newState && card && card.classList.contains("card-net-ysf")) {
+      const vfoYsf = card.querySelector(".vfo-ysf-row");
+      if (vfoYsf && typeof vfoYsf.setYsfTextView === "function") {
+        vfoYsf.setYsfTextView(true);
+      }
     }
   }
 
@@ -3173,11 +3302,12 @@ function toggleSlotTts(row, slot) {
     }
   }
 
+  const isSingleTts = _isSingleChannelTranscribeContext(row || card || hid);
   if (newState) {
     showToast(
-      window.t
-        ? window.t("transcriber.tts_ts_on", { slot }, `✓ Голосовой синтез TS${slot} включен`)
-        : `✓ Голосовой синтез TS${slot} включен`,
+      isSingleTts
+        ? (window.t ? window.t("transcriber.tts_single_on", {}, "✓ Голосовой синтез включен") : "✓ Голосовой синтез включен")
+        : (window.t ? window.t("transcriber.tts_ts_on", { slot }, `✓ Голосовой синтез TS${slot} включен`) : `✓ Голосовой синтез TS${slot} включен`),
       2000,
       card || hid
     );
@@ -3190,9 +3320,9 @@ function toggleSlotTts(row, slot) {
       window.ttsAudioQueueManager.syncIdleDucking(0.15);
     }
     showToast(
-      window.t
-        ? window.t("transcriber.tts_ts_off", { slot }, `✕ Голосовой синтез TS${slot} выключен`)
-        : `✕ Голосовой синтез TS${slot} выключен`,
+      isSingleTts
+        ? (window.t ? window.t("transcriber.tts_single_off", {}, "✕ Голосовой синтез выключен") : "✕ Голосовой синтез выключен")
+        : (window.t ? window.t("transcriber.tts_ts_off", { slot }, `✕ Голосовой синтез TS${slot} выключен`) : `✕ Голосовой синтез TS${slot} выключен`),
       2000,
       card || hid
     );
@@ -3773,15 +3903,19 @@ function resolveTranscribeCallsign(msg, targetCard, vfoRow, slot, callEntry) {
       return cs;
     }
   }
-  if (vfoRow) {
-    const callerCallEl = vfoRow.querySelector(".vfo-caller-call");
+  if (vfoRow || targetCard) {
+    const callerCallEl = (vfoRow && vfoRow.querySelector(".vfo-caller-call")) ||
+                         (targetCard && targetCard.querySelector(".vfo-ts1-row .vfo-caller-call"));
     if (callerCallEl) {
       const dsCall = (callerCallEl.dataset.callsign || "").trim().toUpperCase();
       if (dsCall && dsCall !== "---" && dsCall !== "UNKNOWN" && dsCall !== "DMR" && !dsCall.startsWith("ID ")) {
         return dsCall;
       }
       const textCall = (callerCallEl.textContent || "").trim().toUpperCase();
-      if (textCall && !textCall.includes("ОЖИДАНИЕ") && !textCall.includes("STANDBY") && textCall !== "---" && textCall !== "UNKNOWN" && textCall !== "DMR" && !textCall.startsWith("ID ")) {
+      const isStandby = (callerCallEl.dataset && callerCallEl.dataset.standby === "1") ||
+        (window.i18n && window.i18n.isTranslationOf && window.i18n.isTranslationOf("vfo.standby", textCall)) ||
+        textCall.includes("ОЖИДАНИЕ") || textCall.includes("STANDBY");
+      if (textCall && !isStandby && textCall !== "---" && textCall !== "UNKNOWN" && textCall !== "DMR" && !textCall.startsWith("ID ")) {
         return textCall;
       }
     }
@@ -4072,7 +4206,11 @@ function triggerSlotTranscribeError(langBadge, slot, errorMsg) {
   if (!langBadge) return;
   console.warn(`[TRANSCRIBER] Gemini TS${slot} raw error:`, errorMsg);
   const cleanError = formatGeminiError(errorMsg, "transcribe");
-  langBadge.title = `⚠️ Gemini (TS${slot}): ${cleanError}`;
+  const isSingle = _isSingleChannelTranscribeContext(langBadge);
+  const errTxt = isSingle
+    ? (window.t ? window.t("transcriber.ai_single_error", { error: cleanError }, `⚠️ AI Транскрибатор: ${cleanError}`) : `⚠️ AI Транскрибатор: ${cleanError}`)
+    : `⚠️ Gemini (TS${slot}): ${cleanError}`;
+  langBadge.title = errTxt;
 
   // Restart 1Hz 5-cycle blink cleanly (5 cycles: 5 seconds total)
   langBadge.classList.remove("ai-error-blink");
@@ -4085,7 +4223,7 @@ function triggerSlotTranscribeError(langBadge, slot, errorMsg) {
     langBadge.classList.remove("ai-error-blink");
   }, 5050);
 
-  showToast(`⚠️ Gemini (TS${slot}): ${cleanError}`, 3500);
+  showToast(errTxt, 3500);
 }
 
 function handleTtsError(msg) {
@@ -4094,7 +4232,11 @@ function handleTtsError(msg) {
   const slot = msg.slot || 1;
   console.warn(`[TTS] Slot TS${slot} raw error:`, msg);
   const cleanError = formatGeminiError(msg.error || msg.message, "tts");
-  showToast(`⚠️ TTS (TS${slot}): ${cleanError}`, 3500);
+  const isSingle = _isSingleChannelTranscribeContext(msg.hotspot_id);
+  const errTxt = isSingle
+    ? (window.t ? window.t("transcriber.tts_single_error", { error: cleanError }, `⚠️ TTS: ${cleanError}`) : `⚠️ TTS: ${cleanError}`)
+    : `⚠️ TTS (TS${slot}): ${cleanError}`;
+  showToast(errTxt, 3500);
 }
 window.handleTtsError = handleTtsError;
 if (window.__proxdmr) window.__proxdmr.handleTtsError = handleTtsError;
@@ -4125,18 +4267,24 @@ function updateSlotLangBadge(row, slot, isActive, langCode = null) {
 
   const effectiveActive = Boolean(isActive && row.classList.contains("has-transcribe"));
 
+  langBadge.removeAttribute("data-i18n-title");
+  const isSingle = _isSingleChannelTranscribeContext(row);
   if (effectiveActive) {
     langBadge.classList.add("transcribe-on");
     if (langCode && langCode !== "---") {
       setLangBadgeText(langBadge, langCode.toUpperCase());
       langBadge.classList.add("has-lang");
-      langBadge.title = window.t ? window.t("transcriber.lang_badge_on", { slot, lang: langCode.toUpperCase() }, `Транскрибатор TS${slot}: ВКЛЮЧЕН (Язык: ${langCode.toUpperCase()}). Клик — выкл, удержание — параметры`) : `Транскрибатор TS${slot}: ВКЛЮЧЕН (Язык: ${langCode.toUpperCase()}). Клик — выкл, удержание — параметры`;
+      langBadge.title = isSingle
+        ? (window.t ? window.t("transcriber.lang_badge_single_on", { lang: langCode.toUpperCase() }, `Транскрибатор: ВКЛЮЧЕН (Язык: ${langCode.toUpperCase()}). Клик — выкл, удержание — параметры`) : `Транскрибатор: ВКЛЮЧЕН (Язык: ${langCode.toUpperCase()}). Клик — выкл, удержание — параметры`)
+        : (window.t ? window.t("transcriber.lang_badge_on", { slot, lang: langCode.toUpperCase() }, `Транскрибатор TS${slot}: ВКЛЮЧЕН (Язык: ${langCode.toUpperCase()}). Клик — выкл, удержание — параметры`) : `Транскрибатор TS${slot}: ВКЛЮЧЕН (Язык: ${langCode.toUpperCase()}). Клик — выкл, удержание — параметры`);
     } else {
       const curText = getLangBadgeText(langBadge);
       if (!curText || curText === "---" || curText === "AI" || curText === "TXT") {
         setLangBadgeText(langBadge, "TXT");
       }
-      langBadge.title = window.t ? window.t("transcriber.lang_badge_on", { slot, lang: "AUTO" }, `Транскрибатор TS${slot}: ВКЛЮЧЕН. Клик — выкл, удержание — параметры`) : `Транскрибатор TS${slot}: ВКЛЮЧЕН. Клик — выкл, удержание — параметры`;
+      langBadge.title = isSingle
+        ? (window.t ? window.t("transcriber.lang_badge_single_on", { lang: "AUTO" }, `Транскрибатор: ВКЛЮЧЕН (Язык: AUTO). Клик — выкл, удержание — параметры`) : `Транскрибатор: ВКЛЮЧЕН (Язык: AUTO). Клик — выкл, удержание — параметры`)
+        : (window.t ? window.t("transcriber.lang_badge_on", { slot, lang: "AUTO" }, `Транскрибатор TS${slot}: ВКЛЮЧЕН. Клик — выкл, удержание — параметры`) : `Транскрибатор TS${slot}: ВКЛЮЧЕН. Клик — выкл, удержание — параметры`);
     }
   } else {
     langBadge.classList.remove("transcribe-on", "has-lang", "has-ai-error", "ai-error-blink");
@@ -4145,7 +4293,9 @@ function updateSlotLangBadge(row, slot, isActive, langCode = null) {
       langBadge._errorTimer = null;
     }
     setLangBadgeText(langBadge, "TXT");
-    langBadge.title = window.t ? window.t("transcriber.lang_badge_off", { slot }, `Транскрибатор TS${slot}: выключен. Клик — вкл, удержание — параметры`) : `Транскрибатор TS${slot}: выключен. Клик — вкл, удержание — параметры`;
+    langBadge.title = isSingle
+      ? (window.t ? window.t("transcriber.lang_badge_single_off", {}, "Транскрибатор: выключен. Клик — вкл, удержание — параметры") : "Транскрибатор: выключен. Клик — вкл, удержание — параметры")
+      : (window.t ? window.t("transcriber.lang_badge_off", { slot }, `Транскрибатор TS${slot}: выключен. Клик — вкл, удержание — параметры`) : `Транскрибатор TS${slot}: выключен. Клик — вкл, удержание — параметры`);
   }
 
   updateSlotPipelineVisibility(row, slot);
@@ -4153,29 +4303,29 @@ function updateSlotLangBadge(row, slot, isActive, langCode = null) {
 
 // --- Transcriber Model Picker Subsystem ---
 const TRANSCRIBER_MODELS_META = {
-  "gemini-3.1-flash-lite": { name: "Gemini 3.1 Flash-Lite", badgeKey: "transcriber.model_badge_free", badge: "Free Tier", descKey: "transcriber.model_desc_31_flash_lite", desc: "⚡ Free Tier (Ультрабыстрая, для бесплатных ключей)" },
-  "gemini-3.5-flash": { name: "Gemini 3.5 Flash", badgeKey: "transcriber.model_badge_rec", badge: "Рекомендуется", descKey: "transcriber.model_desc_35_flash", desc: "⚡ Оптимальный баланс скорости и качества" },
-  "gemini-3.5-flash-lite": { name: "Gemini 3.5 Flash-Lite", badgeKey: "transcriber.model_badge_fast", badge: "Ультрабыстрая", descKey: "transcriber.model_desc_35_flash_lite", desc: "🚀 Минимальная задержка отклика в плотном эфире" },
-  "gemini-3.1-flash-lite-preview": { name: "Gemini 3.1 Flash-Lite Preview", badgeKey: "transcriber.model_badge_fast", badge: "Free Preview", descKey: "transcriber.model_desc_31_flash_lite_prev", desc: "⚡ Предварительная версия Flash-Lite" },
-  "gemini-3.6-flash": { name: "Gemini 3.6 Flash", badgeKey: "transcriber.model_badge_new", badge: "Новое поколение", descKey: "transcriber.model_desc_36_flash", desc: "✨ Улучшенное распознавание зашумленной речи" },
-  "gemini-3.7-flash": { name: "Gemini 3.7 Flash", badgeKey: "transcriber.model_badge_new", badge: "Flash 3.7", descKey: "transcriber.model_desc_37_flash", desc: "⚡ Новая гибридная модель Flash" },
-  "gemini-3.8-flash": { name: "Gemini 3.8 Flash", badgeKey: "transcriber.model_badge_new", badge: "Flash 3.8", descKey: "transcriber.model_desc_38_flash", desc: "⚡ Новейшая версия Flash" },
-  "gemini-flash-latest": { name: "Gemini Flash Latest", badgeKey: "transcriber.model_badge_auto", badge: "Авто Flash", descKey: "transcriber.model_desc_flash_latest", desc: "🔄 Самая свежая стабильная версия Flash" },
-  "gemini-flash-lite-latest": { name: "Gemini Flash-Lite Latest", badgeKey: "transcriber.model_badge_auto_lite", badge: "Авто Lite", descKey: "transcriber.model_desc_flash_lite_latest", desc: "🔄 Самая свежая облегченная версия Lite" },
-  "gemini-2.5-flash": { name: "Gemini 2.5 Flash", badge: "Flash 2.5", descKey: "transcriber.model_desc_25_flash", desc: "⚡ Стабильная рабочая модель Flash" },
-  "gemini-2.5-flash-lite": { name: "Gemini 2.5 Flash-Lite", badge: "Lite 2.5", descKey: "transcriber.model_desc_25_flash_lite", desc: "⚡ Облегченная стабильная модель Flash-Lite" },
-  "gemini-3.5-transcribe": { name: "Gemini 3.5 Transcribe", badge: "ASR", descKey: "transcriber.model_desc_35_transcribe", desc: "🎙️ Распознавание речи радиоэфира" },
-  "gemini-3.1-pro-preview": { name: "Gemini 3.1 Pro", badgeKey: "transcriber.model_badge_pro", badge: "Pro", descKey: "transcriber.model_desc_31_pro", desc: "🧠 Флагманская модель с глубоким пониманием радио-жаргона" },
-  "gemini-2.5-pro": { name: "Gemini 2.5 Pro", badgeKey: "transcriber.model_badge_pro", badge: "Pro", descKey: "transcriber.model_desc_25_pro", desc: "🧠 Качественный контекстный анализ речи" },
+  "gemini-3.1-flash-lite": { name: "Gemini 3.1 Flash-Lite", badgeKey: "transcriber.model_badge_free", badge: "Free Tier", descKey: "transcriber.model_desc_31_flash_lite", desc: "⚡ Free Tier (Ultra-fast, for free API keys)" },
+  "gemini-3.5-flash": { name: "Gemini 3.5 Flash", badgeKey: "transcriber.model_badge_rec", badge: "Recommended", descKey: "transcriber.model_desc_35_flash", desc: "⚡ Optimal balance of speed and quality" },
+  "gemini-3.5-flash-lite": { name: "Gemini 3.5 Flash-Lite", badgeKey: "transcriber.model_badge_fast", badge: "Ultra-fast", descKey: "transcriber.model_desc_35_flash_lite", desc: "🚀 Minimum response latency on busy channels" },
+  "gemini-3.1-flash-lite-preview": { name: "Gemini 3.1 Flash-Lite Preview", badgeKey: "transcriber.model_badge_fast", badge: "Free Preview", descKey: "transcriber.model_desc_31_flash_lite_prev", desc: "⚡ Preview release of Flash-Lite" },
+  "gemini-3.6-flash": { name: "Gemini 3.6 Flash", badgeKey: "transcriber.model_badge_new", badge: "New Gen", descKey: "transcriber.model_desc_36_flash", desc: "✨ Improved recognition for noisy radio speech" },
+  "gemini-3.7-flash": { name: "Gemini 3.7 Flash", badgeKey: "transcriber.model_badge_new", badge: "Flash 3.7", descKey: "transcriber.model_desc_37_flash", desc: "⚡ New hybrid Flash model" },
+  "gemini-3.8-flash": { name: "Gemini 3.8 Flash", badgeKey: "transcriber.model_badge_new", badge: "Flash 3.8", descKey: "transcriber.model_desc_38_flash", desc: "⚡ Latest Flash release" },
+  "gemini-flash-latest": { name: "Gemini Flash Latest", badgeKey: "transcriber.model_badge_auto", badge: "Auto Flash", descKey: "transcriber.model_desc_flash_latest", desc: "🔄 Latest stable Flash model" },
+  "gemini-flash-lite-latest": { name: "Gemini Flash-Lite Latest", badgeKey: "transcriber.model_badge_auto_lite", badge: "Auto Lite", descKey: "transcriber.model_desc_flash_lite_latest", desc: "🔄 Latest stable Flash-Lite model" },
+  "gemini-2.5-flash": { name: "Gemini 2.5 Flash", badge: "Flash 2.5", descKey: "transcriber.model_desc_25_flash", desc: "⚡ Stable production Flash model" },
+  "gemini-2.5-flash-lite": { name: "Gemini 2.5 Flash-Lite", badge: "Lite 2.5", descKey: "transcriber.model_desc_25_flash_lite", desc: "⚡ Lightweight stable Flash-Lite model" },
+  "gemini-3.5-transcribe": { name: "Gemini 3.5 Transcribe", badge: "ASR", descKey: "transcriber.model_desc_35_transcribe", desc: "🎙️ Dedicated radio speech transcription" },
+  "gemini-3.1-pro-preview": { name: "Gemini 3.1 Pro", badgeKey: "transcriber.model_badge_pro", badge: "Pro", descKey: "transcriber.model_desc_31_pro", desc: "🧠 Flagship model with deep radio jargon understanding" },
+  "gemini-2.5-pro": { name: "Gemini 2.5 Pro", badgeKey: "transcriber.model_badge_pro", badge: "Pro", descKey: "transcriber.model_desc_25_pro", desc: "🧠 High-accuracy contextual speech analysis" },
 };
 
 const TTS_MODELS_META = {
-  "gemini-3.1-flash-tts-preview": { name: "Gemini 3.1 Flash TTS Preview", badgeKey: "transcriber.model_badge_rec", badge: "Рекомендуется", descKey: "transcriber.tts_model_desc_31_flash", desc: "Новейшая TTS: низкая задержка, 30 голосов, поддержка стриминга, мульти-спикеры." },
-  "gemini-3.8-flash-lite-tts": { name: "Gemini 3.8 Flash-Lite TTS", badgeKey: "transcriber.model_badge_fast", badge: "Быстрая TTS", descKey: "transcriber.tts_model_desc_38_flash_lite", desc: "Облегченная модель генерации речи Text-to-Speech с ультранизкой задержкой." },
-  "gemini-3.8-flash-tts": { name: "Gemini 3.8 Flash TTS", badge: "TTS", descKey: "transcriber.tts_model_desc_38_flash", desc: "Полноформатная модель Text-to-Speech высокого качества." },
-  "gemini-2.5-flash-preview-tts": { name: "Gemini 2.5 Flash TTS Preview", badgeKey: "transcriber.model_badge_fast", badge: "Быстрая", descKey: "transcriber.tts_model_desc_25_flash", desc: "Быстрая и экономичная генерация речи с минимальной задержкой." },
-  "gemini-2.5-pro-preview-tts": { name: "Gemini 2.5 Pro TTS Preview", badgeKey: "transcriber.model_badge_pro", badge: "Pro", descKey: "transcriber.tts_model_desc_25_pro", desc: "Студийное качество синтеза речи — для подкастов и аудиокниг. Только платный тариф." },
-  "gemini-3.1-flash-live-preview": { name: "Gemini 3.1 Flash Live", badgeKey: "transcriber.model_badge_new", badge: "Live Voice", descKey: "transcriber.tts_model_desc_31_live", desc: "Интерактивная голосовая модель реального времени Live API." },
+  "gemini-3.1-flash-tts-preview": { name: "Gemini 3.1 Flash TTS Preview", badgeKey: "transcriber.model_badge_rec", badge: "Recommended", descKey: "transcriber.tts_model_desc_31_flash", desc: "Latest TTS: low latency, 30 voices, streaming & multi-speaker support." },
+  "gemini-3.8-flash-lite-tts": { name: "Gemini 3.8 Flash-Lite TTS", badgeKey: "transcriber.model_badge_fast", badge: "Fast TTS", descKey: "transcriber.tts_model_desc_38_flash_lite", desc: "Lightweight Text-to-Speech model with ultra-low latency." },
+  "gemini-3.8-flash-tts": { name: "Gemini 3.8 Flash TTS", badge: "TTS", descKey: "transcriber.tts_model_desc_38_flash", desc: "Full-scale high-quality Text-to-Speech model." },
+  "gemini-2.5-flash-preview-tts": { name: "Gemini 2.5 Flash TTS Preview", badgeKey: "transcriber.model_badge_fast", badge: "Fast", descKey: "transcriber.tts_model_desc_25_flash", desc: "Fast and cost-effective speech generation with minimal latency." },
+  "gemini-2.5-pro-preview-tts": { name: "Gemini 2.5 Pro TTS Preview", badgeKey: "transcriber.model_badge_pro", badge: "Pro", descKey: "transcriber.tts_model_desc_25_pro", desc: "Studio-quality speech synthesis — paid tier only." },
+  "gemini-3.1-flash-live-preview": { name: "Gemini 3.1 Flash Live", badgeKey: "transcriber.model_badge_new", badge: "Live Voice", descKey: "transcriber.tts_model_desc_31_live", desc: "Interactive real-time voice model for Live API." },
 };
 
 function getLocalizedModelLabel(m, isTts = false) {
@@ -4259,98 +4409,98 @@ const DEFAULT_TRANSCRIBER_MODELS = [
     name: "Gemini 3.1 Flash-Lite",
     badge: "Free Tier",
     badgeType: "fast",
-    description: "⚡ Free Tier (Ультрабыстрая, для бесплатных ключей)"
+    description: "⚡ Free Tier (Ultra-fast, for free API keys)"
   },
   {
     id: "gemini-3.5-flash",
     name: "Gemini 3.5 Flash",
-    badge: "Рекомендуется",
+    badge: "Recommended",
     badgeType: "recommended",
-    description: "⚡ Оптимальный баланс скорости и качества"
+    description: "⚡ Optimal balance of speed and quality"
   },
   {
     id: "gemini-3.5-flash-lite",
     name: "Gemini 3.5 Flash-Lite",
-    badge: "Ультрабыстрая",
+    badge: "Ultra-Fast",
     badgeType: "fast",
-    description: "🚀 Минимальная задержка отклика в плотном эфире"
+    description: "🚀 Minimum response latency in busy traffic"
   },
   {
     id: "gemini-3.1-flash-lite-preview",
     name: "Gemini 3.1 Flash-Lite Preview",
     badge: "Free Preview",
     badgeType: "fast",
-    description: "⚡ Предварительная версия Flash-Lite"
+    description: "⚡ Flash-Lite preview release"
   },
   {
     id: "gemini-3.6-flash",
     name: "Gemini 3.6 Flash",
-    badge: "Новое поколение",
+    badge: "Next Gen",
     badgeType: "new",
-    description: "✨ Улучшенное распознавание зашумленной речи"
+    description: "✨ Improved noisy speech recognition"
   },
   {
     id: "gemini-3.7-flash",
     name: "Gemini 3.7 Flash",
     badge: "Flash 3.7",
     badgeType: "new",
-    description: "⚡ Новая гибридная модель Flash"
+    description: "⚡ New hybrid Flash model"
   },
   {
     id: "gemini-3.8-flash",
     name: "Gemini 3.8 Flash",
     badge: "Flash 3.8",
     badgeType: "new",
-    description: "⚡ Новейшая версия Flash"
+    description: "⚡ Latest Flash generation"
   },
   {
     id: "gemini-flash-latest",
     name: "Gemini Flash Latest",
-    badge: "Авто Flash",
+    badge: "Auto Flash",
     badgeType: "auto",
-    description: "🔄 Самая свежая стабильная версия Flash"
+    description: "🔄 Latest stable Flash release"
   },
   {
     id: "gemini-flash-lite-latest",
     name: "Gemini Flash-Lite Latest",
-    badge: "Авто Lite",
+    badge: "Auto Lite",
     badgeType: "auto",
-    description: "🔄 Самая свежая облегченная версия Lite"
+    description: "🔄 Latest lightweight Lite release"
   },
   {
     id: "gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
     badge: "Flash 2.5",
     badgeType: "default",
-    description: "⚡ Стабильная рабочая модель Flash"
+    description: "⚡ Stable production Flash model"
   },
   {
     id: "gemini-2.5-flash-lite",
     name: "Gemini 2.5 Flash-Lite",
     badge: "Lite 2.5",
     badgeType: "fast",
-    description: "⚡ Облегченная стабильная модель Flash-Lite"
+    description: "⚡ Lightweight stable Flash-Lite model"
   },
   {
     id: "gemini-3.5-transcribe",
     name: "Gemini 3.5 Transcribe",
     badge: "ASR",
     badgeType: "default",
-    description: "🎙️ Распознавание речи радиоэфира"
+    description: "🎙️ Amateur radio speech recognition"
   },
   {
     id: "gemini-3.1-pro-preview",
     name: "Gemini 3.1 Pro",
     badge: "Pro",
     badgeType: "pro",
-    description: "🧠 Флагманская модель с глубоким пониманием радио-жаргона"
+    description: "🧠 Flagship model with deep radio jargon understanding"
   },
   {
     id: "gemini-2.5-pro",
     name: "Gemini 2.5 Pro",
     badge: "Pro",
     badgeType: "pro",
-    description: "🧠 Качественный контекстный анализ речи"
+    description: "🧠 High-accuracy contextual speech analysis"
   }
 ];
 
@@ -4377,13 +4527,16 @@ async function loadTranscriberModelsCache() {
 
     if (validTranscribeModels.length > 0) {
       cachedTranscriberModels = validTranscribeModels.map(m => {
-        let bType = "default";
-        const bLower = (m.badge || "").toLowerCase();
-        if (bLower.includes("рекоменд")) bType = "recommended";
-        else if (bLower.includes("free") || bLower.includes("быстр") || bLower.includes("задерж")) bType = "fast";
-        else if (bLower.includes("нов")) bType = "new";
-        else if (bLower.includes("pro")) bType = "pro";
-        else if (bLower.includes("авто")) bType = "auto";
+        const meta = (typeof TRANSCRIBER_MODELS_META !== "undefined" && TRANSCRIBER_MODELS_META[m.id]) || null;
+        let bType = (meta && meta.badgeType) || "default";
+        if (bType === "default") {
+          const bLower = (m.badge || "").toLowerCase();
+          if (/rekommend|рекоменд|empfohlen|recomend|recommand|consigliat|aanbevolen|recommended/.test(bLower)) bType = "recommended";
+          else if (/free|fast|schnell|rápid|rapide|veloce|snel|швидк|быстр|задерж|instant/.test(bLower)) bType = "fast";
+          else if (/new|neu|nuev|nouv|nuov|nieuw|нов/.test(bLower)) bType = "new";
+          else if (bLower.includes("pro")) bType = "pro";
+          else if (/auto|авто/.test(bLower)) bType = "auto";
+        }
 
         let shortName = m.name || m.id;
         if (shortName.includes("—")) {
@@ -4509,9 +4662,9 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   }
 
   if (!slot && targetBadge) {
-    const cardRow = targetBadge.closest(".vfo-ts1-row, .vfo-ts2-row, .vfo-allstar-row");
+    const cardRow = targetBadge.closest(".vfo-ts1-row, .vfo-ts2-row, .vfo-allstar-row, .vfo-ysf-row");
     if (cardRow) {
-      slot = (cardRow.classList.contains("vfo-ts1-row") || cardRow.classList.contains("vfo-allstar-row")) ? 1 : 2;
+      slot = (cardRow.classList.contains("vfo-ts1-row") || cardRow.classList.contains("vfo-allstar-row") || cardRow.classList.contains("vfo-ysf-row")) ? 1 : 2;
     } else {
       slot = 1;
     }
@@ -4538,12 +4691,16 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   }
 
   // Header
+  const isSingleTxtModal = _isSingleChannelTranscribeContext(row || targetBadge);
+  const txtTitleStr = isSingleTxtModal
+    ? (window.t ? window.t("transcriber.txt_modal_single_title", {}, "Транскрибация и перевод") : "Транскрибация и перевод")
+    : (window.t ? window.t("transcriber.txt_modal_title", { slot }, `Транскрибация и перевод TS${slot}`) : `Транскрибация и перевод TS${slot}`);
   const header = document.createElement("div");
   header.className = "tts-quick-header";
   header.innerHTML = `
     <div class="tts-quick-title">
       <span class="tts-quick-icon">📝</span>
-      <span>${window.t ? window.t("transcriber.txt_modal_title", { slot }, `Транскрибация и перевод TS${slot}`) : `Транскрибация и перевод TS${slot}`}</span>
+      <span>${txtTitleStr}</span>
     </div>
     <button type="button" class="tts-quick-close" aria-label="${window.t ? window.t("buttons.close", {}, "Закрыть") : "Закрыть"}">&times;</button>
   `;
@@ -4743,7 +4900,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
       e.stopPropagation();
 
       btnSave.disabled = true;
-      btnSave.textContent = "⏳ Сохранение...";
+      btnSave.textContent = window.t ? window.t("transcriber.apikeys_saving", {}, "⏳ Saving...") : "⏳ Saving...";
 
       if (window.ttsAudioQueueManager) {
         window.ttsAudioQueueManager.stopAll();
@@ -4897,11 +5054,15 @@ function openTranscriberModelPicker(targetBadge) {
 
   displayModels.forEach(m => {
     const isSelected = (m.id === curModel);
+    const info = getLocalizedModelLabel(m, false);
+    const locName = info.name || m.name || m.id;
+    const locBadge = info.badge || m.badge || "";
+    const locDesc = info.title || m.description || "";
     const item = document.createElement("div");
     item.className = `model-picker-item ${isSelected ? "active" : ""}`;
     item.dataset.modelId = m.id;
 
-    const badgeHtml = m.badge ? `<span class="model-picker-badge badge-${m.badgeType || 'default'}">${safeEscapeHtml(m.badge)}</span>` : "";
+    const badgeHtml = locBadge ? `<span class="model-picker-badge badge-${m.badgeType || 'default'}">${safeEscapeHtml(locBadge)}</span>` : "";
 
     item.innerHTML = `
       <div class="model-picker-radio">
@@ -4909,10 +5070,10 @@ function openTranscriberModelPicker(targetBadge) {
       </div>
       <div class="model-picker-info">
         <div class="model-picker-name-row">
-          <span class="model-picker-name">${safeEscapeHtml(m.name)}</span>
+          <span class="model-picker-name">${safeEscapeHtml(locName)}</span>
           ${badgeHtml}
         </div>
-        <div class="model-picker-desc">${safeEscapeHtml(m.description)}</div>
+        <div class="model-picker-desc">${safeEscapeHtml(locDesc)}</div>
       </div>
     `;
 
@@ -4923,7 +5084,7 @@ function openTranscriberModelPicker(targetBadge) {
       if (navigator.vibrate) {
         try { navigator.vibrate(25); } catch (_) {}
       }
-      selectTranscriberModel(m.id, m.name);
+      selectTranscriberModel(m.id, locName);
       setTimeout(closeTranscriberModelPicker, 130);
     });
 
@@ -5158,7 +5319,14 @@ function toggleSlotTranscribe(row, slot) {
       }
     }
 
-    showToast(window.t ? window.t("transcriber.ts_on", { slot }, `✓ Режим транскрибации TS${slot} включен`) : `✓ Режим транскрибации TS${slot} включен`, 2000, card || hid);
+    const isSingleTrOn = _isSingleChannelTranscribeContext(row || card || hid);
+    showToast(
+      isSingleTrOn
+        ? (window.t ? window.t("transcriber.single_on", {}, "✓ Режим транскрибации включен") : "✓ Режим транскрибации включен")
+        : (window.t ? window.t("transcriber.ts_on", { slot }, `✓ Режим транскрибации TS${slot} включен`) : `✓ Режим транскрибации TS${slot} включен`),
+      2000,
+      card || hid
+    );
     const hasKey = Boolean(window.transcriberSettings && window.transcriberSettings.api_key);
     if (!hasKey) {
       showToast(window.t ? window.t("transcriber.token_missing_toast", {}, "⚠️ Укажите токен Gemini API в Настройках ➔ AI Транскрибатор") : "⚠️ Укажите токен Gemini API в Настройках ➔ AI Транскрибатор", 4000, card || hid);
@@ -5214,7 +5382,14 @@ function toggleSlotTranscribe(row, slot) {
     // Synchronize TTS Solo mode (restores all channels muted by Solo mode)
     syncTtsSoloMode();
 
-    showToast(window.t ? window.t("transcriber.ts_off", { slot }, `✕ Режим транскрибации TS${slot} выключен`) : `✕ Режим транскрибации TS${slot} выключен`, 2000, card || hid);
+    const isSingleTrOff = _isSingleChannelTranscribeContext(row || card || hid);
+    showToast(
+      isSingleTrOff
+        ? (window.t ? window.t("transcriber.single_off", {}, "✕ Режим транскрибации выключен") : "✕ Режим транскрибации выключен")
+        : (window.t ? window.t("transcriber.ts_off", { slot }, `✕ Режим транскрибации TS${slot} выключен`) : `✕ Режим транскрибации TS${slot} выключен`),
+      2000,
+      card || hid
+    );
   }
 
   if (card) {
@@ -5230,6 +5405,12 @@ function alignTranscribeCardHeight(card) {
   // Pure CSS deterministic layout: heights are invariant across all modes
 }
 
+function _notifyToolbarTranscribeIndicators() {
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
+  }
+}
+
 function updateCardTranscribeLayout(card) {
   if (!card) return;
   if (card.classList.contains("card-net-allstar")) {
@@ -5238,6 +5419,31 @@ function updateCardTranscribeLayout(card) {
       const isTranscribeActive = vfoAllStar.classList.contains("has-transcribe");
       vfoAllStar.setAslTextView(isTranscribeActive);
     }
+    _notifyToolbarTranscribeIndicators();
+    return;
+  }
+  if (card.classList.contains("card-net-ysf")) {
+    card.classList.remove(
+      "has-transcribe-mode",
+      "transcribe-ts1-only",
+      "transcribe-ts2-only",
+      "transcribe-both",
+      "has-maximized-vfo",
+      "card-transcribe-maximized"
+    );
+    const ts1RowYsf = card.querySelector(".vfo-ts1-row");
+    if (ts1RowYsf) {
+      ts1RowYsf.classList.remove("has-transcribe", "is-maximized", "vfo-hidden-by-max");
+      ts1RowYsf.style.removeProperty("height");
+      ts1RowYsf.style.removeProperty("min-height");
+      ts1RowYsf.style.removeProperty("max-height");
+    }
+    const vfoYsf = card.querySelector(".vfo-ysf-row");
+    if (vfoYsf && typeof vfoYsf.setYsfTextView === "function") {
+      const isTranscribeActive = vfoYsf.classList.contains("has-transcribe");
+      vfoYsf.setYsfTextView(isTranscribeActive);
+    }
+    _notifyToolbarTranscribeIndicators();
     return;
   }
   const ts1Row = card.querySelector(".vfo-ts1-row");
@@ -5274,6 +5480,7 @@ function updateCardTranscribeLayout(card) {
       }
     });
 
+    _notifyToolbarTranscribeIndicators();
     return;
   }
 
@@ -5322,13 +5529,14 @@ function updateCardTranscribeLayout(card) {
       box.style.removeProperty("display");
     }
   });
+  _notifyToolbarTranscribeIndicators();
 }
 
 function setSlotMaximized(row, slot, isMax, savePref = true) {
   if (!row) return;
   const card = row.closest(".radio-container");
   if (!card) return;
-  if (card.classList.contains("card-net-allstar")) return;
+  if (card.classList.contains("card-net-allstar") || card.classList.contains("card-net-ysf")) return;
   const cid = resolveHotspotId(card.dataset.hotspotId || window.activeHotspotId);
 
   row.classList.toggle("is-maximized", Boolean(isMax));
@@ -5535,7 +5743,10 @@ function setupCaptionBoxLongPress(row, slot) {
 
   if (captionBox._longPressAttached) return;
   captionBox._longPressAttached = true;
-  captionBox.title = (window.t ? window.t("transcriber.caption_expand_hint", {}, "AI Расшифровка речи (длительное удержание для увеличения)") : "AI Расшифровка речи (длительное удержание для увеличения)");
+  const isInCurtainFrame = row.classList.contains("vfo-allstar-row") || row.classList.contains("vfo-ysf-row");
+  captionBox.title = isInCurtainFrame
+    ? (window.t ? window.t("vfo.caption_box_title", {}, "AI Расшифровка речи") : "AI Расшифровка речи")
+    : (window.t ? window.t("transcriber.caption_expand_hint", {}, "AI Расшифровка речи (длительное удержание для увеличения)") : "AI Расшифровка речи (длительное удержание для увеличения)");
 
   // Track scroll position to allow user reading history without forced autoscroll
   const captionStream = row.querySelector(".vfo-caption-stream");
@@ -5568,6 +5779,11 @@ function setupCaptionBoxLongPress(row, slot) {
 
   const startPress = (clientX, clientY) => {
     clearTimer();
+    const curCard = row.closest(".radio-container");
+    if (row.classList.contains("vfo-allstar-row") || row.classList.contains("vfo-ysf-row") ||
+        (curCard && (curCard.classList.contains("card-net-allstar") || curCard.classList.contains("card-net-ysf")))) {
+      return;
+    }
     isTriggered = false;
     startX = clientX;
     startY = clientY;
@@ -5768,7 +5984,13 @@ function disableSlotTranscribe(row, slot, hid, silent = true, notifyWs = true) {
   syncTtsSoloMode();
 
   if (!silent && wasActive) {
-    showToast(window.t ? window.t("transcriber.ts_off", { slot }, `✕ Режим транскрибации TS${slot} выключен`) : `✕ Режим транскрибации TS${slot} выключен`, 1500);
+    const isSingleDis = _isSingleChannelTranscribeContext(row || cid);
+    showToast(
+      isSingleDis
+        ? (window.t ? window.t("transcriber.single_off", {}, "✕ Режим транскрибации выключен") : "✕ Режим транскрибации выключен")
+        : (window.t ? window.t("transcriber.ts_off", { slot }, `✕ Режим транскрибации TS${slot} выключен`) : `✕ Режим транскрибации TS${slot} выключен`),
+      1500
+    );
   }
 }
 
@@ -5950,7 +6172,8 @@ window.addEventListener("pagehide", () => {
 function syncCardSlotTranscribeUI(card, hid) {
   if (!card) return;
   const cid = resolveHotspotId(hid || card.dataset.hotspotId);
-  const isCardInTranscribeMode = card.classList.contains("has-transcribe-mode");
+  const isCardInTranscribeMode = card.classList.contains("has-transcribe-mode") ||
+                                 Boolean(card.querySelector(".vfo-allstar-row.has-transcribe, .vfo-ysf-row.has-transcribe"));
 
   // When a card is first wired or not actively in transcribe mode, always start in standard view with TXT/TTS off
   if (!isCardInTranscribeMode) {
@@ -6130,9 +6353,11 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
   editor.className = "apikeys-popover-editor";
   editor.contentEditable = "true";
   editor.spellcheck = false;
+  const phPaid = t("transcriber.apikeys_ph_paid", {}, "main/paid key");
+  const phFree = t("transcriber.apikeys_ph_free", {}, "free pool");
   editor.dataset.placeholder = isGroq
-    ? ["gsk_... (основной/платный ключ)", "gsk_... (бесплатный пул)", "gsk_..."].join("\n")
-    : ["AIzaSy... (основной/платный ключ)", "AIzaSy... (бесплатный пул)", "AIzaSy..."].join("\n");
+    ? [`gsk_... (${phPaid})`, `gsk_... (${phFree})`, "gsk_..."].join("\n")
+    : [`AIzaSy... (${phPaid})`, `AIzaSy... (${phFree})`, "AIzaSy..."].join("\n");
 
   // Mode checkboxes container
   const modeContainer = document.createElement("div");
@@ -6290,7 +6515,7 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
       statusEl.textContent = t(
         "transcriber.apikeys_warn_no_other_keys",
         {},
-        "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ"
+        "⚠️ Only 1 key in list — add keys starting on line 2 or enable the 1st key"
       );
       return;
     }
@@ -6301,20 +6526,20 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
       statusEl.textContent = t(
         "transcriber.apikeys_status_first_only",
         { count: total },
-        `Найдено ключей: ${total} • Активен: только №1 (платный, без перебора)`
+        `Found keys: ${total} • Active: #1 only (paid, no rotation)`
       );
     } else if (!useFirst && useOther) {
       const activeCount = Math.max(0, total - 1);
       statusEl.textContent = t(
         "transcriber.apikeys_status_others_only",
         { count: total, active: activeCount },
-        `Найдено ключей: ${total} • Активны: №2–${total} (${activeCount} в переборе, №1 в резерве)`
+        `Found keys: ${total} • Active: #2–${total} (${activeCount} rotating, #1 in reserve)`
       );
     } else {
       statusEl.textContent = t(
         "transcriber.apikeys_status_all",
         { count: total },
-        `Найдено ключей: ${total} • Активны: все ${total} (в переборе)`
+        `Found keys: ${total} • Active: all ${total} (rotating)`
       );
     }
   }
@@ -6424,11 +6649,13 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
           } else if (code === 429) {
             rateLimitCount++;
             lineDiv.className = "key-ratelimit";
-            lineDiv.title = item.error ? `429 Rate Limit: ${item.error}` : "429: Лимит запросов исчерпан";
+            lineDiv.title = item.error
+              ? `429 Rate Limit: ${item.error}`
+              : t("transcriber.apikeys_429_title", {}, "429: Rate limit exceeded");
           } else {
             invalidCount++;
             lineDiv.className = "key-invalid";
-            lineDiv.title = item.error ? `${t("common.error", {}, "Ошибка")}: ${item.error}` : t("transcriber.apikeys_key_invalid", {}, "Недействителен");
+            lineDiv.title = item.error ? `${t("common.error", {}, "Error")}: ${item.error}` : t("transcriber.apikeys_key_invalid", {}, "Invalid");
           }
           editor.appendChild(lineDiv);
         });
@@ -6437,10 +6664,14 @@ export function openApiKeysManagerPopover(engine, anchorBtn) {
 
         if (invalidCount === 0 && rateLimitCount === 0) {
           statusEl.style.color = "#22c55e";
-          statusEl.textContent = t("transcriber.apikeys_all_valid", { count: validCount }, `✅ Все ключи (${validCount}) проверены и работают!`);
+          statusEl.textContent = t("transcriber.apikeys_all_valid", { count: validCount }, `✅ All keys (${validCount}) verified and working!`);
         } else if (rateLimitCount > 0 && invalidCount === 0) {
           statusEl.style.color = "#fbbf24";
-          statusEl.textContent = `⚠️ Доступно: ${validCount}, временно исчерпан лимит (429): ${rateLimitCount} (будет использован автоперебор).`;
+          statusEl.textContent = t(
+            "transcriber.apikeys_rate_limited_summary",
+            { valid: validCount, limited: rateLimitCount },
+            `⚠️ Available: ${validCount}, temporarily rate-limited (429): ${rateLimitCount} (auto-rotation will be used).`
+          );
         } else {
           statusEl.style.color = "#ef4444";
           statusEl.textContent = t("transcriber.apikeys_partial_valid", { valid: validCount, invalid: invalidCount + rateLimitCount }, `⚠️ ${validCount} активных, ${invalidCount + rateLimitCount} с ошибками или лимитом.`);
@@ -6777,11 +7008,14 @@ function initGeminiTtsFrame() {
 
     if (optTtsModel) {
       if (isGemini) {
-        if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Модель Gemini TTS:") : "🤖 Модель Gemini TTS:";
+        if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Gemini TTS Model:") : "🤖 Gemini TTS Model:";
+        const bRec = window.t ? window.t("transcriber.model_badge_rec", {}, "Recommended") : "Recommended";
+        const bFast = window.t ? window.t("transcriber.model_fast", {}, "Fast") : "Fast";
+        const bQual = window.t ? window.t("transcriber.model_qual", {}, "Quality") : "Quality";
         optTtsModel.innerHTML = `
-          <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview (⚡ Рекомендуется)</option>
-          <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (Быстрый)</option>
-          <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (Качество)</option>
+          <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview (⚡ ${safeEscapeHtml(bRec)})</option>
+          <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (${safeEscapeHtml(bFast)})</option>
+          <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (${safeEscapeHtml(bQual)})</option>
           <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash TTS Preview (Free)</option>
           <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro TTS Preview (Pro)</option>
         `;
@@ -6790,10 +7024,10 @@ function initGeminiTtsFrame() {
           optTtsModel.value = savedMod;
         }
       } else if (isGroq) {
-        if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Модель Groq TTS:") : "⚡ Модель Groq TTS:";
+        if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Groq TTS Model:") : "⚡ Groq TTS Model:";
         optTtsModel.innerHTML = `
           <option value="canopylabs/orpheus-v1-english">Orpheus V1 English (⚡ Expressive, US)</option>
-          <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi (Саудовский арабский)</option>
+          <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi</option>
         `;
         const savedMod = (window.transcriberSettings && window.transcriberSettings.tts_model) || "canopylabs/orpheus-v1-english";
         if (Array.from(optTtsModel.options).some(o => o.value === savedMod)) {
@@ -6947,7 +7181,12 @@ function initGeminiTtsFrame() {
     const engine = optTtsEngine ? optTtsEngine.value : 'gemini';
     const curTargetL = resolveCurrentTargetLang();
     if (engine === 'silero' && curTargetL && !SILERO_SUPPORTED_LANGUAGES.includes(curTargetL.toLowerCase())) {
-      showToast(`⚠️ Язык [${curTargetL.toUpperCase()}] не поддерживается в Silero TTS. Выберите Piper TTS или Gemini API.`, 4000);
+      showToast(
+        window.t
+          ? window.t("transcriber.silero_unsupported_toast", { lang: curTargetL.toUpperCase() }, `⚠️ Language [${curTargetL.toUpperCase()}] is not supported by Silero TTS. Choose Piper TTS or Gemini API.`)
+          : `⚠️ Language [${curTargetL.toUpperCase()}] is not supported by Silero TTS. Choose Piper TTS or Gemini API.`,
+        4000
+      );
       return;
     }
     const model = optTtsModel ? optTtsModel.value : (engine === 'groq' ? 'canopylabs/orpheus-v1-english' : 'gemini-3.1-flash-tts-preview');
@@ -6982,8 +7221,8 @@ function initGeminiTtsFrame() {
       if (!activeKeys.length) {
         const all = getEngineKeys('groq');
         const warn = all.length > 0
-          ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ") : "⚠️ В списке только 1 ключ — добавьте ключи со 2-й строки или включите 1-й ключ")
-          : "⚠️ Укажите API-ключ Groq для проверки звука";
+          ? (window.t ? window.t("transcriber.apikeys_warn_no_other_keys", {}, "⚠️ Only 1 key in list — add keys starting on line 2 or enable the 1st key") : "⚠️ Only 1 key in list — add keys starting on line 2 or enable the 1st key")
+          : (window.t ? window.t("transcriber.groq_need_key_test", {}, "⚠️ Enter a Groq API key to test audio") : "⚠️ Enter a Groq API key to test audio");
         showToast(warn, 3500);
         return;
       }
@@ -7083,7 +7322,7 @@ function initGeminiTtsFrame() {
           }
         } else {
           console.warn('[TTS] Settings Piper test error:', data);
-          const errDetail = data.message || data.detail || 'Ошибка синтеза';
+          const errDetail = data.message || data.detail || (window.t ? window.t("transcriber.err_synth", {}, "Synthesis error") : "Synthesis error");
           showToast(window.t ? window.t("transcriber.toast_tts_piper_err", { error: errDetail }, `⚠️ Piper TTS: ${errDetail}`) : `⚠️ Piper TTS: ${errDetail}`, 3500);
         }
       } catch (err) {
@@ -7117,7 +7356,7 @@ function initGeminiTtsFrame() {
       const data = await resp.json();
       if (data && data.status === 'ok' && data.audio_base64) {
         const engTitle = engine === 'groq' ? 'Groq TTS' : (engine === 'piper' ? 'Piper TTS' : 'Gemini TTS');
-        showToast(`🔊 Озвучка ${engTitle} [${testLang.toUpperCase()}] (${voice || "default"})`, 2500);
+        showToast(window.t ? window.t("transcriber.tts_playback_toast", { engine: engTitle, lang: testLang.toUpperCase(), voice: voice || "default" }, `🔊 Playback ${engTitle} [${testLang.toUpperCase()}] (${voice || "default"})`) : `🔊 Playback ${engTitle} [${testLang.toUpperCase()}] (${voice || "default"})`, 2500);
         if (window.ttsAudioQueueManager) {
           window.ttsAudioQueueManager.enqueue({
             hotspot_id: actHid,
@@ -7466,10 +7705,10 @@ function initTranscriberSettings() {
         const optTtsModel = document.getElementById('optTtsModel');
         const lblTtsModel = document.getElementById('lblTtsModel');
         if (optTtsModel && effEngine === 'groq') {
-          if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Модель Groq TTS:") : "⚡ Модель Groq TTS:";
+          if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Groq TTS Model:") : "⚡ Groq TTS Model:";
           optTtsModel.innerHTML = `
             <option value="canopylabs/orpheus-v1-english">Orpheus V1 English (⚡ Expressive, US)</option>
-            <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi (Саудовский арабский)</option>
+            <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi</option>
           `;
         }
         if (data.settings.tts_model && optTtsModel) optTtsModel.value = data.settings.tts_model;
@@ -7632,12 +7871,12 @@ function initTranscriberSettings() {
           // Guarantee valid lists even if remote backend returned unusual response
           if (ttsModels.length === 0) {
             ttsModels = [
-              { id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS Preview — ⚡ Новейшая (Рекомендуется)", description: "Новейшая TTS: низкая задержка, 30 голосов, поддержка стриминга, мульти-спикеры.", badge: "Рекомендуется" },
-              { id: "gemini-3.8-flash-lite-tts", name: "Gemini 3.8 Flash-Lite TTS — ⚡ Быстрый синтез (TTS)", description: "Облегченная модель генерации речи Text-to-Speech с ультранизкой задержкой.", badge: "Быстрая TTS" },
-              { id: "gemini-3.8-flash-tts", name: "Gemini 3.8 Flash TTS — 🔊 Синтез речи (TTS)", description: "Полноформатная модель Text-to-Speech высокого качества.", badge: "TTS" },
-              { id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS Preview — 🚀 Быстрая (Free Tier)", description: "Быстрая и экономичная генерация речи с минимальной задержкой.", badge: "Быстрая" },
-              { id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS Preview — 🧠 Студийное качество (Paid)", description: "Студийное качество синтеза речи — для подкастов и аудиокниг. Только платный тариф.", badge: "Pro" },
-              { id: "gemini-3.1-flash-live-preview", name: "Gemini 3.1 Flash Live — 🎙️ Live Voice (Двустороннее аудио)", description: "Интерактивная голосовая модель реального времени Live API.", badge: "Live Voice" }
+              { id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS Preview — ⚡ Latest (Recommended)", description: "Latest TTS: low latency, 30 voices, streaming support, multi-speaker.", badge: "Recommended" },
+              { id: "gemini-3.8-flash-lite-tts", name: "Gemini 3.8 Flash-Lite TTS — ⚡ Fast Synthesis (TTS)", description: "Lightweight Text-to-Speech model with ultra-low latency.", badge: "Fast TTS" },
+              { id: "gemini-3.8-flash-tts", name: "Gemini 3.8 Flash TTS — 🔊 Speech Synthesis (TTS)", description: "Full-quality Text-to-Speech model.", badge: "TTS" },
+              { id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS Preview — 🚀 Fast (Free Tier)", description: "Fast and cost-effective speech synthesis with minimal latency.", badge: "Fast" },
+              { id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS Preview — 🧠 Studio Quality (Paid)", description: "Studio-quality speech synthesis — for podcasts and audiobooks. Paid tier only.", badge: "Pro" },
+              { id: "gemini-3.1-flash-live-preview", name: "Gemini 3.1 Flash Live — 🎙️ Live Voice (Two-way Audio)", description: "Interactive real-time voice Live API model.", badge: "Live Voice" }
             ];
           }
 
@@ -7648,14 +7887,14 @@ function initTranscriberSettings() {
           populateSelect(optModel,    transcribeModels, LS_TRANSCRIBE_MODEL, LS_TRANSCRIBE_OPTS);
           populateSelect(optTtsModel, ttsModels,        LS_TTS_MODEL,        LS_TTS_OPTS);
 
-          const updatedMsg = window.t ? window.t("transcriber.toast_models_updated", { transcribe: transcribeModels.length, tts: ttsModels.length }, `✓ Модели обновлены: ${transcribeModels.length} для транскрибации, ${ttsModels.length} для синтеза`) : `✓ Модели обновлены: ${transcribeModels.length} для транскрибации, ${ttsModels.length} для синтеза`;
+          const updatedMsg = window.t ? window.t("transcriber.toast_models_updated", { transcribe: transcribeModels.length, tts: ttsModels.length }, `✓ Models updated: ${transcribeModels.length} for transcription, ${ttsModels.length} for synthesis`) : `✓ Models updated: ${transcribeModels.length} for transcription, ${ttsModels.length} for synthesis`;
           showToast(updatedMsg, 3000);
         } else {
-          showToast(window.t ? window.t("transcriber.models_fetch_fail", {}, "⚠️ Не удалось получить модели. Проверьте ключ API.") : "⚠️ Не удалось получить модели. Проверьте ключ API.", 3500);
+          showToast(window.t ? window.t("transcriber.models_fetch_fail", {}, "⚠️ Failed to fetch models. Check your API key.") : "⚠️ Failed to fetch models. Check your API key.", 3500);
         }
       } catch (err) {
         console.error(err);
-        showToast(window.t ? window.t("transcriber.models_fetch_err", {}, "⚠️ Ошибка запроса моделей к Gemini API") : "⚠️ Ошибка запроса моделей к Gemini API", 3500);
+        showToast(window.t ? window.t("transcriber.models_fetch_err", {}, "⚠️ Error querying Gemini API models") : "⚠️ Error querying Gemini API models", 3500);
       } finally {
         btnFetchModels.disabled = false;
         btnFetchModels.textContent = originalText;
@@ -7672,7 +7911,12 @@ function initTranscriberSettings() {
 
       const chosenTtsEng = optTtsEngine ? optTtsEngine.value : "gemini";
       if (chosenTtsEng === "silero" && targetLangVal !== "none" && !SILERO_SUPPORTED_LANGUAGES.includes(targetLangVal.toLowerCase())) {
-        showToast(`⚠️ Язык [${targetLangVal.toUpperCase()}] не поддерживается в Silero TTS. Выберите Piper TTS или Gemini API.`, 4500);
+        showToast(
+          window.t
+            ? window.t("transcriber.silero_unsupported_toast", { lang: targetLangVal.toUpperCase() }, `⚠️ Language [${targetLangVal.toUpperCase()}] is not supported in Silero TTS. Choose Piper TTS or Gemini API.`)
+            : `⚠️ Language [${targetLangVal.toUpperCase()}] is not supported in Silero TTS. Choose Piper TTS or Gemini API.`,
+          4500
+        );
         return;
       }
 
@@ -7961,4 +8205,17 @@ if (typeof window !== "undefined") {
   window.__proxdmr.LANG_3LETTER_MAP = LANG_3LETTER_MAP;
   window.__proxdmr.refreshAllSlotTtsBadges = refreshAllSlotTtsBadges;
   window.__proxdmr.syncTtsSoloMode = syncTtsSoloMode;
+  window.addEventListener("languageChanged", () => {
+    try { renderSourceLangSelect(); } catch (_) {}
+    try { renderTargetLangSelect(); } catch (_) {}
+    try { renderTranscriberModelOptions(); } catch (_) {}
+    try { renderTtsModelOptions(); } catch (_) {}
+    try { populateVoiceSelect(); } catch (_) {}
+    try { refreshAllSlotTtsBadges(); } catch (_) {}
+    try {
+      document.querySelectorAll(".radio-card").forEach((c) => {
+        try { syncCardSlotTranscribeUI(c); } catch (_) {}
+      });
+    } catch (_) {}
+  });
 }

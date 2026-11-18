@@ -17,6 +17,11 @@ import wave
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.piper")
 
 BASE_HF_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
@@ -54,7 +59,7 @@ MALE_NAMES = {
 FEMALE_NAMES = {
     "irina", "amy", "alba", "jenny_dioco", "kathleen", "kristin", "lessac",
     "lada", "tetiana", "eva_k", "kerstin", "ramona", "paola", "serena",
-    "siwis", "jessica", "daniela", "terra5871", "cori", "sharvard", "gosia",
+    "siwis", "jessica", "daniela", "terra5871", "april682", "cori", "sharvard", "gosia",
     "kasandra", "kss", "huayan", "alma", "lisa", "berta", "anna", "joy",
     "rapunzelina", "nathalie"
 }
@@ -64,6 +69,7 @@ VOICE_FRIENDLY_NAMES = {
     "sushkov_v4": "Sushkov",
     "igm3804": "IGM",
     "igm": "IGM",
+    "april682": "April",
     "ukrainian_tts": "Ukrainian TTS",
     "thorsten_emotional": "Thorsten (Emotional)",
     "mc_speech": "MC Speech",
@@ -76,7 +82,14 @@ VOICE_FRIENDLY_NAMES = {
 }
 
 LANG_PREFS: Dict[str, List[str]] = {
-    "ru": ["ru_RU-terra5871-medium", "ru_RU-igm3804-medium", "ru_RU-sushkov_v4-medium"],
+    "ru": [
+        "ru_RU-terra5871-medium",
+        "ru_RU-igm3804-medium",
+        "ru_RU-sushkov_v4-medium",
+        "ru_RU-dmitri-medium",
+        "ru_RU-denis-medium",
+        "ru_RU-april682-medium",
+    ],
     "en": ["en_US-bryce-medium", "en_GB-alan-medium", "en_US-amy-medium"],
     "uk": ["uk_UA-ukrainian_tts-medium", "uk_UA-mykyta-high", "uk_UA-tetiana-high"],
     "de": ["de_DE-thorsten-medium", "de_DE-thorsten_emotional-medium"],
@@ -700,10 +713,10 @@ class PiperService:
         Returns: (wav_bytes, sample_rate, error_message)
         """
         if not text or not text.strip():
-            return None, 0, "Текст для синтеза пуст"
+            return None, 0, _tr("tts.empty_text", fallback="Empty text for speech synthesis")
 
         if not voice_id or not voice_id.strip():
-            return None, 0, "Голос для синтеза речи не указан"
+            return None, 0, _tr("piper.voice_not_specified", fallback="Voice for speech synthesis not specified")
 
         voice_lang = self.get_voice_lang(voice_id) or "ru"
         try:
@@ -713,7 +726,7 @@ class PiperService:
             logger.warning(f"[PIPER] Error filtering foreign text for voice '{voice_id}' ({voice_lang}): {e}")
 
         if not text or not text.strip():
-            return None, 0, "Текст для синтеза пуст (отфильтрован как чужеродный язык)"
+            return None, 0, _tr("tts.empty_after_filter", fallback="Text is empty for speech synthesis (filtered as foreign language)")
 
         if "+" in text:
             try:

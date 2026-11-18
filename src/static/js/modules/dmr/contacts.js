@@ -5,10 +5,11 @@
  * contact creation/editing modals, JSON import/export, and gateway settings.
  */
 
-import { escapeHtml, attachTgLivePreview } from '../core/formatters.js?v=2.9.367';
-import { showToast } from '../core/toast.js';
+import { escapeHtml, attachTgLivePreview, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
-import { resolveHotspotId } from '../core/state.js';
+import { resolveHotspotId } from '../core/state.js?v=2.9.698';
+import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.737';
 
 // Safe window helper bridges
 
@@ -213,40 +214,44 @@ export const DEFAULT_CONTACTS_TREE = [
     {
       id: "fav_root",
       type: "folder",
-      name: "⭐ Избранное",
+      network_type: "bm",
+      name: "⭐ Favorites",
       collapsed: false,
       children: [
-        { id: "fav_echo", type: "tg", name: "Эхо-тест BM (Parrot)", tg: 9990, city: "Worldwide", slot_override: 2, comment: "Проверка модуляции и задержки" },
-        { id: "fav_ru", type: "tg", name: "Россия общая", tg: 2501, city: "Russia", slot_override: 2, comment: "Основная разговорная группа" }
+        { id: "fav_echo", type: "tg", network_type: "bm", name: "BM Echo Test (Parrot)", tg: 9990, city: "Worldwide", slot_override: 2, comment: "Modulation and latency test" },
+        { id: "fav_ru", type: "tg", network_type: "bm", name: "Russia General", tg: 2501, city: "Russia", slot_override: 2, comment: "Primary talkgroup" }
       ]
     },
     {
       id: "groups_root",
       type: "folder",
-      name: "🎯 Разговорные группы (TG)",
+      network_type: "bm",
+      name: "🎯 Talkgroups (TG)",
       collapsed: false,
       children: [
         {
           id: "tg_fed",
           type: "folder",
-          name: "Федеральные TG",
+          network_type: "bm",
+          name: "Federal TG",
           collapsed: false,
           children: [
-            { id: "tg_2501", type: "tg", name: "Россия (Основная)", tg: 2501, city: "РФ", slot_override: 2 },
-            { id: "tg_2502", type: "tg", name: "Россия (Вызывная)", tg: 2502, city: "РФ", slot_override: 2 },
-            { id: "tg_91", type: "tg", name: "Worldwide English", tg: 91, city: "Global", slot_override: 1 }
+            { id: "tg_2501", type: "tg", network_type: "bm", name: "Russia (Main)", tg: 2501, city: "RU", slot_override: 2 },
+            { id: "tg_2502", type: "tg", network_type: "bm", name: "Russia (Calling)", tg: 2502, city: "RU", slot_override: 2 },
+            { id: "tg_91", type: "tg", network_type: "bm", name: "Worldwide English", tg: 91, city: "Global", slot_override: 1 }
           ]
         },
         {
           id: "tg_reg",
           type: "folder",
-          name: "Региональные TG",
+          network_type: "bm",
+          name: "Regional TG",
           collapsed: true,
           children: [
-            { id: "tg_25050", type: "tg", name: "Москва и МО", tg: 25050, city: "Москва", slot_override: 2 },
-            { id: "tg_25078", type: "tg", name: "Санкт-Петербург и ЛО", tg: 25078, city: "СПб", slot_override: 2 },
-            { id: "tg_25026", type: "tg", name: "Юг России / Кавказ", tg: 25026, city: "ЮФО / СКФО", slot_override: 2 },
-            { id: "tg_25066", type: "tg", name: "Урал и Сибирь", tg: 25066, city: "УФО / СФО", slot_override: 2 }
+            { id: "tg_25050", type: "tg", network_type: "bm", name: "Moscow & Region", tg: 25050, city: "Moscow", slot_override: 2 },
+            { id: "tg_25078", type: "tg", network_type: "bm", name: "Saint Petersburg & LO", tg: 25078, city: "St. Petersburg", slot_override: 2 },
+            { id: "tg_25026", type: "tg", network_type: "bm", name: "South Russia / Caucasus", tg: 25026, city: "South / N. Caucasus", slot_override: 2 },
+            { id: "tg_25066", type: "tg", network_type: "bm", name: "Ural & Siberia", tg: 25066, city: "Ural / Siberia", slot_override: 2 }
           ]
         }
       ]
@@ -254,17 +259,19 @@ export const DEFAULT_CONTACTS_TREE = [
     {
       id: "repeaters_root",
       type: "folder",
-      name: "📡 Репитеры и Точки доступа",
+      network_type: "bm",
+      name: "📡 Repeaters & Hotspots",
       collapsed: true,
       children: [
-        { id: "rpt_moscow", type: "repeater", name: "RR3AAA Репитер Москва", callsign: "RR3AAA", dmr_id: 250100, city: "Москва, 439.100", slot_override: 1, comment: "BM Master 2501" },
-        { id: "rpt_spb", type: "repeater", name: "RR1AA Репитер СПб", callsign: "RR1AA", dmr_id: 250101, city: "СПб, 438.825", slot_override: 2, comment: "BM Master 2501" }
+        { id: "rpt_moscow", type: "repeater", network_type: "bm", name: "RR3AAA Moscow Repeater", callsign: "RR3AAA", dmr_id: 250100, city: "Moscow, 439.100", slot_override: 1, comment: "BM Master 2501" },
+        { id: "rpt_spb", type: "repeater", network_type: "bm", name: "RR1AA St. Petersburg Repeater", callsign: "RR1AA", dmr_id: 250101, city: "St. Petersburg, 438.825", slot_override: 2, comment: "BM Master 2501" }
       ]
     }
   ];
 
 
 export let contactsTree = [];
+export let contactsCrossCallsigns = {};
 export let contactsGateway = { hotspot_id: "default", slot: 2 };
 let currentProposalNode = null;
 let selectedProposalSlot = 2;
@@ -300,13 +307,15 @@ export function ensureValidContactsGateway() {
     if (!Array.isArray(window.currentHotspots) || window.currentHotspots.length === 0) {
       return false;
     }
+    const bmHotspots = window.currentHotspots.filter(h => (h.network_type || "bm").toLowerCase() === "bm");
+    const pool = bmHotspots.length > 0 ? bmHotspots : window.currentHotspots;
     const resolvedGw = resolveHotspotId(contactsGateway.hotspot_id);
-    const exists = window.currentHotspots.some(h => 
-      String(h.id) === String(contactsGateway.hotspot_id) || 
+    const exists = pool.some(h =>
+      String(h.id) === String(contactsGateway.hotspot_id) ||
       resolveHotspotId(h.id) === resolvedGw
     );
     if (!exists) {
-      const fallbackId = window.currentHotspots[0].id || "default";
+      const fallbackId = pool[0].id || "default";
       console.log(`[CONTACTS] Stale gateway hotspot_id "${contactsGateway.hotspot_id}" -> fallback "${fallbackId}"`);
       contactsGateway.hotspot_id = fallbackId;
       if (contactsGateway.slot !== 1 && contactsGateway.slot !== 2) {
@@ -328,8 +337,8 @@ export function loadContactsLocal() {
         contactsTree = JSON.parse(savedTree);
       }
     } catch (e) {}
-    if (!Array.isArray(contactsTree) || contactsTree.length === 0) {
-      contactsTree = JSON.parse(JSON.stringify(DEFAULT_CONTACTS_TREE));
+    if (!Array.isArray(contactsTree)) {
+      contactsTree = [];
     }
     try {
       const savedGw = localStorage.getItem("proxdmr_contacts_gw");
@@ -350,12 +359,13 @@ export async function loadContactsFromServer() {
       if (res.ok) {
         const data = await res.json();
         if (data.status === "ok") {
-          if (Array.isArray(data.contacts) && data.contacts.length > 0) {
-            contactsTree = data.contacts;
-            try { localStorage.setItem("proxdmr_my_contacts_tree", JSON.stringify(contactsTree)); } catch (e) {}
-          } else if (contactsTree.length > 0) {
-            saveContactsToServer();
+          // Сервер — единственный источник истины: пустой список НЕ подменяется дефолтами
+          contactsTree = Array.isArray(data.contacts) ? data.contacts : [];
+          if (data.cross_callsigns && typeof data.cross_callsigns === "object") {
+            contactsCrossCallsigns = data.cross_callsigns;
+            if (typeof window !== "undefined") window.contactsCrossCallsigns = contactsCrossCallsigns;
           }
+          try { localStorage.setItem("proxdmr_my_contacts_tree", JSON.stringify(contactsTree)); } catch (e) {}
           if (data.gateway && data.gateway.hotspot_id) {
             contactsGateway = data.gateway;
             try { localStorage.setItem("proxdmr_contacts_gw", JSON.stringify(contactsGateway)); } catch (e) {}
@@ -379,16 +389,39 @@ export function saveContactsToServer() {
     clearTimeout(saveContactsDebounce);
     saveContactsDebounce = setTimeout(async () => {
       try {
-        await fetch("/api/contacts", {
+        const res = await fetch("/api/contacts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contacts: contactsTree, gateway: contactsGateway })
         });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.status === "ok" && data.cross_callsigns && typeof data.cross_callsigns === "object") {
+            contactsCrossCallsigns = data.cross_callsigns;
+            if (typeof window !== "undefined") window.contactsCrossCallsigns = contactsCrossCallsigns;
+            if (myContactsModal && myContactsModal.classList.contains("active")) {
+              renderContactsTree(contactsSearchInput ? contactsSearchInput.value.trim() : "");
+            }
+          }
+        }
       } catch (err) {
         console.warn("Failed to save contacts to server:", err);
       }
     }, 400);
   }
+
+export function flushPendingContactsSave() {
+  if (saveContactsDebounce) {
+    clearTimeout(saveContactsDebounce);
+    saveContactsDebounce = null;
+    fetch("/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contacts: contactsTree, gateway: contactsGateway }),
+      keepalive: true
+    }).catch(e => console.warn("[CONTACTS] Failed to flush contacts on freeze:", e));
+  }
+}
 
 export function updateContactsGatewaySummary() {
     if (!contactsGwSummary) return;
@@ -484,14 +517,31 @@ function resolveHotspotNetworkType(hid) {
   return "bm";
 }
 
-function getNetworkBadgeLabel(net) {
+export function getNetworkBadgeLabel(net) {
   const map = {
     bm: "BM (DMR)",
     tgif: "TGIF (DMR)",
     freedmr: "FreeDMR",
+    adn: "ADN",
     dmrplus: "DMR+",
     xlx: "XLX",
+    ysf: "YSF (C4FM)",
     allstar: "AllStarLink",
+    custom: "Custom DMR"
+  };
+  return map[(net || "bm").toLowerCase()] || String(net || "BM").toUpperCase();
+}
+
+export function getNetworkShortBadge(net) {
+  const map = {
+    bm: "BM",
+    tgif: "TGIF",
+    freedmr: "FreeDMR",
+    adn: "ADN",
+    dmrplus: "DMR+",
+    xlx: "XLX",
+    ysf: "YSF",
+    allstar: "ASL",
     custom: "DMR"
   };
   return map[(net || "bm").toLowerCase()] || String(net || "BM").toUpperCase();
@@ -510,37 +560,161 @@ export function getPersonIdentities(node) {
   return ids;
 }
 
+export function resolveNodeNetworkType(node) {
+  if (!node || typeof node !== "object") return "bm";
+  const raw = String(node.network_type || "").trim().toLowerCase();
+  if (raw) return raw;
+  if (node.type === "allstar_node" || node.type === "asl_macro") return "allstar";
+  return "bm";
+}
+
 export function nodeMatchesNetworkContext(node, netType) {
   if (!node) return false;
   const activeNet = (netType || contactsActiveNetworkType || "bm").toLowerCase();
-  const isDmrFamily = (activeNet !== "allstar");
 
   if (node.type === "folder") {
-    const folderNet = (node.network_type || "").toLowerCase();
-    if (folderNet && folderNet === activeNet) return true;
-    const children = Array.isArray(node.children) ? node.children : [];
-    return children.some(ch => nodeMatchesNetworkContext(ch, activeNet));
+    const folderNet = resolveNodeNetworkType(node);
+    return folderNet === activeNet;
   }
 
-  if (node.type === "person") {
-    const ids = getPersonIdentities(node);
-    if (activeNet === "allstar") {
-      return Boolean(ids.allstar_node || ids.echolink_node);
+  // Strictly isolated phonebooks per hotspot network type (BM, ADN, FreeDMR, TGIF, DMR+, XLX, YSF, AllStar, Custom)
+  return resolveNodeNetworkType(node) === activeNet;
+}
+
+function collectLocalCrossEntriesByCallsign(callsign, activeNet, excludeNodeId = null) {
+  const cs = String(callsign || "").trim().toUpperCase();
+  if (!cs) return [];
+  const entries = [];
+  function walk(nodes) {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes) {
+      if (!n) continue;
+      if (n.type === "folder") {
+        walk(n.children);
+        continue;
+      }
+      if (excludeNodeId && n.id === excludeNodeId) continue;
+      const nCs = String(n.callsign || "").trim().toUpperCase();
+      if (nCs !== cs) continue;
+      const nNet = resolveNodeNetworkType(n);
+      if (nNet === activeNet) continue;
+      const ids = n.type === "person" ? getPersonIdentities(n) : {};
+      entries.push({
+        node_id: n.id,
+        network_type: nNet,
+        type: n.type || "person",
+        name: n.name || cs,
+        dmr_id: ids.dmr_id || n.dmr_id || null,
+        allstar_node: n.node_number || n.allstar_node || ids.allstar_node || "",
+        echolink_node: n.echolink_node || ids.echolink_node || "",
+        tg: n.tg || null,
+        city: n.city || "",
+        comment: n.comment || ""
+      });
     }
-    if (isDmrFamily) {
-      return Boolean(ids.dmr_id && Number(ids.dmr_id) > 0);
+  }
+  walk(contactsTree);
+  return entries;
+}
+
+export function buildCrossNetworkBadgesForNode(node, activeNet, forEditBox = false) {
+  if (!node) return "";
+  const cs = String(node.callsign || "").trim().toUpperCase();
+  const curNet = String(activeNet || contactsActiveNetworkType || "bm").toLowerCase();
+  const ids = node.type === "person" ? getPersonIdentities(node) : {};
+  const srvCross = (cs && contactsCrossCallsigns && contactsCrossCallsigns[cs]) ? contactsCrossCallsigns[cs] : null;
+  const localOtherEntries = cs ? collectLocalCrossEntriesByCallsign(cs, curNet, node.id) : [];
+
+  return renderCrossNetworkBadgesHtml(cs, curNet, {
+    nodeIds: ids,
+    userEntries: localOtherEntries.length ? localOtherEntries : ((srvCross && Array.isArray(srvCross.user_networks)) ? srvCross.user_networks.filter(e => String(e.network_type || "").toLowerCase() !== curNet) : []),
+    radioidDmr: (srvCross && Array.isArray(srvCross.radioid_dmr)) ? srvCross.radioid_dmr : [],
+    allstarNodes: (srvCross && Array.isArray(srvCross.allstar_nodes)) ? srvCross.allstar_nodes : [],
+    echolinkNodes: (srvCross && Array.isArray(srvCross.echolink_nodes)) ? srvCross.echolink_nodes : []
+  }, forEditBox);
+}
+
+export function renderCrossNetworkBadgesHtml(callsign, activeNet, crossData, forEditBox = false) {
+  const curNet = String(activeNet || "bm").toLowerCase();
+  const badges = [];
+  const seenKeys = new Set();
+  const nodeIds = (crossData && crossData.nodeIds) || {};
+  const userEntries = (crossData && Array.isArray(crossData.userEntries)) ? crossData.userEntries : [];
+  const radioidDmr = (crossData && Array.isArray(crossData.radioidDmr)) ? crossData.radioidDmr : [];
+  const allstarNodes = (crossData && Array.isArray(crossData.allstarNodes)) ? crossData.allstarNodes : [];
+  const echolinkNodes = (crossData && Array.isArray(crossData.echolinkNodes)) ? crossData.echolinkNodes : [];
+
+  // 1. Entries of the same callsign in user's OTHER hotspot phonebooks
+  for (const ent of userEntries) {
+    const net = String(ent.network_type || "bm").toLowerCase();
+    if (!net || net === curNet) continue;
+    const netShort = getNetworkShortBadge(net);
+    const idTxt = ent.dmr_id ? `ID ${ent.dmr_id}` : (ent.allstar_node ? `#${ent.allstar_node}` : (ent.tg ? `TG ${ent.tg}` : ""));
+    const uniqKey = `user:${net}:${idTxt || ent.node_id}`;
+    if (seenKeys.has(uniqKey)) continue;
+    seenKeys.add(uniqKey);
+
+    const tipParts = [
+      `${getNetworkBadgeLabel(net)}: ${ent.name || callsign}`,
+      idTxt,
+      ent.city || "",
+      ent.comment || ""
+    ].filter(Boolean);
+    const clickableAttr = (!forEditBox && ent.node_id)
+      ? `data-action="call-cross-net" data-target-node-id="${escapeHtml(String(ent.node_id))}" data-net="${escapeHtml(net)}"`
+      : "";
+    badges.push(
+      `<span class="cross-net-pill contact-net-badge net-${escapeHtml(net)} ${clickableAttr ? "is-clickable" : ""}" ${clickableAttr} title="${escapeHtml(tipParts.join(" • "))}">${escapeHtml(netShort)}${idTxt ? `: ${escapeHtml(idTxt)}` : ""}</span>`
+    );
+  }
+
+  // 2. RadioID global DMR DB IDs (helpful when viewing in AllStar/YSF or if user has multiple DMR IDs)
+  for (const ridObj of radioidDmr) {
+    const rid = ridObj.radio_id ? String(ridObj.radio_id) : "";
+    if (!rid) continue;
+    if (curNet !== "allstar" && curNet !== "ysf" && nodeIds.dmr_id && String(nodeIds.dmr_id) === rid && userEntries.length === 0) {
+      // Only hide trivial duplicate of the sole DMR ID already displayed in DMR card when no other cross info
     }
-    return Boolean(ids[activeNet]);
+    const loc = [ridObj.city, ridObj.country].filter(Boolean).join(", ");
+    const tip = `RadioID DMR: ${rid} — ${ridObj.callsign || callsign}${ridObj.name ? ` (${ridObj.name})` : ""}${loc ? `, ${loc}` : ""}`;
+    if (!seenKeys.has(`rid:${rid}`)) {
+      seenKeys.add(`rid:${rid}`);
+      if (curNet === "allstar" || curNet === "ysf" || (nodeIds.dmr_id && String(nodeIds.dmr_id) !== rid) || forEditBox) {
+        badges.push(`<span class="cross-net-pill contact-net-badge net-radioid" title="${escapeHtml(tip)}">🆔 RadioID ${escapeHtml(rid)}</span>`);
+      }
+    }
   }
 
-  if (node.type === "allstar_node" || node.type === "asl_macro" || (node.network_type || "").toLowerCase() === "allstar") {
-    return activeNet === "allstar";
+  // 3. Explicit AllStar node stored on card + AllStarLink directory nodes for this callsign
+  const knownAslNodes = new Set();
+  if (nodeIds.allstar_node && curNet !== "allstar") {
+    const aslNum = String(nodeIds.allstar_node).trim();
+    knownAslNodes.add(aslNum);
+    badges.push(`<span class="cross-net-pill contact-net-badge net-allstar" title="AllStarLink #${escapeHtml(aslNum)}">📻 ASL #${escapeHtml(aslNum)}</span>`);
+  }
+  for (const asl of allstarNodes) {
+    const nNum = String(asl.node || "").trim();
+    if (!nNum || knownAslNodes.has(nNum)) continue;
+    if (curNet === "allstar" && !forEditBox) continue;
+    knownAslNodes.add(nNum);
+    const tip = `AllStarLink #${nNum}: ${asl.name || asl.callsign || callsign}${asl.location ? ` (${asl.location})` : ""}`;
+    badges.push(`<span class="cross-net-pill contact-net-badge net-allstar" title="${escapeHtml(tip)}">📻 ASL #${escapeHtml(nNum)}</span>`);
   }
 
-  // Network-specific DMR entities (TG, Repeater, XLX module) — strictly isolated per network
-  if (!isDmrFamily) return false;
-  const nodeNet = (node.network_type || "bm").toLowerCase();
-  return nodeNet === activeNet;
+  // 4. EchoLink nodes
+  const allEcho = new Set(echolinkNodes);
+  if (nodeIds.echolink_node) allEcho.add(String(nodeIds.echolink_node).trim());
+  for (const el of allEcho) {
+    if (!el) continue;
+    badges.push(`<span class="cross-net-pill contact-net-badge net-echolink" title="EchoLink Node #${escapeHtml(el)}">🌐 EL #${escapeHtml(el)}</span>`);
+  }
+
+  if (!badges.length) return "";
+  const labelTxt = window.t ? window.t("hs_edit.type_other_group", {}, "Другие сети") : "Другие сети";
+  if (forEditBox) {
+    return `<div class="contact-edit-cross-title">🌐 ${escapeHtml(labelTxt)} (${escapeHtml(callsign)}):</div><div class="contact-edit-cross-list">${badges.join("")}</div>`;
+  }
+  return `<div class="tree-contact-other-nets"><span class="tree-other-nets-label">🌐 ${escapeHtml(labelTxt)}:</span>${badges.join("")}</div>`;
 }
 
 function updateContactsNetFilterHeaderUI() {
@@ -549,16 +723,18 @@ function updateContactsNetFilterHeaderUI() {
   const gwToggle = document.getElementById("btnContactsGatewayToggle");
   const gwPanel = document.getElementById("contactsGatewayPanel");
 
-  const netLabel = getNetworkBadgeLabel(contactsActiveNetworkType);
+  const activeNet = (contactsActiveNetworkType || "bm").toLowerCase();
+  const netLabel = getNetworkBadgeLabel(activeNet);
   if (netBadge) {
     netBadge.textContent = netLabel;
+    netBadge.className = `contact-net-badge net-${activeNet}`;
   }
   if (tabsWrap) {
-    tabsWrap.style.display = (contactsActiveNetworkType === "allstar") ? "inline-flex" : "none";
+    tabsWrap.style.display = (activeNet === "allstar" || activeNet === "ysf") ? "inline-flex" : "none";
   }
 
   // Group Gateway feature is strictly BrandMeister-only
-  const isBm = ((contactsActiveNetworkType || "bm").toLowerCase() === "bm");
+  const isBm = (activeNet === "bm");
   if (gwToggle) gwToggle.style.display = isBm ? "" : "none";
   if (gwPanel && !isBm) gwPanel.style.display = "none";
 }
@@ -581,8 +757,29 @@ export function openMyContactsModal(targetHid = null, defaultTab = null) {
     updateContactsGatewaySummary();
     renderContactsTree("");
 
+    const isYsf = (contactsActiveNetworkType === "ysf");
+    const isAsl = (contactsActiveNetworkType === "allstar");
+    const btnTabYsf = document.getElementById("btnContactsTabYsf");
+    const btnTabYsfContacts = document.getElementById("btnContactsTabYsfContacts");
+    const btnTabAsl = document.getElementById("btnContactsTabAllstar");
+    const btnTabDmrEl = document.getElementById("btnContactsTabDmr");
+    if (btnTabYsf) btnTabYsf.style.display = isYsf ? "inline-flex" : "none";
+    if (btnTabYsfContacts) btnTabYsfContacts.style.display = isYsf ? "inline-flex" : "none";
+    if (btnTabDmrEl) btnTabDmrEl.style.display = "";
+    if (btnTabAsl) btnTabAsl.style.display = isAsl ? "inline-flex" : "none";
+
     const shouldOpenAllStarDir = (defaultTab === "allstar_dir");
-    switchContactsModalTab(shouldOpenAllStarDir ? "allstar" : "dmr");
+    const shouldOpenYsfDir = (isYsf && defaultTab === "ysf_dir");
+    const shouldOpenYsfContacts = (isYsf && defaultTab === "ysf_bookmarks");
+    if (shouldOpenAllStarDir) {
+      switchContactsModalTab("allstar");
+    } else if (shouldOpenYsfDir) {
+      switchContactsModalTab("ysf");
+    } else if (shouldOpenYsfContacts) {
+      switchContactsModalTab("ysf_contacts");
+    } else {
+      switchContactsModalTab("dmr");
+    }
 
     if (myContactsModal) {
       myContactsModal.style.display = "flex";
@@ -591,6 +788,9 @@ export function openMyContactsModal(targetHid = null, defaultTab = null) {
       setTimeout(() => {
         if (shouldOpenAllStarDir) {
           const inp = document.getElementById("aslNodeSearchInput");
+          if (inp) inp.focus();
+        } else if (shouldOpenYsfDir || shouldOpenYsfContacts) {
+          const inp = document.getElementById("ysfRoomSearchInput");
           if (inp) inp.focus();
         } else {
           if (contactsSearchInput) contactsSearchInput.focus();
@@ -604,13 +804,13 @@ export function openMyContactsModal(targetHid = null, defaultTab = null) {
 // ==========================================================================
 
 export const DEFAULT_ASL_DIRECTORY = [
-  { node: "1999",  name: "Local Echo Test", hub: "Эхо-тест (проверка звука и микрофона)", country: "LOCAL", flag: "🔄", mode: "*3" },
+  { node: "1999",  name: "Local Echo Test", hub: "Echo test (audio and mic check)", hub_key: "contacts.asl_dir_echo_hub", country: "LOCAL", flag: "🔄", mode: "*3" },
   { node: "41522", name: "HUBNet UK", hub: "United Kingdom National Hub", country: "GB", flag: "🇬🇧", mode: "*3" },
   { node: "27339", name: "East Coast Reflector", hub: "US East Coast ASL Hub", country: "US", flag: "🇺🇸", mode: "*3" },
   { node: "2143",  name: "WAN RS System", hub: "Western PA & Ohio Hub", country: "US", flag: "🇺🇸", mode: "*3" },
   { node: "9999",  name: "AllStar Parrot", hub: "Global Parrot Repeater", country: "GLOBAL", flag: "🦜", mode: "*3" },
   { node: "51010", name: "World Conference", hub: "Worldwide ASL Conference", country: "GLOBAL", flag: "🌐", mode: "*3" },
-  { node: "2502",  name: "ASL Russia", hub: "Российский узел AllStarLink", country: "RU", flag: "🇷🇺", mode: "*3" },
+  { node: "2502",  name: "ASL Russia", hub: "Russian AllStarLink Node", hub_key: "contacts.asl_dir_russia_hub", country: "RU", flag: "🇷🇺", mode: "*3" },
   { node: "52495", name: "DL-Nordwest", hub: "German ASL Network", country: "DE", flag: "🇩🇪", mode: "*3" },
   { node: "2000",  name: "Western Reflector", hub: "US Western System", country: "US", flag: "🇺🇸", mode: "*3" },
   { node: "43393", name: "Australia ASL Hub", hub: "VK National Repeater Hub", country: "AU", flag: "🇦🇺", mode: "*3" }
@@ -638,10 +838,800 @@ if (typeof window !== "undefined") {
   window.saveAllStarNodesDirectory = saveAllStarNodesDirectory;
 }
 
+// ==========================================================================
+// Yaesu System Fusion (YSF / C4FM) Dedicated Rooms Directory & Bookmarks
+// ==========================================================================
+
+function _isoToEmoji(cCode) {
+  if (typeof isoToEmoji === "function") return isoToEmoji(cCode);
+  if (typeof window !== "undefined" && typeof window.isoToEmoji === "function") {
+    return window.isoToEmoji(cCode);
+  }
+  if (!cCode || cCode.length !== 2) return "🌐";
+  const codePoints = [...cCode.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65);
+  return String.fromCodePoint(...codePoints);
+}
+
+const _YSF_STD_MULTIROOM_RE = /(?:^|[^A-Z0-9])(YCS|FCS)(?:[0-9]{0,4}|[^A-Z0-9]|$)/i;
+const _YSF_MUTANT_MULTIROOM_RE = /(?:^|[^A-Z0-9])(PYSF3|PYSFREFLECTOR3|YSFREFLECTOR3|MULTI[-_\s]?STREAM|DG[-_]?ID(?:_ENABLE|S|\d{1,2})?)(?:[^A-Z0-9]|$)/i;
+const _YSF_MUTANT_KINDS = new Set(["PYSF3", "PYSFREFLECTOR3", "YSFREFLECTOR3", "MULTISTREAM", "DGID", "LIVE_DGID", "MANUAL"]);
+const _ysfRuntimeMutants = (typeof window !== "undefined")
+  ? (window.__proxdmrYsfRuntimeMutants = window.__proxdmrYsfRuntimeMutants || {})
+  : {};
+
+function _normalizeYsfMutantKindToken(raw) {
+  const up = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!up) return "";
+  if (up.includes("PYSF") || up.includes("YSFREFLECTOR3")) return "PYSF3";
+  if (up.includes("MULTISTREAM")) return "MULTISTREAM";
+  if (up.startsWith("DGID")) return "DGID";
+  return up.slice(0, 16);
+}
+
+export function getYsfRoomTypeOverride(roomId) {
+  const sId = String(roomId || "").trim();
+  if (!sId) return "";
+  const val = String(getServerCollectionValue("ysf_room_types", sId) || "").trim().toLowerCase();
+  return (val === "single" || val === "multi_standard" || val === "multi_mutant") ? val : "";
+}
+
+export function markYsfRoomRuntimeMutant(roomId, kind = "LIVE_DGID") {
+  const sId = String(roomId || "").trim();
+  if (!sId) return;
+  _ysfRuntimeMutants[sId] = String(kind || "LIVE_DGID").trim().toUpperCase() || "LIVE_DGID";
+}
+
+export function setYsfRoomTypeOverride(roomId, mode) {
+  const sId = String(roomId || "").trim();
+  if (!sId) return;
+  const clean = String(mode || "").trim().toLowerCase();
+  if (clean === "single" || clean === "multi_standard" || clean === "multi_mutant") {
+    setServerCollectionKey("ysf_room_types", sId, clean, null, false);
+  } else {
+    deleteServerCollectionKey("ysf_room_types", sId, null);
+  }
+  if (typeof window !== "undefined") {
+    const viewYsf = document.getElementById("ysfRoomsView");
+    if (viewYsf && viewYsf.style.display !== "none") {
+      renderYsfRoomsList(document.getElementById("ysfRoomSearchInput")?.value || "");
+    }
+    const curHsList = window.currentHotspots || [];
+    document.querySelectorAll('.radio-container.card-net-ysf, .radio-container[data-network-type="ysf"]').forEach(cardEl => {
+      const cid = cardEl.dataset.hotspotId;
+      const hsObj = curHsList.find(h => h && h.id === cid);
+      if (hsObj) {
+        if (typeof window.updateCardYsfPanel === "function") window.updateCardYsfPanel(cardEl, hsObj);
+        if (typeof window.syncCardYsfDgIdBar === "function") window.syncCardYsfDgIdBar(cardEl, hsObj);
+      }
+    });
+  }
+}
+
+export function classifyYsfReflector(r, fallbackRoomId = "") {
+  const isStr = typeof r === "string";
+  const rObj = (!isStr && r && typeof r === "object") ? r : null;
+  const sId = String(fallbackRoomId || (rObj && (rObj.id || rObj.room)) || "").trim();
+  const explicitOverride = rObj ? String(rObj.room_type_override || rObj.type_override || "").trim().toLowerCase() : "";
+  const storedOverride = getYsfRoomTypeOverride(sId);
+  const effectiveOverride = (explicitOverride === "single" || explicitOverride === "multi_standard" || explicitOverride === "multi_mutant")
+    ? explicitOverride
+    : storedOverride;
+
+  const fields = isStr
+    ? [String(r)]
+    : (rObj ? [rObj.name, rObj.reflector_name, rObj.label, rObj.description, rObj.host] : []);
+
+  let stdKind = "";
+  let mutKind = "";
+  for (const val of fields) {
+    if (!val) continue;
+    const up = String(val).toUpperCase();
+    if (!stdKind) {
+      const mStd = up.match(_YSF_STD_MULTIROOM_RE);
+      if (mStd) stdKind = mStd[1].toUpperCase();
+    }
+    if (!mutKind) {
+      const mMut = up.match(_YSF_MUTANT_MULTIROOM_RE);
+      if (mMut) mutKind = _normalizeYsfMutantKindToken(mMut[1]);
+    }
+  }
+
+  const existingKind = rObj ? String(rObj.multiroom_kind || "").trim().toUpperCase() : "";
+  if (!stdKind && (existingKind === "YCS" || existingKind === "FCS")) stdKind = existingKind;
+  if (!mutKind && _YSF_MUTANT_KINDS.has(existingKind)) mutKind = existingKind;
+
+  if (effectiveOverride === "single") {
+    return { reflectorType: "single", isMultiroom: false, kind: "", override: "single" };
+  }
+  if (effectiveOverride === "multi_standard") {
+    return { reflectorType: "multi_standard", isMultiroom: true, kind: stdKind || "YCS", override: "multi_standard" };
+  }
+  if (effectiveOverride === "multi_mutant") {
+    return { reflectorType: "multi_mutant", isMultiroom: true, kind: mutKind || "MANUAL", override: "multi_mutant" };
+  }
+  if (stdKind) {
+    return { reflectorType: "multi_standard", isMultiroom: true, kind: stdKind, override: "" };
+  }
+  if (mutKind) {
+    return { reflectorType: "multi_mutant", isMultiroom: true, kind: mutKind, override: "" };
+  }
+  if (sId && _ysfRuntimeMutants[sId]) {
+    return { reflectorType: "multi_mutant", isMultiroom: true, kind: _ysfRuntimeMutants[sId], override: "" };
+  }
+  if (rObj && rObj.reflector_type === "multi_mutant") {
+    return { reflectorType: "multi_mutant", isMultiroom: true, kind: existingKind || "LIVE_DGID", override: "" };
+  }
+  return { reflectorType: "single", isMultiroom: false, kind: "", override: "" };
+}
+
+function _enrichYsfRoomRecord(r) {
+  if (!r || typeof r !== "object") return r;
+  const sId = String(r.id || "").trim();
+  const catalog = _getYsfServersList();
+  const catHit = sId
+    ? catalog.find(item => String(item.id || "").trim() === sId || (sId.length < 5 && String(item.id || "").trim() === sId.padStart(5, "0")))
+    : null;
+  const merged = catHit
+    ? {
+        ...catHit,
+        ...r,
+        name: r.name || catHit.name,
+        reflector_name: r.reflector_name || catHit.reflector_name || catHit.name || "",
+        description: r.description || catHit.description || "",
+        host: r.host || catHit.host || "",
+        port: r.port || catHit.port || 42000,
+        country_code: (r.country_code && r.country_code !== "XX") ? r.country_code : (catHit.country_code || r.country_code || "XX"),
+      }
+    : { ...r };
+  const cls = classifyYsfReflector(merged, sId);
+  merged.reflector_type = cls.reflectorType;
+  merged.is_multiroom = cls.isMultiroom;
+  merged.multiroom_kind = cls.kind;
+  merged.room_type_override = cls.override;
+  return merged;
+}
+
+export function getYsfMultiroomKind(r) {
+  if (!r) return "";
+  return classifyYsfReflector(r).kind || "";
+}
+
+export function isYsfMultiroomRoom(r) {
+  if (!r) return false;
+  return Boolean(classifyYsfReflector(r).isMultiroom);
+}
+
+function _getContactsCurrentLang() {
+  if (typeof window !== "undefined") {
+    return (window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang))
+      || (window.i18n && (window.i18n.currentLanguage || window.i18n.currentLang))
+      || "en";
+  }
+  return "en";
+}
+
+export function resolveYsfRoomInfo(r) {
+  const intlName = (typeof window !== "undefined" && window.t) ? window.t("countries.GLOBAL", {}, "International") : "International";
+  if (!r) return { cCode: "XX", refName: "YSF", flag: "🌐", countryName: intlName };
+  const rawName = String(r.name || "").trim();
+  let cCode = String(r.country_code || r.country || "").toUpperCase();
+  let refName = String(r.reflector_name || "").trim();
+
+  if (!cCode || cCode === "GLOBAL" || cCode === "XX" || !refName || refName === rawName) {
+    const match = rawName.match(/^([A-Za-z]{2})[-_ ]\s*(.*)$/);
+    if (match) {
+      if (!cCode || cCode === "GLOBAL" || cCode === "XX") {
+        cCode = match[1].toUpperCase();
+      }
+      if (!refName || refName === rawName) {
+        refName = match[2].trim();
+      }
+    }
+  }
+
+  if (!cCode) cCode = "XX";
+  if (!refName) refName = rawName || `YSF #${r.id || ""}`;
+
+  const isGlobalOrXx = (cCode === "XX" || cCode === "GLOBAL");
+  const isEu = (cCode === "EU");
+  let flag = "🌐";
+  if (isEu) {
+    flag = "🇪🇺";
+  } else if (!isGlobalOrXx) {
+    flag = _isoToEmoji(cCode);
+  }
+
+  const curLang = _getContactsCurrentLang();
+  let countryName = isGlobalOrXx
+    ? intlName
+    : (typeof getLocalizedCountryName === "function"
+        ? getLocalizedCountryName(cCode, cCode, curLang)
+        : cCode);
+
+  return { cCode, refName, flag, countryName };
+}
+
+let _ysfViewMode = "catalog"; // "catalog" (все комнаты) | "contacts" (только добавленные пользователем)
+let _ysfSortType = "id"; // "id" | "country" | "name"
+let _ysfSortDir = "asc"; // "asc" | "desc"
+let _ysfTypeFilter = "all"; // "all" | "single" | "multi_standard" | "multi_mutant"
+let _ysfFilteredRooms = [];
+
+function _updateYsfTypeFilterUi() {
+  document.querySelectorAll(".btn-ysf-type-filter").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.typeFilter === _ysfTypeFilter);
+  });
+}
+
+function _sortYsfRooms(list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  const sortLang = _getContactsCurrentLang();
+  return [...list].sort((a, b) => {
+    const infoA = resolveYsfRoomInfo(a);
+    const infoB = resolveYsfRoomInfo(b);
+    let cmp = 0;
+    if (_ysfSortType === "country") {
+      const cA = (infoA.countryName || infoA.cCode || "").toLowerCase();
+      const cB = (infoB.countryName || infoB.cCode || "").toLowerCase();
+      cmp = cA.localeCompare(cB, sortLang, { sensitivity: "base" });
+      if (cmp === 0) {
+        cmp = (parseInt(a.id, 10) || 0) - (parseInt(b.id, 10) || 0);
+      }
+    } else if (_ysfSortType === "name") {
+      const nA = (infoA.refName || a.name || "").toLowerCase();
+      const nB = (infoB.refName || b.name || "").toLowerCase();
+      cmp = nA.localeCompare(nB, sortLang, { sensitivity: "base" });
+      if (cmp === 0) {
+        cmp = (parseInt(a.id, 10) || 0) - (parseInt(b.id, 10) || 0);
+      }
+    } else {
+      // Default: numeric sort by room id
+      const idA = parseInt(a.id, 10) || 0;
+      const idB = parseInt(b.id, 10) || 0;
+      cmp = idA - idB;
+    }
+    return _ysfSortDir === "desc" ? -cmp : cmp;
+  });
+}
+
+function _updateYsfSortUi() {
+  const ysfSortBtns = document.querySelectorAll(".btn-ysf-sort");
+  ysfSortBtns.forEach(btn => {
+    const isCur = (btn.dataset.sort === _ysfSortType);
+    btn.classList.toggle("active", isCur);
+    const arrow = btn.querySelector(".sort-arrow");
+    if (arrow) {
+      arrow.textContent = isCur ? (_ysfSortDir === "asc" ? "▲" : "▼") : "";
+    }
+  });
+}
+
+function _renderYsfRoomCardHtml(r) {
+  const enriched = _enrichYsfRoomRecord(r);
+  const sId = String(enriched.id || "").trim();
+  const info = resolveYsfRoomInfo(enriched);
+  const host = enriched.host || "";
+  const isFav = isYsfRoomBookmarked(sId);
+  const cls = classifyYsfReflector(enriched, sId);
+  const rType = cls.reflectorType;
+  const isMr = cls.isMultiroom;
+  const mrKind = cls.kind || (rType === "multi_mutant" ? "PYSF3" : "YCS");
+
+  let cardTypeCls = "is-ysf-single";
+  let mrBadgeHtml = "";
+  if (rType === "multi_standard") {
+    cardTypeCls = "is-ysf-multiroom is-ysf-multi-standard";
+    const stdLbl = window.t ? window.t("ysf.type_badge_standard", { kind: mrKind }, `${mrKind} · DG-ID 01–99`) : `${mrKind} · DG-ID 01–99`;
+    const stdTip = window.t
+      ? window.t("ysf.type_tip_standard", { kind: mrKind }, `Standard multi-room hub (${mrKind}): DG-ID channels 01–99. Online counter shows all hub participants.`)
+      : `Standard multi-room hub (${mrKind}): DG-ID channels 01–99. Online counter shows all hub participants.`;
+    mrBadgeHtml = `<span class="ysf-multiroom-badge ysf-type-badge--standard" title="${escapeHtml(stdTip)}"><span class="ysf-inline-type-dot ysf-inline-type-dot--standard" aria-hidden="true"></span>${escapeHtml(stdLbl)}</span>`;
+  } else if (rType === "multi_mutant") {
+    cardTypeCls = "is-ysf-multiroom is-ysf-multi-mutant";
+    const mutLbl = window.t ? window.t("ysf.type_badge_mutant", { kind: mrKind }, `${mrKind} · Мутант`) : `${mrKind} · Мутант`;
+    const mutTip = window.t
+      ? window.t("ysf.type_tip_mutant", { kind: mrKind }, `Нестандартный многокомнатный рефлектор («мутант» ${mrKind}): поддержка DG-ID 01–99 без тега YCS/FCS.`)
+      : `Нестандартный многокомнатный рефлектор («мутант» ${mrKind}): поддержка DG-ID 01–99 без тега YCS/FCS.`;
+    mrBadgeHtml = `<span class="ysf-multiroom-badge ysf-type-badge--mutant" title="${escapeHtml(mutTip)}"><span class="ysf-inline-type-dot ysf-inline-type-dot--mutant" aria-hidden="true"></span>${escapeHtml(mutLbl)}</span>`;
+  } else {
+    const sngLbl = window.t ? window.t("ysf.type_badge_single", {}, "1 комн.") : "1 комн.";
+    const sngTip = window.t
+      ? window.t("ysf.type_tip_single", {}, "Однокомнатный классический YSF-рефлектор (DG-ID 00)")
+      : "Однокомнатный классический YSF-рефлектор (DG-ID 00)";
+    mrBadgeHtml = `<span class="ysf-type-badge ysf-type-badge--single" title="${escapeHtml(sngTip)}">${escapeHtml(sngLbl)}</span>`;
+  }
+
+  const cachedProbe = (window._ysfGlobalRoomProbeCache && (window._ysfGlobalRoomProbeCache[sId] || (sId.startsWith("0") ? window._ysfGlobalRoomProbeCache[String(parseInt(sId, 10))] : null))) || null;
+  let dirConnsHtml = "";
+  if (cachedProbe) {
+    const linksNum = cachedProbe.connections !== undefined ? cachedProbe.connections : 0;
+    const isKeyed = Boolean(cachedProbe.keyed);
+    const connsClass = isKeyed ? "asl-conns-hot" : (linksNum >= 10 ? "asl-conns-hot" : (linksNum > 0 ? "asl-conns-active" : "asl-conns-zero"));
+    const connsText = isKeyed ? `• ${linksNum}` : String(linksNum);
+    const connsTitle = isKeyed
+      ? (window.t ? window.t("asl.conns_live_now", {}, "On air right now 🔥") : "On air right now 🔥")
+      : (isMr
+          ? (window.t ? window.t("contacts.ysf_hub_conns_title", { kind: mrKind, count: linksNum }, `Total connections across ${mrKind} hub (all DG-IDs): ${linksNum}`) : `Total connections across ${mrKind} hub (all DG-IDs): ${linksNum}`)
+          : (window.t ? window.t("contacts.ysf_conns_title", { count: linksNum }, `Connections: ${linksNum}`) : `Connections: ${linksNum}`));
+    dirConnsHtml = `<span class="asl-btn-conns ${connsClass}" style="margin-left:6px;" title="${escapeHtml(connsTitle)}">${connsText}</span>`;
+  }
+  const ovrVal = cls.override || "auto";
+  const optAutoLbl = window.t ? window.t("ysf.type_opt_auto_short", {}, "Auto") : "Auto";
+  const optSngLbl = window.t ? window.t("ysf.type_opt_single_short", {}, "1-room") : "1-room";
+  const optStdLbl = window.t ? window.t("ysf.type_opt_standard_short", {}, "YCS/FCS") : "YCS/FCS";
+  const optMutLbl = window.t ? window.t("ysf.type_opt_mutant_short", {}, "Mutant") : "Mutant";
+  const ovrTitle = window.t ? window.t("ysf.type_override_title", {}, "Manual reflector type override for this room") : "Manual reflector type override for this room";
+  const favTitle = isFav
+    ? (window.t ? window.t("contacts.ysf_fav_remove_title", {}, "Remove from Favorites") : "Remove from Favorites")
+    : (window.t ? window.t("contacts.ysf_fav_add_title", {}, "Add to Favorites") : "Add to Favorites");
+  const favText = isFav
+    ? (window.t ? window.t("contacts.ysf_in_favorites", {}, "In Favorites") : "In Favorites")
+    : (window.t ? window.t("contacts.ysf_to_favorites", {}, "Add to Favorites") : "Add to Favorites");
+  const connTitle = window.t ? window.t("contacts.ysf_connect_room_title", {}, "Connect to this room") : "Connect to this room";
+  const connText = window.t ? window.t("contacts.ysf_connect_btn", {}, "Connect") : "Connect";
+  return `
+    <div class="ysf-room-card ${cardTypeCls}" data-room-id="${sId}" data-reflector-type="${rType}" data-room-host="${escapeHtml(host)}">
+      <div class="ysf-room-left">
+        <span class="ysf-room-flag" title="${escapeHtml(info.countryName)}">${info.flag}</span>
+        <div class="ysf-room-details">
+          <div class="ysf-room-title-line">
+            <span class="ysf-room-id-tag">#${sId}</span>
+            <span class="ysf-room-name">${escapeHtml(info.refName)}</span>
+            ${mrBadgeHtml}
+            ${dirConnsHtml}
+          </div>
+          <div class="ysf-room-sub-line">
+            <span class="ysf-room-country">${info.flag} ${escapeHtml(info.cCode)} · ${escapeHtml(info.countryName)}</span>
+            ${host ? ` · <span class="ysf-room-host">${escapeHtml(host)}</span>` : ""}
+            <select class="ysf-card-type-select" data-room-id="${sId}" title="${escapeHtml(ovrTitle)}">
+              <option value="auto"${ovrVal === "auto" ? " selected" : ""}>⚙ ${escapeHtml(optAutoLbl)}</option>
+              <option value="single"${ovrVal === "single" ? " selected" : ""}>${escapeHtml(optSngLbl)}</option>
+              <option value="multi_standard"${ovrVal === "multi_standard" ? " selected" : ""}>🟠 ${escapeHtml(optStdLbl)}</option>
+              <option value="multi_mutant"${ovrVal === "multi_mutant" ? " selected" : ""}>🔴 ${escapeHtml(optMutLbl)}</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="ysf-room-actions">
+        <button type="button" class="btn-ysf-action btn-ysf-fav ${isFav ? 'is-fav' : ''}" title="${escapeHtml(favTitle)}" data-room-id="${sId}"><span class="btn-ysf-fav-icon">${isFav ? '⭐' : '☆&#xFE0E;'}</span><span class="btn-ysf-action-text"> ${escapeHtml(favText)}</span></button>
+        <button type="button" class="btn-ysf-action btn-ysf-connect" title="${escapeHtml(connTitle)}" data-room-id="${sId}"><span class="btn-ysf-conn-icon">🔗</span><span class="btn-ysf-action-text"> ${escapeHtml(connText)}</span></button>
+      </div>
+    </div>
+  `;
+}
+
+function _renderAllYsfRooms(container) {
+  if (!container || !_ysfFilteredRooms.length) return;
+  const tempDiv = document.createElement("div");
+  tempDiv.innerHTML = _ysfFilteredRooms.map(r => _renderYsfRoomCardHtml(r)).join("");
+  const fragment = document.createDocumentFragment();
+  while (tempDiv.firstChild) {
+    fragment.appendChild(tempDiv.firstChild);
+  }
+  container.innerHTML = "";
+  container.appendChild(fragment);
+}
+
+function _findYsfRoomByAnySource(roomId) {
+  const sId = String(roomId || "").trim();
+  const hit = _getYsfServersList().find(r => String(r.id || "").trim() === sId)
+    || getYsfBookmarks().find(r => String(r.id || "").trim() === sId)
+    || DEFAULT_YSF_BOOKMARKS.find(r => String(r.id || "").trim() === sId);
+  return hit ? _enrichYsfRoomRecord(hit) : null;
+}
+
+function _ensureYsfContainerListener(container) {
+  if (!container || container._clickWired) return;
+  container._clickWired = true;
+  container.addEventListener("change", (e) => {
+    const sel = e.target.closest(".ysf-card-type-select");
+    if (!sel) return;
+    e.stopPropagation();
+    const sId = sel.dataset.roomId;
+    setYsfRoomTypeOverride(sId, sel.value);
+  });
+  container.addEventListener("click", (e) => {
+    if (e.target.closest(".ysf-card-type-select")) {
+      e.stopPropagation();
+      return;
+    }
+    const favBtn = e.target.closest(".btn-ysf-fav");
+    if (favBtn) {
+      const sId = favBtn.dataset.roomId;
+      const room = _findYsfRoomByAnySource(sId);
+      if (room) toggleYsfRoomBookmark(room);
+      return;
+    }
+    const connBtn = e.target.closest(".btn-ysf-connect");
+    if (connBtn) {
+      const sId = connBtn.dataset.roomId;
+      const room = _findYsfRoomByAnySource(sId);
+      if (room) {
+        connectYsfRoomById(room.id, room.reflector_name || room.name, null, room.host || "", Number(room.port || 42000));
+        const myContactsModal = document.getElementById("myContactsModal");
+        if (myContactsModal) {
+          myContactsModal.style.display = "none";
+          myContactsModal.classList.remove("active");
+        }
+      }
+      return;
+    }
+  });
+}
+
+function _getYsfServersList() {
+  if (typeof window !== "undefined") {
+    if (typeof window.getNetworkServersList === "function") {
+      const list = window.getNetworkServersList("ysf");
+      if (Array.isArray(list) && list.length > 0) return list;
+    }
+    if (window._dmrServersCache && Array.isArray(window._dmrServersCache["ysf"])) {
+      return window._dmrServersCache["ysf"];
+    }
+  }
+  return [];
+}
+
+export const DEFAULT_YSF_BOOKMARKS = [
+  { id: "25000", name: "YSF-Russia", reflector_name: "Russia", country_code: "RU", host: "ysf.brandmeister.ru" },
+  { id: "00007", name: "EUROPELINK", reflector_name: "EUROPELINK", country_code: "EU", host: "161.97.73.43" },
+  { id: "32592", name: "America-Link", reflector_name: "America-Link", country_code: "US", host: "americalink.duckdns.org" },
+  { id: "00032", name: "XLX032", reflector_name: "XLX032", country_code: "LU", host: "158.64.26.140" },
+  { id: "00020", name: "NLCENTRAL", reflector_name: "NLCENTRAL", country_code: "NL", host: "90.145.156.242" },
+  { id: "00040", name: "DL-Nordwest", reflector_name: "DL-Nordwest", country_code: "DE", host: "45.88.109.116" }
+];
+
+// Избранное YSF (= «Контакты YSF») хранится на СЕРВЕРЕ. Здесь — только последний ответ сервера
+// (/api/ysf/favorites) для отрисовки текущей страницы. В localStorage НИЧЕГО не пишется.
+let _ysfFavoritesCache = [];
+
+export function getYsfBookmarks() {
+  return Array.isArray(_ysfFavoritesCache) ? _ysfFavoritesCache.map(item => _enrichYsfRoomRecord(item)) : [];
+}
+
+function _applyYsfFavButtonState(favBtn, isFav) {
+  if (!favBtn) return;
+  favBtn.classList.toggle("is-fav", isFav);
+  favBtn.title = isFav
+    ? (window.t ? window.t("contacts.ysf_fav_remove_title", {}, "Remove from Favorites") : "Remove from Favorites")
+    : (window.t ? window.t("contacts.ysf_fav_add_title", {}, "Add to Favorites") : "Add to Favorites");
+  const iconSpan = favBtn.querySelector(".btn-ysf-fav-icon");
+  if (iconSpan) iconSpan.innerHTML = isFav ? "⭐" : "☆&#xFE0E;";
+  const textSpan = favBtn.querySelector(".btn-ysf-action-text");
+  if (textSpan) {
+    textSpan.textContent = " " + (isFav
+      ? (window.t ? window.t("contacts.ysf_in_favorites", {}, "In Favorites") : "In Favorites")
+      : (window.t ? window.t("contacts.ysf_to_favorites", {}, "Add to Favorites") : "Add to Favorites"));
+  }
+}
+
+function _refreshYsfFavoritesUi() {
+  if (typeof window !== "undefined" && typeof window.refreshAllCardsBmBanner === "function") {
+    window.refreshAllCardsBmBanner();
+  }
+  if (typeof document !== "undefined") {
+    const viewYsf = document.getElementById("ysfRoomsView");
+    if (viewYsf && viewYsf.style.display !== "none") {
+      if (_ysfViewMode === "contacts") {
+        renderYsfRoomsList(document.getElementById("ysfRoomSearchInput")?.value || "");
+      } else {
+        // Каталог: обновляем звёзды на месте, не сбрасывая позицию прокрутки.
+        const favIds = new Set(_ysfFavoritesCache.map(r => String(r.id).trim()));
+        document.querySelectorAll(".ysf-room-card").forEach(card => {
+          const isFavNow = favIds.has(String(card.dataset.roomId || "").trim());
+          _applyYsfFavButtonState(card.querySelector(".btn-ysf-fav"), isFavNow);
+        });
+      }
+    }
+  }
+}
+
+export function applyYsfFavoritesFromServer(list) {
+  _ysfFavoritesCache = Array.isArray(list) ? list : [];
+  _refreshYsfFavoritesUi();
+}
+
+export async function loadYsfFavoritesFromServer() {
+  try {
+    const res = await fetch("/api/ysf/favorites");
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.status === "ok") {
+        applyYsfFavoritesFromServer(data.favorites);
+      }
+    }
+  } catch (err) {
+    console.warn("[YSF] Failed to load favorites from server:", err);
+  }
+}
+
+export function saveYsfBookmarks(list) {
+  // Оптимистичное обновление интерфейса, затем сервер — единственный источник истины.
+  _ysfFavoritesCache = Array.isArray(list) ? list.slice() : [];
+  if (typeof window !== "undefined" && typeof window.refreshAllCardsBmBanner === "function") {
+    window.refreshAllCardsBmBanner();
+  }
+  fetch("/api/ysf/favorites", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ favorites: _ysfFavoritesCache })
+  }).then(res => res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status)))
+    .then(data => {
+      if (data && data.status === "ok") applyYsfFavoritesFromServer(data.favorites);
+    })
+    .catch(err => {
+      console.warn("[YSF] Failed to save favorites to server:", err);
+      if (typeof showToast === "function") {
+        showToast(window.t ? window.t("contacts.ysf_save_err_toast", {}, "Failed to save YSF Contacts on server") : "Failed to save YSF Contacts on server", "error", 3500);
+      }
+      loadYsfFavoritesFromServer();
+    });
+}
+
+export function isYsfRoomBookmarked(roomId) {
+  const sid = String(roomId || "").trim();
+  return getYsfBookmarks().some(r => String(r.id).trim() === sid);
+}
+
+export function toggleYsfRoomBookmark(roomObj) {
+  if (!roomObj || !roomObj.id) return;
+  const list = getYsfBookmarks();
+  const sid = String(roomObj.id).trim();
+  const idx = list.findIndex(r => String(r.id).trim() === sid);
+  let nowAdded = false;
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    const cls = classifyYsfReflector(roomObj, sid);
+    list.push({
+      id: sid,
+      name: roomObj.name || `YSF #${sid}`,
+      reflector_name: roomObj.reflector_name || roomObj.name || "",
+      description: roomObj.description || "",
+      country_code: roomObj.country_code || roomObj.country || "XX",
+      host: roomObj.host || "",
+      port: Number(roomObj.port || 42000) || 42000,
+      reflector_type: cls.reflectorType,
+      is_multiroom: cls.isMultiroom,
+      multiroom_kind: cls.kind,
+    });
+    nowAdded = true;
+  }
+  saveYsfBookmarks(list);
+  const msg = nowAdded
+    ? (window.t ? window.t("contacts.ysf_fav_added_toast", { name: roomObj.name }, `★ Комната «${roomObj.name}» добавлена в Избранное`) : `★ Комната «${roomObj.name}» добавлена в Избранное`)
+    : (window.t ? window.t("contacts.ysf_fav_removed_toast", { name: roomObj.name }, `Комната «${roomObj.name}» удалена из Избранного`) : `Комната «${roomObj.name}» удалена из Избранного`);
+  if (typeof showToast === "function") showToast(msg, "info", 2500);
+
+  const matchedCards = (_ysfViewMode === "contacts") ? [] : document.querySelectorAll(`.ysf-room-card[data-room-id="${sid}"]`);
+  if (matchedCards.length > 0) {
+    matchedCards.forEach(card => {
+      _applyYsfFavButtonState(card.querySelector(".btn-ysf-fav"), nowAdded);
+    });
+  } else {
+    renderYsfRoomsList(document.getElementById("ysfRoomSearchInput")?.value || "");
+  }
+}
+
+export async function connectYsfRoomById(roomId, roomName = "", card = null, roomHost = "", roomPort = 42000, opts = {}) {
+  if (typeof window.ysfConnectRoomProcedure === "function") {
+    return await window.ysfConnectRoomProcedure(roomId, roomName, card, roomHost, roomPort, opts);
+  }
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || (window.__proxdmr && window.__proxdmr.currentHotspots))) || [];
+  const cid = card ? (card.dataset.hotspotId || "default") : (window.activeHotspotId || "default");
+  const targetHs = curHsList.find(h => h && h.id === cid) || curHsList[0];
+  if (!targetHs) return { ok: false, reason: "no_hotspot" };
+
+  targetHs.isManualBmDisconnect = false;
+  if (typeof window !== "undefined" && (cid === window.activeHotspotId || targetHs.id === window.activeHotspotId)) {
+    window.isManualBmDisconnect = false;
+  }
+
+  const ysfList = _getYsfServersList();
+  const sRoomId = String(roomId).trim();
+  const foundInList = (ysfList || []).find(r => String(r.id).trim() === sRoomId);
+  let effectiveHost = roomHost || (foundInList && foundInList.host) || "";
+  if (effectiveHost && (/^\d+$/.test(effectiveHost.trim()) || effectiveHost.trim() === "ysf.brandmeister.ru")) {
+    effectiveHost = "";
+  }
+  const effectiveName = roomName || (foundInList && (foundInList.reflector_name || foundInList.name)) || `YSF #${sRoomId}`;
+  const effectivePort = roomPort || (foundInList && foundInList.port) || 42000;
+
+  targetHs.ysf_room = sRoomId;
+  targetHs.ysf_room_id = sRoomId;
+  targetHs.ysf_name = effectiveName;
+  targetHs.ysf_room_name = effectiveName;
+  if (effectiveHost) {
+    targetHs.bm_master_host = effectiveHost;
+    targetHs.ysf_host = effectiveHost;
+  }
+  targetHs.ysf_port = Number(effectivePort) || 42000;
+
+  const effectiveCard = card || document.querySelector(`.radio-container[data-hotspot-id="${targetHs.id}"]`) || document.getElementById("radioContainer");
+  if (effectiveCard && typeof window.updateCardYsfPanel === "function") {
+    window.updateCardYsfPanel(effectiveCard, targetHs);
+  }
+
+  try {
+    const resp = await fetch(`/api/hotspots/${encodeURIComponent(targetHs.id)}?reconnect=1`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...targetHs,
+        bm_master_host: effectiveHost || "",
+        ysf_host: effectiveHost || "",
+        ysf_port: Number(effectivePort) || 42000,
+        ysf_room: sRoomId,
+        ysf_room_id: sRoomId,
+        ysf_name: effectiveName,
+        ysf_room_name: effectiveName
+      })
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    let putData = null;
+    try { putData = await resp.json(); } catch (_) {}
+    if (putData && putData.hotspot) {
+      Object.assign(targetHs, putData.hotspot);
+    }
+    const hsStatus = String(putData?.hotspot?.status || "").toUpperCase();
+    if (hsStatus === "DISCONNECTED" || hsStatus === "OFFLINE" || hsStatus === "ERROR") {
+      throw new Error(`Hotspot status ${hsStatus}`);
+    }
+    if (effectiveCard && typeof window.updateCardYsfPanel === "function") {
+      window.updateCardYsfPanel(effectiveCard, targetHs);
+    }
+    if (typeof showToast === "function") {
+      showToast(window.t ? window.t("ysf.connected_toast", { name: effectiveName, room: sRoomId }, `Подключение к комнате #${sRoomId} (${effectiveName})...`) : `Подключение к комнате #${sRoomId} (${effectiveName})...`, 3000, effectiveCard);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn("[YSF] Connect room error:", e);
+    if (typeof showToast === "function") {
+      showToast(window.t ? window.t("contacts.ysf_connect_err_toast", { room: sRoomId, error: e.message || e }, `Failed to connect to room #${sRoomId}: ${e.message || e}`) : `Failed to connect to room #${sRoomId}: ${e.message || e}`, "error", effectiveCard);
+    }
+    return { ok: false, reason: e.message || "http_failed" };
+  }
+}
+
+export function openYsfMemPickerModal(roomObj, cid = null) {
+  // Ячейки памяти M1-M5 в YSF упразднены в пользу матрицы комнат
+  return;
+  if (!roomObj || !roomObj.id) return;
+  const sRoom = String(roomObj.id).trim();
+  const rName = roomObj.reflector_name || roomObj.name || `YSF #${sRoom}`;
+
+  const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : (window.currentHotspots || (window.__proxdmr && window.__proxdmr.currentHotspots))) || [];
+  const targetId = cid || (window.activeHotspotId || "default");
+  const targetHs = curHsList.find(h => h && h.id === targetId) || curHsList[0];
+  if (!targetHs) return;
+
+  targetHs.ysf_memories = targetHs.ysf_memories || [
+    { room: "25000", name: "YSF-Russia" },
+    { room: "00007", name: "EUROPELINK" },
+    { room: "00032", name: "XLX032" },
+    { room: "00020", name: "NLCENTRAL" },
+    { room: "00040", name: "DL-Nordwest" }
+  ];
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "ysf-mem-picker-backdrop";
+  const dialog = document.createElement("div");
+  dialog.className = "ysf-mem-picker-dialog";
+  dialog.innerHTML = `
+    <div class="ysf-mem-picker-title">${window.t ? window.t("contacts.ysf_mem_picker_title", { room: sRoom, name: escapeHtml(rName) }, `💾 Assign room #${sRoom} (${escapeHtml(rName)}) to memory button:`) : `💾 Assign room #${sRoom} (${escapeHtml(rName)}) to memory button:`}</div>
+    <div class="ysf-mem-picker-slots">
+      ${[0, 1, 2, 3, 4].map(idx => {
+        const cur = targetHs.ysf_memories[idx] || { room: "", name: "" };
+        const curLabel = cur.room ? `#${cur.room} ${cur.name}` : "—";
+        return `
+          <button type="button" class="btn-ysf-mem-slot" data-slot="${idx}">
+            <span>M${idx + 1}</span>
+            <span class="mem-cur-label">${escapeHtml(curLabel)}</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+    <div style="display:flex; justify-content:flex-end;">
+      <button type="button" class="btn-secondary btn-sm btn-close-mem-picker" style="padding:4px 12px;">${window.t ? window.t("common.cancel", {}, "Cancel") : "Cancel"}</button>
+    </div>
+  `;
+  backdrop.appendChild(dialog);
+  document.body.appendChild(backdrop);
+
+  const cleanup = () => { backdrop.remove(); };
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) cleanup(); });
+  dialog.querySelector(".btn-close-mem-picker").addEventListener("click", cleanup);
+
+  dialog.querySelectorAll(".btn-ysf-mem-slot").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const slotIdx = parseInt(btn.dataset.slot, 10);
+      targetHs.ysf_memories[slotIdx] = { room: sRoom, name: rName };
+      cleanup();
+
+      // Сохранение в настройки хотспота
+      try {
+        await fetch(`/api/hotspots/${encodeURIComponent(targetHs.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(targetHs)
+        });
+      } catch (err) {
+        console.warn("[YSF] Save memory error:", err);
+      }
+
+      // Обновление карточки
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHs.id}"]`) || document.getElementById("radioContainer");
+      if (card && typeof window.updateCardYsfPanel === "function") {
+        window.updateCardYsfPanel(card, targetHs);
+      }
+      if (typeof showToast === "function") {
+        showToast(window.t ? window.t("contacts.ysf_mem_assigned_toast", { room: sRoom, name: rName, slot: slotIdx + 1 }, `✓ Room #${sRoom} (${rName}) assigned to M${slotIdx + 1}`) : `✓ Room #${sRoom} (${rName}) assigned to M${slotIdx + 1}`, "success", 3000);
+      }
+    });
+  });
+}
+
+export function renderYsfRoomsList(filterText = "") {
+  const container = document.getElementById("ysfRoomsListContainer");
+  const headerCountBadge = document.getElementById("contactsCountBadge");
+  if (!container) return;
+
+  const ysfList = ((_ysfViewMode === "contacts") ? getYsfBookmarks() : _getYsfServersList()).map(r => _enrichYsfRoomRecord(r));
+  const query = (filterText || "").trim().toLowerCase();
+
+  let filtered = ysfList;
+  if (_ysfTypeFilter && _ysfTypeFilter !== "all") {
+    filtered = filtered.filter(r => classifyYsfReflector(r).reflectorType === _ysfTypeFilter);
+  }
+  if (query) {
+    filtered = filtered.filter(r => {
+      const info = resolveYsfRoomInfo(r);
+      const rid = String(r.id || "").toLowerCase();
+      const rname = String(r.name || "").toLowerCase();
+      const refname = String(info.refName || "").toLowerCase();
+      const ccode = String(info.cCode || "").toLowerCase();
+      const cname = String(info.countryName || "").toLowerCase();
+      const host = String(r.host || "").toLowerCase();
+      const desc = String(r.description || "").toLowerCase();
+      return rid.includes(query) || rname.includes(query) || refname.includes(query) || ccode.includes(query) || cname.includes(query) || host.includes(query) || desc.includes(query);
+    });
+  }
+
+  filtered = _sortYsfRooms(filtered);
+  _ysfFilteredRooms = filtered;
+
+  if (headerCountBadge && isYsfRoomsActive()) {
+    headerCountBadge.textContent = String(filtered.length);
+  }
+
+  _updateYsfSortUi();
+  _updateYsfTypeFilterUi();
+
+  if (!filtered.length) {
+    const emptyMsg = (_ysfViewMode === "contacts" && !query && _ysfTypeFilter === "all")
+      ? (window.t ? window.t("contacts.ysf_contacts_empty", {}, "YSF contacts are empty. Open «YSF Directory» and click ☆ on rooms you want.") : "YSF contacts are empty. Open «YSF Directory» and click ☆ on rooms you want.")
+      : (_ysfViewMode === "catalog" && !query && !ysfList.length)
+        ? (window.t ? window.t("contacts.ysf_catalog_loading", {}, "YSF catalog is loading… Please try again in a minute.") : "YSF catalog is loading… Please try again in a minute.")
+        : (window.t ? window.t("contacts.ysf_not_found", {}, "No rooms found") : "No rooms found");
+    container.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#94a3b8; font-size:0.88rem;">${emptyMsg}</div>`;
+    return;
+  }
+
+  _renderAllYsfRooms(container);
+  _ensureYsfContainerListener(container);
+}
+
 let aslSearchAbortCtrl = null;
 export function isAllStarNodesActive() {
   const viewAsl = document.getElementById("allstarNodesView");
   return Boolean(viewAsl && viewAsl.style.display !== "none");
+}
+
+export function isYsfRoomsActive() {
+  const viewYsf = document.getElementById("ysfRoomsView");
+  return Boolean(viewYsf && viewYsf.style.display !== "none");
 }
 
 let cachedAslDbTotal = 40995;
@@ -671,8 +1661,10 @@ export async function fetchAslDirectoryStats() {
 export function switchContactsModalTab(tabName) {
   const btnDmr = document.getElementById("btnContactsTabDmr");
   const btnAsl = document.getElementById("btnContactsTabAllstar");
+  const btnYsf = document.getElementById("btnContactsTabYsf");
   const viewDmr = document.getElementById("dmrContactsView");
   const viewAsl = document.getElementById("allstarNodesView");
+  const viewYsf = document.getElementById("ysfRoomsView");
   const dmrFooter = document.getElementById("dmrFooterControls");
   const aslFooter = document.getElementById("allstarFooterControls");
   const gwToggle = document.getElementById("btnContactsGatewayToggle");
@@ -683,8 +1675,10 @@ export function switchContactsModalTab(tabName) {
 
   if (tabName === "allstar") {
     if (btnDmr) btnDmr.classList.remove("active");
+    if (btnYsf) btnYsf.classList.remove("active");
     if (btnAsl) btnAsl.classList.add("active");
     if (viewDmr) viewDmr.style.display = "none";
+    if (viewYsf) viewYsf.style.display = "none";
     if (viewAsl) {
       viewAsl.style.display = "flex";
       renderAllStarNodesList();
@@ -700,10 +1694,33 @@ export function switchContactsModalTab(tabName) {
     if (syncBtn) syncBtn.style.display = "inline-flex";
 
     fetchAslDirectoryStats();
+  } else if (tabName === "ysf" || tabName === "ysf_contacts") {
+    _ysfViewMode = (tabName === "ysf_contacts") ? "contacts" : "catalog";
+    const btnYsfContacts = document.getElementById("btnContactsTabYsfContacts");
+    if (btnDmr) btnDmr.classList.remove("active");
+    if (btnAsl) btnAsl.classList.remove("active");
+    if (btnYsf) btnYsf.classList.toggle("active", _ysfViewMode === "catalog");
+    if (btnYsfContacts) btnYsfContacts.classList.toggle("active", _ysfViewMode === "contacts");
+    if (viewDmr) viewDmr.style.display = "none";
+    if (viewAsl) viewAsl.style.display = "none";
+    if (viewYsf) {
+      viewYsf.style.display = "flex";
+      renderYsfRoomsList(document.getElementById("ysfRoomSearchInput")?.value || "");
+    }
+    if (dmrFooter) dmrFooter.style.display = "none";
+    if (aslFooter) aslFooter.style.display = "none";
+    if (gwToggle) gwToggle.style.display = "none";
+    if (expBtn) expBtn.style.display = "none";
+    if (impBtn) impBtn.style.display = "none";
+    if (gwPanel) gwPanel.style.display = "none";
+    const syncBtn = document.getElementById("btnSyncAslNodes");
+    if (syncBtn) syncBtn.style.display = "none";
   } else {
     if (btnAsl) btnAsl.classList.remove("active");
+    if (btnYsf) btnYsf.classList.remove("active");
     if (btnDmr) btnDmr.classList.add("active");
     if (viewAsl) viewAsl.style.display = "none";
+    if (viewYsf) viewYsf.style.display = "none";
     if (viewDmr) viewDmr.style.display = "block";
 
     const isBmContext = ((contactsActiveNetworkType || "bm").toLowerCase() === "bm");
@@ -889,8 +1906,16 @@ export function openAslCellPickerModal(targetItem, cid = "default") {
 
   let userQuickNodes = [];
   try {
-    const saved = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
-    if (saved) userQuickNodes = JSON.parse(saved);
+    let srvVal = hasServerCollectionKey("asl_quick_nodes", cid)
+      ? getServerCollectionValue("asl_quick_nodes", cid)
+      : (hasServerCollectionKey("asl_quick_nodes", "global") ? getServerCollectionValue("asl_quick_nodes", "global") : null);
+    if (typeof srvVal === "string") srvVal = JSON.parse(srvVal);
+    if (Array.isArray(srvVal)) {
+      userQuickNodes = srvVal.map(x => (x ? { ...x } : x));
+    } else {
+      const saved = localStorage.getItem(`proxdmr_asl_quick_nodes_${cid}`) || localStorage.getItem("proxdmr_asl_quick_nodes_global");
+      if (saved) userQuickNodes = JSON.parse(saved);
+    }
   } catch (_) {}
 
   if (!Array.isArray(userQuickNodes) || !userQuickNodes.length) {
@@ -1069,9 +2094,12 @@ export function openAslCellPickerModal(targetItem, cid = "default") {
       scan: false,
       role: targetItem.role || (/[*#ABCDabcd]/.test(targetNode) ? "dtmf" : "node")
     };
-    try {
-      localStorage.setItem(`proxdmr_asl_quick_nodes_${cid}`, JSON.stringify(userQuickNodes));
-    } catch (_) {}
+    if (typeof window.saveAslUserNodes === "function") {
+      window.saveAslUserNodes(cid, userQuickNodes);
+    } else {
+      setServerCollectionKey("asl_quick_nodes", cid, userQuickNodes, "proxdmr_asl_quick_nodes_", true);
+      setServerCollectionKey("asl_quick_nodes", "global", userQuickNodes, "proxdmr_asl_quick_nodes_", true);
+    }
 
     const placedPage = Math.floor(placedIdx / 20);
     closeModal();
@@ -1212,11 +2240,17 @@ export async function renderAllStarNodesList(filterText = "") {
   }
 
   if (!nodes.length) {
-    container.innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8;font-size:0.85rem;">Узлы AllStarLink не найдены</div>';
+    const aslEmptyMsg = window.t ? window.t("contacts.asl_not_found", {}, "No AllStarLink nodes found") : "No AllStarLink nodes found";
+    container.innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8;font-size:0.85rem;">${escapeHtml(aslEmptyMsg)}</div>`;
     return;
   }
 
-  container.innerHTML = nodes.map(item => `
+  const toContactsTitle = window.t ? window.t("contacts.asl_to_contacts_title", {}, "Save node or operator to your personal phonebook (My Contacts)") : "Save node or operator to your personal phonebook (My Contacts)";
+  const toContactsBtn = window.t ? window.t("contacts.asl_btn_to_contacts", {}, "➕ To Contacts") : "➕ To Contacts";
+
+  container.innerHTML = nodes.map(item => {
+    const hubDisplay = item.location || (item.hub_key && window.t ? window.t(item.hub_key, {}, item.hub) : item.hub) || '';
+    return `
     <div class="asl-node-card" data-node="${item.node}">
       <div class="asl-node-card-left">
         <span class="asl-node-card-flag">${item.flag || '🌐'}</span>
@@ -1226,20 +2260,21 @@ export async function renderAllStarNodesList(filterText = "") {
             <span>${item.callsign ? `<strong style="color:#7dd3fc; margin-right:4px;">${item.callsign}</strong>` : ''}${item.name || 'AllStar Node'}</span>
             <span class="asl-dir-telemetry" data-telemetry-node="${item.node}"></span>
           </div>
-          <div class="asl-node-card-desc">${item.location || item.hub || ''}</div>
+          <div class="asl-node-card-desc">${escapeHtml(hubDisplay)}</div>
         </div>
       </div>
       <div class="asl-node-card-right" style="display:inline-flex; align-items:center; gap:5px;">
-        <button type="button" class="btn-asl-to-contacts" data-node="${item.node}" title="Сохранить узел или оператора в личную телефонную книгу (Мои контакты)" style="padding:3px 7px; font-size:0.72rem; border-radius:6px; background:rgba(56,189,248,0.14); color:#7dd3fc; border:1px solid rgba(56,189,248,0.3); cursor:pointer;">
-          ➕ В контакты
+        <button type="button" class="btn-asl-to-contacts" data-node="${item.node}" title="${escapeHtml(toContactsTitle)}" style="padding:3px 7px; font-size:0.72rem; border-radius:6px; background:rgba(56,189,248,0.14); color:#7dd3fc; border:1px solid rgba(56,189,248,0.3); cursor:pointer;">
+          ${escapeHtml(toContactsBtn)}
         </button>
-        <button type="button" class="btn-asl-pin" data-node="${item.node}" title="${window.t ? window.t("contacts.asl_pin_tooltip", {}, "Добавить в быстрые кнопки хотспота") : "Добавить в быстрые кнопки хотспота"}">
-          📌 ${window.t ? window.t("contacts.asl_btn_pin", {}, "В быстрые") : "В быстрые"}
+        <button type="button" class="btn-asl-pin" data-node="${item.node}" title="${window.t ? window.t("contacts.asl_pin_tooltip", {}, "Add to hotspot quick buttons") : "Add to hotspot quick buttons"}">
+          📌 ${window.t ? window.t("contacts.asl_btn_pin", {}, "To Quick") : "To Quick"}
         </button>
-        ${item.isCustom ? `<button type="button" class="btn-asl-del" data-node="${item.node}" title="${window.t ? window.t("contacts.asl_del_tooltip", {}, "Удалить узел") : "Удалить узел"}" style="background:transparent;border:none;cursor:pointer;color:#f87171;">🗑️</button>` : ''}
+        ${item.isCustom ? `<button type="button" class="btn-asl-del" data-node="${item.node}" title="${window.t ? window.t("contacts.asl_del_tooltip", {}, "Delete node") : "Delete node"}" style="background:transparent;border:none;cursor:pointer;color:#f87171;">🗑️</button>` : ''}
       </div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 
   container.querySelectorAll(".btn-asl-to-contacts").forEach(btn => {
     btn.onclick = (e) => {
@@ -1251,7 +2286,7 @@ export async function renderAllStarNodesList(filterText = "") {
       openContactEditModal(null, null, "allstar_node");
       if (contactEditAllStarNode) contactEditAllStarNode.value = String(targetItem.node || "");
       if (contactEditCallsign && targetItem.callsign) contactEditCallsign.value = String(targetItem.callsign).toUpperCase();
-      if (contactEditName) contactEditName.value = targetItem.name || targetItem.hub || `Node #${targetItem.node}`;
+      if (contactEditName) contactEditName.value = targetItem.name || (targetItem.hub_key && window.t ? window.t(targetItem.hub_key, {}, targetItem.hub) : targetItem.hub) || `Node #${targetItem.node}`;
       if (contactEditCity && targetItem.location) contactEditCity.value = targetItem.location;
     };
   });
@@ -1275,7 +2310,7 @@ export async function renderAllStarNodesList(filterText = "") {
       saveAllStarNodesDirectory(updated);
       renderAllStarNodesList(filterText);
       if (typeof showToast === "function") {
-        showToast(`🗑️ Узел #${n} удален`, "info", 1500);
+        showToast(window.t ? window.t("contacts.asl_node_deleted_toast", { node: n }, `🗑️ Node #${n} deleted`) : `🗑️ Node #${n} deleted`, "info", 1500);
       }
     };
   });
@@ -1398,7 +2433,41 @@ export function getLocalizedContactName(node) {
   if (node.id === "tg_2502" || name === "Россия (Вызывная)" || name === "Russia (Calling)") {
     return window.t("contacts.tg_2502", {}, name);
   }
+  if (node.id === "tg_25050" || name === "Москва и МО" || name === "Moscow & Region") {
+    return window.t("contacts.tg_25050", {}, name);
+  }
+  if (node.id === "tg_25078" || name === "Санкт-Петербург и ЛО" || name === "Saint Petersburg & LO") {
+    return window.t("contacts.tg_25078", {}, name);
+  }
+  if (node.id === "tg_25026" || name === "Юг России / Кавказ" || name === "South Russia / Caucasus") {
+    return window.t("contacts.tg_25026", {}, name);
+  }
+  if (node.id === "tg_25066" || name === "Урал и Сибирь" || name === "Ural & Siberia") {
+    return window.t("contacts.tg_25066", {}, name);
+  }
+  if (node.id === "rpt_moscow" || name === "RR3AAA Репитер Москва" || name === "RR3AAA Moscow Repeater") {
+    return window.t("contacts.rpt_moscow", {}, name);
+  }
+  if (node.id === "rpt_spb" || name === "RR1AA Репитер СПб" || name === "RR1AA St. Petersburg Repeater") {
+    return window.t("contacts.rpt_spb", {}, name);
+  }
   return name;
+}
+
+export function getLocalizedContactCity(node) {
+  if (!node || !node.city) return "";
+  const city = String(node.city);
+  if (!window.t) return city;
+  if (city === "Worldwide" || city === "Global") return window.t("countries.GLOBAL", {}, city);
+  if (city === "Russia") return window.t("countries.RU", {}, city);
+  if (city === "РФ" || city === "RU") return window.t("contacts.city_rf", {}, city);
+  if (city === "Москва" || city === "Moscow") return window.t("contacts.city_moscow", {}, city);
+  if (city === "СПб" || city === "St. Petersburg") return window.t("contacts.city_spb", {}, city);
+  if (city === "ЮФО / СКФО" || city === "South / N. Caucasus") return window.t("contacts.city_south_caucasus", {}, city);
+  if (city === "УФО / СФО" || city === "Ural / Siberia") return window.t("contacts.city_ural_siberia", {}, city);
+  if (city === "Москва, 439.100" || city === "Moscow, 439.100") return window.t("contacts.city_moscow_freq", {}, city);
+  if (city === "СПб, 438.825" || city === "St. Petersburg, 438.825") return window.t("contacts.city_spb_freq", {}, city);
+  return city;
 }
 
   // Render contacts tree
@@ -1413,12 +2482,14 @@ export function renderContactsTree(filterText = "") {
       if (!nodeMatchesNetworkContext(n, activeNet)) return false;
       if (!q) return true;
       const locName = getLocalizedContactName(n);
+      const locCity = getLocalizedContactCity(n);
       const ids = n.type === "person" ? getPersonIdentities(n) : {};
       const matchSelf = (
         (n.name && n.name.toLowerCase().includes(q)) ||
         (locName && locName.toLowerCase().includes(q)) ||
         (n.callsign && n.callsign.toLowerCase().includes(q)) ||
         (n.city && n.city.toLowerCase().includes(q)) ||
+        (locCity && locCity.toLowerCase().includes(q)) ||
         (n.comment && n.comment.toLowerCase().includes(q)) ||
         (n.dmr_id && String(n.dmr_id).includes(q)) ||
         (ids.dmr_id && String(ids.dmr_id).includes(q)) ||
@@ -1495,38 +2566,25 @@ export function renderContactsTree(filterText = "") {
           icon = "📡";
           targetLabel = node.callsign || (node.dmr_id ? `ID ${node.dmr_id}` : `TG ${node.tg || ''}`);
         } else {
-          // Person: Callsign is primary, show active network ID + all other network IDs this person has!
+          // Person: Callsign + active network primary identifier (cross-network data goes cleanly into "Другие сети" section)
           icon = "👤";
           const ids = getPersonIdentities(node);
           const cs = node.callsign ? escapeHtml(node.callsign) : "";
-          const badgeParts = [];
-
           if (activeNet === "allstar") {
             const primaryAsl = ids.allstar_node ? `#${escapeHtml(String(ids.allstar_node))}` : (ids.echolink_node ? `EL #${escapeHtml(String(ids.echolink_node))}` : "");
             targetLabel = cs ? (primaryAsl ? `${cs} (${primaryAsl})` : cs) : primaryAsl;
-            if (ids.dmr_id) {
-              badgeParts.push(`<span class="contact-net-badge net-bm" title="DMR ID оператора: ${ids.dmr_id}">🆔 DMR ${ids.dmr_id}</span>`);
-            }
-            if (ids.allstar_node && ids.echolink_node) {
-              badgeParts.push(`<span class="contact-net-badge net-allstar" title="EchoLink #${escapeHtml(String(ids.echolink_node))}">🌐 EL #${escapeHtml(String(ids.echolink_node))}</span>`);
-            }
           } else {
             const primaryDmr = ids.dmr_id ? String(ids.dmr_id) : "";
-            targetLabel = cs ? (primaryDmr ? `${cs} (${primaryDmr})` : cs) : `ID ${primaryDmr}`;
-            if (ids.allstar_node) {
-              badgeParts.push(`<span class="contact-net-badge net-allstar" title="Нода AllStarLink оператора: #${escapeHtml(String(ids.allstar_node))}">📻 ASL #${escapeHtml(String(ids.allstar_node))}</span>`);
-            }
-            if (ids.echolink_node) {
-              badgeParts.push(`<span class="contact-net-badge net-allstar" title="EchoLink #${escapeHtml(String(ids.echolink_node))}">🌐 EL #${escapeHtml(String(ids.echolink_node))}</span>`);
-            }
+            targetLabel = cs ? (primaryDmr ? `${cs} (${primaryDmr})` : cs) : (primaryDmr ? `ID ${primaryDmr}` : "—");
           }
-          extraNetBadgesHtml = badgeParts.join(" ");
         }
 
+        const otherNetworksHtml = buildCrossNetworkBadgesForNode(node, activeNet, false);
         const callProposalHint = window.t ? window.t("contacts.click_proposal", {}, "Кликните для предложения вызова") : "Кликните для предложения вызова";
         const callBtnTitle = window.t ? window.t("contacts.call_tg_btn", {}, "Вызов") : "Вызов";
         const editContactTitle = window.t ? window.t("contacts.edit_contact", {}, "Редактировать") : "Редактировать";
         const delContactTitle = window.t ? window.t("common.delete", {}, "Удалить") : "Удалить";
+        const localizedCity = getLocalizedContactCity(node);
 
         return `
           <div class="tree-node-item tree-contact-item" data-node-id="${node.id}" data-depth="${depth}">
@@ -1536,15 +2594,15 @@ export function renderContactsTree(filterText = "") {
                 <div class="tree-contact-main">
                   <span class="tree-contact-target target-${node.type}">${targetLabel}</span>
                   <span class="tree-contact-name">${escapeHtml(localizedTitle)}</span>
-                  ${node.city ? `<span class="tree-contact-city">${escapeHtml(node.city)}</span>` : ''}
+                  ${localizedCity ? `<span class="tree-contact-city">${escapeHtml(localizedCity)}</span>` : ''}
                   ${node.slot_override ? `<span class="tree-contact-slot-pill">TS${node.slot_override}</span>` : ''}
                   ${(() => {
-                    if (node.type === "person") return extraNetBadgesHtml;
-                    const net = (node.network_type || "").toLowerCase();
+                    const net = resolveNodeNetworkType(node);
                     if (!net) return "";
-                    const netLabels = { bm: "BM", freedmr: "FreeDMR", tgif: "TGIF", xlx: "XLX", dmrplus: "DMR+", allstar: "ASL", custom: "DMR" };
+                    const netLabels = { bm: "BM", freedmr: "FreeDMR", adn: "ADN", tgif: "TGIF", xlx: "XLX", dmrplus: "DMR+", ysf: "YSF", allstar: "ASL", custom: "DMR" };
                     return `<span class="contact-net-badge net-${net}">${netLabels[net] || net.toUpperCase()}</span>`;
                   })()}
+                  ${otherNetworksHtml}
                 </div>
               </div>
               <div class="tree-row-actions">
@@ -1559,18 +2617,19 @@ export function renderContactsTree(filterText = "") {
     }
 
     const html = contactsTree.map(n => renderNode(n, 1)).join("");
-    if (contactsCountBadge && !isAllStarNodesActive()) {
+    if (contactsCountBadge && !isAllStarNodesActive() && !isYsfRoomsActive()) {
       contactsCountBadge.textContent = visibleContactsCount;
     }
 
     if (!html) {
       const netLabel = getNetworkBadgeLabel(activeNet);
+      const emptyContactsHtml = q
+        ? escapeHtml(window.t ? window.t("contacts.not_found_query", { query: q }, `Nothing found for "${q}"`) : `Nothing found for "${q}"`)
+        : (window.t ? window.t("contacts.empty_net_contacts", { net: escapeHtml(netLabel) }, `No entries in <strong>${escapeHtml(netLabel)}</strong> contacts yet.<br><span style="font-size:0.78rem;color:#64748b;">Click «+ Contact» above to add the first entry.</span>`) : `No entries in <strong>${escapeHtml(netLabel)}</strong> contacts yet.`);
       contactsTreeContainer.innerHTML = `
         <div style="text-align:center;padding:30px 10px;color:#8b949e;">
           <span style="font-size:2rem;display:block;margin-bottom:8px;">📭</span>
-          ${q
-            ? `Ничего не найдено по запросу «${escapeHtml(q)}»`
-            : `В списке контактов <strong>${escapeHtml(netLabel)}</strong> пока нет записей.<br><span style="font-size:0.78rem;color:#64748b;">Нажмите «Новый контакт» выше, чтобы добавить первую запись.</span>`}
+          ${emptyContactsHtml}
         </div>
       `;
     } else {
@@ -1583,10 +2642,97 @@ export function renderContactsTree(filterText = "") {
   let editingParentId = null;
   let isEditingFolder = false;
 
-export function openContactEditModal(nodeToEdit = null, parentId = null, forcedType = "person") {
+let _crossCallsignLookupTimer = null;
+
+export function updateContactEditCrossNetworksPreview(callsignVal, excludeNodeId = null) {
+  const crossBox = document.getElementById("contactEditCrossNetworksBox");
+  if (!crossBox) return;
+  const cs = String(callsignVal || "").trim().toUpperCase();
+  if (!cs || cs.length < 3 || isEditingFolder) {
+    crossBox.style.display = "none";
+    crossBox.innerHTML = "";
+    return;
+  }
+  const activeNet = (contactsActiveNetworkType || "bm").toLowerCase();
+  const localOther = collectLocalCrossEntriesByCallsign(cs, activeNet, excludeNodeId);
+  const cachedSrv = (contactsCrossCallsigns && contactsCrossCallsigns[cs]) ? contactsCrossCallsigns[cs] : null;
+  const localHtml = renderCrossNetworkBadgesHtml(cs, activeNet, {
+    nodeIds: {},
+    userEntries: localOther.length ? localOther : ((cachedSrv && cachedSrv.user_networks) || []),
+    radioidDmr: (cachedSrv && cachedSrv.radioid_dmr) || [],
+    allstarNodes: (cachedSrv && cachedSrv.allstar_nodes) || [],
+    echolinkNodes: (cachedSrv && cachedSrv.echolink_nodes) || []
+  }, true);
+  if (localHtml) {
+    crossBox.innerHTML = localHtml;
+    crossBox.style.display = "block";
+  } else {
+    crossBox.style.display = "none";
+    crossBox.innerHTML = "";
+  }
+
+  clearTimeout(_crossCallsignLookupTimer);
+  _crossCallsignLookupTimer = setTimeout(async () => {
+    try {
+      const resp = await fetch(`/api/contacts/cross-callsign?callsign=${encodeURIComponent(cs)}`);
+      if (!resp.ok) return;
+      const json = await resp.json();
+      if (!json || json.status !== "ok" || !json.data) return;
+      contactsCrossCallsigns[cs] = json.data;
+      if (contactEditCallsign && contactEditCallsign.value.trim().toUpperCase() !== cs) return;
+      const srvOther = (json.data.user_networks || []).filter(e => String(e.network_type || "").toLowerCase() !== activeNet);
+      const mergedUser = localOther.length ? localOther : srvOther;
+      const fullHtml = renderCrossNetworkBadgesHtml(cs, activeNet, {
+        nodeIds: {},
+        userEntries: mergedUser,
+        radioidDmr: json.data.radioid_dmr || [],
+        allstarNodes: json.data.allstar_nodes || [],
+        echolinkNodes: json.data.echolink_nodes || []
+      }, true);
+      if (fullHtml) {
+        crossBox.innerHTML = fullHtml;
+        crossBox.style.display = "block";
+      }
+      // Auto-suggest blank fields from RadioID / other phonebooks without overwriting user input
+      if (!editingNodeId && activeNet !== "allstar" && contactEditDmrId && !contactEditDmrId.value.trim() && json.data.radioid_dmr && json.data.radioid_dmr.length > 0) {
+        contactEditDmrId.value = String(json.data.radioid_dmr[0].radio_id || "");
+      }
+      if (!editingNodeId && contactEditName && !contactEditName.value.trim()) {
+        const refName = (mergedUser[0] && mergedUser[0].name) || (json.data.radioid_dmr && json.data.radioid_dmr[0] && json.data.radioid_dmr[0].name) || "";
+        if (refName) contactEditName.value = refName;
+      }
+      if (!editingNodeId && contactEditCity && !contactEditCity.value.trim()) {
+        const rid0 = json.data.radioid_dmr && json.data.radioid_dmr[0];
+        const refCity = (mergedUser[0] && mergedUser[0].city) || (rid0 ? [rid0.city, rid0.country].filter(Boolean).join(", ") : "");
+        if (refCity) contactEditCity.value = refCity;
+      }
+    } catch (_) {}
+  }, 220);
+}
+
+export function openContactEditModal(nodeToEdit = null, parentId = null, forcedType = "person", contextOpts = null) {
     ensureElements();
     editingNodeId = nodeToEdit ? nodeToEdit.id : null;
     editingParentId = parentId || null;
+
+    if (contextOpts && typeof contextOpts === "object") {
+      if (contextOpts.hotspotId) {
+        contactsActiveHotspotId = resolveHotspotId(contextOpts.hotspotId);
+      }
+      if (contextOpts.network_type) {
+        contactsActiveNetworkType = String(contextOpts.network_type).trim().toLowerCase();
+      } else if (contextOpts.hotspotId) {
+        contactsActiveNetworkType = resolveHotspotNetworkType(contactsActiveHotspotId);
+      }
+      updateContactsNetFilterHeaderUI();
+    } else if (nodeToEdit) {
+      contactsActiveNetworkType = resolveNodeNetworkType(nodeToEdit);
+      updateContactsNetFilterHeaderUI();
+    } else if (typeof window !== "undefined" && window.activeHotspotId && (!myContactsModal || !myContactsModal.classList.contains("active"))) {
+      contactsActiveHotspotId = resolveHotspotId(window.activeHotspotId);
+      contactsActiveNetworkType = resolveHotspotNetworkType(contactsActiveHotspotId);
+      updateContactsNetFilterHeaderUI();
+    }
 
     if (contactEditNodeId) contactEditNodeId.value = editingNodeId || "";
 
@@ -1601,19 +2747,26 @@ export function openContactEditModal(nodeToEdit = null, parentId = null, forcedT
       contactEditModalIcon.textContent = isEditingFolder ? "📁" : "📒";
     }
 
+    const defaultNet = (nodeToEdit ? resolveNodeNetworkType(nodeToEdit) : (contactsActiveNetworkType || "bm")).toLowerCase();
+    const editNetBadge = document.getElementById("contactEditActiveNetBadge");
+    if (editNetBadge) {
+      editNetBadge.textContent = getNetworkBadgeLabel(defaultNet);
+      editNetBadge.className = `contact-net-badge net-${defaultNet}`;
+    }
+
     const contactTypeSelectGroup = document.getElementById("contactTypeSelectGroup");
     if (contactTypeSelectGroup) {
       contactTypeSelectGroup.style.display = isEditingFolder ? "none" : "block";
     }
 
-    // Populate Parent Select (Max 3 levels depth check)
+    // Populate Parent Select strictly filtered to target network (Max 3 levels depth check)
     if (contactEditParentSelect) {
       contactEditParentSelect.innerHTML = `<option value="">${window.t ? window.t("contacts.root_level", {}, "📁 [Корневой уровень]") : "📁 [Корневой уровень]"}</option>`;
       function addFolderOptions(nodes, depth = 1) {
         for (const n of nodes) {
           if (n.type === "folder") {
             if (nodeToEdit && n.id === nodeToEdit.id) continue;
-            if (!nodeMatchesNetworkContext(n, contactsActiveNetworkType)) continue;
+            if (!nodeMatchesNetworkContext(n, defaultNet)) continue;
             const opt = document.createElement("option");
             opt.value = n.id;
             opt.textContent = `${"— ".repeat(depth - 1)}📁 ${getLocalizedContactName(n)}`;
@@ -1638,15 +2791,19 @@ export function openContactEditModal(nodeToEdit = null, parentId = null, forcedT
       }
     }
 
-    // Find person by callsign across tree (for Callsign Merge)
+    // Reset hints & cross-network preview
     const mergeHintEl = document.getElementById("contactEditCallsignMergeHint");
     if (mergeHintEl) {
       mergeHintEl.style.display = "none";
       mergeHintEl.textContent = "";
     }
+    const crossBoxEl = document.getElementById("contactEditCrossNetworksBox");
+    if (crossBoxEl) {
+      crossBoxEl.style.display = "none";
+      crossBoxEl.innerHTML = "";
+    }
 
-    // Lock network strictly to the active hotspot's network
-    const defaultNet = (contactsActiveNetworkType || "bm").toLowerCase();
+    // Lock network strictly to the target hotspot's network
     if (contactEditNetwork) {
       contactEditNetwork.value = defaultNet;
     }
@@ -1654,6 +2811,9 @@ export function openContactEditModal(nodeToEdit = null, parentId = null, forcedT
     // Set type radio
     let activeType = nodeToEdit ? nodeToEdit.type : (forcedType === "folder" ? "person" : forcedType);
     if (!nodeToEdit && forcedType === "person") {
+      activeType = "person";
+    }
+    if (!nodeToEdit && defaultNet === "ysf" && activeType === "tg") {
       activeType = "person";
     }
     const typeRadios = document.querySelectorAll('input[name="contactNodeType"]');
@@ -1687,6 +2847,9 @@ export function openContactEditModal(nodeToEdit = null, parentId = null, forcedT
     }
 
     updateContactFormFieldsVisibility(activeType);
+    if (nodeToEdit && nodeToEdit.callsign) {
+      updateContactEditCrossNetworksPreview(nodeToEdit.callsign, nodeToEdit.id);
+    }
 
     if (contactEditModal) {
       contactEditModal.classList.add("active");
@@ -1697,16 +2860,19 @@ export function openContactEditModal(nodeToEdit = null, parentId = null, forcedT
     }
   }
 
-export function findPersonByCallsignInTree(nodes, callsign, excludeId = null) {
+export function findPersonByCallsignInTree(nodes, callsign, excludeId = null, targetNet = null) {
   if (!Array.isArray(nodes) || !callsign) return null;
   const targetCs = String(callsign).trim().toUpperCase();
   if (!targetCs) return null;
+  const cleanTargetNet = targetNet ? String(targetNet).trim().toLowerCase() : null;
   for (const n of nodes) {
     if (n.type === "person" && n.id !== excludeId && String(n.callsign || "").trim().toUpperCase() === targetCs) {
-      return n;
+      if (!cleanTargetNet || resolveNodeNetworkType(n) === cleanTargetNet) {
+        return n;
+      }
     }
     if (n.children) {
-      const found = findPersonByCallsignInTree(n.children, targetCs, excludeId);
+      const found = findPersonByCallsignInTree(n.children, targetCs, excludeId, cleanTargetNet);
       if (found) return found;
     }
   }
@@ -1731,13 +2897,13 @@ export function updateContactFormFieldsVisibility(type) {
     const optAllStar = document.getElementById("contactTypeOptAllStar");
     const optAslMacro = document.getElementById("contactTypeOptAslMacro");
 
-    if (optTg) optTg.style.display = (curNet === "allstar") ? "none" : "";
+    if (optTg) optTg.style.display = (curNet === "allstar" || curNet === "ysf") ? "none" : "";
     if (boxTg) {
       boxTg.textContent = (curNet === "xlx")
         ? (window.t ? window.t("contacts.type_xlx", {}, "🧩 Модуль XLX") : "🧩 Модуль XLX")
         : (window.t ? window.t("contacts.type_tg", {}, "🎯 TalkGroup") : "🎯 TalkGroup");
     }
-    if (optRepeater) optRepeater.style.display = (curNet === "allstar") ? "none" : "";
+    if (optRepeater) optRepeater.style.display = (curNet === "allstar" || curNet === "ysf") ? "none" : "";
     if (optAllStar) optAllStar.style.display = (curNet === "allstar") ? "" : "none";
     if (optAslMacro) optAslMacro.style.display = (curNet === "allstar") ? "" : "none";
 
@@ -1789,7 +2955,7 @@ export function updateContactFormFieldsVisibility(type) {
     }
     if (allstarModeGroup) allstarModeGroup.style.display = isAllStarNode ? "block" : "none";
     if (cityGroup) cityGroup.style.display = (isFolder || isAslMacro) ? "none" : "block";
-    if (slotGroup) slotGroup.style.display = (isFolder || isAllStarNode || isAslMacro || curNet === "allstar") ? "none" : "block";
+    if (slotGroup) slotGroup.style.display = (isFolder || isAllStarNode || isAslMacro || curNet === "allstar" || curNet === "ysf") ? "none" : "block";
     if (commentGroup) commentGroup.style.display = isFolder ? "none" : "block";
 
     const isXlx = (curNet === "xlx");
@@ -1860,13 +3026,14 @@ export function closeContactEditModal() {
   window.closeContactEditModal = closeContactEditModal;
 
 export function saveContactFromForm() {
+    const alertTitle = window.t ? window.t("contacts.title", {}, "Contacts") : "Contacts";
     const name = contactEditName ? contactEditName.value.trim() : "";
     if (!name) {
       const errMsg = window.t
-        ? window.t("contacts.err_name_required", {}, "Пожалуйста, укажите имя или название!")
-        : "Пожалуйста, укажите имя или название!";
+        ? window.t("contacts.err_name_required", {}, "Please enter a name or title!")
+        : "Please enter a name or title!";
       if (window.showAppAlert) {
-        window.showAppAlert(errMsg, { title: "Контакты", icon: "⚠️" });
+        window.showAppAlert(errMsg, { title: alertTitle, icon: "⚠️" });
       } else {
         alert(errMsg);
       }
@@ -1912,10 +3079,10 @@ export function saveContactFromForm() {
       linkModeVal = (type === "asl_macro") ? "dtmf" : (contactEditAllStarMode ? contactEditAllStarMode.value : "*3");
       if (!nodeNumberVal) {
         const errMsg = type === "asl_macro"
-          ? "Пожалуйста, укажите команду DTMF (например *70)!"
-          : "Пожалуйста, укажите номер ноды AllStarLink!";
+          ? (window.t ? window.t("contacts.err_dtmf_required", {}, "Please enter a DTMF command (e.g. *70)!") : "Please enter a DTMF command (e.g. *70)!")
+          : (window.t ? window.t("contacts.err_allstar_node_required", {}, "Please specify the AllStarLink node number!") : "Please specify the AllStarLink node number!");
         if (window.showAppAlert) {
-          window.showAppAlert(errMsg, { title: "Контакты", icon: "⚠️" });
+          window.showAppAlert(errMsg, { title: alertTitle, icon: "⚠️" });
         } else {
           alert(errMsg);
         }
@@ -1925,9 +3092,9 @@ export function saveContactFromForm() {
     } else if (type === "tg") {
       tgVal = contactEditTg ? parseInt(contactEditTg.value.trim(), 10) : null;
       if (!tgVal || tgVal <= 0) {
-        const errMsg = "Пожалуйста, укажите корректный номер TalkGroup (TG)!";
+        const errMsg = window.t ? window.t("contacts.err_tg_required", {}, "Please enter a valid TalkGroup (TG) number!") : "Please enter a valid TalkGroup (TG) number!";
         if (window.showAppAlert) {
-          window.showAppAlert(errMsg, { title: "Контакты", icon: "⚠️" });
+          window.showAppAlert(errMsg, { title: alertTitle, icon: "⚠️" });
         } else {
           alert(errMsg);
         }
@@ -1937,9 +3104,9 @@ export function saveContactFromForm() {
     } else if (type === "person") {
       dmrIdVal = contactEditDmrId ? parseInt(contactEditDmrId.value.trim(), 10) : null;
       if (!callsignVal && !dmrIdVal && !personAslVal && !personEchoVal) {
-        const errMsg = "Укажите позывной и хотя бы один сетевой ID (DMR ID или ноду AllStarLink)!";
+        const errMsg = window.t ? window.t("contacts.err_person_id_or_call", {}, "Please enter a callsign and at least one network ID (DMR ID or AllStarLink node)!") : "Please enter a callsign and at least one network ID (DMR ID or AllStarLink node)!";
         if (window.showAppAlert) {
-          window.showAppAlert(errMsg, { title: "Контакты", icon: "⚠️" });
+          window.showAppAlert(errMsg, { title: alertTitle, icon: "⚠️" });
         } else {
           alert(errMsg);
         }
@@ -1949,9 +3116,9 @@ export function saveContactFromForm() {
     } else if (type === "repeater") {
       dmrIdVal = contactEditDmrId ? parseInt(contactEditDmrId.value.trim(), 10) : null;
       if (!dmrIdVal && !callsignVal) {
-        const errMsg = "Пожалуйста, укажите ID репитера или позывной!";
+        const errMsg = window.t ? window.t("contacts.err_repeater_id_or_call", {}, "Please enter a repeater ID or callsign!") : "Please enter a repeater ID or callsign!";
         if (window.showAppAlert) {
-          window.showAppAlert(errMsg, { title: "Контакты", icon: "⚠️" });
+          window.showAppAlert(errMsg, { title: alertTitle, icon: "⚠️" });
         } else {
           alert(errMsg);
         }
@@ -1960,9 +3127,9 @@ export function saveContactFromForm() {
       }
     }
 
-    // Auto-merge by Callsign if creating a new person whose callsign already exists
+    // Auto-merge by Callsign strictly within the SAME network phonebook (never merge across BM/ADN/FreeDMR/etc.)
     if (!editingNodeId && type === "person" && callsignVal) {
-      const existingPerson = findPersonByCallsignInTree(contactsTree, callsignVal);
+      const existingPerson = findPersonByCallsignInTree(contactsTree, callsignVal, null, netVal);
       if (existingPerson) {
         editingNodeId = existingPerson.id;
       }
@@ -2077,7 +3244,7 @@ export function saveContactFromForm() {
     closeContactEditModal();
     saveContactsToServer();
     renderContactsTree(contactsSearchInput ? contactsSearchInput.value.trim() : "");
-    showToast(`✅ Запись «${name}» сохранена!`, 2000);
+    showToast(window.t ? window.t("contacts.saved_toast", { name }, `✅ Entry «${name}» saved!`) : `✅ Entry «${name}» saved!`, 2000);
     if (typeof refreshQuickAssignContactUI === "function") {
       refreshQuickAssignContactUI();
     }
@@ -2149,7 +3316,7 @@ export function openContactCallProposal(node, forcedNet = null) {
             hotspot_id: targetHid,
             digits: rawNodeNum
           }));
-          showToast(`⌨️ Отправлена команда DTMF ${rawNodeNum}`, 2200);
+          showToast(window.t ? window.t("contacts.dtmf_sent_toast", { cmd: rawNodeNum }, `⌨️ Sent DTMF command ${rawNodeNum}`) : `⌨️ Sent DTMF command ${rawNodeNum}`, 2200);
         } else {
           window.ws.send(JSON.stringify({
             type: "allstar_connect_node",
@@ -2158,7 +3325,7 @@ export function openContactCallProposal(node, forcedNet = null) {
             mode: linkMode
           }));
           const modeLabel = (linkMode === "*1" || linkMode === "*2") ? "Monitor" : "Transceive";
-          showToast(`📻 Подключение к ASL ноде #${rawNodeNum} (${modeLabel})...`, 2500);
+          showToast(window.t ? window.t("contacts.allstar_connecting_toast", { node: rawNodeNum, mode: modeLabel }, `📻 Connecting to ASL node #${rawNodeNum} (${modeLabel})...`) : `📻 Connecting to ASL node #${rawNodeNum} (${modeLabel})...`, 2500);
         }
         closeMyContactsModal();
       }
@@ -2171,22 +3338,30 @@ export function openContactCallProposal(node, forcedNet = null) {
     const targetVal = isTg ? parseInt(node.tg || node.dmr_id, 10) : parseInt(dmrTargetId, 10);
     if (!targetVal || targetVal <= 0) return;
 
+    const nodeNet = String(forcedNet || node.network_type || contactsActiveNetworkType || "bm").toLowerCase();
     let targetSlot = (node.slot_override === 1 || node.slot_override === 2)
       ? node.slot_override
-      : (contactsGateway && (contactsGateway.slot === 1 || contactsGateway.slot === 2) ? contactsGateway.slot : undefined);
-    let targetHid = (contactsGateway && contactsGateway.hotspot_id) || window.activeHotspotId || "default";
+      : (nodeNet === "bm" && contactsGateway && (contactsGateway.slot === 1 || contactsGateway.slot === 2) ? contactsGateway.slot : undefined);
+    let targetHid = (nodeNet === "bm" && contactsGateway && contactsGateway.hotspot_id)
+      ? contactsGateway.hotspot_id
+      : (contactsActiveHotspotId || window.activeHotspotId || "default");
 
-    // Auto-select hotspot of matching network if specified in contact
-    if (node.network_type && typeof window !== "undefined" && Array.isArray(window.currentHotspots) && window.currentHotspots.length) {
-      const matchHs = window.currentHotspots.find(h => (h.network_type || "bm").toLowerCase() === node.network_type.toLowerCase() && isHotspotFullyOnline(h))
-                   || window.currentHotspots.find(h => (h.network_type || "bm").toLowerCase() === node.network_type.toLowerCase());
-      if (matchHs) {
-        targetHid = matchHs.id;
+    // Auto-select hotspot of matching network (prefer currently opened contactsActiveHotspotId if its network matches)
+    if (typeof window !== "undefined" && Array.isArray(window.currentHotspots) && window.currentHotspots.length) {
+      const activeHs = window.currentHotspots.find(h => resolveHotspotId(h.id) === resolveHotspotId(contactsActiveHotspotId));
+      if (activeHs && (activeHs.network_type || "bm").toLowerCase() === nodeNet) {
+        targetHid = activeHs.id;
+      } else {
+        const matchHs = window.currentHotspots.find(h => (h.network_type || "bm").toLowerCase() === nodeNet && isHotspotFullyOnline(h))
+                     || window.currentHotspots.find(h => (h.network_type || "bm").toLowerCase() === nodeNet);
+        if (matchHs) {
+          targetHid = matchHs.id;
+        }
       }
     }
-    if (node.network_type === "xlx") {
+    if (nodeNet === "xlx") {
       targetSlot = 2;
-    } else if (node.network_type === "dmrplus" && (node.slot_override === 2 || (node.type === "tg" && node.tg >= 4000 && node.tg <= 5000))) {
+    } else if (nodeNet === "dmrplus" && (node.slot_override === 2 || (node.type === "tg" && node.tg >= 4000 && node.tg <= 5000))) {
       targetSlot = 2;
     }
 
@@ -2198,6 +3373,7 @@ export function openContactCallProposal(node, forcedNet = null) {
       name: [node.callsign, displayName].filter(Boolean).join(" ").trim() || displayName,
       city: node.city || "",
       hotspotId: targetHid,
+      network_type: nodeNet,
       slot: targetSlot
     };
 
@@ -2389,7 +3565,7 @@ function serializeContactNodeForNetwork(node, activeNet) {
     return null;
   }
 
-  // DMR networks: bm, tgif, freedmr, dmrplus, custom
+  // DMR / YSF networks: bm, adn, tgif, freedmr, dmrplus, ysf, custom
   if (node.type === "tg") {
     return {
       id: node.id,
@@ -2446,7 +3622,7 @@ function normalizeImportedNodeForNetwork(raw, activeNet) {
     return {
       id: nodeId,
       type: "folder",
-      name: String(raw.name || "Папка").trim(),
+      name: String(raw.name || (window.t ? window.t("contacts.default_folder_name", {}, "Folder") : "Folder")).trim(),
       network_type: net,
       collapsed: Boolean(raw.collapsed),
       children
@@ -2582,38 +3758,14 @@ function pruneNetworkFromTree(nodes, activeNet, preservedCrossNetPersonsMap) {
     }
 
     if (node.type === "person") {
-      const ids = getPersonIdentities(node);
+      const nodeNet = resolveNodeNetworkType(node);
       const cs = String(node.callsign || "").trim().toUpperCase();
-      if (net === "allstar") {
-        const hasDmr = Boolean(ids.dmr_id && Number(ids.dmr_id) > 0);
-        if (hasDmr) {
-          const cleanIds = Object.assign({}, ids);
-          delete cleanIds.allstar_node;
-          delete cleanIds.echolink_node;
-          const copy = Object.assign({}, node, { identities: cleanIds });
-          delete copy.allstar_node;
-          delete copy.echolink_node;
-          if ((copy.network_type || "").toLowerCase() === "allstar") copy.network_type = "bm";
-          if (cs) preservedCrossNetPersonsMap.set(cs, copy);
-          result.push(copy);
-        }
-      } else {
-        const nodeNet = (node.network_type || "bm").toLowerCase();
-        const hasAsl = Boolean(ids.allstar_node || ids.echolink_node);
-        if (nodeNet === net) {
-          if (hasAsl) {
-            const cleanIds = Object.assign({}, ids);
-            delete cleanIds.dmr_id;
-            const copy = Object.assign({}, node, { identities: cleanIds, network_type: "allstar" });
-            delete copy.dmr_id;
-            if (cs) preservedCrossNetPersonsMap.set(cs, copy);
-            result.push(copy);
-          }
-        } else {
-          if (cs) preservedCrossNetPersonsMap.set(cs, node);
-          result.push(node);
-        }
+      if (nodeNet === net) {
+        if (cs) preservedCrossNetPersonsMap.set(cs, node);
+        continue;
       }
+      if (cs) preservedCrossNetPersonsMap.set(cs, node);
+      result.push(node);
       continue;
     }
 
@@ -2699,7 +3851,9 @@ export function handleImportContactsFile(e) {
           const fileNet = String(parsed.network_type).trim().toLowerCase();
           if (fileNet !== activeNet) {
             const fileNetLabel = getNetworkBadgeLabel(fileNet);
-            const mismatchMsg = `Этот файл контактов создан для сети «${fileNetLabel}», а сейчас открыт раздел «${activeNetLabel}».\n\nПожалуйста, откройте контакты соответствующей сети или выберите файл для «${activeNetLabel}».`;
+            const mismatchMsg = window.t
+              ? window.t("contacts.import_net_mismatch", { file_net: fileNetLabel, active_net: activeNetLabel }, `This contacts file was created for network «${fileNetLabel}», while «${activeNetLabel}» is currently open.\n\nPlease open the matching network contacts or choose a file for «${activeNetLabel}».`)
+              : `This contacts file was created for network «${fileNetLabel}», while «${activeNetLabel}» is currently open.\n\nPlease open the matching network contacts or choose a file for «${activeNetLabel}».`;
             if (window.showAppAlert) {
               await window.showAppAlert(mismatchMsg, { title: errTitle, icon: "⚠️" });
             } else {
@@ -2784,6 +3938,12 @@ export function initContactsManager() {
 
     loadContactsLocal();
     loadContactsFromServer();
+    try { localStorage.removeItem("proxdmr_ysf_bookmarks"); } catch (_) {}
+    loadYsfFavoritesFromServer();
+    // Предзагрузка полного каталога YSF с сервера при инициализации менеджера контактов
+    if (typeof window !== "undefined" && typeof window.getNetworkServersList === "function") {
+      try { window.getNetworkServersList("ysf"); } catch (_) {}
+    }
 
     if (btnContactsGatewayToggle) {
       btnContactsGatewayToggle.addEventListener("click", () => toggleContactsGatewayPanel());
@@ -2831,8 +3991,12 @@ export function initContactsManager() {
     // AllStarLink Directory Tabs & Search Wiring
     const btnTabDmr = document.getElementById("btnContactsTabDmr");
     const btnTabAsl = document.getElementById("btnContactsTabAllstar");
+    const btnTabYsf = document.getElementById("btnContactsTabYsf");
+    const btnTabYsfContacts = document.getElementById("btnContactsTabYsfContacts");
     if (btnTabDmr) btnTabDmr.addEventListener("click", () => switchContactsModalTab("dmr"));
     if (btnTabAsl) btnTabAsl.addEventListener("click", () => switchContactsModalTab("allstar"));
+    if (btnTabYsf) btnTabYsf.addEventListener("click", () => switchContactsModalTab("ysf"));
+    if (btnTabYsfContacts) btnTabYsfContacts.addEventListener("click", () => switchContactsModalTab("ysf_contacts"));
 
     const aslSearchInp = document.getElementById("aslNodeSearchInput");
     const aslClearBtn = document.getElementById("clearAslNodeSearchBtn");
@@ -2857,6 +4021,57 @@ export function initContactsManager() {
       });
     }
 
+    const ysfSearchInp = document.getElementById("ysfRoomSearchInput");
+    const ysfClearBtn = document.getElementById("clearYsfRoomSearchBtn");
+    let ysfSearchTimer = null;
+    if (ysfSearchInp) {
+      ysfSearchInp.addEventListener("input", (e) => {
+        const val = e.target.value;
+        if (ysfClearBtn) ysfClearBtn.classList.toggle("hidden", !val);
+        clearTimeout(ysfSearchTimer);
+        ysfSearchTimer = setTimeout(() => {
+          renderYsfRoomsList(val);
+        }, 150);
+      });
+    }
+
+    if (ysfClearBtn && ysfSearchInp) {
+      ysfClearBtn.addEventListener("click", () => {
+        ysfSearchInp.value = "";
+        ysfClearBtn.classList.add("hidden");
+        renderYsfRoomsList("");
+        ysfSearchInp.focus();
+      });
+    }
+
+    const ysfSortBtns = document.querySelectorAll(".btn-ysf-sort");
+    ysfSortBtns.forEach(btn => {
+      if (btn._wired) return;
+      btn._wired = true;
+      btn.addEventListener("click", () => {
+        const sortType = btn.dataset.sort;
+        if (_ysfSortType === sortType) {
+          _ysfSortDir = (_ysfSortDir === "asc") ? "desc" : "asc";
+        } else {
+          _ysfSortType = sortType;
+          _ysfSortDir = "asc";
+        }
+        _updateYsfSortUi();
+        renderYsfRoomsList(ysfSearchInp ? ysfSearchInp.value : "");
+      });
+    });
+
+    const ysfFilterBtns = document.querySelectorAll(".btn-ysf-type-filter");
+    ysfFilterBtns.forEach(btn => {
+      if (btn._wiredFilter) return;
+      btn._wiredFilter = true;
+      btn.addEventListener("click", () => {
+        _ysfTypeFilter = btn.dataset.typeFilter || "all";
+        _updateYsfTypeFilterUi();
+        renderYsfRoomsList(ysfSearchInp ? ysfSearchInp.value : "");
+      });
+    });
+
     const btnSyncAsl = document.getElementById("btnSyncAslNodes");
     if (btnSyncAsl && !btnSyncAsl._wired) {
       btnSyncAsl._wired = true;
@@ -2867,7 +4082,7 @@ export function initContactsManager() {
         const totalCountEl = document.getElementById("aslNodesTotalCount");
         if (icon) icon.style.display = "none";
         if (dots) dots.style.display = "inline-block";
-        if (txt) txt.textContent = "Обновление...";
+        if (txt) txt.textContent = window.t ? window.t("contacts.syncing_status", {}, "Updating...") : "Updating...";
         btnSyncAsl.disabled = true;
         try {
           const res = await fetch("/api/allstar/nodes/sync", { method: "POST" });
@@ -2936,17 +4151,25 @@ export function initContactsManager() {
       contactEditCallsign._mergeWired = true;
       contactEditCallsign.addEventListener("input", () => {
         const mergeHintEl = document.getElementById("contactEditCallsignMergeHint");
-        if (!mergeHintEl) return;
         const typeRadio = document.querySelector('input[name="contactNodeType"]:checked');
         const curType = typeRadio ? typeRadio.value : "person";
+        const curNet = (contactEditNetwork && contactEditNetwork.value) ? contactEditNetwork.value.toLowerCase() : (contactsActiveNetworkType || "bm").toLowerCase();
+        const cs = contactEditCallsign.value.trim().toUpperCase();
+        if (!isEditingFolder && cs) {
+          updateContactEditCrossNetworksPreview(cs, editingNodeId);
+        } else {
+          updateContactEditCrossNetworksPreview("", editingNodeId);
+        }
+        if (!mergeHintEl) return;
         if (isEditingFolder || curType !== "person") {
           mergeHintEl.style.display = "none";
           return;
         }
-        const cs = contactEditCallsign.value.trim().toUpperCase();
-        const existing = cs ? findPersonByCallsignInTree(contactsTree, cs, editingNodeId) : null;
+        const existing = cs ? findPersonByCallsignInTree(contactsTree, cs, editingNodeId, curNet) : null;
         if (existing) {
-          mergeHintEl.textContent = `💡 Позывной ${cs} уже есть в контактах («${existing.name || cs}»). При сохранении новые сетевые ID будут объединены с его карточкой.`;
+          mergeHintEl.textContent = window.t
+            ? window.t("contacts.merge_callsign_hint", { callsign: cs, name: existing.name || cs }, `💡 Callsign ${cs} is already in ${getNetworkShortBadge(curNet)} contacts («${existing.name || cs}»). Saving will update their card in ${getNetworkShortBadge(curNet)}.`)
+            : `💡 Callsign ${cs} is already in ${getNetworkShortBadge(curNet)} contacts («${existing.name || cs}»). Saving will update their card in ${getNetworkShortBadge(curNet)}.`;
           mergeHintEl.style.display = "block";
           if (contactEditName && !contactEditName.value.trim() && existing.name) {
             contactEditName.value = existing.name;
@@ -3022,7 +4245,7 @@ export function initContactsManager() {
         anchorEl: document.getElementById("contactEditTgGroup") || contactEditTg.parentElement,
         popupClass: "in-contact-edit-modal",
         mode: "tg",
-        actionHint: (info) => (info && info.isKnown ? "Заполнить ⏎" : ""),
+        actionHint: (info) => (info && info.isKnown ? (window.t ? window.t("contacts.autofill_hint", {}, "Fill ⏎") : "Fill ⏎") : ""),
         onAction: (info) => {
           if (info && info.cleanDesc && contactEditName && !contactEditName.value.trim()) {
             contactEditName.value = info.cleanDesc;
@@ -3041,7 +4264,7 @@ export function initContactsManager() {
         anchorEl: document.getElementById("contactEditDmrIdGroup") || contactEditDmrId.parentElement,
         popupClass: "in-contact-edit-modal",
         mode: "id",
-        actionHint: (info) => (info && info.isKnown ? "Заполнить ⏎" : ""),
+        actionHint: (info) => (info && info.isKnown ? (window.t ? window.t("contacts.autofill_hint", {}, "Fill ⏎") : "Fill ⏎") : ""),
         onAction: (info) => {
           if (info && info.user) {
             if (contactEditCallsign && info.user.callsign) {
@@ -3076,6 +4299,19 @@ export function initContactsManager() {
           if (node && node.type === "folder") {
             node.collapsed = !node.collapsed;
             renderContactsTree(contactsSearchInput ? contactsSearchInput.value.trim() : "");
+          }
+        } else if (action === "call-cross-net") {
+          const targetNodeId = targetActionEl.dataset.targetNodeId || nodeId;
+          const targetNet = (targetActionEl.dataset.net || "bm").toLowerCase();
+          const targetNode = findNodeInTree(contactsTree, targetNodeId);
+          if (targetNode) {
+            const hasHsForNet = Array.isArray(window.currentHotspots) && window.currentHotspots.some(h => (h.network_type || "bm").toLowerCase() === targetNet);
+            if (!hasHsForNet) {
+              const netLabel = getNetworkBadgeLabel(targetNet);
+              showToast(window.t ? window.t("contacts.cross_net_no_hotspot", { net: netLabel }, `ℹ️ ${netLabel}: не найден настроенный хотспот для вызова`) : `ℹ️ ${netLabel}: не найден настроенный хотспот для вызова`, 2600);
+              return;
+            }
+            openContactCallProposal(targetNode, targetNet);
           }
         } else if (action === "call-person-net") {
           const node = findNodeInTree(contactsTree, nodeId);
@@ -3146,6 +4382,7 @@ if (typeof window !== "undefined") {
   window.renderContactsTree = renderContactsTree;
   window.getLocalizedContactName = getLocalizedContactName;
   window.saveContactsToServer = saveContactsToServer;
+  window.flushPendingContactsSave = flushPendingContactsSave;
   window.deleteContactNode = deleteContactNode;
   window.initContactsManager = initContactsManager;
   window.openAslCellPickerModal = openAslCellPickerModal;
@@ -3168,8 +4405,43 @@ if (typeof window !== "undefined") {
   window.__proxdmr.renderContactsTree = renderContactsTree;
   window.__proxdmr.getLocalizedContactName = getLocalizedContactName;
   window.__proxdmr.saveContactsToServer = saveContactsToServer;
+  window.__proxdmr.flushPendingContactsSave = flushPendingContactsSave;
   window.__proxdmr.deleteContactNode = deleteContactNode;
   window.__proxdmr.initContactsManager = initContactsManager;
+
+  window.getYsfBookmarks = getYsfBookmarks;
+  window.saveYsfBookmarks = saveYsfBookmarks;
+  window.isYsfRoomBookmarked = isYsfRoomBookmarked;
+  window.toggleYsfRoomBookmark = toggleYsfRoomBookmark;
+  window.connectYsfRoomById = connectYsfRoomById;
+  window.openYsfMemPickerModal = openYsfMemPickerModal;
+  window.renderYsfRoomsList = renderYsfRoomsList;
+  window.resolveYsfRoomInfo = resolveYsfRoomInfo;
+  window.classifyYsfReflector = classifyYsfReflector;
+  window.getYsfRoomTypeOverride = getYsfRoomTypeOverride;
+  window.setYsfRoomTypeOverride = setYsfRoomTypeOverride;
+  window.markYsfRoomRuntimeMutant = markYsfRoomRuntimeMutant;
+  window.isYsfMultiroomRoom = isYsfMultiroomRoom;
+  window.getYsfMultiroomKind = getYsfMultiroomKind;
+
+  window.__proxdmr.getYsfBookmarks = getYsfBookmarks;
+  window.__proxdmr.saveYsfBookmarks = saveYsfBookmarks;
+  window.__proxdmr.connectYsfRoomById = connectYsfRoomById;
+  window.__proxdmr.openYsfMemPickerModal = openYsfMemPickerModal;
+  window.__proxdmr.renderYsfRoomsList = renderYsfRoomsList;
+  window.__proxdmr.resolveYsfRoomInfo = resolveYsfRoomInfo;
+  window.__proxdmr.classifyYsfReflector = classifyYsfReflector;
+  window.__proxdmr.getYsfRoomTypeOverride = getYsfRoomTypeOverride;
+  window.__proxdmr.setYsfRoomTypeOverride = setYsfRoomTypeOverride;
+  window.__proxdmr.markYsfRoomRuntimeMutant = markYsfRoomRuntimeMutant;
+  window.__proxdmr.isYsfMultiroomRoom = isYsfMultiroomRoom;
+  window.__proxdmr.getYsfMultiroomKind = getYsfMultiroomKind;
+  window.loadContactsFromServer = loadContactsFromServer;
+  window.__proxdmr.loadContactsFromServer = loadContactsFromServer;
+  window.applyYsfFavoritesFromServer = applyYsfFavoritesFromServer;
+  window.loadYsfFavoritesFromServer = loadYsfFavoritesFromServer;
+  window.__proxdmr.applyYsfFavoritesFromServer = applyYsfFavoritesFromServer;
+  window.__proxdmr.loadYsfFavoritesFromServer = loadYsfFavoritesFromServer;
 }
 
 // Delegated click handler for Contacts button across all cards and static elements
@@ -3183,7 +4455,7 @@ if (typeof document !== "undefined") {
     if (typeof window !== "undefined" && typeof window.switchActiveHotspot === "function") {
       window.switchActiveHotspot(cid);
     }
-    openMyContactsModal();
+    openMyContactsModal(cid);
   });
 }
 
@@ -3194,4 +4466,23 @@ if (typeof document !== "undefined") {
   } else {
     initContactsManager();
   }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("languageChanged", () => {
+    try { updateContactsGatewaySummary(); } catch (_) {}
+    try { renderContactsTree(contactsSearchInput ? contactsSearchInput.value.trim() : ""); } catch (_) {}
+    try {
+      if (isYsfRoomsActive()) {
+        const ysfInp = document.getElementById("ysfRoomSearchInput");
+        renderYsfRoomsList(ysfInp ? ysfInp.value : "");
+      }
+    } catch (_) {}
+    try {
+      if (isAllStarNodesActive()) {
+        const aslInp = document.getElementById("aslNodeSearchInput");
+        renderAllStarNodesList(aslInp ? aslInp.value : "");
+      }
+    } catch (_) {}
+  });
 }

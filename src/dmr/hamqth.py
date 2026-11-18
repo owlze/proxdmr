@@ -16,6 +16,11 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.hamqth")
 
 QRZ_COM_XML_URL = "https://xmldata.qrz.com/xml/current/"
@@ -180,7 +185,7 @@ class HamQTHService:
         u_clean = username.strip()
         p_clean = password.strip()
         if not u_clean or not p_clean:
-            raise ValueError("Логин и пароль QRZ.com обязательны")
+            raise ValueError(_tr("hamqth.qrz_creds_required", fallback="QRZ.com login and password are required"))
 
         now = time.time()
         if not force_refresh and u_clean in self._qrz_com_session_cache:
@@ -206,7 +211,7 @@ class HamQTHService:
         if err_msg:
             raise ValueError(f"QRZ.com: {err_msg}")
         if not key:
-            raise ValueError("Не получен сессионный ключ от QRZ.com")
+            raise ValueError(_tr("hamqth.qrz_no_session_key", fallback="Failed to obtain session key from QRZ.com"))
 
         self._qrz_com_session_cache[u_clean] = (key, now)
         logger.info(f"[QRZ.com] Successfully authenticated user '{u_clean}' (key: {key[:8]}...)")
@@ -215,24 +220,24 @@ class HamQTHService:
     def _sync_lookup_qrz_com(self, callsign: str, username: str, password: str) -> Dict[str, Any]:
         call_upper = _clean_call(callsign)
         if not call_upper:
-            return {"status": "error", "message": "Позывной не указан"}
+            return {"status": "error", "message": _tr("hamqth.callsign_missing", fallback="Callsign not specified")}
 
         u_clean = username.strip()
         p_clean = password.strip()
         if not u_clean or not p_clean:
-            return {"status": "error", "message": "Учетные данные QRZ.com не настроены"}
+            return {"status": "error", "message": _tr("hamqth.qrz_not_configured", fallback="QRZ.com credentials are not configured")}
 
         try:
             session_key = self._sync_get_qrz_com_session(u_clean, p_clean)
         except Exception as e:
-            return {"status": "error", "message": f"Ошибка авторизации QRZ.com: {e}"}
+            return {"status": "error", "message": _tr("hamqth.qrz_auth_err", fallback="QRZ.com authorization error: {error}", error=e)}
 
         url = f"{QRZ_COM_XML_URL}?s={urllib.parse.quote(session_key)};callsign={urllib.parse.quote(call_upper)}"
         try:
             xml_resp = self._http_get(url)
             root = self._parse_xml(xml_resp)
         except Exception as e:
-            return {"status": "error", "message": f"Ошибка запроса к QRZ.com: {e}"}
+            return {"status": "error", "message": _tr("hamqth.qrz_req_err", fallback="QRZ.com request error: {error}", error=e)}
 
         # Check for session error / retry
         err_text = None
@@ -256,7 +261,7 @@ class HamQTHService:
                             err_text = elem.text.strip()
                             break
                 except Exception as e:
-                    return {"status": "error", "message": f"Повторная ошибка авторизации QRZ.com: {e}"}
+                    return {"status": "error", "message": _tr("hamqth.qrz_reauth_err", fallback="QRZ.com re-authorization error: {error}", error=e)}
 
             if err_text:
                 if "not found" in err_text.lower():
@@ -332,7 +337,7 @@ class HamQTHService:
         u_clean = username.strip()
         p_clean = password.strip()
         if not u_clean or not p_clean:
-            raise ValueError("Логин и пароль HamQTH обязательны")
+            raise ValueError(_tr("hamqth.creds_required", fallback="HamQTH login and password are required"))
 
         now = time.time()
         if not force_refresh and u_clean in self._session_cache:
@@ -357,7 +362,7 @@ class HamQTHService:
                 break
 
         if not session_id:
-            raise ValueError("Не получен session_id от HamQTH")
+            raise ValueError(_tr("hamqth.no_session_id", fallback="Failed to obtain session_id from HamQTH"))
 
         self._session_cache[u_clean] = (session_id, now)
         logger.info(f"[HamQTH] Successfully authenticated user '{u_clean}' (session: {session_id[:8]}...)")
@@ -366,7 +371,7 @@ class HamQTHService:
     def _sync_lookup_hamqth(self, callsign: str, username: str = "", password: str = "", session_key: str = "") -> Dict[str, Any]:
         call_upper = _clean_call(callsign)
         if not call_upper:
-            return {"status": "error", "message": "Позывной не указан"}
+            return {"status": "error", "message": _tr("hamqth.callsign_missing", fallback="Callsign not specified")}
 
         u_clean = username.strip()
         p_clean = password.strip()
@@ -377,11 +382,11 @@ class HamQTHService:
             try:
                 session_id = self._sync_get_session(u_clean, p_clean)
             except Exception as e:
-                return {"status": "error", "message": f"Ошибка авторизации HamQTH: {e}"}
+                return {"status": "error", "message": _tr("hamqth.auth_error", fallback="HamQTH authorization error: {error}", error=e)}
         elif k_clean:
             session_id = k_clean
         else:
-            return {"status": "error", "message": "Учетные данные HamQTH не настроены"}
+            return {"status": "error", "message": _tr("hamqth.not_configured", fallback="HamQTH credentials are not configured")}
 
         params = urllib.parse.urlencode({
             "id": session_id,
@@ -394,7 +399,7 @@ class HamQTHService:
             xml_resp = self._http_get(url)
             root = self._parse_xml(xml_resp)
         except Exception as e:
-            return {"status": "error", "message": f"Ошибка запроса к HamQTH: {e}"}
+            return {"status": "error", "message": _tr("hamqth.req_err", fallback="HamQTH request error: {error}", error=e)}
 
         # Check session expiry / retry
         err = None
@@ -420,7 +425,7 @@ class HamQTHService:
                         err = elem.text.strip()
                         break
             except Exception as e:
-                return {"status": "error", "message": f"Повторная ошибка авторизации HamQTH: {e}"}
+                return {"status": "error", "message": _tr("hamqth.reauth_err", fallback="HamQTH re-authorization error: {error}", error=e)}
 
         if err:
             err_lower = err.lower()
@@ -494,7 +499,7 @@ class HamQTHService:
             portal_label = "QRZ.com" if p_name == "qrz_com" else "HamQTH.com"
             return {
                 "status": "error",
-                "message": f"Укажите логин и пароль {portal_label}"
+                "message": _tr("hamqth.login_password_required_portal", fallback="Enter login and password for {portal}", portal=portal_label)
             }
 
         try:
@@ -502,7 +507,7 @@ class HamQTHService:
                 sess_id = await asyncio.to_thread(self._sync_get_qrz_com_session, u_clean, p_clean, True)
                 return {
                     "status": "ok",
-                    "message": "Успешная авторизация на QRZ.com",
+                    "message": _tr("hamqth.auth_ok_qrz", fallback="Authorized successfully on QRZ.com"),
                     "session_id": f"{sess_id[:8]}..."
                 }
             else:  # hamqth
@@ -510,16 +515,16 @@ class HamQTHService:
                     sess_id = await asyncio.to_thread(self._sync_get_session, u_clean, p_clean, True)
                     return {
                         "status": "ok",
-                        "message": "Успешная авторизация на HamQTH.com",
+                        "message": _tr("hamqth.auth_ok_hamqth", fallback="Authorized successfully on HamQTH.com"),
                         "session_id": f"{sess_id[:8]}..."
                     }
                 elif k_clean:
                     res = await asyncio.to_thread(self._sync_lookup_hamqth, "W1AW", session_key=k_clean)
                     if res.get("status") in ("ok", "not_found"):
-                        return {"status": "ok", "message": "Сессионный ключ HamQTH действителен"}
-                    return {"status": "error", "message": res.get("message", "Сессионный ключ недействителен")}
+                        return {"status": "ok", "message": _tr("hamqth.session_key_valid", fallback="HamQTH session key is valid")}
+                    return {"status": "error", "message": res.get("message", _tr("hamqth.session_key_invalid", fallback="Session key is invalid"))}
                 else:
-                    return {"status": "error", "message": "Для авторизации требуются и логин, и пароль"}
+                    return {"status": "error", "message": _tr("hamqth.login_password_required", fallback="Both login and password are required for authorization")}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -662,7 +667,7 @@ class HamQTHService:
         """
         call_upper = _clean_call(callsign)
         if not call_upper:
-            return {"status": "error", "message": "Позывной не указан"}
+            return {"status": "error", "message": _tr("hamqth.callsign_missing", fallback="Callsign not specified")}
 
         now = time.time()
         # Check cached combined lookup
@@ -696,7 +701,7 @@ class HamQTHService:
         if not tasks:
             return {
                 "status": "no_credentials",
-                "message": "Учетные данные HAM веб-порталов (QRZ.com, HamQTH.com) не настроены в Общих настройках"
+                "message": _tr("hamqth.portals_not_configured", fallback="HAM web portal credentials (QRZ.com, HamQTH.com) are not configured in General Settings")
             }
 
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -710,7 +715,7 @@ class HamQTHService:
             elif isinstance(r, dict):
                 results_by_portal[p_name] = r
                 if r.get("status") == "error":
-                    errors.append(f"{p_name}: {r.get('message', 'Ошибка')}")
+                    errors.append(f"{p_name}: {r.get('message', _tr('common.error', fallback='Error'))}")
 
         # Check which sources were found
         sources_found = [p for p in ("QRZ.com", "HamQTH.com") if results_by_portal.get(p, {}).get("found")]
@@ -727,14 +732,14 @@ class HamQTHService:
                     "status": "not_found",
                     "found": False,
                     "callsign": call_upper,
-                    "message": f"Позывной {call_upper} не найден на порталах ({', '.join(portal_order)})"
+                    "message": _tr("hamqth.callsign_not_found_portals", fallback="Callsign {callsign} not found on portals ({portals})", callsign=call_upper, portals=", ".join(portal_order))
                 }
                 self._lookup_cache[call_upper] = (res, now)
                 return res
 
             return {
                 "status": "error",
-                "message": "; ".join(errors) or f"Не удалось получить информацию о позывном {call_upper}"
+                "message": "; ".join(errors) or _tr("hamqth.lookup_failed", fallback="Failed to retrieve information for callsign {callsign}", callsign=call_upper)
             }
 
         # Priority merge: 1. QRZ.com -> 2. HamQTH.com

@@ -23,6 +23,7 @@ typedef struct {
     int spectral_enh;
     float high_band_gain;
     float unvoiced_gain;
+    int codec_mode; /* 0=none, 1=ambe, 2=imbe */
 } MbeNeoContext;
 
 typedef struct {
@@ -44,6 +45,7 @@ EXPORT void* mbe_neo_create(void) {
         ctx->spectral_enh = 1;
         ctx->high_band_gain = 1.05925373f; /* +0.5 dB */
         ctx->unvoiced_gain = 0.84139514f;  /* -1.5 dB */
+        ctx->codec_mode = 0;
     }
     return ctx;
 }
@@ -66,6 +68,7 @@ EXPORT void mbe_neo_reset(void* ctx) {
     if (ctx) {
         MbeNeoContext* c = (MbeNeoContext*)ctx;
         mbe_initMbeParms(&c->cur_mp, &c->prev_mp, &c->prev_mp_enhanced);
+        c->codec_mode = 0;
     }
 }
 
@@ -126,6 +129,10 @@ static void fill_meta(MbeNeoContext* c, const mbe_process_result* res, MbeNeoFra
 EXPORT int mbe_neo_decode_72(void* ctx, const uint8_t* raw72, int16_t* pcm160, MbeNeoFrameMeta* meta_out) {
     if (!ctx || !raw72 || !pcm160) return -1;
     MbeNeoContext* c = (MbeNeoContext*)ctx;
+    if (c->codec_mode == 2) {
+        mbe_initMbeParms(&c->cur_mp, &c->prev_mp, &c->prev_mp_enhanced);
+    }
+    c->codec_mode = 1;
 
     mbe_set_tuning(c->spectral_enh, c->high_band_gain, c->unvoiced_gain);
 
@@ -148,6 +155,10 @@ EXPORT int mbe_neo_decode_72(void* ctx, const uint8_t* raw72, int16_t* pcm160, M
 EXPORT int mbe_neo_decode_49(void* ctx, const char* ambe_d49, int16_t* pcm160, MbeNeoFrameMeta* meta_out) {
     if (!ctx || !ambe_d49 || !pcm160) return -1;
     MbeNeoContext* c = (MbeNeoContext*)ctx;
+    if (c->codec_mode == 2) {
+        mbe_initMbeParms(&c->cur_mp, &c->prev_mp, &c->prev_mp_enhanced);
+    }
+    c->codec_mode = 1;
 
     mbe_set_tuning(c->spectral_enh, c->high_band_gain, c->unvoiced_gain);
 
@@ -156,6 +167,59 @@ EXPORT int mbe_neo_decode_49(void* ctx, const char* ambe_d49, int16_t* pcm160, M
 
     int status = mbe_processAmbe2450Data(
         pcm160, &res, ambe_d49,
+        &c->cur_mp, &c->prev_mp, &c->prev_mp_enhanced
+    );
+
+    fill_meta(c, &res, meta_out);
+    return status;
+}
+
+/* TIA-102.BABA / YSF Full-Rate IMBE (dt=3 VW) 144-bit interleaving table */
+static const uint8_t IMBE_INTERLEAVE[144] = {
+    0,  7, 12, 19, 24, 31, 36, 43, 48, 55, 60, 67, 72, 79, 84, 91,  96, 103, 108, 115, 120, 127, 132, 139,
+    1,  6, 13, 18, 25, 30, 37, 42, 49, 54, 61, 66, 73, 78, 85, 90,  97, 102, 109, 114, 121, 126, 133, 138,
+    2,  9, 14, 21, 26, 33, 38, 45, 50, 57, 62, 69, 74, 81, 86, 93,  98, 105, 110, 117, 122, 129, 134, 141,
+    3,  8, 15, 20, 27, 32, 39, 44, 51, 56, 63, 68, 75, 80, 87, 92,  99, 104, 111, 116, 123, 128, 135, 140,
+    4, 11, 16, 23, 28, 35, 40, 47, 52, 59, 64, 71, 76, 83, 88, 95, 100, 107, 112, 119, 124, 131, 136, 143,
+    5, 10, 17, 22, 29, 34, 41, 46, 53, 58, 65, 70, 77, 82, 89, 94, 101, 106, 113, 118, 125, 130, 137, 142
+};
+
+static void deinterleave_imbe_144_bytes(const uint8_t bytes18[18], char imbe_fr[8][23]) {
+    static const int row_lens[8] = {23, 23, 23, 23, 15, 15, 15, 7};
+    char flat[144];
+    memset(imbe_fr, 0, 8 * 23);
+    for (int i = 0; i < 144; i++) {
+        uint8_t n = IMBE_INTERLEAVE[i];
+        flat[i] = (char)((bytes18[n >> 3] >> (7 - (n & 7))) & 1u);
+    }
+    int pos = 0;
+    for (int r = 0; r < 8; r++) {
+        int len = row_lens[r];
+        for (int k = 0; k < len; k++) {
+            imbe_fr[r][len - 1 - k] = flat[pos++];
+        }
+    }
+}
+
+EXPORT int mbe_neo_decode_imbe_144(void* ctx, const uint8_t* raw18, int16_t* pcm160, MbeNeoFrameMeta* meta_out) {
+    if (!ctx || !raw18 || !pcm160) return -1;
+    MbeNeoContext* c = (MbeNeoContext*)ctx;
+    if (c->codec_mode == 1) {
+        mbe_initMbeParms(&c->cur_mp, &c->prev_mp, &c->prev_mp_enhanced);
+    }
+    c->codec_mode = 2;
+
+    mbe_set_tuning(c->spectral_enh, c->high_band_gain, c->unvoiced_gain);
+
+    char imbe_fr[8][23];
+    deinterleave_imbe_144_bytes(raw18, imbe_fr);
+
+    char imbe_d[88];
+    mbe_process_result res;
+    mbe_initProcessResult(&res);
+
+    int status = mbe_processImbe7200x4400Frame(
+        pcm160, &res, imbe_fr, imbe_d,
         &c->cur_mp, &c->prev_mp, &c->prev_mp_enhanced
     );
 
@@ -237,6 +301,22 @@ EXPORT int mbe_neo_encode_72(void* ctx, const int16_t* pcm160, uint8_t* raw72) {
     if (status < 0) return status;
 
     interleave_72_bytes(ambe_fr, raw72);
+    mbe_moveMbeParms(&c->cur_mp, &c->prev_mp);
+    return 0;
+}
+
+EXPORT int mbe_neo_encode_49(void* ctx, const int16_t* pcm160, uint8_t* ambe49) {
+    if (!ctx || !pcm160 || !ambe49) return -1;
+    MbeNeoEncoderContext* c = (MbeNeoEncoderContext*)ctx;
+    if (!c->enc) return -1;
+
+    char ambe_d[49];
+    int status = mbe_encodeAmbe2450ParmsShort(c->enc, pcm160, ambe_d, &c->cur_mp, &c->prev_mp);
+    if (status < 0) return status;
+
+    for (int i = 0; i < 49; i++) {
+        ambe49[i] = (uint8_t)(ambe_d[i] & 1);
+    }
     mbe_moveMbeParms(&c->cur_mp, &c->prev_mp);
     return 0;
 }

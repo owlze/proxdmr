@@ -368,10 +368,15 @@
   }
 
   export function getLocalizedCountryName(isoCode, fallbackName = "", lang = null) {
-    const curLang = lang || (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
+    const curLang = lang || (typeof window !== "undefined" && window.I18N && (typeof window.I18N.getLanguage === "function" ? window.I18N.getLanguage() : (window.I18N.currentLanguage || window.I18N.currentLang))) || (typeof localStorage !== "undefined" && localStorage.getItem("proxdmr_language")) || "ru";
     if (isoCode && typeof isoCode === "string") {
       const clean = isoCode.trim().toUpperCase();
       if (clean.length === 2 && clean !== "GL") {
+        if (typeof window !== "undefined" && typeof window.t === "function") {
+          const tKey = `countries.${clean.toLowerCase()}`;
+          const tVal = window.t(tKey, {}, "");
+          if (tVal && tVal !== tKey) return tVal;
+        }
         try {
           const regionNames = new Intl.DisplayNames([curLang], { type: 'region' });
           const dn = regionNames.of(clean);
@@ -382,25 +387,48 @@
     return fallbackName || isoCode || "BM";
   }
 
+  export function resolveCountryDisplayName(countryInfo, lang = null) {
+    if (!countryInfo) return "";
+    if (typeof countryInfo === "string") return countryInfo.trim();
+    const curLang = lang || getActiveLang();
+    if (countryInfo.name === "Global" || (countryInfo.flag === "🌐" && !countryInfo.iso && !countryInfo.name_en)) {
+      return (typeof window !== "undefined" && typeof window.t === "function") ? window.t("common.global", {}, "Global") : "Global";
+    }
+    const iso = countryInfo.iso || emojiToIso(countryInfo.flag);
+    const isCyr = (curLang === "ru" || curLang === "uk");
+    const fb = isCyr ? (countryInfo.name || countryInfo.name_en || "") : (countryInfo.name_en || countryInfo.name || "");
+    if (iso) {
+      return getLocalizedCountryName(iso, fb, curLang);
+    }
+    return fb;
+  }
+
   export function getFlagBadgeHtml(countryInfo, isParrot = false, fallbackEmoji = "") {
     if (isParrot) {
-      return `<span class="flag-badge parrot-badge" title="Parrot / Echo">🦜</span>`;
+      const parrotTitle = (typeof window !== "undefined" && typeof window.t === "function")
+        ? window.t("tg_special.9990", {}, "Parrot / Echo")
+        : "Parrot / Echo";
+      return `<span class="flag-badge parrot-badge" title="${safeEscapeHtml(parrotTitle)}">🦜</span>`;
     }
-    const name = (countryInfo && countryInfo.name) ? countryInfo.name : "";
+    const name = resolveCountryDisplayName(countryInfo) || ((countryInfo && countryInfo.name) ? countryInfo.name : "");
     const flag = (countryInfo && countryInfo.flag) ? countryInfo.flag : fallbackEmoji;
 
     // Global / Worldwide / Standby
     if (!flag || flag === "🌐" || name.toLowerCase().includes("global") || name.toLowerCase().includes("worldwide")) {
-      return `<span class="flag-badge flag-global" title="Global"><svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>`;
+      const globalTitle = (typeof window !== "undefined" && typeof window.t === "function")
+        ? window.t("common.global", {}, "Global")
+        : "Global";
+      return `<span class="flag-badge flag-global" title="${safeEscapeHtml(globalTitle)}"><svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>`;
     }
 
     const iso = (countryInfo && countryInfo.iso) || emojiToIso(flag) || emojiToIso(fallbackEmoji);
     if (iso) {
-      return `<span class="flag-badge flag-${iso}" title="${name}"><img src="/static/flags/${iso}.svg" alt="${name}" class="flag-img" loading="eager" decoding="sync" onerror="this.parentElement.innerHTML='${flag}'" /></span>`;
+      const safeName = safeEscapeHtml(name);
+      return `<span class="flag-badge flag-${iso}" title="${safeName}"><img src="/static/flags/${iso}.svg" alt="${safeName}" class="flag-img" loading="eager" decoding="sync" onerror="this.parentElement.innerHTML='${flag}'" /></span>`;
     }
 
     // Other unicode emojis
-    return `<span class="flag-badge" title="${name}">${flag}</span>`;
+    return `<span class="flag-badge" title="${safeEscapeHtml(name)}">${flag}</span>`;
   }
 
   export function updateFlagElement(el, countryInfo, isParrot = false, fallbackEmoji = "") {
@@ -487,125 +515,147 @@
 
   // BrandMeister Russian regional talkgroup codes (250001 - 250099)
   const BM_RUSSIA_REGIONS = {
-    "01": "Адыгея",
-    "02": "Башкортостан",
-    "03": "Бурятия",
-    "04": "Алтай",
-    "05": "Дагестан",
-    "06": "Ингушетия",
-    "07": "Кабардино-Балкария",
-    "08": "Калмыкия",
-    "09": "Карачаево-Черкесия",
-    "10": "Карелия",
-    "11": "Коми",
-    "12": "Марий Эл",
-    "13": "Мордовия",
-    "14": "Якутия",
-    "15": "Северная Осетия",
-    "16": "Татарстан",
-    "17": "Тыва",
-    "18": "Удмуртия",
-    "19": "Хакасия",
-    "20": "Чечня",
-    "21": "Чувашия",
-    "22": "Алтайский край",
-    "23": "Краснодарский край",
-    "24": "Красноярский край",
-    "25": "Приморский край",
-    "26": "Ставропольский край",
-    "27": "Хабаровский край",
-    "28": "Амурская обл.",
-    "29": "Архангельская обл.",
-    "30": "Астраханская обл.",
-    "31": "Белгородская обл.",
-    "32": "Брянская обл.",
-    "33": "Владимирская обл.",
-    "34": "Волгоградская обл.",
-    "35": "Вологодская обл.",
-    "36": "Воронежская обл.",
-    "37": "Ивановская обл.",
-    "38": "Иркутская обл.",
-    "39": "Калининградская обл.",
-    "40": "Калужская обл.",
-    "41": "Камчатский край",
-    "42": "Кемеровская обл.",
-    "43": "Кировская обл.",
-    "44": "Костромская обл.",
-    "45": "Курганская обл.",
-    "46": "Курская обл.",
-    "47": "Ленинградская обл.",
-    "48": "Липецкая обл.",
-    "49": "Магаданская обл.",
-    "50": "Московская обл.",
-    "51": "Мурманская обл.",
-    "52": "Нижегородская обл.",
-    "53": "Новгородская обл.",
-    "54": "Новосибирская обл.",
-    "55": "Омская обл.",
-    "56": "Оренбургская обл.",
-    "57": "Орловская обл.",
-    "58": "Пензенская обл.",
-    "59": "Пермский край",
-    "60": "Псковская обл.",
-    "61": "Ростовская обл.",
-    "62": "Рязанская обл.",
-    "63": "Самарская обл.",
-    "64": "Саратовская обл.",
-    "65": "Сахалинская обл.",
-    "66": "Свердловская обл.",
-    "67": "Смоленская обл.",
-    "68": "Тамбовская обл.",
-    "69": "Тверская обл.",
-    "70": "Томская обл.",
-    "71": "Тульская обл.",
-    "72": "Тюменская обл.",
-    "73": "Ульяновская обл.",
-    "74": "Челябинская обл.",
-    "75": "Забайкальский край",
-    "76": "Ярославская обл.",
-    "77": "Москва",
-    "78": "Санкт-Петербург",
-    "79": "Еврейская АО",
-    "80": "Забайкальский край",
-    "82": "Крым",
-    "83": "Ненецкий АО",
-    "84": "Таймырский АО",
-    "85": "Усть-Ордынский АО",
-    "86": "ХМАО - Югра",
-    "87": "Чукотский АО",
-    "88": "Эвенкийский АО",
-    "89": "ЯНАО",
-    "92": "Севастополь",
-    "94": "Байконур"
+    "01": "Republic of Adygea",
+    "02": "Bashkortostan",
+    "03": "Buryatia",
+    "04": "Altai Republic",
+    "05": "Dagestan",
+    "06": "Ingushetia",
+    "07": "Kabardino-Balkaria",
+    "08": "Kalmykia",
+    "09": "Karachay-Cherkessia",
+    "10": "Karelia",
+    "11": "Komi Republic",
+    "12": "Mari El",
+    "13": "Mordovia",
+    "14": "Yakutia (Sakha)",
+    "15": "North Ossetia",
+    "16": "Tatarstan",
+    "17": "Tuva",
+    "18": "Udmurtia",
+    "19": "Khakassia",
+    "20": "Chechnya",
+    "21": "Chuvashia",
+    "22": "Altai Krai",
+    "23": "Krasnodar Krai",
+    "24": "Krasnoyarsk Krai",
+    "25": "Primorsky Krai",
+    "26": "Stavropol Krai",
+    "27": "Khabarovsk Krai",
+    "28": "Amur Oblast",
+    "29": "Arkhangelsk Oblast",
+    "30": "Astrakhan Oblast",
+    "31": "Belgorod Oblast",
+    "32": "Bryansk Oblast",
+    "33": "Vladimir Oblast",
+    "34": "Volgograd Oblast",
+    "35": "Vologda Oblast",
+    "36": "Voronezh Oblast",
+    "37": "Ivanovo Oblast",
+    "38": "Irkutsk Oblast",
+    "39": "Kaliningrad Oblast",
+    "40": "Kaluga Oblast",
+    "41": "Kamchatka Krai",
+    "42": "Kemerovo Oblast",
+    "43": "Kirov Oblast",
+    "44": "Kostroma Oblast",
+    "45": "Kurgan Oblast",
+    "46": "Kursk Oblast",
+    "47": "Leningrad Oblast",
+    "48": "Lipetsk Oblast",
+    "49": "Magadan Oblast",
+    "50": "Moscow Oblast",
+    "51": "Murmansk Oblast",
+    "52": "Nizhny Novgorod Oblast",
+    "53": "Novgorod Oblast",
+    "54": "Novosibirsk Oblast",
+    "55": "Omsk Oblast",
+    "56": "Orenburg Oblast",
+    "57": "Oryol Oblast",
+    "58": "Penza Oblast",
+    "59": "Perm Krai",
+    "60": "Pskov Oblast",
+    "61": "Rostov Oblast",
+    "62": "Ryazan Oblast",
+    "63": "Samara Oblast",
+    "64": "Saratov Oblast",
+    "65": "Sakhalin Oblast",
+    "66": "Sverdlovsk Oblast",
+    "67": "Smolensk Oblast",
+    "68": "Tambov Oblast",
+    "69": "Tver Oblast",
+    "70": "Tomsk Oblast",
+    "71": "Tula Oblast",
+    "72": "Tyumen Oblast",
+    "73": "Ulyanovsk Oblast",
+    "74": "Chelyabinsk Oblast",
+    "75": "Zabaykalsky Krai",
+    "76": "Yaroslavl Oblast",
+    "77": "Moscow",
+    "78": "St. Petersburg",
+    "79": "Jewish Autonomous Oblast",
+    "80": "Zabaykalsky Krai",
+    "82": "Crimea",
+    "83": "Nenets AO",
+    "84": "Taymyr AO",
+    "85": "Ust-Orda Buryat AO",
+    "86": "Khanty-Mansiysk AO (Yugra)",
+    "87": "Chukotka AO",
+    "88": "Evenk AO",
+    "89": "Yamalo-Nenets AO",
+    "92": "Sevastopol",
+    "94": "Baikonur"
   };
 
   const GLOBAL_TG_MAP = {
-    "91": { en: "Worldwide", ru: "Весь мир", uk: "Весь світ", de: "Weltweit", es: "Mundial", fr: "Monde entier", it: "Mondiale" },
-    "92": { en: "Europe", ru: "Европа", uk: "Європа", de: "Europa", es: "Europa", fr: "Europe", it: "Europa" },
-    "93": { en: "North America", ru: "Северная Америка", uk: "Північна Америка", de: "Nordamerika", es: "Norteamérica", fr: "Amérique du Nord", it: "Nord America" },
-    "94": { en: "South America", ru: "Южная Америка", uk: "Південна Америка", de: "Südamerika", es: "Sudamérica", fr: "Amérique du Sud", it: "Sud America" },
-    "95": { en: "Asia", ru: "Азия", uk: "Азія", de: "Asien", es: "Asia", fr: "Asie", it: "Asia" },
-    "96": { en: "Oceania", ru: "Океания", uk: "Океанія", de: "Ozeanien", es: "Oceanía", fr: "Océanie", it: "Oceania" },
-    "97": { en: "Africa", ru: "Африка", uk: "Африка", de: "Afrika", es: "África", fr: "Afrique", it: "Africa" },
-    "113": { en: "English WW", ru: "English WW", uk: "English WW", de: "English WW", es: "English WW", fr: "English WW", it: "English WW" },
-    "98": { en: "Radio Test", ru: "Radio Test (Тестовая)", uk: "Radio Test (Тестова)", de: "Funktest (Radio Test)", es: "Prueba de radio", fr: "Test radio", it: "Test radio" },
-    "250": { en: "Russia (General / CIS)", ru: "Россия (Общий / CIS)", uk: "Росія (Загальний / CIS)", de: "Russland (Allgemein / GUS)", es: "Rusia (General / CEI)", fr: "Russie (Général / CEI)", it: "Russia (Generale / CSI)" },
-    "2501": { en: "Russia 1 (National)", ru: "Россия 1 (National)", uk: "Росія 1 (National)", de: "Russland 1 (National)", es: "Rusia 1 (Nacional)", fr: "Russie 1 (National)", it: "Russia 1 (Nazionale)" },
-    "2502": { en: "Moscow & Moscow Region", ru: "Москва и Московская обл.", uk: "Москва та Московська обл.", de: "Moskau & Gebiet Moskau", es: "Moscú y Región de Moscú", fr: "Moscou et Région de Moscou", it: "Mosca e Regione di Mosca" },
-    "2503": { en: "St. Petersburg & NWFO", ru: "Санкт-Петербург и СЗФО", uk: "Санкт-Петербург та ПЗФО", de: "St. Petersburg & NWFO", es: "San Petersburgo y NWFO", fr: "Saint-Pétersbourg et NWFO", it: "San Pietroburgo e NWFO" },
-    "2504": { en: "Central Federal District (RU)", ru: "Центральный ФО", uk: "Центральний ФО", de: "Zentraler Föderationskreis (RU)", es: "Distrito Federal Central (RU)", fr: "District fédéral central (RU)", it: "Circondario federale centrale (RU)" },
-    "2505": { en: "Southern & Caucasian FD (RU)", ru: "Южный & Кавказский ФО", uk: "Південний та Кавказький ФО", de: "Südlicher & Kaukasischer FK (RU)", es: "Distrito Federal Sur y Cáucaso (RU)", fr: "District fédéral du Sud et Caucase (RU)", it: "Circondario federale meridionale (RU)" },
-    "2506": { en: "Volga Federal District (RU)", ru: "Приволжский ФО", uk: "Приволзький ФО", de: "Föderationskreis Wolga (RU)", es: "Distrito Federal del Volga (RU)", fr: "District fédéral de la Volga (RU)", it: "Circondario federale del Volga (RU)" },
-    "2507": { en: "Ural Federal District (RU)", ru: "Уральский ФО", uk: "Уральський ФО", de: "Föderationskreis Ural (RU)", es: "Distrito Federal de los Urales (RU)", fr: "District fédéral de l'Oural (RU)", it: "Circondario federale degli Urali (RU)" },
-    "2508": { en: "Siberian Federal District (RU)", ru: "Сибирский ФО", uk: "Сибірський ФО", de: "Föderationskreis Sibirien (RU)", es: "Distrito Federal de Siberia (RU)", fr: "District fédéral de Sibérie (RU)", it: "Circondario federale siberiano (RU)" },
-    "2509": { en: "Far Eastern Federal District (RU)", ru: "Дальневосточный ФО", uk: "Далекосхідний ФО", de: "Fernöstlicher Föderationskreis (RU)", es: "Distrito Federal del Lejano Oriente (RU)", fr: "District fédéral extrême-oriental (RU)", it: "Circondario federale dell'Estremo Oriente (RU)" },
-    "9990": { en: "Parrot (Echo)", ru: "Parrot (Эхо-тест)", uk: "Parrot (Ехо-тест)", de: "Parrot (Echo-Test)", es: "Parrot (Eco)", fr: "Parrot (Écho)", it: "Parrot (Echo)" },
-    "4000": { en: "Unlink", ru: "Отключение (Unlink)", uk: "Відключення (Unlink)", de: "Trennen (Unlink)", es: "Desconectar (Unlink)", fr: "Déconnexion (Unlink)", it: "Disconnetti (Unlink)" }
+    "91": { en: "Worldwide", ru: "Весь мир", uk: "Весь світ", de: "Weltweit", es: "Mundial", fr: "Monde entier", it: "Mondiale", nl: "Wereldwijd" },
+    "92": { en: "Europe", ru: "Европа", uk: "Європа", de: "Europa", es: "Europa", fr: "Europe", it: "Europa", nl: "Europa" },
+    "93": { en: "North America", ru: "Северная Америка", uk: "Північна Америка", de: "Nordamerika", es: "Norteamérica", fr: "Amérique du Nord", it: "Nord America", nl: "Noord-Amerika" },
+    "94": { en: "South America", ru: "Южная Америка", uk: "Південна Америка", de: "Südamerika", es: "Sudamérica", fr: "Amérique du Sud", it: "Sud America", nl: "Zuid-Amerika" },
+    "95": { en: "Asia", ru: "Азия", uk: "Азія", de: "Asien", es: "Asia", fr: "Asie", it: "Asia", nl: "Azië" },
+    "96": { en: "Oceania", ru: "Океания", uk: "Океанія", de: "Ozeanien", es: "Oceanía", fr: "Océanie", it: "Oceania", nl: "Oceanië" },
+    "97": { en: "Africa", ru: "Африка", uk: "Африка", de: "Afrika", es: "África", fr: "Afrique", it: "Africa", nl: "Afrika" },
+    "113": { en: "English WW", ru: "English WW", uk: "English WW", de: "English WW", es: "English WW", fr: "English WW", it: "English WW", nl: "English WW" },
+    "98": { en: "Radio Test", ru: "Radio Test (Тестовая)", uk: "Radio Test (Тестова)", de: "Funktest (Radio Test)", es: "Prueba de radio", fr: "Test radio", it: "Test radio", nl: "Radiotest" },
+    "250": { en: "Russia (General / CIS)", ru: "Россия (Общий / CIS)", uk: "Росія (Загальний / CIS)", de: "Russland (Allgemein / GUS)", es: "Rusia (General / CEI)", fr: "Russie (Général / CEI)", it: "Russia (Generale / CSI)", nl: "Rusland (Algemeen / GOS)" },
+    "2501": { en: "Russia 1 (National)", ru: "Россия 1 (National)", uk: "Росія 1 (National)", de: "Russland 1 (National)", es: "Rusia 1 (Nacional)", fr: "Russie 1 (National)", it: "Russia 1 (Nazionale)", nl: "Rusland 1 (Nationaal)" },
+    "2502": { en: "Moscow & Moscow Region", ru: "Москва и Московская обл.", uk: "Москва та Московська обл.", de: "Moskau & Gebiet Moskau", es: "Moscú y Región de Moscú", fr: "Moscou et Région de Moscou", it: "Mosca e Regione di Mosca", nl: "Moskou en regio Moskou" },
+    "2503": { en: "St. Petersburg & NWFO", ru: "Санкт-Петербург и СЗФО", uk: "Санкт-Петербург та ПЗФО", de: "St. Petersburg & NWFO", es: "San Petersburgo y NWFO", fr: "Saint-Pétersbourg et NWFO", it: "San Pietroburgo e NWFO", nl: "Sint-Petersburg en NWFO" },
+    "2504": { en: "Central Federal District (RU)", ru: "Центральный ФО", uk: "Центральний ФО", de: "Zentraler Föderationskreis (RU)", es: "Distrito Federal Central (RU)", fr: "District fédéral central (RU)", it: "Circondario federale centrale (RU)", nl: "Centraal Federaal District (RU)" },
+    "2505": { en: "Southern & Caucasian FD (RU)", ru: "Южный & Кавказский ФО", uk: "Південний та Кавказький ФО", de: "Südlicher & Kaukasischer FK (RU)", es: "Distrito Federal Sur y Cáucaso (RU)", fr: "District fédéral du Sud et Caucase (RU)", it: "Circondario federale meridionale (RU)", nl: "Zuidelijk & Kaukasisch FD (RU)" },
+    "2506": { en: "Volga Federal District (RU)", ru: "Приволжский ФО", uk: "Приволзький ФО", de: "Föderationskreis Wolga (RU)", es: "Distrito Federal del Volga (RU)", fr: "District fédéral de la Volga (RU)", it: "Circondario federale del Volga (RU)", nl: "Federaal District Wolga (RU)" },
+    "2507": { en: "Ural Federal District (RU)", ru: "Уральский ФО", uk: "Уральський ФО", de: "Föderationskreis Ural (RU)", es: "Distrito Federal de los Urales (RU)", fr: "District fédéral de l'Oural (RU)", it: "Circondario federale degli Urali (RU)", nl: "Federaal District Oeral (RU)" },
+    "2508": { en: "Siberian Federal District (RU)", ru: "Сибирский ФО", uk: "Сибірський ФО", de: "Föderationskreis Sibirien (RU)", es: "Distrito Federal de Siberia (RU)", fr: "District fédéral de Sibérie (RU)", it: "Circondario federale siberiano (RU)", nl: "Federaal District Siberië (RU)" },
+    "2509": { en: "Far Eastern Federal District (RU)", ru: "Дальневосточный ФО", uk: "Далекосхідний ФО", de: "Fernöstlicher Föderationskreis (RU)", es: "Distrito Federal del Lejano Oriente (RU)", fr: "District fédéral extrême-oriental (RU)", it: "Circondario federale dell'Estremo Oriente (RU)", nl: "Federaal District Verre Oosten (RU)" },
+    "9990": { en: "Parrot (Echo)", ru: "Parrot (Эхо-тест)", uk: "Parrot (Ехо-тест)", de: "Parrot (Echo-Test)", es: "Parrot (Eco)", fr: "Parrot (Écho)", it: "Parrot (Echo)", nl: "Parrot (Echo)" },
+    "4000": { en: "Unlink", ru: "Отключение (Unlink)", uk: "Відключення (Unlink)", de: "Trennen (Unlink)", es: "Desconectar (Unlink)", fr: "Déconnexion (Unlink)", it: "Disconnetti (Unlink)", nl: "Loskoppelen (Unlink)" }
   };
 
+  function resolveRussiaRegionName(code, lang = null) {
+    const fb = BM_RUSSIA_REGIONS[code] || "";
+    if (!fb) return "";
+    if (typeof window !== "undefined" && typeof window.t === "function") {
+      const key = `tg_regions.${code}`;
+      const val = window.t(key, {}, fb);
+      if (val && val !== key) return val;
+    }
+    return fb;
+  }
+
+  function resolveCommonTgName(sTg, lang = null) {
+    const fb = BM_COMMON_TG_MAP[sTg] || "";
+    if (!fb) return "";
+    if (typeof window !== "undefined" && typeof window.t === "function") {
+      const key = `tg_common.${sTg}`;
+      const val = window.t(key, {}, fb);
+      if (val && val !== key) return val;
+    }
+    return fb;
+  }
+
   function getActiveLang() {
-    return (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || 
-           (typeof localStorage !== "undefined" && localStorage.getItem("proxdmr_language")) || 
+    return (typeof window !== "undefined" && window.I18N && (typeof window.I18N.getLanguage === "function" ? window.I18N.getLanguage() : (window.I18N.currentLanguage || window.I18N.currentLang))) ||
+           (typeof localStorage !== "undefined" && localStorage.getItem("proxdmr_language")) ||
            "ru";
   }
 
@@ -754,12 +804,56 @@
     "kyiv": "Киев"
   };
 
-  export function formatCallerLocation(countryInfo, city = "", lang = null) {
+  const CITY_CANONICAL_SLUGS = {
+    "st petersburg": "saint_petersburg",
+    "st. petersburg": "saint_petersburg",
+    "saint-petersburg": "saint_petersburg",
+    "spb": "saint_petersburg",
+    "ekaterinburg": "yekaterinburg",
+    "rostov-on-don": "rostov_on_don",
+    "rostov on don": "rostov_on_don",
+    "rostov": "rostov_on_don",
+    "arhangelsk": "arkhangelsk",
+    "orel": "oryol",
+    "viluchinsk": "vilyuchinsk",
+    "petropavlovsk-kamchatsky": "petropavlovsk_kamchatsky",
+    "kiev": "kyiv",
+    "chisinau": "chisinau"
+  };
+
+  const CYR_CITY_TO_SLUG = (() => {
+    const map = {};
+    for (const [k, ruVal] of Object.entries(CITY_LOCALIZATIONS)) {
+      const slug = CITY_CANONICAL_SLUGS[k] || k.replace(/[\s\-]+/g, "_");
+      const ruLower = String(ruVal || "").toLowerCase().trim();
+      if (ruLower && !map[ruLower]) map[ruLower] = slug;
+    }
+    return map;
+  })();
+
+  export function resolveCityName(city, lang = null) {
+    const raw = String(city || "").trim();
+    if (!raw) return "";
     const curLang = lang || getActiveLang();
     const isCyr = (curLang === "ru" || curLang === "uk");
+    const lower = raw.toLowerCase();
+    const slug = CITY_CANONICAL_SLUGS[lower] || (CITY_LOCALIZATIONS[lower] ? lower.replace(/[\s\-]+/g, "_") : null) || CYR_CITY_TO_SLUG[lower] || null;
+    if (slug && typeof window !== "undefined" && typeof window.t === "function") {
+      const key = `cities.${slug}`;
+      const val = window.t(key, {}, "");
+      if (val && val !== key) return val;
+    }
+    if (isCyr && CITY_LOCALIZATIONS[lower]) {
+      return CITY_LOCALIZATIONS[lower];
+    }
+    return raw;
+  }
+
+  export function formatCallerLocation(countryInfo, city = "", lang = null) {
+    const curLang = lang || getActiveLang();
     let cName = "";
     if (countryInfo && typeof countryInfo === "object") {
-      cName = isCyr ? (countryInfo.name || countryInfo.name_en) : (countryInfo.name_en || countryInfo.name);
+      cName = resolveCountryDisplayName(countryInfo, curLang);
     } else if (typeof countryInfo === "string") {
       cName = countryInfo.trim();
     }
@@ -768,8 +862,8 @@
     if (cCityLower === "none" || cCityLower === "unknown" || cCityLower === "n/a" || cCityLower.includes("ask admin")) {
       cCity = "";
     }
-    if (cCity && isCyr && CITY_LOCALIZATIONS[cCityLower]) {
-      cCity = CITY_LOCALIZATIONS[cCityLower];
+    if (cCity) {
+      cCity = resolveCityName(cCity, curLang);
     }
     if (cName && cCity) {
       if (cCity.toLowerCase() === cName.toLowerCase()) {
@@ -781,64 +875,66 @@
   }
 
   const BM_COMMON_TG_MAP = {
-    250: "Россия (Общий / CIS)",
-    2501: "Россия 1 (National)",
-    2502: "Москва и Московская обл.",
-    2503: "Санкт-Петербург и СЗФО",
-    2504: "Центральный ФО",
-    2505: "Южный & Кавказский ФО",
-    2506: "Приволжский ФО",
-    2507: "Уральский ФО",
-    2508: "Сибирский ФО",
-    2509: "Дальневосточный ФО",
-    25011: "Калининградская обл.",
-    25020: "Конференция РОСХАМ",
-    25033: "Ленинградская обл.",
-    250002: "Россия / Уфа",
-    250016: "Россия / Нижнекамск",
-    250023: "Россия / Краснодар",
-    250024: "Россия / Красноярск",
-    250025: "Россия / Владивосток",
-    250034: "Россия / Волгоград",
-    250036: "Россия / Воронеж",
-    250039: "Россия / Калининград",
-    250052: "Россия / Нижний Новгород",
-    250054: "Россия / Новосибирск",
-    250055: "Россия / Омск",
-    250059: "Россия / Пермь",
-    250061: "Россия / Ростов-на-Дону",
-    250063: "Россия / Самара",
-    250064: "Россия / Саратов",
-    250066: "Россия / Екатеринбург",
-    250070: "Россия / Томск",
-    250072: "Россия / Тюмень",
-    250074: "Россия / Челябинск",
-    250082: "Россия / Крым",
-    250351: "Россия / Челябинск",
-    250601: "Волгоградская обл.",
-    250602: "Ростовская обл.",
-    250603: "Армения / Репитер",
-    250608: "Россия / Сочи",
-    250621: "Россия / Москва",
-    250641: "Краснодарский край",
-    250647: "Ставропольский край",
-    250707: "Россия / Севастополь",
-    250777: "Россия / Калининград",
-    250812: "Россия / Санкт-Петербург",
-    250907: "Приморский край",
+    250: "Russia (General / CIS)",
+    2501: "Russia 1 (National)",
+    2502: "Moscow & Moscow Region",
+    2503: "St. Petersburg & NWFD",
+    2504: "Central Federal District",
+    2505: "Southern & Caucasus FD",
+    2506: "Volga Federal District",
+    2507: "Ural Federal District",
+    2508: "Siberian Federal District",
+    2509: "Far Eastern Federal District",
+    25011: "Kaliningrad Oblast",
+    25020: "ROSHAM Conference",
+    25033: "Leningrad Oblast",
+    250002: "Russia / Ufa",
+    250016: "Russia / Nizhnekamsk",
+    250023: "Russia / Krasnodar",
+    250024: "Russia / Krasnoyarsk",
+    250025: "Russia / Vladivostok",
+    250034: "Russia / Volgograd",
+    250036: "Russia / Voronezh",
+    250039: "Russia / Kaliningrad",
+    250052: "Russia / Nizhny Novgorod",
+    250054: "Russia / Novosibirsk",
+    250055: "Russia / Omsk",
+    250059: "Russia / Perm",
+    250061: "Russia / Rostov-on-Don",
+    250063: "Russia / Samara",
+    250064: "Russia / Saratov",
+    250066: "Russia / Yekaterinburg",
+    250070: "Russia / Tomsk",
+    250072: "Russia / Tyumen",
+    250074: "Russia / Chelyabinsk",
+    250082: "Russia / Crimea",
+    250351: "Russia / Chelyabinsk",
+    250601: "Volgograd Oblast",
+    250602: "Rostov Oblast",
+    250603: "Armenia / Repeater",
+    250608: "Russia / Sochi",
+    250621: "Russia / Moscow",
+    250641: "Krasnodar Krai",
+    250647: "Stavropol Krai",
+    250707: "Russia / Sevastopol",
+    250777: "Russia / Kaliningrad",
+    250812: "Russia / St. Petersburg",
+    250907: "Primorsky Krai",
     91: "Worldwide",
     92: "Europe",
     113: "English WW",
-    262: "Германия",
+    262: "Germany",
     310: "TAC 310",
-    9990: "Parrot (Эхо-тест)",
-    4000: "Отключение (Unlink)"
+    9990: "Parrot (Echo Test)",
+    4000: "Disconnect (Unlink)"
   };
 
   export function getHotspotNetworkType(hidOrCard = null) {
     if (typeof window === "undefined") return "bm";
     let hid = null;
+    let cardEl = null;
     if (hidOrCard && typeof hidOrCard === "object" && hidOrCard.dataset) {
+      cardEl = hidOrCard;
       hid = hidOrCard.dataset.hotspotId;
     } else if (typeof hidOrCard === "string" && hidOrCard.trim()) {
       hid = hidOrCard.trim();
@@ -850,7 +946,32 @@
     const resolved = resolveFn(hid);
     const list = Array.isArray(window.currentHotspots) ? window.currentHotspots : [];
     const hs = list.find(h => h && (h.id === resolved || h.id === hid)) || (resolved === "default" ? list[0] : null);
-    return ((hs && hs.network_type) || "bm").toLowerCase();
+    if (hs && hs.network_type) {
+      return String(hs.network_type).toLowerCase();
+    }
+    if (!cardEl && typeof document !== "undefined") {
+      cardEl = document.querySelector(`.radio-container[data-hotspot-id="${resolved}"]`)
+        || (resolved !== hid ? document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`) : null);
+    }
+    if (cardEl && cardEl.classList) {
+      if (cardEl.classList.contains("card-net-ysf")) return "ysf";
+      if (cardEl.classList.contains("card-net-allstar")) return "allstar";
+      if (cardEl.classList.contains("card-net-xlx")) return "xlx";
+      if (cardEl.classList.contains("card-net-tgif")) return "tgif";
+      if (cardEl.classList.contains("card-net-freedmr")) return "freedmr";
+      if (cardEl.classList.contains("card-net-dmrplus")) return "dmrplus";
+      if (cardEl.classList.contains("card-net-adn")) return "adn";
+      const dsNet = String((cardEl.dataset && cardEl.dataset.networkType) || "").toLowerCase();
+      if (dsNet && dsNet !== "bm") return dsNet;
+    }
+    try {
+      const cachedNet = localStorage.getItem(`proxdmr_net_type_${resolved}`) || (hid ? localStorage.getItem(`proxdmr_net_type_${hid}`) : "");
+      if (cachedNet) return String(cachedNet).toLowerCase();
+    } catch (_) {}
+    if (cardEl && cardEl.dataset && cardEl.dataset.networkType) {
+      return String(cardEl.dataset.networkType).toLowerCase();
+    }
+    return "bm";
   }
 
   export function getNetworkRawTgName(tg, networkType = null) {
@@ -859,8 +980,8 @@
     const nTg = parseInt(sTg, 10);
     const net = (networkType || getHotspotNetworkType()).toLowerCase();
     if (net === "tgif") {
-      if (nTg === 4000) return "Disconnect (Unlink)";
-      if (nTg === 9990) return "Parrot (Эхо-тест)";
+      if (nTg === 4000) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000_short", {}, "Disconnect (Unlink)") : "Disconnect (Unlink)";
+      if (nTg === 9990) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990", {}, "Parrot (Echo)") : "Parrot (Echo)";
       const tgifMap = (typeof window !== "undefined" && window.TGIF_TG_NAMES) || {};
       if (tgifMap[sTg]) return String(tgifMap[sTg]).trim();
       if (nTg === 31665) return "TGIF The Mothership";
@@ -868,17 +989,41 @@
       return "";
     }
     if (net === "xlx") {
-      if (nTg === 4000) return "Unlink (Отключение)";
-      if (nTg === 9) return "Reflector Call (TS2)";
+      if (nTg === 4000) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000", {}, "Unlink") : "Unlink";
+      if (nTg === 9) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.xlx_reflector_call_ts2", {}, "Reflector Call (TS2)") : "Reflector Call (TS2)";
       if (nTg >= 4001 && nTg <= 4026) {
-        return `Module ${String.fromCharCode(65 + (nTg - 4001))}`;
+        const modLetter = String.fromCharCode(65 + (nTg - 4001));
+        return (typeof window !== "undefined" && window.t) ? window.t("tg_special.xlx_module", { mod: modLetter }, `Module ${modLetter}`) : `Module ${modLetter}`;
       }
       return "";
     }
     if (net === "dmrplus") {
-      if (nTg === 4000) return "Unlink (Отключение)";
-      if (nTg === 9990) return "Parrot (Эхо-тест)";
-      if (nTg >= 4001 && nTg <= 4999) return `Reflector ${nTg}`;
+      if (nTg === 4000) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000", {}, "Unlink") : "Unlink";
+      if (nTg === 9990) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990", {}, "Parrot (Echo)") : "Parrot (Echo)";
+      if (nTg >= 4001 && nTg <= 4999) {
+        return (typeof window !== "undefined" && window.t) ? window.t("tg_special.dmrplus_reflector", { id: nTg }, `Reflector ${nTg}`) : `Reflector ${nTg}`;
+      }
+    }
+    if (net === "adn") {
+      if (nTg === 4000) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000_short", {}, "Disconnect (Unlink)") : "Disconnect (Unlink)";
+      if (nTg === 9990) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990", {}, "Parrot (Echo)") : "Parrot (Echo)";
+      const adnMap = (typeof window !== "undefined" && window.ADN_TG_NAMES) || {};
+      if (adnMap[sTg]) return String(adnMap[sTg]).trim();
+      const fdmrMap = (typeof window !== "undefined" && window.FREEDMR_TG_NAMES) || {};
+      if (fdmrMap[sTg]) return String(fdmrMap[sTg]).trim();
+      const bmMap = (typeof window !== "undefined" && window.TG_NAMES) || {};
+      return bmMap[sTg] ? String(bmMap[sTg]).trim() : "";
+    }
+    if (net === "freedmr") {
+      if (nTg === 4000) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000_short", {}, "Disconnect (Unlink)") : "Disconnect (Unlink)";
+      if (nTg === 9990) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990", {}, "Parrot (Echo)") : "Parrot (Echo)";
+      const fdmrMap = (typeof window !== "undefined" && window.FREEDMR_TG_NAMES) || {};
+      if (fdmrMap[sTg]) return String(fdmrMap[sTg]).trim();
+      const bmMap = (typeof window !== "undefined" && window.TG_NAMES) || {};
+      return bmMap[sTg] ? String(bmMap[sTg]).trim() : "";
+    }
+    if (net === "ysf" || net === "allstar") {
+      return "";
     }
     const bmMap = (typeof window !== "undefined" && window.TG_NAMES) || {};
     return bmMap[sTg] ? String(bmMap[sTg]).trim() : "";
@@ -901,8 +1046,8 @@
 
     // Network-specific handling for TGIF, XLX, DMR+
     if (net === "tgif") {
-      if (sTg === "4000") return isCyr ? "Отключение" : "Disconnect";
-      if (sTg === "9990") return isCyr ? "Эхо-тест" : "Parrot";
+      if (sTg === "4000") return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000_short", {}, "Disconnect") : "Disconnect";
+      if (sTg === "9990") return (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990_short", {}, "Parrot") : "Parrot";
       const tgifMap = (typeof window !== "undefined" && window.TGIF_TG_NAMES) || {};
       const officialTgif = tgifMap[sTg]
         ? String(tgifMap[sTg]).trim()
@@ -920,7 +1065,7 @@
         str = str.replace(prefixRegex, "").trim();
       }
       const lowerTgif = str.toLowerCase();
-      if (!str || lowerTgif === "talkgroup" || lowerTgif === "tg" || lowerTgif === "unknown" || lowerTgif === "неизвестно") {
+      if (!str || lowerTgif === "talkgroup" || lowerTgif === "tg" || lowerTgif === "unknown" || lowerTgif === "неизвестно" || lowerTgif === "невідомо") {
         return "";
       }
       return str;
@@ -928,24 +1073,37 @@
 
     if (net === "xlx") {
       const nTg = parseInt(sTg, 10);
-      if (nTg === 4000) return isCyr ? "Отключение" : "Unlink";
-      if (nTg === 9) return "Reflector Call";
+      if (nTg === 4000) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.4000", {}, "Unlink") : "Unlink";
+      if (nTg === 9) return (typeof window !== "undefined" && window.t) ? window.t("tg_special.xlx_reflector_call", {}, "Reflector Call") : "Reflector Call";
       if (nTg >= 4001 && nTg <= 4026) {
-        return `Module ${String.fromCharCode(65 + (nTg - 4001))}`;
+        const modLetter = String.fromCharCode(65 + (nTg - 4001));
+        return (typeof window !== "undefined" && window.t) ? window.t("tg_special.xlx_module", { mod: modLetter }, `Module ${modLetter}`) : `Module ${modLetter}`;
       }
     }
 
     if (net === "dmrplus") {
       const nTg = parseInt(sTg, 10);
       if (nTg >= 4001 && nTg <= 4999) {
-        return `Reflector ${nTg}`;
+        return (typeof window !== "undefined" && window.t) ? window.t("tg_special.dmrplus_reflector", { id: nTg }, `Reflector ${nTg}`) : `Reflector ${nTg}`;
       }
+    }
+
+    if (net === "ysf") {
+      if (!str || str === sTg || str.toLowerCase() === "unknown" || str.toLowerCase() === "неизвестно" || str.toLowerCase() === "невідомо") {
+        return "";
+      }
+      return stripOuterBrackets(str);
     }
 
     // 1. Resolve well-known worldwide / system TalkGroups
     if (sTg && GLOBAL_TG_MAP[sTg]) {
-      const gName = GLOBAL_TG_MAP[sTg][curLang] || GLOBAL_TG_MAP[sTg].en || GLOBAL_TG_MAP[sTg].ru || "";
-      return stripOuterBrackets(gName);
+      const fbGlobal = GLOBAL_TG_MAP[sTg][curLang] || GLOBAL_TG_MAP[sTg].en || GLOBAL_TG_MAP[sTg].ru || "";
+      if (typeof window !== "undefined" && typeof window.t === "function") {
+        const gKey = `tg_special.${sTg}`;
+        const gT = window.t(gKey, {}, fbGlobal);
+        if (gT && gT !== gKey) return stripOuterBrackets(gT);
+      }
+      return stripOuterBrackets(fbGlobal);
     }
 
     // 2. Resolve 3-digit Country TalkGroups (e.g. 255 -> Ukraine, 401 -> Kazakhstan, 283 -> Armenia, 262 -> Germany, etc.)
@@ -964,10 +1122,10 @@
     if (sTg && sTg.length === 6 && sTg.startsWith("2500")) {
       const code = sTg.slice(4);
       if (BM_RUSSIA_REGIONS[code]) {
-        knownRegion = BM_RUSSIA_REGIONS[code];
+        knownRegion = resolveRussiaRegionName(code, curLang);
       }
     } else if (sTg && BM_COMMON_TG_MAP[sTg]) {
-      knownRegion = BM_COMMON_TG_MAP[sTg];
+      knownRegion = resolveCommonTgName(sTg, curLang);
     } else if (sTg && (window.TG_NAMES || {})[sTg]) {
       const predefined = String((window.TG_NAMES || {})[sTg]).trim();
       if (predefined && !predefined.toLowerCase().includes("регион") && predefined !== `TG ${sTg}`) {
@@ -1042,11 +1200,8 @@
       matchCountrySlash = knownRegion.match(countrySlashRegex);
     }
     if (matchCountrySlash) {
-      let regionPart = matchCountrySlash[1].trim();
-      if (isCyr && CITY_LOCALIZATIONS[regionPart.toLowerCase()]) {
-        regionPart = CITY_LOCALIZATIONS[regionPart.toLowerCase()];
-      }
-      const cLabel = isCyr ? "Россия" : "Russia";
+      const regionPart = resolveCityName(matchCountrySlash[1].trim(), curLang);
+      const cLabel = getLocalizedCountryName("RU", "Russia", curLang);
       return `${cLabel}, ${regionPart}`;
     }
 
@@ -1075,16 +1230,13 @@
     // Re-check countrySlashRegex in case knownRegion was substituted
     const mRegionSlash = str.match(countrySlashRegex);
     if (mRegionSlash) {
-      let rPart = mRegionSlash[1].trim();
-      if (isCyr && CITY_LOCALIZATIONS[rPart.toLowerCase()]) {
-        rPart = CITY_LOCALIZATIONS[rPart.toLowerCase()];
-      }
-      const cLabel = isCyr ? "Россия" : "Russia";
+      const rPart = resolveCityName(mRegionSlash[1].trim(), curLang);
+      const cLabel = getLocalizedCountryName("RU", isCyr ? "Россия" : "Russia", curLang);
       return `${cLabel}, ${rPart}`;
     }
 
     // Must contain at least one meaningful letter
-    const letters = str.replace(/[^a-zA-Zа-яА-ЯёЁ]/g, "");
+    const letters = str.replace(/[^\p{L}]/gu, "");
     if (letters.length === 0) {
       return knownRegion || "";
     }
@@ -1094,12 +1246,9 @@
     // If str does not contain country prefix yet, prepend country if known
     const cInfo = getCountryInfo(sTg);
     if (cInfo && cInfo.name && cInfo.name !== "Global") {
-      const cName = isCyr ? (cInfo.name || cInfo.name_en) : (cInfo.name_en || cInfo.name);
+      const cName = resolveCountryDisplayName(cInfo, curLang);
       if (cName && !str.toLowerCase().includes(cName.toLowerCase())) {
-        let cityPart = str;
-        if (isCyr && CITY_LOCALIZATIONS[cityPart.toLowerCase()]) {
-          cityPart = CITY_LOCALIZATIONS[cityPart.toLowerCase()];
-        }
+        const cityPart = resolveCityName(str, curLang);
         return `${cName}, ${cityPart}`;
       }
     }
@@ -1193,7 +1342,7 @@
       cleanDesc = cleanDesc.slice(1, -1).trim();
     }
     const descHtml = cleanDesc ? ` <span class="vfo-tg-desc ts-tg-desc">(${cleanDesc})</span>` : "";
-    const pfx = prefix ? `${prefix} ` : "";
+    const pfx = prefix ? (prefix === "#" ? "#" : `${prefix} `) : "";
     const isId = prefix && (prefix.toUpperCase().includes("ID") || prefix.toUpperCase().includes("CALL") || prefix.toUpperCase().includes("UNIT"));
     const typeClass = isId ? "is-id" : "is-tg";
     const valHtml = isId ? `<span class="dmr-id-text">${tg}</span>` : tg;
@@ -1303,6 +1452,8 @@
     window.getNetworkRawTgName = getNetworkRawTgName;
     window.getCleanTgDesc = getCleanTgDesc;
     window.renderTgTextHtml = renderTgTextHtml;
+    window.resolveCountryDisplayName = resolveCountryDisplayName;
+    window.resolveCityName = resolveCityName;
   }
 
 export function safeEscapeHtml(str) {
@@ -1384,7 +1535,8 @@ export function attachTgLivePreview(inputEl, opts = {}) {
       const nm = (usr.name || "").trim();
       const loc = [usr.city, usr.country].filter(Boolean).join(", ");
       const details = [nm, loc].filter(Boolean).join(", ");
-      return `<span class="quick-tg-pop-sub">↳ Напр.: <b>ID ${safeEscapeHtml(String(uid))}</b> — <strong>${safeEscapeHtml(cs)}</strong>${details ? ` (${safeEscapeHtml(details)})` : ""}</span>`;
+      const egPfx = (typeof window !== "undefined" && typeof window.t === "function") ? window.t("tgtx.example_prefix", {}, "↳ Напр.:") : "↳ Напр.:";
+      return `<span class="quick-tg-pop-sub">${safeEscapeHtml(egPfx)} <b>ID ${safeEscapeHtml(String(uid))}</b> — <strong>${safeEscapeHtml(cs)}</strong>${details ? ` (${safeEscapeHtml(details)})` : ""}</span>`;
     };
 
     if (isPrivate) {
@@ -1438,7 +1590,8 @@ export function attachTgLivePreview(inputEl, opts = {}) {
         ? getCountryInfo(num, u?.callsign || "", u?.country || "")
         : { name: "Global", name_en: "", flag: "🌐" };
       const flagHtml = getFlagBadgeHtml(cInfo, false);
-      const cLabel = (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "DMR ID";
+      const cResolved = (cInfo && cInfo.name && cInfo.name !== "Global") ? resolveCountryDisplayName(cInfo) : "";
+      const cLabel = cResolved || "DMR ID";
 
       lastRenderedInfo = {
         num,
@@ -1446,7 +1599,7 @@ export function attachTgLivePreview(inputEl, opts = {}) {
         isKnown,
         user: u || null,
         cleanDesc: u ? [u.callsign, u.name].filter(Boolean).join(" ").trim() : "",
-        country: (cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : ""
+        country: cResolved
       };
 
       const hintText = typeof opts.actionHint === "function"
@@ -1473,7 +1626,8 @@ export function attachTgLivePreview(inputEl, opts = {}) {
     const isUnlink = (num === 4000);
     const cardEl = inputEl && inputEl.closest ? inputEl.closest(".radio-container") : null;
     const netType = getHotspotNetworkType(cardEl || opts.hotspotId);
-    const rawName = getNetworkRawTgName(num, netType) || (isParrot ? "Parrot / Echo (Эхо-тест)" : "");
+    const parrotFullFallback = (typeof window !== "undefined" && window.t) ? window.t("tg_special.parrot_echo_full", {}, "Parrot / Echo (Эхо-тест)") : "Parrot / Echo (Эхо-тест)";
+    const rawName = getNetworkRawTgName(num, netType) || (isParrot ? parrotFullFallback : "");
     let cleanDesc = getCleanTgDesc(num, rawName, null, netType);
     const isNonMccNet = (netType === "tgif" || netType === "xlx");
     const tgCacheKey = `tg_${netType}_${num}`;
@@ -1518,6 +1672,12 @@ export function attachTgLivePreview(inputEl, opts = {}) {
               if (netType === "tgif") {
                 if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
                 window.TGIF_TG_NAMES[num] = exact.name;
+              } else if (netType === "freedmr") {
+                if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+                window.FREEDMR_TG_NAMES[num] = exact.name;
+              } else if (netType === "adn") {
+                if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+                window.ADN_TG_NAMES[num] = exact.name;
               } else {
                 if (!window.TG_NAMES) window.TG_NAMES = {};
                 window.TG_NAMES[num] = exact.name;
@@ -1551,7 +1711,9 @@ export function attachTgLivePreview(inputEl, opts = {}) {
       ? { name: netType.toUpperCase(), name_en: netType.toUpperCase(), flag: "🌐" }
       : (canResolveMccCountry ? getCountryInfo(num, "", "") : { name: "Global", name_en: "", flag: "🌐" });
     const flagHtml = getFlagBadgeHtml(cInfo, isParrot);
-    const cLabel = isParrot ? "Эхо-тест" : (isNonMccNet ? netType.toUpperCase() : ((cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : "TalkGroup"));
+    const cResolved = (!isNonMccNet && cInfo && cInfo.name && cInfo.name !== "Global") ? resolveCountryDisplayName(cInfo) : "";
+    const parrotShortLbl = (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990_short", {}, "Эхо-тест") : "Эхо-тест";
+    const cLabel = isParrot ? parrotShortLbl : (isNonMccNet ? netType.toUpperCase() : (cResolved || "TalkGroup"));
 
     lastRenderedInfo = {
       num,
@@ -1559,7 +1721,7 @@ export function attachTgLivePreview(inputEl, opts = {}) {
       isKnown,
       user: null,
       cleanDesc: cleanDesc || "",
-      country: (!isNonMccNet && cInfo && cInfo.name && cInfo.name !== "Global") ? cInfo.name : ""
+      country: cResolved
     };
 
     const hintText = typeof opts.actionHint === "function"

@@ -86,6 +86,15 @@ class SlotAudioState {
     this.duckGain = 1.0;
     this.targetDuckGain = 1.0;
 
+    // Per-slot RX AGC state (stream-synchronous, isolated per hotspot & timeslot)
+    this.agcEnvelope = 0.0;
+    this.agcInitialized = false;
+    this.agcIsSpeech = false;
+    this.agcLastSpeechTime = 0.0;
+    this.agcStreamTime = 0.0;
+    this.agcCurrentGain = 1.0;
+    this.agcLastAppliedGain = 1.0;
+
     // Resampling scratchpad (8000 Hz incoming stream)
     this.ratio = 8000.0 / sampleRate;
     this.tempChunk = new Float32Array(128);
@@ -99,32 +108,138 @@ class SlotAudioState {
     this.fadeStep = 1.0 / (sampleRate * 0.003); // 3ms micro-ramp
   }
 
-  feedPcm16(int16Array, preGainLinear, jitterSec) {
+  _resetAgcState() {
+    this.agcEnvelope = 0.0;
+    this.agcInitialized = false;
+    this.agcIsSpeech = false;
+    this.agcLastSpeechTime = 0.0;
+    this.agcStreamTime = 0.0;
+    this.agcCurrentGain = 1.0;
+    this.agcLastAppliedGain = 1.0;
+  }
+
+  feedPcm16(int16Array, preGainLinear, jitterSec, agcConfig = null) {
     const numSamples = int16Array.length;
     if (numSamples === 0) return;
 
     this.txEnded = false; // New packet arrived, transmission ongoing
-    // Reset resampler state ONLY if stream was completely idle (>600ms) and ring is empty
+    // Reset resampler & AGC state ONLY if stream was completely idle (>600ms) and ring is empty
     if (this.samplesSinceLastFeed > (this.sampleRate * 0.600) && this.ring.available === 0) {
       this.resampleBuf = null;
       this.resamplePos = 0.0;
       this.isRebuffering = false;
       this.chebyS1.fill(0);
       this.chebyS2.fill(0);
+      this._resetAgcState();
     }
     this.samplesSinceLastFeed = 0;
 
-    // 1. Digital Pre-Gain & Soft Limiter
+    // 1. Convert Int16 PCM to float [-1..+1], apply real-time RX AGC & Base Gain + Soft-Knee Limiter
     const inSamples = new Float32Array(numSamples);
+    let sumSq = 0.0;
+    let chunkPeak = 0.0;
     for (let i = 0; i < numSamples; i++) {
-      let s = (int16Array[i] / 32768.0) * preGainLinear;
-      if (s > 0.90) {
-        s = 0.90 + 0.10 * Math.tanh((s - 0.90) / 0.10);
-      } else if (s < -0.90) {
-        s = -0.90 + 0.10 * Math.tanh((s + 0.90) / 0.10);
+      const s = (int16Array[i] / 32768.0) * preGainLinear;
+      inSamples[i] = s;
+      sumSq += s * s;
+      const absS = s < 0.0 ? -s : s;
+      if (absS > chunkPeak) chunkPeak = absS;
+    }
+
+    const agcEnabled = agcConfig ? Boolean(agcConfig.enabled) : true;
+    const depthDb = agcConfig ? Math.max(6.0, Math.min(30.0, Number(agcConfig.depthDb) || 18.0)) : 18.0;
+    const gainRaw = agcConfig ? Math.max(10.0, Math.min(120.0, Number(agcConfig.gainRaw) || 35.0)) : 35.0;
+    const gainMult = gainRaw / 10.0; // slider 10..120 -> 1.0x..12.0x
+
+    const chunkDur = Math.max(0.005, Math.min(0.200, numSamples / 8000.0));
+    this.agcStreamTime += chunkDur;
+    const agcNow = this.agcStreamTime;
+
+    let targetGain = 1.0;
+    if (!agcEnabled) {
+      // Manual Base Gain mode when AGC is toggled OFF (1.0x..12.0x -> 0.4x..4.0x)
+      targetGain = Math.min(4.0, Math.max(0.4, gainMult / 2.5));
+      if (chunkPeak > 0.001 && (chunkPeak * targetGain) > 1.05) {
+        targetGain = Math.max(0.4, Math.min(targetGain, 1.05 / chunkPeak));
+      }
+      this.agcCurrentGain = targetGain;
+    } else {
+      const chunkRms = Math.sqrt(sumSq / numSamples);
+      // Schmitt trigger speech detector (-44.4 dBFS onset, -48.4 dBFS release)
+      if (!this.agcIsSpeech) {
+        if (chunkRms >= 0.006) this.agcIsSpeech = true;
+      } else if (chunkRms < 0.0038) {
+        this.agcIsSpeech = false;
+      }
+
+      const maxGainDb = depthDb;
+      const minGainDb = -Math.min(16.0, Math.round(depthDb * 0.8));
+      const boostRatio = Math.min(1.0, 0.55 + (depthDb / 48.0));
+      const attenRatio = 0.85;
+      // 3.5x -> ~0.228 RMS (-12.8 dBFS); 4.5x -> ~0.292 RMS (-10.7 dBFS)
+      const targetRms = Math.min(0.42, Math.max(0.08, 0.065 * gainMult));
+
+      if (this.agcIsSpeech) {
+        this.agcLastSpeechTime = agcNow;
+        const attAlpha = Math.exp(-chunkDur / 0.045);
+        const decAlpha = Math.exp(-chunkDur / 0.500);
+        if (!this.agcInitialized) {
+          this.agcEnvelope = chunkRms;
+          this.agcInitialized = true;
+        } else if (chunkRms > this.agcEnvelope) {
+          this.agcEnvelope = attAlpha * this.agcEnvelope + (1.0 - attAlpha) * chunkRms;
+        } else {
+          this.agcEnvelope = decAlpha * this.agcEnvelope + (1.0 - decAlpha) * chunkRms;
+        }
+
+        const inDb = 20.0 * Math.log10(Math.max(0.001, this.agcEnvelope));
+        const targetDb = 20.0 * Math.log10(targetRms);
+        const diffDb = targetDb - inDb;
+        let gainDb = (diffDb > 0)
+          ? Math.min(maxGainDb, diffDb * boostRatio)
+          : Math.max(minGainDb, diffDb * attenRatio);
+        if (gainMult > 6.0) {
+          gainDb += 20.0 * Math.log10(1.0 + (gainMult - 6.0) * 0.12);
+        }
+        targetGain = Math.pow(10.0, gainDb / 20.0);
+
+        // Peak-ceiling guard prevents clipping high-crest speech transients
+        if (chunkPeak > 0.001 && (chunkPeak * targetGain) > 0.96) {
+          const minLin = Math.pow(10.0, minGainDb / 20.0);
+          targetGain = Math.max(minLin, Math.min(targetGain, 0.96 / chunkPeak));
+        }
+        this.agcCurrentGain = targetGain;
+      } else {
+        const elapsed = (this.agcLastSpeechTime > 0.0) ? (agcNow - this.agcLastSpeechTime) : 999.0;
+        if (elapsed < 0.35) {
+          targetGain = this.agcCurrentGain;
+        } else {
+          const relAlpha = Math.exp(-chunkDur / 0.500);
+          this.agcCurrentGain = relAlpha * this.agcCurrentGain + (1.0 - relAlpha) * 1.0;
+          this.agcEnvelope = relAlpha * this.agcEnvelope;
+          targetGain = this.agcCurrentGain;
+        }
+        if (chunkPeak > 0.001 && (chunkPeak * targetGain) > 0.96) {
+          const minLin = Math.pow(10.0, minGainDb / 20.0);
+          targetGain = Math.max(minLin, Math.min(targetGain, 0.96 / chunkPeak));
+        }
+      }
+    }
+
+    const startGain = this.agcLastAppliedGain;
+    const gainStep = (targetGain - startGain) / numSamples;
+    let currAgcGain = startGain;
+    for (let i = 0; i < numSamples; i++) {
+      currAgcGain += gainStep;
+      let s = inSamples[i] * currAgcGain;
+      if (s > 0.82) {
+        s = 0.82 + 0.18 * Math.tanh((s - 0.82) / 0.18);
+      } else if (s < -0.82) {
+        s = -0.82 + 0.18 * Math.tanh((s + 0.82) / 0.18);
       }
       inSamples[i] = s;
     }
+    this.agcLastAppliedGain = targetGain;
 
     // 2. Resample from 8000 Hz to target DAC sampleRate
     let outSamples;
@@ -253,6 +368,7 @@ class SlotAudioState {
         this.underrunSamples = 0;
         this.resampleBuf = null;
         this.resamplePos = 0.0;
+        this._resetAgcState();
         return;
       }
       // Grace period (up to 180ms = 3 coalesced 60ms packets) for late network/WebSocket packets
@@ -337,6 +453,7 @@ class SlotAudioState {
         this.underrunSamples = 0;
         this.resampleBuf = null;
         this.resamplePos = 0.0;
+        this._resetAgcState();
       } else {
         // Enter short grace period instead of immediately killing isPlaying
         this.underrunSamples = remaining;
@@ -357,6 +474,7 @@ class SlotAudioState {
     this.resamplePos = 0.0;
     this.chebyS1.fill(0);
     this.chebyS2.fill(0);
+    this._resetAgcState();
   }
 }
 
@@ -368,6 +486,11 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
     this.preGainLinear = 1.0;
     this.jitterSec = 0.120; // 120ms default
     this.globalMuted = false;
+    this.agcConfig = {
+      enabled: true,
+      depthDb: 18,
+      gainRaw: 35
+    };
 
     this.port.onmessage = this.handleMessage.bind(this);
   }
@@ -391,7 +514,22 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
       case "feed": {
         const slotState = this.getSlot(data.hotspotId, data.slot);
         const int16 = new Int16Array(data.buffer);
-        slotState.feedPcm16(int16, this.preGainLinear, this.jitterSec);
+        slotState.feedPcm16(int16, this.preGainLinear, this.jitterSec, this.agcConfig);
+        break;
+      }
+
+      case "set_agc_config": {
+        if (data.enabled !== undefined) {
+          this.agcConfig.enabled = Boolean(data.enabled);
+        }
+        if (data.depthDb !== undefined) {
+          const d = parseFloat(data.depthDb);
+          if (!isNaN(d)) this.agcConfig.depthDb = Math.max(6, Math.min(30, d));
+        }
+        if (data.gainRaw !== undefined) {
+          const g = parseFloat(data.gainRaw);
+          if (!isNaN(g)) this.agcConfig.gainRaw = Math.max(10, Math.min(120, g));
+        }
         break;
       }
 

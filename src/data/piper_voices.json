@@ -8329,5 +8329,98 @@
     "url_onnx": "https://huggingface.co/rraaww/ru_piper/resolve/main/ru_RU-sushkov_v4-medium.onnx",
     "url_json": "https://huggingface.co/rraaww/ru_piper/resolve/main/ru_RU-sushkov_v4-medium.onnx.json",
     "aliases": []
+  },
+  "ru_RU-dmitri-medium": {
+    "key": "ru_RU-dmitri-medium",
+    "name": "dmitri",
+    "gender": "male",
+    "language": {
+      "code": "ru_RU",
+      "family": "ru",
+      "region": "RU",
+      "name_native": "Русский",
+      "name_english": "Russian",
+      "country_english": "Russia"
+    },
+    "quality": "medium",
+    "num_speakers": 1,
+    "speaker_id_map": {},
+    "files": {
+      "ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx": {
+        "size_bytes": 63221984,
+        "md5_digest": "3f68914893fb107c454fd05e80196981"
+      },
+      "ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx.json": {
+        "size_bytes": 6197,
+        "md5_digest": "7ba9b8c1470022d238b09c997bd46a9f"
+      },
+      "ru/ru_RU/dmitri/medium/MODEL_CARD": {
+        "size_bytes": 454,
+        "md5_digest": "970ea746486a886c50e303322cfc6b98"
+      }
+    },
+    "url_onnx": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx",
+    "url_json": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx.json",
+    "aliases": []
+  },
+  "ru_RU-denis-medium": {
+    "key": "ru_RU-denis-medium",
+    "name": "denis",
+    "gender": "male",
+    "language": {
+      "code": "ru_RU",
+      "family": "ru",
+      "region": "RU",
+      "name_native": "Русский",
+      "name_english": "Russian",
+      "country_english": "Russia"
+    },
+    "quality": "medium",
+    "num_speakers": 1,
+    "speaker_id_map": {},
+    "files": {
+      "ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx": {
+        "size_bytes": 63221984,
+        "md5_digest": "0fdddcfaf23c01e9804bab8004e7d725"
+      },
+      "ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx.json": {
+        "size_bytes": 6196,
+        "md5_digest": "f4932d114829349b68007cbf4ee5147e"
+      },
+      "ru/ru_RU/denis/medium/MODEL_CARD": {
+        "size_bytes": 418,
+        "md5_digest": "73e83feade9efaf4a342c62c0d84cae0"
+      }
+    },
+    "url_onnx": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx",
+    "url_json": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx.json",
+    "aliases": []
+  },
+  "ru_RU-april682-medium": {
+    "key": "ru_RU-april682-medium",
+    "name": "april682",
+    "gender": "female",
+    "language": {
+      "code": "ru_RU",
+      "family": "ru",
+      "region": "RU",
+      "name_native": "Русский",
+      "name_english": "Russian",
+      "country_english": "Russia"
+    },
+    "quality": "medium",
+    "num_speakers": 1,
+    "speaker_id_map": {},
+    "files": {
+      "ru_RU-april682-medium.onnx": {
+        "size_bytes": 63516201
+      },
+      "ru_RU-april682-medium.onnx.json": {
+        "size_bytes": 5074
+      }
+    },
+    "url_onnx": "https://huggingface.co/rraaww/ru_piper/resolve/main/ru_RU-april682-medium.onnx",
+    "url_json": "https://huggingface.co/rraaww/ru_piper/resolve/main/ru_RU-april682-medium.onnx.json",
+    "aliases": []
   }
 }

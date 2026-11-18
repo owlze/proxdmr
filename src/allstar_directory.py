@@ -36,12 +36,12 @@ CIRCUIT_BREAKER_COOLDOWN_SEC = 900.0  # 15 minutes
 USER_AGENT = "ProxDMR/1.0"
 
 CURATED_POPULAR_NODES = [
-    {"node": "1999", "callsign": "PARROT", "name": "Parrot Echo", "location": "Эхо-репитер Попугай (проверка звука и микрофона)", "country": "LOCAL", "flag": "🦜"},
+    {"node": "1999", "callsign": "PARROT", "name": "Parrot Echo", "location": "Parrot Echo Repeater (audio & mic test)", "country": "LOCAL", "flag": "🦜"},
     {"node": "41522", "callsign": "HUBNET", "name": "HUBNet UK", "location": "United Kingdom National Hub", "country": "GB", "flag": "🇬🇧"},
     {"node": "27339", "callsign": "EASTC", "name": "East Coast Reflector", "location": "US East Coast ASL Hub", "country": "US", "flag": "🇺🇸"},
     {"node": "2143", "callsign": "WANRS", "name": "WAN RS System", "location": "Western PA & Ohio Hub", "country": "US", "flag": "🇺🇸"},
     {"node": "51010", "callsign": "WORLD", "name": "World Conference", "location": "Worldwide ASL Conference", "country": "GLOBAL", "flag": "🌐"},
-    {"node": "28554", "callsign": "RU3AID", "name": "Moscow ASL Hub", "location": "Российский узел AllStarLink (RU3AID)", "country": "RU", "flag": "🇷🇺"},
+    {"node": "28554", "callsign": "RU3AID", "name": "Moscow ASL Hub", "location": "Russian AllStarLink Node (RU3AID)", "country": "RU", "flag": "🇷🇺"},
     {"node": "52495", "callsign": "DL-NW", "name": "DL-Nordwest", "location": "German ASL Network", "country": "DE", "flag": "🇩🇪"},
     {"node": "2000", "callsign": "WESTC", "name": "Western Reflector", "location": "US Western System", "country": "US", "flag": "🇺🇸"},
     {"node": "43393", "callsign": "VKHUB", "name": "Australia ASL Hub", "location": "VK National Repeater Hub", "country": "AU", "flag": "🇦🇺"}
@@ -328,6 +328,41 @@ class AllStarDirectoryManager:
             "country": country,
             "flag": flag,
         }
+
+    def get_nodes_by_callsign(self, callsign: str) -> List[Dict[str, Any]]:
+        """Returns all AllStarLink directory nodes matching a given callsign."""
+        cs = str(callsign or "").strip().upper()
+        if not cs:
+            return []
+        if len(self._nodes) <= len(CURATED_POPULAR_NODES):
+            self._load_cache()
+        base_cs = cs.split("/")[0].split("-")[0].strip()
+        targets = {cs}
+        if base_cs and len(base_cs) >= 3:
+            targets.add(base_cs)
+        matches: List[Dict[str, Any]] = []
+        seen_nodes = set()
+        for item in self._nodes:
+            item_cs = str(item.get("callsign") or "").strip().upper()
+            if not item_cs:
+                continue
+            item_base = item_cs.split("/")[0].split("-")[0].strip()
+            if item_cs in targets or item_base in targets:
+                n_str = str(item.get("node") or "").strip()
+                if not n_str or n_str in seen_nodes:
+                    continue
+                seen_nodes.add(n_str)
+                matches.append({
+                    "node": n_str,
+                    "callsign": item_cs,
+                    "name": item.get("name") or item_cs,
+                    "location": item.get("location") or "",
+                    "country": item.get("country") or "INT",
+                    "flag": item.get("flag") or "🌐",
+                })
+                if len(matches) >= 15:
+                    break
+        return matches
 
     def search(self, query: str = "", limit: int = 50) -> Dict[str, Any]:
         q = (query or "").strip().lower()

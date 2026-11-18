@@ -167,9 +167,18 @@ class DMRMicProcessor extends AudioWorkletProcessor {
           const rms = Math.sqrt(sumSq / this.chunkSize);
           const rmsDb = rms > 0.00001 ? 20.0 * Math.log10(rms) : -100.0;
 
+          const wasGateOpen = this.isGateOpen;
           if (rmsDb >= this.gateThresholdDb) {
             this.gateHoldCounter = this.gateHoldBursts;
             this.isGateOpen = true;
+            if (!wasGateOpen) {
+              // Smooth 5ms fade-in ramp (40 samples @ 8kHz) to eliminate opening click
+              const rampLen = 40;
+              for (let i = 0; i < rampLen; i++) {
+                const w = 0.5 * (1.0 - Math.cos((Math.PI * i) / rampLen));
+                this.buffer[i] = Math.round(this.buffer[i] * w);
+              }
+            }
           } else if (this.gateHoldCounter > 0) {
             this.gateHoldCounter--;
             this.isGateOpen = true; // Hangover: keep speech tail intact

@@ -16,6 +16,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("proxdmr.user_db")
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "radioid_users.db"
 RADIOID_USER_CSV_URL = "https://database.radioid.net/static/user.csv"
@@ -272,6 +277,59 @@ class UserDBManager:
         finally:
             conn.close()
 
+    def get_users_by_callsign(self, callsign: str) -> List[Dict[str, Any]]:
+        """Finds all DMR IDs registered for a given amateur callsign (uses NOCASE index)."""
+        cs = str(callsign or "").strip().upper()
+        if not cs:
+            return []
+        base_cs = cs.split("/")[0].split("-")[0].strip()
+        queries = [cs] if (not base_cs or base_cs == cs or len(base_cs) < 3) else [cs, base_cs]
+
+        results: List[Dict[str, Any]] = []
+        seen_ids = set()
+
+        for ov_rid, ov_data in DEFAULT_USER_OVERRIDES.items():
+            ov_cs = str(ov_data.get("callsign") or "").strip().upper()
+            if ov_cs in queries and ov_rid not in seen_ids:
+                seen_ids.add(ov_rid)
+                results.append({
+                    "radio_id": ov_rid,
+                    "callsign": ov_cs,
+                    "name": ov_data.get("name", ""),
+                    "city": ov_data.get("city", ""),
+                    "state": "",
+                    "country": ov_data.get("country", "")
+                })
+
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in queries)
+            cur.execute(f"""
+                SELECT radio_id, callsign, first_name, last_name, city, state, country
+                FROM users
+                WHERE callsign IN ({placeholders})
+                ORDER BY radio_id ASC
+                LIMIT 20
+            """, tuple(queries))
+            for row in cur.fetchall():
+                item = dict(row)
+                rid = item.get("radio_id")
+                if rid in seen_ids:
+                    continue
+                seen_ids.add(rid)
+                fname = clean_user_name(item.get("first_name") or "")
+                lname = clean_user_name(item.get("last_name") or "")
+                item["name"] = f"{fname} {lname}".strip() if (fname and lname) else (fname or lname or "")
+                item["city"] = clean_user_name(item.get("city") or "")
+                item["callsign"] = str(item.get("callsign") or cs).strip().upper()
+                results.append(item)
+        except Exception as e:
+            logger.debug(f"[USER_DB] get_users_by_callsign error for '{cs}': {e}")
+        finally:
+            conn.close()
+        return results
+
     async def update_from_network(self) -> int:
         """
         Downloads latest user.csv from RadioID.net and imports into SQLite database.
@@ -403,7 +461,7 @@ class UserDBManager:
             "delta": self.delta,
             "prev_count": self.prev_count,
             "updated_ts": updated_ts,
-            "updated_str": time.strftime("%d.%m.%Y %H:%M", time.localtime(updated_ts)) if updated_ts else "Встроенная база"
+            "updated_str": time.strftime("%d.%m.%Y %H:%M", time.localtime(updated_ts)) if updated_ts else _tr("user_db.builtin", fallback="Built-in DB")
         }
 
 

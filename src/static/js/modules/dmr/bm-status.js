@@ -4,9 +4,9 @@
  * and user-triggered manual connect / disconnect actions per hotspot.
  */
 
-import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.624";
-import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.590";
-import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.628";
+import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.737";
+import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.737";
+import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.741";
 
 export let currentBmStatus = "OFFLINE";
 export let isTogglingConnection = false;
@@ -39,7 +39,9 @@ export function updateBmStatus(status, detail = "", hotspotId = null) {
   }
 
   const currentHotspots = getCurrentHotspots();
-  const hs = currentHotspots.find(h => h.id === targetHid || h.id === rawTargetHid) || (rawTargetHid === "default" ? currentHotspots[0] : null);
+  const hs = currentHotspots.find(h => h.id === rawTargetHid) ||
+             currentHotspots.find(h => h.id === targetHid) ||
+             (rawTargetHid === "default" ? currentHotspots[0] : null);
   if (hs && status) {
     hs.status = status;
     if (detail !== undefined && detail !== "") hs.detail = detail;
@@ -63,40 +65,42 @@ export function updateBmStatus(status, detail = "", hotspotId = null) {
     if (hs) hs.status = "DISCONNECTED";
     badgeClass = "status-offline bm-offline";
     badgeText = `${netPrefix}:OFFLINE`;
-    comment = window.t ? window.t("status.bm_collapsed_detail", {}, "Свернут / отключен") : "Свернут / отключен";
-    tooltip = window.t ? window.t("status.bm_collapsed_tooltip", {}, "⚪ Хотспот свернут и отключен.") : "⚪ Хотспот свернут и отключен.";
+    comment = window.t ? window.t("status.bm_collapsed_detail", {}, "Collapsed / disconnected") : "Collapsed / disconnected";
+    tooltip = window.t ? window.t("status.bm_collapsed_tooltip", {}, "⚪ Hotspot is collapsed and disconnected.") : "⚪ Hotspot is collapsed and disconnected.";
   } else if (status === "ONLINE") {
     badgeClass = "status-online bm-online";
     badgeText = `${netPrefix}:ONLINE`;
-    comment = (detail && !detail.includes("BrandMeister") && !detail.includes("BM") && !detail.includes(netShort) && !detail.includes(netPrefix) && !detail.includes("Подключен"))
+    const isConnWord = !detail || detail.includes("BrandMeister") || detail.includes("BM") || detail.includes(netShort) || detail.includes(netPrefix) || detail.includes("Подключен") || /^(connected|verbunden|conectado|connect[ée]|connesso|verbonden|підключено)/i.test(detail);
+    comment = !isConnWord
       ? `${masterHost} (${detail})`
       : `${masterHost}`;
-    tooltip = window.t ? window.t("status.bm_connected_tooltip", { host: masterHost }, `🟢 Подключен к ${netShort} (${masterHost}). Клик для отключения`) : `🟢 Подключен к ${netShort} (${masterHost}). Клик для отключения`;
+    tooltip = window.t ? window.t("status.bm_connected_tooltip", { host: masterHost }, `🟢 Connected to ${netShort} (${masterHost}). Click to disconnect`) : `🟢 Connected to ${netShort} (${masterHost}). Click to disconnect`;
   } else if (status === "CONNECTING" || status === "AUTHENTICATING" || status === "CONFIGURING") {
     badgeClass = "status-connecting bm-connecting";
     badgeText = `${netPrefix}:CONNECTING`;
-    comment = detail || (window.t ? window.t("status.bm_connecting_host", { host: masterHost }, `Подключение к ${masterHost}...`) : `Подключение к ${masterHost}...`);
-    tooltip = window.t ? window.t("status.bm_connecting_tooltip", { comment }, `🟡 ${comment}. Клик для отмены`) : `🟡 ${comment}. Клик для отмены`;
+    comment = detail || (window.t ? window.t("status.bm_connecting_host", { host: masterHost }, `Connecting to ${masterHost}...`) : `Connecting to ${masterHost}...`);
+    tooltip = window.t ? window.t("status.bm_connecting_tooltip", { comment }, `🟡 ${comment}. Click to cancel`) : `🟡 ${comment}. Click to cancel`;
   } else if (status === "AUTH_FAILED") {
     badgeClass = "status-error bm-error";
     badgeText = `${netPrefix}:AUTH FAIL`;
-    comment = detail || ((typeof window !== "undefined" && window.t) ? window.t("status.bm_password_detail") : "Неверный пароль хотспота");
-    tooltip = window.t ? window.t("status.bm_error_tooltip", { comment }, `🔴 ${comment}. Клик для повтора`) : `🔴 ${comment}. Клик для повтора`;
+    comment = detail || ((typeof window !== "undefined" && window.t) ? window.t("status.bm_password_detail", {}, "Incorrect hotspot SelfCare password") : "Incorrect hotspot SelfCare password");
+    tooltip = window.t ? window.t("status.bm_error_tooltip", { comment }, `🔴 ${comment}. Click to retry`) : `🔴 ${comment}. Click to retry`;
   } else if (status === "ERROR") {
     badgeClass = "status-error bm-error";
     badgeText = `${netPrefix}:ERROR`;
-    comment = detail || (window.t ? window.t("status.bm_connect_err", { host: masterHost }, `Ошибка связи с ${masterHost}`) : `Ошибка связи с ${masterHost}`);
-    tooltip = window.t ? window.t("status.bm_error_tooltip", { comment }, `🔴 ${comment}. Клик для повтора`) : `🔴 ${comment}. Клик для повтора`;
+    comment = detail || (window.t ? window.t("status.bm_connect_err", { host: masterHost }, `Connection error with ${masterHost}`) : `Connection error with ${masterHost}`);
+    tooltip = window.t ? window.t("status.bm_error_tooltip", { comment }, `🔴 ${comment}. Click to retry`) : `🔴 ${comment}. Click to retry`;
   } else {
     badgeClass = "status-offline bm-offline";
     badgeText = `${netPrefix}:OFFLINE`;
-    comment = (detail && detail !== "Отключен") ? detail : (window.t ? window.t("status.bm_disconnected_host", { host: masterHost }, `${masterHost} (отключен)`) : `${masterHost} (отключен)`);
-    tooltip = window.t ? window.t("status.bm_disconnected_tooltip", { host: masterHost }, `⚪ Хотспот отключен. Клик для подключения к ${masterHost}`) : `⚪ Хотспот отключен. Клик для подключения к ${masterHost}`;
+    const isDiscWord = detail && /^(отключен|відключено|disconnected|getrennt|desconectado|déconnecté|disconnesso|verbroken)$/i.test(detail.trim());
+    comment = (detail && !isDiscWord) ? detail : (window.t ? window.t("status.bm_disconnected_host", { host: masterHost }, `${masterHost} (disconnected)`) : `${masterHost} (disconnected)`);
+    tooltip = window.t ? window.t("status.bm_disconnected_tooltip", { host: masterHost }, `⚪ Hotspot disconnected. Click to connect to ${masterHost}`) : `⚪ Hotspot disconnected. Click to connect to ${masterHost}`;
   }
 
   // Update specific hotspot card in grid if present
   let card = targetHid ? document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`) : null;
-  if (!card && (!targetHid || targetHid === activeHid)) {
+  if (!card && (!targetHid || (targetHid === activeHid && !currentHotspots.some(h => h && String(h.id) === String(targetHid))))) {
     card = document.querySelector(".radio-container");
   }
   if (card) {
@@ -137,13 +141,13 @@ export function updateBmStatus(status, detail = "", hotspotId = null) {
     if (aslBadge && !aslBadge.classList.contains("status-rx") && !aslBadge.classList.contains("status-tx")) {
       if (isOnline) {
         aslBadge.className = "allstar-status-badge status-online";
-        aslBadge.textContent = "CONNECTED";
+        aslBadge.textContent = window.t ? window.t("asl.status_connected", {}, "CONNECTED") : "CONNECTED";
       } else if (status === "CONNECTING" || status === "AUTHENTICATING" || status === "CONFIGURING") {
         aslBadge.className = "allstar-status-badge status-connecting";
-        aslBadge.textContent = "CONNECTING...";
+        aslBadge.textContent = window.t ? window.t("asl.status_connecting", {}, "CONNECTING...") : "CONNECTING...";
       } else {
         aslBadge.className = "allstar-status-badge status-idle";
-        aslBadge.textContent = "IDLE";
+        aslBadge.textContent = window.t ? window.t("asl.status_idle", {}, "IDLE") : "IDLE";
       }
     }
   }
@@ -163,6 +167,9 @@ export function updateBmStatus(status, detail = "", hotspotId = null) {
 
   if (typeof window !== "undefined" && typeof window.checkAndRenderFailoverBadges === "function") {
     try { window.checkAndRenderFailoverBadges(); } catch (e) {}
+  }
+  if (typeof window !== "undefined" && typeof window.renderToolbarHotspotSlots === "function") {
+    window.renderToolbarHotspotSlots();
   }
 }
 
@@ -189,6 +196,16 @@ export async function toggleHotspotConnection(hid) {
     hs.status === "CONFIGURING";
 
   const action = isOnline ? "disconnect" : "connect";
+  if (action === "connect" && String(hs.network_type || "").toLowerCase() === "ysf") {
+    const hasYsfTarget = Boolean(String(hs.ysf_room || hs.ysf_room_id || hs.ysf_host || hs.bm_master_host || "").trim());
+    if (!hasYsfTarget) {
+      if (toggleBtn) toggleBtn.style.opacity = "1";
+      if (typeof window !== "undefined" && typeof window.showToast === "function") {
+        window.showToast(window.t ? window.t("status.ysf_select_room_toast", {}, "Выберите комнату YSF в матрице или каталоге для подключения") : "Выберите комнату YSF в матрице или каталоге для подключения", "info", 2800);
+      }
+      return;
+    }
+  }
   if (action === "disconnect") {
     hs.isManualBmDisconnect = true;
     if (hid === activeHid && typeof window !== "undefined") window.isManualBmDisconnect = true;

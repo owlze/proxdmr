@@ -68,142 +68,103 @@ export function stripToastEmojis(text) {
 }
 
 /**
- * Show a short toast notification centered on the target Hotspot card (or screen center if global)
- * with dark green background, white text, 1.6s pause and 0.8s fade-out.
+ * Show a short toast notification in the visible viewport area below #proxdmrTopToolbar
+ * and horizontally centered relative to the toolbar's midpoint (both desktop and mobile),
+ * clamped within viewport bounds so collapsed cards never pull toasts off-screen.
  *
  * @param {string} msg Message text
- * @param {number} duration Duration in ms (default: 1000)
- * @param {HTMLElement|string|null} targetCardOrId Optional target card element or hotspot id
+ * @param {number} duration Duration in ms (default: TOAST_HOLD_MS)
+ * @param {HTMLElement|string|null} targetCardOrId Legacy target hint / error marker
  */
 export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) {
   let dur = (typeof duration === "number" && !isNaN(duration) && duration > 4500) ? duration : TOAST_HOLD_MS;
-  if (typeof duration !== "number" && !targetCardOrId) {
-    if (typeof duration === "string" && (duration.startsWith("hs") || (typeof document !== "undefined" && document.querySelector(`.radio-container[data-hotspot-id="${duration}"]`)))) {
+  if (typeof duration !== "number" && !targetCardOrId && typeof duration === "string") {
+    if (duration === "error") {
       targetCardOrId = duration;
-      dur = TOAST_HOLD_MS;
     }
+    dur = TOAST_HOLD_MS;
   }
 
-  // 1. Resolve target hotspot card
-  let targetCard = null;
-  if (typeof document !== "undefined") {
-    if (targetCardOrId) {
-      if (targetCardOrId instanceof Element) {
-        targetCard = (typeof targetCardOrId.closest === "function") ? targetCardOrId.closest(".radio-container") : targetCardOrId;
-      } else if (typeof targetCardOrId === "string") {
-        targetCard = document.querySelector(`.radio-container[data-hotspot-id="${targetCardOrId}"]`);
-      }
-    }
-    if (!targetCard) {
-      const activeEl = document.activeElement;
-      if (activeEl && typeof activeEl.closest === "function") {
-        targetCard = activeEl.closest(".radio-container");
-      }
-    }
-    // Also try to extract hotspot name/callsign/id from msg if formatted as [Name] or [callsign]
-    if (!targetCard && typeof msg === "string") {
-      const match = msg.match(/^\[(.*?)\]/);
-      if (match && match[1]) {
-        const hsKey = match[1].trim().toLowerCase();
-        const allCards = document.querySelectorAll(".radio-container");
-        for (const c of allCards) {
-          const hid = (c.dataset.hotspotId || "").toLowerCase();
-          const hsObj = (window.currentHotspots || []).find(h => (h.id || "").toLowerCase() === hid);
-          const name = (hsObj?.name || "").toLowerCase();
-          const call = (hsObj?.callsign || "").toLowerCase();
-          if (name === hsKey || call === hsKey || hid === hsKey) {
-            targetCard = c;
-            break;
-          }
-        }
-      }
-    }
-    // Also check if message starts with "Name: TS..." (e.g. from triggerQuickUnlink4000)
-    if (!targetCard && typeof msg === "string") {
-      const matchColon = msg.match(/^([^:\n]+):\s*TS[12]/);
-      if (matchColon && matchColon[1]) {
-        const hsKey = matchColon[1].trim().toLowerCase();
-        const allCards = document.querySelectorAll(".radio-container");
-        for (const c of allCards) {
-          const hid = (c.dataset.hotspotId || "").toLowerCase();
-          const hsObj = (window.currentHotspots || []).find(h => (h.id || "").toLowerCase() === hid);
-          const name = (hsObj?.name || "").toLowerCase();
-          const call = (hsObj?.callsign || "").toLowerCase();
-          if (name === hsKey || call === hsKey || hid === hsKey) {
-            targetCard = c;
-            break;
-          }
-        }
-      }
-    }
-    if (!targetCard && typeof window !== "undefined" && window.activeHotspotId) {
-      targetCard = document.querySelector(`.radio-container[data-hotspot-id="${window.activeHotspotId}"]`);
-    }
-    if (!targetCard && typeof document !== "undefined") {
-      targetCard = document.querySelector(".radio-container.active-hotspot") ||
-                   document.querySelector(".radio-container:not(.collapsed)");
-    }
-  }
+  if (typeof document === "undefined") return;
+  const hostRoot = document.body || document.documentElement;
+  if (!hostRoot) return;
 
-  // 2. Container setup (per hotspot card or global)
-  const containerId = targetCard
-    ? ("toastContainer_hs_" + (targetCard.dataset.hotspotId || "default"))
-    : "toastContainer";
-
+  // 1. Unified toast container (keeps auth-pending / auth-locked CSS exemptions active)
+  const containerId = "toastContainer";
   let container = document.getElementById(containerId);
   if (!container) {
     container = document.createElement("div");
     container.id = containerId;
-    container.className = "proxdmr-toast-container";
-    document.body.appendChild(container);
+    container.className = "toast-container proxdmr-toast-container";
+    hostRoot.appendChild(container);
+  } else {
+    container.className = "toast-container proxdmr-toast-container";
   }
 
-  // 3. Position update: top 1/5 (~20%) of targetCard, or 20% of viewport
+  // 2. Position below #proxdmrTopToolbar centered on its horizontal midpoint, clamped to visible viewport
   const updateContainerPosition = () => {
-    if (targetCard && targetCard.isConnected) {
-      const rect = targetCard.getBoundingClientRect();
-      const centerX = Math.round(rect.left + rect.width / 2);
-      const topY = Math.round(rect.top + rect.height * 0.20);
-      const maxW = Math.max(220, Math.round(rect.width - 24));
+    const win = typeof window !== "undefined" ? window : null;
+    const vw = (win && win.innerWidth) || document.documentElement?.clientWidth || 360;
+    const vh = (win && win.innerHeight) || document.documentElement?.clientHeight || 640;
 
-      container.style.cssText = [
-        "position: fixed;",
-        `top: ${topY}px;`,
-        `left: ${centerX}px;`,
-        "transform: translate(-50%, -50%);",
-        "z-index: 99999;",
-        "pointer-events: none;",
-        "display: flex;",
-        "flex-direction: column;",
-        "gap: 8px;",
-        "align-items: center;",
-        "justify-content: center;",
-        "width: max-content;",
-        `max-width: ${maxW}px;`
-      ].join("");
-    } else {
-      container.style.cssText = [
-        "position: fixed;",
-        "top: 20%;",
-        "left: 50%;",
-        "transform: translate(-50%, -50%);",
-        "z-index: 99999;",
-        "pointer-events: none;",
-        "display: flex;",
-        "flex-direction: column;",
-        "gap: 8px;",
-        "align-items: center;",
-        "justify-content: center;",
-        "width: max-content;",
-        "max-width: min(90vw, 480px);"
-      ].join("");
+    const toolbarEl = document.getElementById("proxdmrTopToolbar");
+    let tbRect = null;
+    if (toolbarEl && toolbarEl.isConnected) {
+      const tbStyle = win && typeof win.getComputedStyle === "function" ? win.getComputedStyle(toolbarEl) : null;
+      const tbVisible = !tbStyle || (tbStyle.display !== "none" && tbStyle.visibility !== "hidden" && tbStyle.visibility !== "collapse");
+      if (tbVisible) {
+        const r = toolbarEl.getBoundingClientRect();
+        if (r && r.width > 40 && r.height > 0) {
+          tbRect = r;
+        }
+      }
     }
+
+    const maxW = tbRect
+      ? Math.max(200, Math.min(vw - 16, Math.round(tbRect.width - 12), 520))
+      : Math.max(200, Math.min(vw - 16, 460));
+
+    const rawCenterX = (tbRect && tbRect.right > 0 && tbRect.left < vw)
+      ? (tbRect.left + tbRect.width / 2)
+      : (vw / 2);
+    const rawTopY = tbRect
+      ? Math.round(tbRect.bottom + 8)
+      : 16;
+
+    container.style.cssText = [
+      "position: fixed;",
+      `top: ${rawTopY}px;`,
+      `left: ${Math.round(rawCenterX)}px;`,
+      "transform: translateX(-50%);",
+      "z-index: 99999;",
+      "pointer-events: none;",
+      "display: flex;",
+      "flex-direction: column;",
+      "gap: 8px;",
+      "align-items: center;",
+      "justify-content: flex-start;",
+      "width: max-content;",
+      `max-width: ${maxW}px;`
+    ].join("");
+
+    const measuredW = Math.min(maxW, container.offsetWidth || 0);
+    const halfW = measuredW / 2;
+    const minCenterX = Math.min(vw / 2, 8 + halfW);
+    const maxCenterX = Math.max(vw / 2, vw - 8 - halfW);
+    const clampedCenterX = Math.round(Math.max(minCenterX, Math.min(rawCenterX, maxCenterX)));
+
+    const measuredH = container.offsetHeight || 44;
+    const maxTopY = Math.max(10, vh - measuredH - 10);
+    const clampedTopY = Math.round(Math.max(10, Math.min(rawTopY, maxTopY)));
+
+    container.style.left = `${clampedCenterX}px`;
+    container.style.top = `${clampedTopY}px`;
   };
 
   updateContainerPosition();
 
-  // Keep position pinned to card center during scrolls / window resizing
-  if (!container._hasPositionWatcher && targetCard) {
+  // Keep position pinned inside visible screen below toolbar during scrolls / resizes
+  if (!container._hasPositionWatcher && typeof window !== "undefined") {
     container._hasPositionWatcher = true;
     const reposHandler = () => {
       if (document.getElementById(containerId)) {
@@ -223,22 +184,35 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
   const existingToasts = container.querySelectorAll(".proxdmr-toast-item");
   for (const t of existingToasts) {
     if (t.textContent === cleanMsg) {
+      updateContainerPosition();
       return;
     }
   }
 
-  // 4. Create toast item with theme-aware styling
-  const isLight = (typeof document !== "undefined") && (
-    document.documentElement.getAttribute("data-theme") === "light" ||
-    document.body.classList.contains("theme-light") ||
-    document.body.getAttribute("data-theme") === "light"
+  // 3. Create toast item with theme-aware styling and error red background support
+  const isError = (typeof duration === "object" && duration?.type === "error") ||
+                  (typeof targetCardOrId === "object" && targetCardOrId?.type === "error") ||
+                  (typeof duration === "string" && duration === "error") ||
+                  (typeof targetCardOrId === "string" && targetCardOrId === "error");
+  const isLight = (
+    document.documentElement?.getAttribute("data-theme") === "light" ||
+    document.body?.classList?.contains("theme-light") ||
+    document.body?.getAttribute("data-theme") === "light"
   );
-  const bgCol = isLight ? "#000000" : "#ffffff";
-  const textCol = isLight ? "#ffffff" : "#000000";
-  const borderCol = isLight ? "#16a34a" : "#22c55e";
-  const shadowCol = isLight
+
+  let bgCol = isLight ? "#000000" : "#ffffff";
+  let textCol = isLight ? "#ffffff" : "#000000";
+  let borderCol = isLight ? "#16a34a" : "#22c55e";
+  let shadowCol = isLight
     ? "0 10px 28px rgba(0, 0, 0, 0.45), 0 2px 12px rgba(22, 163, 74, 0.35)"
     : "0 10px 28px rgba(0, 0, 0, 0.25), 0 2px 12px rgba(34, 197, 94, 0.3)";
+
+  if (isError) {
+    bgCol = "#b91c1c";
+    textCol = "#ffffff";
+    borderCol = "#ef4444";
+    shadowCol = "0 10px 28px rgba(0, 0, 0, 0.55), 0 2px 14px rgba(239, 68, 68, 0.45)";
+  }
 
   const toast = document.createElement("div");
   toast.className = "proxdmr-toast-item";
@@ -267,6 +241,7 @@ export function showToast(msg, duration = TOAST_HOLD_MS, targetCardOrId = null) 
 
   toast.textContent = cleanMsg;
   container.appendChild(toast);
+  updateContainerPosition();
 
   requestAnimationFrame(() => {
     toast.style.opacity = "1";

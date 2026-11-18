@@ -1,5 +1,6 @@
-import { disableAllTranscribe } from '../dmr/transcriber.js?v=2.9.628';
-import { initHapticSettingsUI } from './haptic.js';
+import { disableAllTranscribe } from '../dmr/transcriber.js?v=2.9.729';
+import { initHapticSettingsUI } from './haptic.js?v=2.9.711';
+import { showToast } from './toast.js?v=2.9.699';
 
 /**
  * Android Bridge & APK Client Integration Module
@@ -125,7 +126,8 @@ export function initAndroidBridge() {
       console.warn("Failed to load Tailscale settings:", e);
     }
 
-
+    // Hardware PTT Button configuration (APK v1.35+)
+    initHardwarePttSettingsUI();
 
     // Full exit button in settings
     const authServerSettingsRow = document.getElementById("authServerSettingsRow");
@@ -189,8 +191,8 @@ export function initAndroidBridge() {
       initApkDate.style.display = "inline-block";
     }
 
-    // Replace fullscreen button with exit button ONLY on the main card header
-    const mainExitBtn = document.querySelector("#radioContainer .fullscreen-toggle-btn, .radio-header.app-header .fullscreen-toggle-btn, .fullscreen-toggle-btn");
+    // Replace fullscreen button with exit button on #proxdmrTopToolbar
+    const mainExitBtn = document.querySelector("#proxdmrTopToolbar .fullscreen-toggle-btn, .proxdmr-top-toolbar .fullscreen-toggle-btn, .fullscreen-toggle-btn");
     if (mainExitBtn) {
       mainExitBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
       const exitTitle = typeof window.t === "function" ? window.t("app.quit_title", {}, "Полный выход из приложения") : "Полный выход из приложения";
@@ -248,6 +250,207 @@ export function initAndroidBridge() {
       hintSyncSystemVolumeWeb.style.display = "block";
     }
   }
+}
+
+function initHardwarePttSettingsUI() {
+  const select = document.getElementById("optHardwarePttMode");
+  const customRow = document.getElementById("hwPttCustomRow");
+  const customLabel = document.getElementById("hwPttCustomKeyLabel");
+  const btnCapture = document.getElementById("btnHwPttCapture");
+  const btnClear = document.getElementById("btnHwPttClear");
+  const hintVolBoth = document.getElementById("hintHwPttVolBoth");
+  const hintOldApk = document.getElementById("hintHwPttOldApk");
+  if (!select) return;
+
+  const bridge = window.AndroidBridge;
+  const hasNativeHwPtt = Boolean(
+    bridge &&
+    typeof bridge.getHardwarePttConfig === "function" &&
+    typeof bridge.setHardwarePttMode === "function"
+  );
+
+  if (!hasNativeHwPtt) {
+    select.disabled = true;
+    select.value = "off";
+    if (customRow) customRow.style.display = "none";
+    if (hintVolBoth) hintVolBoth.style.display = "none";
+    if (hintOldApk) hintOldApk.style.display = "block";
+    return;
+  }
+
+  select.disabled = false;
+  if (hintOldApk) hintOldApk.style.display = "none";
+
+  const tr = (key, fallback, params = {}) =>
+    typeof window.t === "function" ? window.t(key, params, fallback) : fallback;
+
+  let state = {
+    mode: "volume_up",
+    customKeyCode: -1,
+    customScanCode: -1,
+    customKeyName: "",
+    capturing: false
+  };
+
+  function loadState() {
+    try {
+      const raw = bridge.getHardwarePttConfig();
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        state = {
+          mode: parsed.mode || "volume_up",
+          customKeyCode: typeof parsed.customKeyCode === "number" ? parsed.customKeyCode : -1,
+          customScanCode: typeof parsed.customScanCode === "number" ? parsed.customScanCode : -1,
+          customKeyName: parsed.customKeyName || "",
+          capturing: Boolean(parsed.capturing)
+        };
+      }
+    } catch (e) {
+      console.warn("[AndroidBridge] getHardwarePttConfig failed:", e);
+    }
+  }
+
+  function hasCustomKey() {
+    return state.customKeyCode > 0 || (state.customKeyCode === 0 && state.customScanCode > 0);
+  }
+
+  function render() {
+    select.value = state.mode || "volume_up";
+    if (customRow) {
+      customRow.style.display = state.mode === "custom" ? "block" : "none";
+    }
+    if (hintVolBoth) {
+      hintVolBoth.style.display = state.mode === "volume_both" ? "block" : "none";
+    }
+    if (customLabel) {
+      if (hasCustomKey()) {
+        customLabel.textContent = state.customKeyName || `Key #${state.customKeyCode}`;
+        customLabel.style.color = "#58a6ff";
+      } else {
+        customLabel.textContent = tr("android.hw_ptt_not_assigned", "Не назначена");
+        customLabel.style.color = "var(--text-secondary, #8b949e)";
+      }
+    }
+    if (btnCapture) {
+      if (state.capturing) {
+        btnCapture.textContent = tr("android.hw_ptt_capturing", "⏳ Нажмите физическую кнопку... (Отмена)");
+        btnCapture.style.borderColor = "#d29922";
+        btnCapture.style.color = "#e3b341";
+      } else {
+        btnCapture.textContent = tr("android.hw_ptt_capture_btn", "🎯 Назначить кнопку");
+        btnCapture.style.borderColor = "";
+        btnCapture.style.color = "";
+      }
+    }
+    if (btnClear) {
+      btnClear.style.display = hasCustomKey() && !state.capturing ? "inline-flex" : "none";
+    }
+  }
+
+  function cancelCaptureIfActive() {
+    if (!state.capturing) return;
+    state.capturing = false;
+    try {
+      if (typeof bridge.cancelHardwarePttKeyCapture === "function") {
+        bridge.cancelHardwarePttKeyCapture();
+      }
+    } catch (_) {}
+    render();
+  }
+
+  window.onHardwarePttKeyCaptured = function(keyCode, keyName, scanCode) {
+    state.mode = "custom";
+    state.customKeyCode = typeof keyCode === "number" ? keyCode : -1;
+    state.customScanCode = typeof scanCode === "number" ? scanCode : -1;
+    state.customKeyName = keyName || `Key #${keyCode}`;
+    state.capturing = false;
+    render();
+    showToast(
+      tr("android.hw_ptt_captured_toast", `Аппаратная кнопка PTT назначена: ${state.customKeyName}`, { key: state.customKeyName }),
+      "success"
+    );
+  };
+
+  window.onHardwarePttCaptureCancelled = function() {
+    if (state.capturing) {
+      state.capturing = false;
+      render();
+    }
+  };
+
+  if (!select._hwPttWired) {
+    select._hwPttWired = true;
+    select.addEventListener("change", () => {
+      cancelCaptureIfActive();
+      const nextMode = select.value || "volume_up";
+      state.mode = nextMode;
+      try {
+        bridge.setHardwarePttMode(nextMode);
+      } catch (err) {
+        console.warn("[AndroidBridge] setHardwarePttMode failed:", err);
+      }
+      render();
+    });
+  }
+
+  if (btnCapture && !btnCapture._hwPttWired) {
+    btnCapture._hwPttWired = true;
+    btnCapture.addEventListener("click", () => {
+      if (state.capturing) {
+        cancelCaptureIfActive();
+        return;
+      }
+      state.capturing = true;
+      render();
+      try {
+        if (typeof bridge.startHardwarePttKeyCapture === "function") {
+          bridge.startHardwarePttKeyCapture();
+        }
+      } catch (err) {
+        state.capturing = false;
+        render();
+        console.warn("[AndroidBridge] startHardwarePttKeyCapture failed:", err);
+      }
+    });
+  }
+
+  if (btnClear && !btnClear._hwPttWired) {
+    btnClear._hwPttWired = true;
+    btnClear.addEventListener("click", () => {
+      cancelCaptureIfActive();
+      state.customKeyCode = -1;
+      state.customScanCode = -1;
+      state.customKeyName = "";
+      try {
+        if (typeof bridge.clearHardwarePttCustomKey === "function") {
+          bridge.clearHardwarePttCustomKey();
+        }
+      } catch (err) {
+        console.warn("[AndroidBridge] clearHardwarePttCustomKey failed:", err);
+      }
+      render();
+    });
+  }
+
+  // Cancel key capture automatically if the Settings modal is closed
+  const settingsModal = document.getElementById("settingsModal");
+  if (settingsModal && !settingsModal._hwPttObserverWired && typeof MutationObserver === "function") {
+    settingsModal._hwPttObserverWired = true;
+    const obs = new MutationObserver(() => {
+      if (!settingsModal.classList.contains("active")) {
+        cancelCaptureIfActive();
+      }
+    });
+    obs.observe(settingsModal, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  if (window.I18N && typeof window.I18N.onChange === "function" && !window._hwPttI18nWired) {
+    window._hwPttI18nWired = true;
+    window.I18N.onChange(() => render());
+  }
+
+  loadState();
+  render();
 }
 
 // Window & __proxdmr bridge for backward compatibility

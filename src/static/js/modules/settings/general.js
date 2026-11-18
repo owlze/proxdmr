@@ -11,19 +11,21 @@
  * - System Update Notifications Toggle
  */
 
-import { showToast } from "../core/toast.js";
+import { showToast } from "../core/toast.js?v=2.9.699";
 import {
   setMuteOnPttEnabled,
   setVolumeUpPttEnabled,
   setVolumeDownPttEnabled,
   setHotspotVolumeSyncEnabled,
-  setSystemVolumeSyncEnabled
-} from "../audio/volume-mute.js?v=2.9.622";
+  setSystemVolumeSyncEnabled,
+  isSingleHotspotAudioEnabled,
+  setSingleHotspotAudioEnabled
+} from "../audio/volume-mute.js?v=2.9.737";
 import {
   isCheckMicOnTxEnabled,
   setCheckMicOnTxEnabled
-} from "../ptt/engine.js?v=2.9.628";
-import { setHapticEnabled, setHapticDuration } from "../core/haptic.js";
+} from "../ptt/engine.js?v=2.9.733";
+import { setHapticEnabled, setHapticDuration } from "../core/haptic.js?v=2.9.711";
 
 export function initGeneralSettings() {
   const optCheckMic = document.getElementById("optCheckMicOnTx");
@@ -32,6 +34,14 @@ export function initGeneralSettings() {
     optCheckMic.checked = isCheckMicOnTxEnabled();
     optCheckMic.addEventListener("change", () => {
       setCheckMicOnTxEnabled(optCheckMic.checked, true);
+    });
+  }
+  const optSingleHsAudio = document.getElementById("optSingleHotspotAudio");
+  if (optSingleHsAudio && !optSingleHsAudio._wired) {
+    optSingleHsAudio._wired = true;
+    optSingleHsAudio.checked = isSingleHotspotAudioEnabled();
+    optSingleHsAudio.addEventListener("change", () => {
+      setSingleHotspotAudioEnabled(optSingleHsAudio.checked, true);
     });
   }
   const btnSave = document.getElementById("btnSaveGeneralSettings");
@@ -50,12 +60,14 @@ export function initGeneralSettings() {
     const optDisableUpdates = document.getElementById("optDisableUpdateNotifications");
 
     const optCheckMic = document.getElementById("optCheckMicOnTx");
+    const optSingleHsAudio = document.getElementById("optSingleHotspotAudio");
 
     const lang = optLang ? optLang.value : undefined;
     const muteOnPtt = optMute ? optMute.checked : undefined;
     const syncHs = optSyncHs ? optSyncHs.checked : undefined;
     const syncSys = optSyncSys ? optSyncSys.checked : undefined;
     const checkMicOnTx = optCheckMic ? optCheckMic.checked : undefined;
+    const singleHsAudio = optSingleHsAudio ? optSingleHsAudio.checked : undefined;
     const hapticFeedback = optHaptic ? optHaptic.checked : undefined;
     const hapticDuration = optHapticDur ? parseInt(optHapticDur.value, 10) : undefined;
     const hamUser = optHamUser ? optHamUser.value.trim() : undefined;
@@ -67,6 +79,7 @@ export function initGeneralSettings() {
     if (syncHs !== undefined) setHotspotVolumeSyncEnabled(syncHs, false);
     if (syncSys !== undefined) setSystemVolumeSyncEnabled(syncSys, false);
     if (checkMicOnTx !== undefined) setCheckMicOnTxEnabled(checkMicOnTx, false);
+    if (singleHsAudio !== undefined) setSingleHotspotAudioEnabled(singleHsAudio, false);
     if (hapticFeedback !== undefined) setHapticEnabled(hapticFeedback, false);
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) setHapticDuration(hapticDuration, false);
     if (disableUpdates !== undefined) window.DISABLE_UPDATE_NOTIFICATIONS = disableUpdates;
@@ -77,6 +90,7 @@ export function initGeneralSettings() {
     if (syncHs !== undefined) payload.sync_hotspot_volume = syncHs;
     if (syncSys !== undefined) payload.sync_system_volume = syncSys;
     if (checkMicOnTx !== undefined) payload.check_mic_on_tx = checkMicOnTx;
+    if (singleHsAudio !== undefined) payload.single_hotspot_audio = singleHsAudio;
     if (hapticFeedback !== undefined) payload.haptic_feedback = hapticFeedback;
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) payload.haptic_duration = hapticDuration;
     if (hamUser !== undefined) payload.hamqth_username = hamUser;
@@ -101,6 +115,9 @@ export function initGeneralSettings() {
         }
         if (checkMicOnTx !== undefined) {
           try { window.ws.send(JSON.stringify({ type: "set_check_mic_on_tx", enabled: checkMicOnTx })); } catch (_) {}
+        }
+        if (singleHsAudio !== undefined) {
+          try { window.ws.send(JSON.stringify({ type: "set_single_hotspot_audio", enabled: singleHsAudio })); } catch (_) {}
         }
         if (lang !== undefined) {
           try { window.ws.send(JSON.stringify({ type: "set_language", language: lang })); } catch (_) {}

@@ -10,7 +10,10 @@ export function resolveHotspotId(hid) {
     return (currentHotspots && currentHotspots[0] && currentHotspots[0].id) || "default";
   }
   const sHid = String(hid);
-  if (sHid === "default") {
+  if (Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === sHid)) {
+    return sHid;
+  }
+  if (sHid === "default" || sHid === "1") {
     return (currentHotspots && currentHotspots[0] && currentHotspots[0].id) || "default";
   }
   return sHid;
@@ -31,7 +34,7 @@ export function getHotspotNetworkProfile(card, cid) {
   const rawCid = (card && card.dataset && card.dataset.hotspotId) || cid || "default";
   const resolvedCid = resolveHotspotId(rawCid);
   const hs = (currentHotspots && currentHotspots.length)
-    ? (currentHotspots.find(h => h.id === resolvedCid) || currentHotspots.find(h => h.id === rawCid) || (rawCid === "default" ? currentHotspots[0] : null) || currentHotspots[0])
+    ? (currentHotspots.find(h => h.id === rawCid) || currentHotspots.find(h => h.id === resolvedCid) || (rawCid === "default" ? currentHotspots[0] : null) || currentHotspots[0])
     : null;
   const netBadge = card && card.querySelector ? card.querySelector(".hotspot-network-badge") : null;
   const netType = (hs && hs.network_type)
@@ -48,7 +51,8 @@ export function getHotspotNetworkProfile(card, cid) {
   const fallbackProfiles = {
     bm: { id: "bm", shortLabel: "BM", fullName: "BrandMeister" },
     tgif: { id: "tgif", shortLabel: "TGIF", fullName: "TGIF Network" },
-    freedmr: { id: "freedmr", shortLabel: "FDMR", fullName: "FreeDMR / ADN" },
+    freedmr: { id: "freedmr", shortLabel: "FDMR", fullName: "FreeDMR" },
+    adn: { id: "adn", shortLabel: "ADN", fullName: "ADN Systems" },
     dmrplus: { id: "dmrplus", shortLabel: "DMR+", fullName: "DMR+ / IPSC2" },
     xlx: { id: "xlx", shortLabel: "XLX", fullName: "XLX Reflector" },
     custom: { id: "custom", shortLabel: "HBP", fullName: "HomeBrew / HBlink3" },
@@ -649,7 +653,7 @@ export function renderCardPingSparkline(card, hostVal) {
     if (!discOverlay) {
       discOverlay = document.createElement("div");
       discOverlay.className = "asl-ping-disconnected-overlay";
-      discOverlay.textContent = "* disconnect *";
+      discOverlay.textContent = (typeof window !== "undefined" && window.t) ? window.t("ping.asl_disconnect", {}, "* disconnect *") : "* disconnect *";
       chartWrap.appendChild(discOverlay);
     }
     discOverlay.style.display = "block";
@@ -1206,7 +1210,7 @@ export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm", netw
   const netProfile = card ? getHotspotNetworkProfile(card) : null;
   const resolvedLabel = networkLabel || (netProfile && netProfile.shortLabel) || (mode !== "client" && mode !== "bm" && mode !== "server" ? mode : "BM");
   const targetLabel = (mode === "client") ? "Client ↔ ProxDMR" : resolvedLabel;
-  const pingStr = (ms !== null) ? `${ms} ${((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms") : "ms")}` : ((typeof window !== "undefined" && window.t) ? window.t("ping.no_data") : "нет данных");
+  const pingStr = (ms !== null) ? `${ms} ${((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms", {}, "ms") : "ms")}` : ((typeof window !== "undefined" && window.t) ? window.t("ping.no_data", {}, "no data") : "no data");
   const lossDisplay = isOffline ? "--" : ((lossInfo && lossInfo.lossPercent !== undefined && lossInfo.lossPercent !== null) ? Number(lossInfo.lossPercent).toFixed(1) : "0.0");
   const scaleInfo = (lossInfo && lossInfo.scale) ? ` [${lossInfo.scale}]` : "";
   if (typeof window !== "undefined" && window.t) {
@@ -1214,9 +1218,9 @@ export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm", netw
       target: targetLabel,
       ping: pingStr,
       loss: lossDisplay + "%" + scaleInfo
-    });
+    }, `${targetLabel}${scaleInfo}: ping ${pingStr}, loss ${lossDisplay}% (click chart to switch mode)`);
   } else {
-    pingEl.title = `${targetLabel}${scaleInfo}: пинг ${pingStr}, потери ${lossDisplay}% (кликните по графику для смены режима)`;
+    pingEl.title = `${targetLabel}${scaleInfo}: ping ${pingStr}, loss ${lossDisplay}% (click chart to switch mode)`;
   }
 }
 

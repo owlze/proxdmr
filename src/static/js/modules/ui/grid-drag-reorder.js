@@ -13,7 +13,11 @@
 let _dragState = null;
 let _isDragReorderWired = false;
 
-export function initGridDragReorder(radiosGrid, onReorderCallback) {
+export function initGridDragReorder() {
+  // Card grid drag-and-drop removed intentionally; reordering is performed in Top Toolbar slots & Archive Modal.
+}
+
+function _unusedLegacyGridDragReorder(radiosGrid, onReorderCallback) {
   if (!radiosGrid || radiosGrid._dragReorderWired) return;
   radiosGrid._dragReorderWired = true;
 
@@ -54,10 +58,7 @@ export function initGridDragReorder(radiosGrid, onReorderCallback) {
     const card = header.closest(".radio-container");
     if (!card) return;
 
-    // 1st hotspot is fixed and immutable
-    if (card.classList.contains("is-primary-fixed")) return;
-
-    // Ensure it's inside radiosGrid
+    // Ensure it's inside radiosGrid (all hotspots including #1 are equal and draggable)
     if (!radiosGrid.contains(card)) return;
 
     // Register pending drag state
@@ -124,42 +125,21 @@ export function initGridDragReorder(radiosGrid, onReorderCallback) {
       if (
         targetCard &&
         targetCard !== _dragState.card &&
-        radiosGrid.contains(targetCard) &&
-        !targetCard.classList.contains("is-primary-fixed")
+        radiosGrid.contains(targetCard)
       ) {
-        const stack = targetCard.closest(".collapsed-hotspots-stack");
-        const isDraggingCollapsed = _dragState.card.classList.contains("collapsed");
+        const tRect = targetCard.getBoundingClientRect();
+        const isHorizontal = Math.abs(e.clientX - (tRect.left + tRect.width / 2)) > Math.abs(e.clientY - (tRect.top + tRect.height / 2));
+        const isPastCenter = isHorizontal
+          ? (e.clientX > tRect.left + tRect.width / 2)
+          : (e.clientY > tRect.top + tRect.height / 2);
 
-        if (stack && !isDraggingCollapsed) {
-          // Dragging an expanded card over a collapsed card in a stack:
-          // displace relative to the stack container in radiosGrid
-          const sRect = stack.getBoundingClientRect();
-          const isPastCenter = e.clientX > sRect.left + sRect.width / 2;
-          if (isPastCenter) {
-            if (stack.nextElementSibling !== _dragState.card) {
-              stack.after(_dragState.card);
-            }
-          } else {
-            if (stack.previousElementSibling !== _dragState.card) {
-              stack.before(_dragState.card);
-            }
+        if (isPastCenter) {
+          if (targetCard.nextElementSibling !== _dragState.card) {
+            targetCard.after(_dragState.card);
           }
         } else {
-          // Standard displacement within stack or grid
-          const tRect = targetCard.getBoundingClientRect();
-          const isHorizontal = Math.abs(e.clientX - (tRect.left + tRect.width / 2)) > Math.abs(e.clientY - (tRect.top + tRect.height / 2));
-          const isPastCenter = isHorizontal
-            ? (e.clientX > tRect.left + tRect.width / 2)
-            : (e.clientY > tRect.top + tRect.height / 2);
-
-          if (isPastCenter) {
-            if (targetCard.nextElementSibling !== _dragState.card) {
-              targetCard.after(_dragState.card);
-            }
-          } else {
-            if (targetCard.previousElementSibling !== _dragState.card) {
-              targetCard.before(_dragState.card);
-            }
+          if (targetCard.previousElementSibling !== _dragState.card) {
+            targetCard.before(_dragState.card);
           }
         }
       }
@@ -189,23 +169,17 @@ export function initGridDragReorder(radiosGrid, onReorderCallback) {
     // Restore source card appearance
     state.card.classList.remove("is-drag-placeholder");
 
-    // Read new order from DOM
+    // Read new expanded cards order from DOM; keep collapsed active cards at their relative positions, archive at end
     const allCards = Array.from(radiosGrid.querySelectorAll(".radio-container"));
-    const visibleNewIds = allCards.map(c => c.dataset.hotspotId).filter(Boolean);
+    const expandedNewIds = allCards.filter(c => !c.classList.contains("collapsed")).map(c => c.dataset.hotspotId).filter(Boolean);
+    const collapsedActiveIds = allCards.filter(c => c.classList.contains("collapsed")).map(c => c.dataset.hotspotId).filter(Boolean);
 
-    // Ensure 1st fixed primary card is always at index 0
     const allHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
-    const primaryId = (allHotspots[0] && allHotspots[0].id) ||
-      (radiosGrid.querySelector(".radio-container.is-primary-fixed")?.dataset.hotspotId);
+    const visibleNewIds = expandedNewIds.concat(collapsedActiveIds);
 
-    let reorderedVisible = visibleNewIds;
-    if (primaryId) {
-      reorderedVisible = [primaryId, ...visibleNewIds.filter(id => id !== primaryId)];
-    }
-
-    // Preserve any hidden / archived hotspots (not present in DOM) at the end in their existing relative order
-    const hiddenIds = allHotspots.map(h => h.id).filter(id => !reorderedVisible.includes(id));
-    const finalOrder = [...reorderedVisible, ...hiddenIds];
+    // Preserve any archived hotspots (not present in DOM) at the end in their existing relative order
+    const archivedIds = allHotspots.map(h => h.id).filter(id => !visibleNewIds.includes(id));
+    const finalOrder = [...visibleNewIds, ...archivedIds];
 
     // Check if order actually changed across all known hotspots
     const oldOrder = allHotspots.map(h => h.id);

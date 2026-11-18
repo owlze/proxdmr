@@ -6,6 +6,10 @@ natural, fully intelligible phonetic text based on ITU/ICAO standards.
 
 import re
 from typing import Dict, Optional, Any
+try:
+    from radio_abbreviations import replace_radio_abbreviations, RADIO_ABBREVIATIONS
+except ImportError:
+    from src.radio_abbreviations import replace_radio_abbreviations, RADIO_ABBREVIATIONS
 
 try:
     import num2words
@@ -183,6 +187,77 @@ def convert_plus_stress_to_acute(text: str) -> str:
     # Strip any residual '+' before other letters (e.g. +consonant hallucinations)
     text = re.sub(r"\+(?=[а-яёА-ЯЁa-zA-ZєіїЄІЇ])", "", text)
     return text
+
+
+def deduplicate_repeated_phrases(text: str, min_words: int = 1, max_words: int = 5) -> str:
+    """
+    Deduplicates consecutive repetitions of word n-grams (from min_words to max_words words)
+    occurring 2 or more times (e.g. 'спасибо спасибо' -> 'спасибо', 'добрый вечер добрый вечер' -> 'добрый вечер').
+    Leaves only the first occurrence. Handles punctuation and capitalization cleanly.
+    """
+    if not text or not text.strip():
+        return ""
+
+    def _norm(w: str) -> str:
+        return re.sub(r"[^\w]", "", w.lower())
+
+    result = text
+    changed = True
+
+    while changed:
+        changed = False
+        tokens = list(re.finditer(r'\S+', result))
+        if len(tokens) < 2:
+            break
+
+        words = [t.group(0) for t in tokens]
+        norm_words = [_norm(w) for w in words]
+        n_words = len(words)
+
+        found = False
+        for n in range(max_words, min_words - 1, -1):
+            if found:
+                break
+            for i in range(n_words - 2 * n + 1):
+                target = norm_words[i : i + n]
+                if not any(target):
+                    continue
+
+                count = 1
+                while i + (count + 1) * n <= n_words:
+                    next_ngram = norm_words[i + count * n : i + (count + 1) * n]
+                    if next_ngram == target:
+                        count += 1
+                    else:
+                        break
+
+                if count >= 2:
+                    start_char = tokens[i].start()
+                    keep_end_char = tokens[i + n - 1].end()
+                    discard_end_char = tokens[i + count * n - 1].end()
+
+                    first_part = result[start_char:keep_end_char].rstrip(" ,;:-–—")
+                    discarded_part = result[keep_end_char:discard_end_char].strip()
+
+                    tail_punct = ""
+                    for p in [".", "!", "?", ",", ";"]:
+                        if discarded_part.endswith(p) and not first_part.endswith(p):
+                            tail_punct = p
+                            break
+
+                    before = result[:start_char]
+                    after = result[discard_end_char:]
+
+                    result = before + first_part + tail_punct + after
+                    result = re.sub(r'[,:;]\s*([.!?])', r'\1', result)
+                    result = re.sub(r'([.!?])\s*([.!?])', r'\1', result)
+                    result = re.sub(r',\s*,', ',', result)
+                    result = re.sub(r'\s+', ' ', result).strip()
+                    changed = True
+                    found = True
+                    break
+
+    return result
 
 
 CALLSIGN_PHONETIC_WORDS = set([
@@ -382,12 +457,12 @@ def clean_display_text(text: str, callsign: str = "") -> str:
     if (consecutive_callsign_tokens >= 2 or saw_real_callsign_or_phonetic) and cut_index > 0:
         remaining = original[cut_index:].lstrip(" ,.:;–-").rstrip()
         if remaining:
-            return remaining[0].upper() + remaining[1:]
+            return deduplicate_repeated_phrases(remaining[0].upper() + remaining[1:])
         else:
             # Entire message was the callsign
             if callsign and callsign not in ("---", "UNKNOWN", "DMR") and not callsign.startswith("ID "):
                 return f"<call>{callsign}</call>"
-            return original
+            return deduplicate_repeated_phrases(original)
 
     # Step 2: Strip any standalone leading <call>...</call> tag or explicit callsign
     s = original
@@ -399,8 +474,8 @@ def clean_display_text(text: str, callsign: str = "") -> str:
     s = re.sub(r"^[\s,:;–\.-]+", "", s).rstrip()
 
     if s:
-        return s[0].upper() + s[1:]
-    return original
+        return deduplicate_repeated_phrases(s[0].upper() + s[1:])
+    return deduplicate_repeated_phrases(original)
 
 
 def strip_callsigns_for_tts(text: str, callsign: str = "") -> str:
@@ -442,7 +517,7 @@ def strip_callsigns_for_tts(text: str, callsign: str = "") -> str:
     text = re.sub(r"^[\s,:;–-]+", "", text)
     text = re.sub(r"[\s,:;–-]+$", "", text)
     text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return deduplicate_repeated_phrases(text)
 
 
 def filter_hesitation_fillers(text: str) -> str:
@@ -1057,13 +1132,8 @@ def normalize_for_russian_tts(text: str, strip_callsigns: bool = False, callsign
     text = re.sub(r"\b(?:RST\s*)?599\b", "пять девять девять", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(?:RST\s*)?59\b", "пять девять", text, flags=re.IGNORECASE)
 
-    # Replace Q-codes and radio abbreviations (longest first)
-    sorted_q_codes = sorted(Q_CODES_AND_ABBREVIATIONS_RU.keys(), key=len, reverse=True)
-    for code in sorted_q_codes:
-        phonetic = Q_CODES_AND_ABBREVIATIONS_RU[code]
-        # Match case-insensitively with word boundaries
-        pattern = r"\b" + re.escape(code) + r"\b"
-        text = re.sub(pattern, phonetic, text, flags=re.IGNORECASE)
+    # Replace Q-codes and radio abbreviations using unified 515-entry multilingual dictionary (Piper / Silero)
+    text = replace_radio_abbreviations(text, lang="ru")
 
     # Detect and replace callsigns with ICAO/ITU phonetic letters if not stripped
     if not strip_callsigns:
@@ -1117,9 +1187,8 @@ def normalize_for_ukrainian_tts(text: str, strip_callsigns: bool = False, callsi
         flags=re.IGNORECASE
     )
 
-    # Standalone radio etiquette greetings: 73 and 88
-    text = re.sub(r"(?<!\d)73(?!\d)", "Сімдесят три", text)
-    text = re.sub(r"(?<!\d)88(?!\d)", "Вісімдесят вісім", text)
+    # Replace Q-codes, radio etiquette (73/88) and abbreviations in Ukrainian (Piper / Silero)
+    text = replace_radio_abbreviations(text, lang="uk")
 
     # Signal report RST 59 / 599
     text = re.sub(r"\b(?:RST\s*)?599\b", "п'ять дев'ять дев'ять", text, flags=re.IGNORECASE)
@@ -1409,6 +1478,8 @@ HAM_AND_TECH_BRANDS_DICT: Dict[str, str] = {
     "openrtx": "Опен Эр-Ти-Икс",
     "brandmeister": "Брэндмейстер",
     "freedmr": "Фри Ди-Эм-Эр",
+    "adn systems": "Эй-Ди-Эн Системс",
+    "adn": "Эй-Ди-Эн",
     "tgif": "Ти-Джи-Ай-Эф",
     "d-star": "Ди-Стар",
     "dstar": "Ди-Стар",
@@ -1684,6 +1755,8 @@ def filter_piper_text_by_language(text: str, target_lang: str = "ru") -> str:
         return ""
 
     norm_lang = (target_lang or "ru").lower().strip()
+    # Normalize radio abbreviations to target voice language phonetics for Piper TTS
+    text = replace_radio_abbreviations(text, lang=norm_lang)
     is_cyr_target = norm_lang in ("ru", "uk", "bg", "be", "sr", "mk", "kk")
 
     # Tokens: sequences of Cyrillic, Latin, Digits, Symbols, Whitespace
@@ -1798,6 +1871,8 @@ def prepare_text_for_silero(text: str, lang: str = "ru") -> str:
         return ""
 
     clean_lang = (lang or "ru").lower().strip()[:2]
+    # Normalize radio abbreviations for Silero TTS
+    text = replace_radio_abbreviations(text, lang=clean_lang)
     if clean_lang in ("ua", "uk"):
         text = normalize_for_ukrainian_tts(text)
     elif clean_lang == "ru":

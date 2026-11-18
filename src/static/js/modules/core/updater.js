@@ -81,11 +81,6 @@ function updateApkUpdateUI(serverInfo) {
   if (!dlLink) return;
   const dlSpan = dlLink.querySelector("span") || dlLink;
 
-  const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || 
-                  (typeof localStorage !== "undefined" && localStorage.getItem("proxdmr_language")) || 
-                  "ru";
-  const isCyr = (curLang === "ru" || curLang === "uk");
-
   const isApk = !!(window.AndroidBridge && typeof window.AndroidBridge.getAppVersion === "function");
 
   if (isApk) {
@@ -103,11 +98,9 @@ function updateApkUpdateUI(serverInfo) {
     if (hasUpdate) {
       // Requirement 1: Active only when server version is newer than running version
       // Requirement 2: Must display the new version number
-      const defaultTitle = isCyr ? `📱 Доступно обновление ProxDMR v${serverVer}` : `📱 ProxDMR update available v${serverVer}`;
-      const defaultDesc = isCyr 
-        ? `Доступна новая версия v${serverVer} (у вас установлена v${installedVer}). Нажмите кнопку ниже для загрузки и обновления поверх текущей версии. Ваши настройки сохранятся.`
-        : `A new version v${serverVer} is available (you have v${installedVer} installed). Click the button below to download and update over the current version. Your settings will be preserved.`;
-      const defaultBtn = isCyr ? `📥 Скачать обновление v${serverVer}` : `📥 Download update v${serverVer}`;
+      const defaultTitle = `📱 ProxDMR update available v${serverVer}`;
+      const defaultDesc = `A new version v${serverVer} is available (you have v${installedVer} installed). Click the button below to download and update over the current version. Your settings will be preserved.`;
+      const defaultBtn = `📥 Download update v${serverVer}`;
 
       if (titleEl) {
         titleEl.textContent = window.t ? window.t("updater.update_available_title", { ver: serverVer }, defaultTitle) : defaultTitle;
@@ -136,11 +129,9 @@ function updateApkUpdateUI(serverInfo) {
       // App is up-to-date (installed >= server):
       // Requirement 1: Button is INACTIVE / DISABLED!
       const displayVer = installedVer || serverVer || "";
-      const defaultTitle = isCyr ? `📱 ProxDMR v.${displayVer} (apk-оболочка для Android)` : `📱 ProxDMR v.${displayVer} (Android APK shell)`;
-      const defaultDesc = isCyr 
-        ? `У вас установлена последняя версия v${displayVer}. Обновлений не требуется.`
-        : `You have the latest version v${displayVer}. No updates required.`;
-      const defaultBtn = isCyr ? `✓ Установлена актуальная версия v${displayVer}` : `✓ Current version v${displayVer} installed`;
+      const defaultTitle = `📱 ProxDMR v.${displayVer} (Android APK shell)`;
+      const defaultDesc = `You have the latest version v${displayVer}. No updates required.`;
+      const defaultBtn = `✓ Current version v${displayVer} installed`;
 
       if (titleEl) {
         titleEl.textContent = window.t ? window.t("updater.up_to_date_title", { ver: displayVer }, defaultTitle) : defaultTitle;
@@ -179,13 +170,9 @@ function updateApkUpdateUI(serverInfo) {
     }
   } else {
     // In standard web browser: simply a download button for the latest APK
-    const defaultTitle = isCyr ? "📱 Приложение ProxDMR для Android" : "📱 ProxDMR App for Android";
-    const defaultDesc = isCyr 
-      ? "Для стабильного приема радиосигнала в фоновом режиме, автоподключения VPN и поддержки гарнитуры установите APK."
-      : "For stable background radio reception, automatic VPN connection, and headset support, please install the APK.";
-    const defaultBtn = isCyr 
-      ? (`📥 Скачать ${serverFilename}` + (serverVer ? ` (v${serverVer})` : ""))
-      : (`📥 Download ${serverFilename}` + (serverVer ? ` (v${serverVer})` : ""));
+    const defaultTitle = "📱 ProxDMR App for Android";
+    const defaultDesc = "For stable background radio reception, automatic VPN connection, and headset support, please install the APK.";
+    const defaultBtn = `📥 Download ${serverFilename}` + (serverVer ? ` (v${serverVer})` : "");
 
     if (titleEl) {
       titleEl.textContent = window.t ? window.t("updater.android_app_title", {}, defaultTitle) : defaultTitle;

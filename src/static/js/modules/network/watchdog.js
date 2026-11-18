@@ -146,14 +146,19 @@ export function updateHotspotGwStatus(hid, isOnline, detail = "") {
   const isDisconnectedByUser = isHotspotGwDisconnected(cid);
   const effectiveOnline = isOnline && !isDisconnectedByUser;
 
-  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) ||
-    (cid === "default" ? document.querySelector(".radio-container") : null);
+  const isDefaultAlias = (typeof window !== "undefined" && typeof window.isPrimaryDefaultAlias === "function")
+    ? window.isPrimaryDefaultAlias(cid)
+    : (cid === "default");
+  const rc = document.getElementById("radioContainer");
+  const rcMatch = (isDefaultAlias && rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === cid || rc.dataset.hotspotId === "default")) ? rc : null;
+  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
   if (!card) return;
 
   const isConnecting = !effectiveOnline && !isDisconnectedByUser && (
     (ws && ws.readyState === WebSocket.CONNECTING) ||
     wsReconnectTimer !== null ||
-    (detail && (detail.includes("попытк") || detail.includes("Повтор") || detail.includes("Подключ") || detail.includes("Пауза") || detail.includes("Быстр") || detail.includes("восстановлен")))
+    Boolean(window._gwIsConnectingPhase) ||
+    (detail && /попытк|повтор|подключ|пауза|быстр|восстанов|attempt|retry|reconnect|connect|pause|fast|restor|спроб|підключ|versuch|wiederverb|intento|reconect|tentativ|poging|herverbind/i.test(detail))
   );
 
   let badgeClass = "status-offline bm-offline";
@@ -170,8 +175,10 @@ export function updateHotspotGwStatus(hid, isOnline, detail = "") {
   }
 
   const defaultComment = effectiveOnline
-    ? `${host} (WSS активен)`
-    : (isDisconnectedByUser ? (window.t ? window.t("status.gw_disconnected_user") : "Отключено пользователем") : `Шлюз ${host} недоступен`);
+    ? (window.t ? window.t("status.gw_wss_active", { host }, `${host} (WSS активен)`) : `${host} (WSS активен)`)
+    : (isDisconnectedByUser
+        ? (window.t ? window.t("status.gw_disconnected_user", {}, "Отключено пользователем") : "Отключено пользователем")
+        : (window.t ? window.t("status.gw_unavailable", { host }, `Шлюз ${host} недоступен`) : `Шлюз ${host} недоступен`));
   const comment = detail || defaultComment;
   const actionHint = effectiveOnline
     ? (window.t ? window.t("status.gw_click_disconnect", {}, "клик для отключения") : "клик для отключения")
@@ -250,10 +257,11 @@ export const triggerHotspotGwAction = async (hid) => {
       });
       if (hs) {
         await fetch(`/api/hotspots/${cid}/disconnect`, { method: "POST" });
+        const gwOffTxt = window.t ? window.t("status.gw_off_bm_disconnected", {}, "Отключено (GW выкл)") : "Отключено (GW выкл)";
         hs.status = "DISCONNECTED";
-        hs.detail = "Отключено (GW выкл)";
+        hs.detail = gwOffTxt;
         if (typeof window.updateBmStatus === "function") {
-          window.updateBmStatus("DISCONNECTED", "Отключено (GW выкл)", cid);
+          window.updateBmStatus("DISCONNECTED", gwOffTxt, cid);
         }
       }
     } catch (err) {
@@ -396,6 +404,12 @@ export async function runSystemLinkCheck() {
       }
 
       const status = hs.status || (hid === activeHotspotId ? currentBmStatus : "") || "OFFLINE";
+      if (String(hs.network_type || "").toLowerCase() === "ysf") {
+        const hasYsfTarget = Boolean(String(hs.ysf_room || hs.ysf_room_id || hs.ysf_host || hs.bm_master_host || "").trim());
+        if (!hasYsfTarget || String(status).toUpperCase() === "STANDBY") {
+          continue;
+        }
+      }
       const isBmOnline = status === "ONLINE";
       const isBmConnecting = status === "CONNECTING" || status === "AUTHENTICATING" || status === "CONFIGURING";
 
@@ -420,7 +434,7 @@ export async function runSystemLinkCheck() {
           } catch (_) {}
         } else {
           try {
-            const res = await fetch(`/api/hotspots/${hid}/connect`, { method: "POST" });
+            const res = await fetch(`/api/hotspots/${hid}/connect?auto=1`, { method: "POST" });
             const data = await res.json().catch(() => ({}));
             if (data && data.bm_status) {
               hs.status = data.bm_status;
@@ -505,7 +519,7 @@ export function wireCardStatusInteractions(card, hs = null) {
       const curHs = (window.currentHotspots || []).find(h => h.id === cid) || hs;
       const netType = ((curHs && curHs.network_type) || "bm").toLowerCase();
       if (netType !== "bm" && netType !== "tgif") {
-        if (netType === "freedmr" || netType === "xlx") {
+        if (netType === "freedmr" || netType === "adn" || netType === "xlx") {
           if (typeof window.openBmTgStaticModal === "function") {
             window.openBmTgStaticModal(cid);
             return;
@@ -552,7 +566,7 @@ export function wireCardStatusInteractions(card, hs = null) {
 export function renderHotspotAuxStatusBadge(card, hs) {
   if (!card || !hs) return false;
   const netType = (hs.network_type || "bm").toLowerCase();
-  if (netType === "bm" || netType === "tgif") return false;
+  if (netType === "bm" || netType === "tgif" || netType === "ysf" || netType === "allstar" || netType === "asl") return false;
 
   const badge = card.querySelector(".api-status-badge");
   const row = card.querySelector(".api-status-row");
@@ -582,6 +596,19 @@ export function renderHotspotAuxStatusBadge(card, hs) {
       badgeText = "FREEDMR_RPTO:READY";
       comment = window.t ? window.t("status.freedmr_rpto_empty_detail", {}, "FreeDMR RPTO (клик для настройки TG)") : "FreeDMR RPTO (клик для настройки TG)";
       tooltip = window.t ? window.t("status.freedmr_rpto_empty_tooltip", {}, "⚪ FreeDMR RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ FreeDMR RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)";
+    }
+  } else if (netType === "adn") {
+    const rpto = (hs.rpto_options || "").trim();
+    if (rpto) {
+      badgeClass = "status-online bm-online";
+      badgeText = "ADN_RPTO:ACTIVE";
+      comment = `ADN: ${rpto}`;
+      tooltip = window.t ? window.t("status.adn_rpto_ready_tooltip", { rpto }, `🟢 ADN Systems RPTO: ${rpto}. Нажмите для управления статическими TG`) : `🟢 ADN Systems RPTO: ${rpto}. Нажмите для управления статическими TG`;
+    } else {
+      badgeClass = "status-offline bm-offline";
+      badgeText = "ADN_RPTO:READY";
+      comment = window.t ? window.t("status.adn_rpto_empty_detail", {}, "ADN RPTO (клик для настройки TG)") : "ADN RPTO (клик для настройки TG)";
+      tooltip = window.t ? window.t("status.adn_rpto_empty_tooltip", {}, "⚪ ADN RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ ADN RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)";
     }
   } else if (netType === "tgif") {
     badgeClass = "status-online bm-online";
@@ -651,14 +678,24 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
     }
   });
 
+  const findStrictCard = (hidVal) => {
+    const exact = document.querySelector(`.radio-container[data-hotspot-id="${hidVal}"]`);
+    if (exact) return exact;
+    const rc = document.getElementById("radioContainer");
+    if (rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === String(hidVal))) return rc;
+    return null;
+  };
+
   let targets = [];
   if (hotspotId) {
     const realId = resolveHotspotId(hotspotId);
-    const found = currentHotspots.find(h => h.id === realId || (realId === "default" && currentHotspots[0] === h));
+    const found = currentHotspots.find(h => h.id === realId) ||
+                  currentHotspots.find(h => String(h.id) === String(hotspotId)) ||
+                  (realId === "default" ? currentHotspots[0] : null);
     if (found) {
       const fnt = (found.network_type || "bm").toLowerCase();
       if (fnt !== "bm" && fnt !== "tgif") {
-        const c = document.querySelector(`.radio-container[data-hotspot-id="${found.id}"]`) || document.getElementById("radioContainer");
+        const c = findStrictCard(found.id);
         if (c) renderHotspotAuxStatusBadge(c, found);
         isCheckingApi = false;
         return;
@@ -680,7 +717,7 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
     if (targetHs) {
       const tnt = (targetHs.network_type || "bm").toLowerCase();
       if (tnt !== "bm" && tnt !== "tgif") {
-        const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHsId}"]`) || document.getElementById("radioContainer");
+        const card = findStrictCard(targetHsId);
         if (card) renderHotspotAuxStatusBadge(card, targetHs);
         isCheckingApi = false;
         return;
@@ -689,13 +726,12 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
       targetHs._apiDetail = "";
       const isTgif = (tnt === "tgif");
       const netShort = isTgif ? "TGIF" : "BM";
-      const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHsId}"]`)
-        || document.getElementById("radioContainer");
+      const card = findStrictCard(targetHsId);
       if (card) {
         const badge = card.querySelector(".api-status-badge");
         const row = card.querySelector(".api-status-row");
         const dt = card.querySelector(".api-detail-text");
-        const ttip = `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+        const ttip = window.t ? window.t("status.api_no_key_tooltip", { net: netShort }, `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`) : `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
         if (badge) {
           badge.className = "status-badge bm-badge api-status-badge status-offline bm-offline";
           badge.textContent = "API:NO KEY";
@@ -715,8 +751,7 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
   try {
     for (const hs of targets) {
       hs._apiStatus = "CHECKING";
-      const card = document.querySelector(`.radio-container[data-hotspot-id="${hs.id}"]`)
-        || (hs.id === resolveHotspotId("default") ? document.getElementById("radioContainer") : null);
+      const card = findStrictCard(hs.id);
       const badge = card ? card.querySelector(".api-status-badge") : null;
       const row = card ? card.querySelector(".api-status-row") : null;
       const dt = card ? card.querySelector(".api-detail-text") : null;
@@ -727,8 +762,10 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
       const netVersion = isTgif ? "v1" : "v2";
       const apiDomain = isTgif ? "api.tgif.network" : "api.brandmeister.network";
 
-      const checkingTtip = `🟡 ${netShort} API: Проверка соединения...`;
-      const checkingDetail = isTgif ? "Проверка токена TGIF..." : (window.t ? window.t("status.api_checking_detail") : "Проверка токена v2...");
+      const checkingTtip = window.t ? window.t("status.api_checking_tooltip", { net: netShort }, `🟡 ${netShort} API: Проверка соединения...`) : `🟡 ${netShort} API: Проверка соединения...`;
+      const checkingDetail = isTgif
+        ? (window.t ? window.t("status.api_checking_tgif", {}, "Проверка токена TGIF...") : "Проверка токена TGIF...")
+        : (window.t ? window.t("status.api_checking_detail", {}, "Проверка токена v2...") : "Проверка токена v2...");
       if (badge) {
         badge.className = "status-badge bm-badge api-status-badge status-connecting bm-connecting";
         badge.textContent = "API:CHECKING";
@@ -754,12 +791,13 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
           if (status === "ONLINE") {
             badge.classList.add("status-online", "bm-online");
             badge.textContent = "API:ONLINE";
-            comment = data.device_id ? `${apiDomain} (ID: ${data.device_id})` : `${apiDomain} (Авторизован)`;
+            const authShort = window.t ? window.t("status.api_authorized_short", {}, "Авторизован") : "Авторизован";
+            comment = data.device_id ? `${apiDomain} (ID: ${data.device_id})` : `${apiDomain} (${authShort})`;
             tooltip = window.t ? window.t("status.api_online_tooltip", { net: netShort, ver: netVersion }, `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`) : `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
           } else if (status === "AUTH_FAILED") {
             badge.classList.add("status-error", "bm-error");
             badge.textContent = "API:AUTH FAIL";
-            comment = data.detail || (isTgif ? "Неверный токен TGIF (401)" : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
+            comment = data.detail || (isTgif ? (window.t ? window.t("status.api_auth_tgif_detail", {}, "Неверный токен TGIF (401)") : "Неверный токен TGIF (401)") : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
             tooltip = window.t ? window.t("status.api_auth_tooltip", { net: netShort, comment }, `🔴 ${netShort} API: ${comment}. Нажмите для настройки`) : `🔴 ${netShort} API: ${comment}. Нажмите для настройки`;
           } else if (status === "NO_KEY") {
             badge.classList.add("status-offline", "bm-offline");
@@ -769,7 +807,7 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
           } else {
             badge.classList.add("status-error", "bm-error");
             badge.textContent = "API:ERROR";
-            comment = data.detail || `Сервер ${apiDomain} недоступен`;
+            comment = data.detail || (window.t ? window.t("status.api_server_unavailable", { domain: apiDomain }, `Сервер ${apiDomain} недоступен`) : `Сервер ${apiDomain} недоступен`);
             tooltip = window.t ? window.t("status.api_error_tooltip", { net: netShort, comment }, `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`) : `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`;
           }
 
@@ -784,7 +822,7 @@ export async function checkBmApiStatus(arg1 = false, arg2 = null) {
         console.error(`[API] Failed to check ${netShort} API status for ${hs.id}:`, e);
         hs._apiStatus = "ERROR";
         const gwErr = window.t ? window.t("status.api_gateway_error") : "Ошибка связи со шлюзом";
-        const errTtip = `🔴 ${netShort} API: ${gwErr}. Клик для повторной проверки`;
+        const errTtip = window.t ? window.t("status.api_error_tooltip", { net: netShort, comment: gwErr }, `🔴 ${netShort} API: ${gwErr}. Клик для повторной проверки`) : `🔴 ${netShort} API: ${gwErr}. Клик для повторной проверки`;
         if (badge) {
           badge.className = "status-badge bm-badge api-status-badge status-error bm-error";
           badge.textContent = "API:ERROR";

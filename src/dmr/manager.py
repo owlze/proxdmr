@@ -27,8 +27,19 @@ try:
     from dmr.tx_dsp import ServerTxDsp
     from dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
     from dmr.tg_resolver import tg_resolver
-    from dmr.constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES, FREEDMR_DEFAULT_OPTS
+    from dmr.adn_hosts import adn_hosts_mgr
+    from dmr.dmrplus_hosts import dmrplus_hosts_mgr
+    from dmr.constants import (
+        parse_freedmr_rpto,
+        build_freedmr_rpto,
+        FREEDMR_MAX_RPTO_BYTES,
+        FREEDMR_DEFAULT_OPTS,
+        normalize_freedmr_slots,
+        parse_dmrplus_rpto,
+        build_dmrplus_rpto,
+    )
     from dmr.jitter_buffer import DMRRxJitterBuffer
+    from i18n_backend import tr as _tr, country_name as _i18n_country_name
 except ImportError:
     from src.config import AppSettings, HotspotConfig, load_app_settings, save_app_settings, CONFIG_DIR
     from src.dmr.homebrew import BMState, DMRFrame, HomeBrewClient
@@ -42,8 +53,19 @@ except ImportError:
     from src.dmr.tx_dsp import ServerTxDsp
     from src.dmr.recorder import ServerAudioRecorder, BeepMarkerGenerator
     from src.dmr.tg_resolver import tg_resolver
-    from src.dmr.constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES, FREEDMR_DEFAULT_OPTS
+    from src.dmr.adn_hosts import adn_hosts_mgr
+    from src.dmr.dmrplus_hosts import dmrplus_hosts_mgr
+    from src.dmr.constants import (
+        parse_freedmr_rpto,
+        build_freedmr_rpto,
+        FREEDMR_MAX_RPTO_BYTES,
+        FREEDMR_DEFAULT_OPTS,
+        normalize_freedmr_slots,
+        parse_dmrplus_rpto,
+        build_dmrplus_rpto,
+    )
     from src.dmr.jitter_buffer import DMRRxJitterBuffer
+    from src.i18n_backend import tr as _tr, country_name as _i18n_country_name
 
 CALLS_HISTORY_FILE = CONFIG_DIR / "calls_history.json"
 CALL_HISTORY_RETENTION_SEC = 86400.0  # 24 hours
@@ -108,7 +130,7 @@ class HotspotRuntime:
     client: Optional[Any] = None
     allstar_client: Optional[Any] = None
     status: BMState = BMState.DISCONNECTED
-    detail: str = "Отключен"
+    detail: str = "Disconnected"
     ts1: SlotState = field(default_factory=SlotState)
     ts2: SlotState = field(default_factory=SlotState)
     vocoder: DMRVocoderDecoder = field(default_factory=DMRVocoderDecoder)
@@ -147,6 +169,20 @@ class HotspotRuntime:
             "dmrplus_reflector": getattr(self.config, "dmrplus_reflector", "4530") or "4530",
             "allstar_node": getattr(self.config, "allstar_node", "1999") or "1999",
             "allstar_always_online": bool(getattr(self.config, "allstar_always_online", True)),
+            "ysf_host": getattr(self.config, "ysf_host", "") or "",
+            "ysf_port": int(getattr(self.config, "ysf_port", 42000) or 42000),
+            "ysf_room_id": getattr(self.config, "ysf_room_id", "") or getattr(self.config, "ysf_room", "") or "",
+            "ysf_room_name": getattr(self.config, "ysf_room_name", "") or getattr(self.config, "ysf_name", "") or "",
+            "ysf_room": getattr(self.config, "ysf_room", "") or getattr(self.config, "ysf_room_id", "") or "",
+            "ysf_name": getattr(self.config, "ysf_name", "") or getattr(self.config, "ysf_room_name", "") or "",
+            "ysf_online_count": int(getattr(getattr(self.client, "client", self.client), "online_count", 0) or 0) if self.client else 0,
+            "ysf_dg_id": str(getattr(getattr(self.client, "client", self.client), "dg_id", "") or getattr(self.config, "ysf_dg_id", "") or "00"),
+            "ysf_tx_dg_id": getattr(getattr(self.client, "client", self.client), "tx_dg_id", getattr(self.config, "ysf_tx_dg_id", None)) if self.client else getattr(self.config, "ysf_tx_dg_id", None),
+            "ysf_rx_dg_id": int(getattr(getattr(self.client, "client", self.client), "current_rx_dg_id", 0) or 0) if self.client else 0,
+            "ysf_is_multiroom": bool(getattr(getattr(self.client, "client", self.client), "is_multiroom", False)) if self.client else False,
+            "ysf_reflector_type": str(getattr(getattr(self.client, "client", self.client), "reflector_type", "single") or "single") if self.client else "single",
+            "ysf_multiroom_kind": str(getattr(getattr(self.client, "client", self.client), "multiroom_kind", "") or "") if self.client else "",
+            "ysf_room_dg_ids": dict(getattr(self.config, "ysf_room_dg_ids", {}) or {}),
             "backend_buffer_ms": getattr(self, "backend_buffer_ms", 0),
             "duplex": self.config.duplex,
             "default_tg_ts1": self.config.default_tg_ts1,
@@ -475,8 +511,10 @@ class HotspotManager:
                 ts = float(item.get("timestamp", 0.0))
                 dur = float(item.get("duration", 0.0))
                 if ts >= cutoff and (dur >= 0.5 or bool(item.get("transcription"))):
+                    raw_id = item.get("id") or f"{int(ts*1000)}_{item.get('src_id', 0)}_{item.get('slot', 1)}"
+                    inferred_net = item.get("network_type", "") or ("ysf" if str(raw_id).startswith("ysf_") else ("allstar" if str(raw_id).startswith("asl_") else ""))
                     entry = CallLogEntry(
-                        id=item.get("id") or f"{int(ts*1000)}_{item.get('src_id', 0)}_{item.get('slot', 1)}",
+                        id=raw_id,
                         timestamp=ts,
                         hotspot_id=item.get("hotspot_id", "default"),
                         slot=int(item.get("slot", 1)),
@@ -491,7 +529,10 @@ class HotspotManager:
                         is_tx=bool(item.get("is_tx", False)),
                         transcription=item.get("transcription", ""),
                         transcription_lang=item.get("transcription_lang", ""),
-                        network_type=item.get("network_type", ""),
+                        dst_name=item.get("dst_name", ""),
+                        city=item.get("city", ""),
+                        country=item.get("country", ""),
+                        network_type=inferred_net,
                         source_type=item.get("source_type", "")
                     )
                     loaded.append(entry)
@@ -618,7 +659,9 @@ class HotspotManager:
                         logger.warning(f"[MANAGER] Error ensuring ASL container started for user {user_id}: {e}")
             else:
                 rt = self._init_runtime(hs_cfg, user_id=user_id)
-                if not getattr(rt.config, "collapsed", False) and not getattr(rt.config, "hidden", False) and (getattr(rt.config, "network_type", "bm") == "allstar" or (rt.config.dmr_id > 0 and rt.config.bm_password)):
+                net_l = (getattr(rt.config, "network_type", "bm") or "bm").lower()
+                ysf_ready = (net_l == "ysf") and bool(getattr(rt.config, "ysf_host", "") or getattr(rt.config, "bm_master_host", "") or getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", ""))
+                if not getattr(rt.config, "collapsed", False) and not getattr(rt.config, "hidden", False) and (net_l == "allstar" or ysf_ready or (rt.config.dmr_id > 0 and rt.config.bm_password)):
                     asyncio.create_task(self.connect_hotspot(hs_cfg.id, user_id=user_id))
 
         for hid in list(user_map.keys()):
@@ -639,6 +682,11 @@ class HotspotManager:
             if hid not in new_map:
                 new_map[hid] = rt
         self.user_runtimes[user_id] = new_map
+
+        active_hid = getattr(new_settings, "active_hotspot_id", None)
+        for rt in new_map.values():
+            if not getattr(rt.config, "hidden", False) and (not getattr(rt.config, "collapsed", False) or rt.config.id == active_hid):
+                self._trigger_adn_sync_for_runtime(rt)
 
         self.apply_client_settings_to_runtimes(getattr(new_settings, "client_settings", {}) or {}, user_id=user_id)
         rec_s = getattr(new_settings, "recordings_settings", {}) or {}
@@ -699,7 +747,12 @@ class HotspotManager:
                 )
         ambe_rx = client_settings.get("ambe_rx", {})
         if ambe_rx and isinstance(ambe_rx, dict):
-            self.set_vocoder_settings(user_id=user_id, **ambe_rx)
+            self.set_vocoder_settings(
+                spectral_enh=ambe_rx.get("spectral_enh"),
+                high_band_gain_db=ambe_rx.get("high_band_gain_db"),
+                unvoiced_gain_db=ambe_rx.get("unvoiced_gain_db"),
+                user_id=user_id,
+            )
         if hasattr(self, "recorder") and self.recorder:
             self.recorder.apply_settings(client_settings)
 
@@ -828,8 +881,10 @@ class HotspotManager:
         elif call_id or created_at:
             # If not in call_history (e.g. was purged or recorded earlier), add a CallLogEntry so it appears in history upon reload
             now_ts = created_at or time.time()
+            resolved_id = call_id or f"{int(now_ts * 1000)}_{src_id}_{slot}"
+            inferred_net = "ysf" if str(resolved_id).startswith("ysf_") else ("allstar" if str(resolved_id).startswith("asl_") else "")
             entry = CallLogEntry(
-                id=call_id or f"{int(now_ts * 1000)}_{src_id}_{slot}",
+                id=resolved_id,
                 timestamp=now_ts,
                 hotspot_id=hotspot_id or "default",
                 slot=int(slot),
@@ -843,7 +898,8 @@ class HotspotManager:
                 active=False,
                 is_tx=False,
                 transcription=clean_text,
-                transcription_lang=lang or ""
+                transcription_lang=lang or "",
+                network_type=inferred_net
             )
             call_history.append(entry)
             call_history.sort(key=lambda x: x.timestamp, reverse=True)
@@ -903,6 +959,60 @@ class HotspotManager:
             )
             runtime.allstar_client = asl_client
             runtime.client = AllStarClientAdapter(asl_client, cfg.id, user_id, self)
+        elif net_type == "ysf":
+            from src.dmr.ysf_client import YSFClient, YSFClientAdapter
+            from src.dmr.ysf_directory import ysf_dir_mgr, resolve_ysf_room_dg_id_settings, classify_ysf_reflector
+            room_id = str(getattr(cfg, "ysf_room_id", None) or getattr(cfg, "ysf_room", None) or "").strip()
+            ysf_host = str(getattr(cfg, "ysf_host", "") or cfg.bm_master_host or "").strip()
+            ysf_port = int(getattr(cfg, "ysf_port", 42000) or getattr(cfg, "bm_master_port", 42000) or 42000)
+
+            found_room = ysf_dir_mgr.get_room_by_id(room_id) if room_id else None
+            # Sanitize host: never accept numeric room ID as host or dummy fallback
+            if not ysf_host or ysf_host.isdigit() or ysf_host == "ysf.brandmeister.ru":
+                if found_room and found_room.get("host"):
+                    ysf_host = str(found_room.get("host")).strip()
+                    ysf_port = int(found_room.get("port", 42000))
+                else:
+                    ysf_host = ""
+
+            user_room_types = (getattr(self, "user_ysf_room_types", None) or {}).get(user_id, {}) or {}
+            room_override = str(user_room_types.get(room_id) or "").strip().lower()
+            rx_dg_id, tx_dg_id, is_multiroom, mr_kind = resolve_ysf_room_dg_id_settings(
+                cfg, room_id, found_room, room_type_override=room_override
+            )
+            cls_info = classify_ysf_reflector(
+                room=found_room,
+                name=str(getattr(cfg, "ysf_room_name", "") or getattr(cfg, "ysf_name", "") or ""),
+                host=ysf_host,
+                room_id=room_id,
+                override=room_override,
+            )
+            cfg.ysf_dg_id = rx_dg_id
+            cfg.ysf_tx_dg_id = tx_dg_id
+
+            callsign = cfg.callsign or "N0CALL"
+            ysf_desc = getattr(cfg, "description", "") or getattr(cfg, "talker_alias", "") or ""
+            ysf_loc = getattr(cfg, "qth_locator", "") or getattr(cfg, "locator", "") or "KO85VU"
+            room_name = getattr(cfg, "ysf_room_name", "") or getattr(cfg, "ysf_name", "") or getattr(cfg, "name", "")
+            ysf_client = YSFClient(
+                host=ysf_host,
+                port=ysf_port,
+                callsign=callsign,
+                room_id=room_id,
+                room_name=room_name,
+                description=ysf_desc,
+                qth_locator=ysf_loc,
+                vocoder=runtime.vocoder,
+                tx_encoder=runtime.tx_encoder,
+                dg_id=rx_dg_id,
+                tx_dg_id=tx_dg_id,
+                is_multiroom=is_multiroom,
+                reflector_type=cls_info["reflector_type"],
+                multiroom_kind=mr_kind,
+                room_type_override=room_override,
+                user_id=user_id,
+            )
+            runtime.client = YSFClientAdapter(ysf_client, cfg.id, user_id, self)
         else:
             def make_status_cb(hid: str, uid: int):
                 def _status_cb(state: BMState, detail: str):
@@ -948,6 +1058,7 @@ class HotspotManager:
                 check_credentials_valid_cb=make_creds_valid_cb(cfg.id, user_id),
                 get_failover_candidates_cb=make_failover_cands_cb(cfg.id, user_id),
                 on_failover_event_cb=make_failover_event_cb(cfg.id, user_id),
+                user_id=user_id,
             )
             runtime.client = client
 
@@ -996,10 +1107,12 @@ class HotspotManager:
             )
         vrx = cs.get("ambe_rx", {})
         if vrx and isinstance(vrx, dict) and hasattr(runtime, "vocoder") and hasattr(runtime.vocoder, "set_settings"):
+            hb = vrx.get("high_band_gain_db")
+            uv = vrx.get("unvoiced_gain_db")
             runtime.vocoder.set_settings(
                 spectral_enh=bool(vrx.get("spectral_enh", True)),
-                high_band_gain_db=float(vrx.get("high_band_gain_db", 2.5)),
-                unvoiced_gain_db=float(vrx.get("unvoiced_gain_db", -0.4))
+                high_band_gain_db=float(hb if hb is not None else 0.5),
+                unvoiced_gain_db=float(uv if uv is not None else -1.5)
             )
 
         if user_id not in self.user_runtimes:
@@ -1029,7 +1142,10 @@ class HotspotManager:
         # Autoconnect configured instances (only if not collapsed and not hidden) across all user runtimes
         for uid, hs_dict in self.user_runtimes.items():
             for hid, rt in hs_dict.items():
-                if not getattr(rt.config, "collapsed", False) and not getattr(rt.config, "hidden", False) and (getattr(rt.config, "network_type", "bm") == "allstar" or (rt.config.dmr_id > 0 and rt.config.bm_password)):
+                net_l = (getattr(rt.config, "network_type", "bm") or "bm").lower()
+                ysf_ready = (net_l == "ysf") and bool(getattr(rt.config, "ysf_host", "") or getattr(rt.config, "bm_master_host", "") or getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", ""))
+                if not getattr(rt.config, "collapsed", False) and not getattr(rt.config, "hidden", False) and (net_l == "allstar" or ysf_ready or (rt.config.dmr_id > 0 and rt.config.bm_password)):
+                    self._trigger_adn_sync_for_runtime(rt)
                     logger.info(f"[MANAGER] Autoconnecting hotspot '{rt.config.name}' (ID {hid}, user {uid})...")
                     asyncio.create_task(rt.client.connect())
                     await asyncio.sleep(0.5)
@@ -1077,6 +1193,20 @@ class HotspotManager:
             return hs_map[active_id]
         return next(iter(hs_map.values()), None)
 
+    def _trigger_adn_sync_for_runtime(self, rt: Optional[HotspotRuntime]) -> None:
+        """Checks 24h staleness for ADN/DMR+ directories whenever a hotspot of that network is entered."""
+        if not rt or not getattr(rt, "config", None):
+            return
+        net_l = (getattr(rt.config, "network_type", "") or "").strip().lower()
+        try:
+            if net_l == "adn":
+                adn_hosts_mgr.ensure_fresh_background()
+                tg_resolver.ensure_adn_fresh_background()
+            elif net_l == "dmrplus":
+                dmrplus_hosts_mgr.ensure_fresh_background()
+        except Exception as e:
+            logger.debug(f"[MANAGER] Network directory sync check note ({net_l}): {e}")
+
     def set_active_hotspot(self, hotspot_id: str, user_id: Optional[int] = None) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         hs_map = self.user_runtimes.get(uid, {})
@@ -1085,6 +1215,7 @@ class HotspotManager:
             settings.active_hotspot_id = hotspot_id
             if uid == 1:
                 save_app_settings(settings)
+            self._trigger_adn_sync_for_runtime(hs_map[hotspot_id])
             self._notify_async({
                 "type": "active_hotspot_changed",
                 "active_hotspot_id": hotspot_id,
@@ -1094,14 +1225,32 @@ class HotspotManager:
             return True
         return False
 
-    async def connect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None, persist: bool = True) -> bool:
+    async def connect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None, persist: bool = True, force: bool = False) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         rt = self.get_runtime(uid, hotspot_id)
         if not rt or not rt.client:
             return False
         hotspot_id = rt.config.id
+        self._trigger_adn_sync_for_runtime(rt)
         if rt.client.is_connected:
             return True
+        net_l = (getattr(rt.config, "network_type", "bm") or "bm").lower()
+        if net_l == "ysf":
+            ysf_target = str(
+                getattr(rt.config, "ysf_host", "")
+                or getattr(rt.config, "bm_master_host", "")
+                or getattr(rt.config, "ysf_room_id", "")
+                or getattr(rt.config, "ysf_room", "")
+                or ""
+            ).strip()
+            if not ysf_target:
+                if hasattr(rt.client, "clear_target"):
+                    rt.client.clear_target()
+                logger.debug(f"[MANAGER] Skip connect_hotspot for YSF '{rt.config.name}' ({hotspot_id}): no active room/host (STANDBY)")
+                return False
+        if not force and getattr(rt.client, "_is_manual_disconnect", False):
+            logger.debug(f"[MANAGER] Skip auto connect_hotspot for '{rt.config.name}' ({hotspot_id}): manual disconnect active")
+            return False
         if rt.config.collapsed:
             rt.config.collapsed = False
             if persist:
@@ -1118,7 +1267,7 @@ class HotspotManager:
                 "collapsed": False,
                 "user_id": uid,
             }, user_id=uid)
-        return await rt.client.connect()
+        return await rt.client.connect(force=force)
 
     async def disconnect_hotspot(self, hotspot_id: str, user_id: Optional[int] = None) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
@@ -1140,6 +1289,7 @@ class HotspotManager:
         if not rt or not rt.client:
             return False
         hotspot_id = rt.config.id
+        self._trigger_adn_sync_for_runtime(rt)
         logger.info(f"[MANAGER] Reconnecting hotspot '{rt.config.name}' (id={hotspot_id}, user={uid}) to BM...")
         if rt.config.collapsed:
             rt.config.collapsed = False
@@ -1160,9 +1310,41 @@ class HotspotManager:
 
         if hasattr(rt.client, "_is_manual_disconnect"):
             rt.client._is_manual_disconnect = False
+        if getattr(rt.config, "network_type", "") == "ysf" and hasattr(rt.client, "retarget"):
+            from src.dmr.ysf_directory import ysf_dir_mgr, resolve_ysf_room_dg_id_settings, classify_ysf_reflector
+            h = getattr(rt.config, "ysf_host", "") or getattr(rt.config, "bm_master_host", "")
+            p = getattr(rt.config, "ysf_port", 42000) or getattr(rt.config, "bm_master_port", 42000)
+            rid = str(getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", "") or "").strip()
+            rname = getattr(rt.config, "ysf_room_name", "") or getattr(rt.config, "ysf_name", "")
+            found = ysf_dir_mgr.get_room_by_id(rid)
+            if not h or str(h).isdigit():
+                if found and found.get("host"):
+                    h = str(found.get("host")).strip()
+                    p = int(found.get("port", 42000))
+            user_room_types = (getattr(self, "user_ysf_room_types", None) or {}).get(uid, {}) or {}
+            room_override = str(user_room_types.get(rid) or "").strip().lower()
+            rx_dg_id, tx_dg_id, is_multiroom, mr_kind = resolve_ysf_room_dg_id_settings(
+                rt.config, rid, found, room_type_override=room_override
+            )
+            cls_info = classify_ysf_reflector(room=found, name=rname, host=h, room_id=rid, override=room_override)
+            rt.config.ysf_dg_id = rx_dg_id
+            rt.config.ysf_tx_dg_id = tx_dg_id
+            rt.client.retarget(
+                h,
+                p,
+                rid,
+                rname,
+                dg_id=rx_dg_id,
+                tx_dg_id=tx_dg_id,
+                is_multiroom=is_multiroom,
+                reflector_type=cls_info["reflector_type"],
+                multiroom_kind=mr_kind,
+                room_type_override=room_override,
+            )
         if hasattr(rt.client, "disconnect"):
             await rt.client.disconnect(is_retry=True)
-        await asyncio.sleep(0.5)
+        is_ysf = (getattr(rt.config, "network_type", "bm") or "bm").lower() == "ysf"
+        await asyncio.sleep(0.1 if is_ysf else 0.5)
         return await rt.client.connect(force=True)
 
     async def set_hotspot_collapsed(self, hotspot_id: str, collapsed: bool, user_id: Optional[int] = None, persist: bool = True) -> bool:
@@ -1175,6 +1357,8 @@ class HotspotManager:
         if not rt:
             return False
         hotspot_id = rt.config.id
+        if not collapsed:
+            self._trigger_adn_sync_for_runtime(rt)
         was_collapsed = bool(getattr(rt.config, "collapsed", False))
         is_client_conn = bool(rt.client and rt.client.is_connected)
         if was_collapsed == bool(collapsed):
@@ -1204,8 +1388,10 @@ class HotspotManager:
                 await rt.client.disconnect()
         else:
             logger.info(f"[MANAGER] Hotspot '{rt.config.name}' (ID {hotspot_id}, user {uid}) expanded -> connecting BM...")
-            if rt.client and not rt.client.is_connected:
-                asyncio.create_task(rt.client.connect())
+            net_l = (getattr(rt.config, "network_type", "bm") or "bm").lower()
+            ysf_ready = (net_l == "ysf") and bool(getattr(rt.config, "ysf_host", "") or getattr(rt.config, "bm_master_host", "") or getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", ""))
+            if rt.client and not rt.client.is_connected and (net_l != "ysf" or ysf_ready):
+                asyncio.create_task(rt.client.connect(force=True))
         return True
 
     def create_hotspot(self, cfg: HotspotConfig, user_id: Optional[int] = None) -> HotspotRuntime:
@@ -1215,23 +1401,21 @@ class HotspotManager:
         if uid == 1:
             save_app_settings(settings)
         rt = self._init_runtime(cfg, user_id=uid)
+        self._trigger_adn_sync_for_runtime(rt)
         self._notify_async({"type": "hotspot_created", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
         return rt
 
     def reorder_hotspots(self, order: List[str], user_id: Optional[int] = None) -> bool:
         uid = user_id if user_id is not None else self.active_user_id
         settings = self.user_settings.get(uid, self.settings)
-        if not settings or not hasattr(settings, "hotspots"):
+        if not settings or not hasattr(settings, "hotspots") or not settings.hotspots:
             return False
 
-        # Rule: The first registered hotspot ALWAYS remains first (#1)
-        primary_hs = settings.hotspots[0]
-        primary_id = primary_hs.id
-
-        hs_by_id = {h.id: h for h in settings.hotspots if h.id != primary_id}
-        new_hotspots = [primary_hs]
+        # All hotspots are equal: apply requested order uniformly without locking index 0
+        hs_by_id = {h.id: h for h in settings.hotspots}
+        new_hotspots = []
         for hid in order:
-            if hid != primary_id and hid in hs_by_id:
+            if hid in hs_by_id:
                 new_hotspots.append(hs_by_id.pop(hid))
         for remaining in hs_by_id.values():
             new_hotspots.append(remaining)
@@ -1341,11 +1525,26 @@ class HotspotManager:
         if not rt:
             return None
         hotspot_id = rt.config.id
+        net_type_l = (getattr(rt.config, "network_type", "bm") or "bm").lower()
         if rpto_options is not None:
             clean_str = str(rpto_options).strip()
-            if (getattr(rt.config, "network_type", "bm") or "bm").lower() == "freedmr":
+            if net_type_l in ("freedmr", "adn"):
                 parsed = parse_freedmr_rpto(clean_str)
-                clean_str = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"])
+                is_duplex = getattr(rt.config, "duplex", True)
+                norm_ts1, norm_ts2 = normalize_freedmr_slots(parsed["ts1"], parsed["ts2"], duplex=is_duplex)
+                clean_str = build_freedmr_rpto(norm_ts1, norm_ts2, parsed["opts"])
+            elif net_type_l == "dmrplus":
+                parsed_dp = parse_dmrplus_rpto(clean_str, fallback_reflector=getattr(rt.config, "dmrplus_reflector", "") or "")
+                clean_str = build_dmrplus_rpto(
+                    start_ref=parsed_dp["start_ref"],
+                    ts1=parsed_dp["ts1"],
+                    ts2=parsed_dp["ts2"],
+                    relink_time=parsed_dp["relink_time"],
+                    user_link=parsed_dp["user_link"],
+                    extra_opts=parsed_dp["opts"],
+                )
+                if dmrplus_reflector is None:
+                    rt.config.dmrplus_reflector = str(parsed_dp["start_ref"]) if parsed_dp["start_ref"] else ""
             rt.config.rpto_options = clean_str
             if rt.client:
                 rt.client.rpto_options = rt.config.rpto_options
@@ -1357,25 +1556,35 @@ class HotspotManager:
                     rt.client.xlx_module = mod_clean
         if dmrplus_reflector is not None:
             ref_clean = str(dmrplus_reflector).strip()
-            rt.config.dmrplus_reflector = ref_clean
+            rt.config.dmrplus_reflector = "" if (not ref_clean or ref_clean == "4000") else ref_clean
+            if net_type_l == "dmrplus" and rpto_options is None:
+                parsed_dp = parse_dmrplus_rpto(getattr(rt.config, "rpto_options", "") or "", fallback_reflector=rt.config.dmrplus_reflector)
+                eff_start_ref = int(rt.config.dmrplus_reflector) if rt.config.dmrplus_reflector.isdigit() else 4000
+                rt.config.rpto_options = build_dmrplus_rpto(
+                    start_ref=eff_start_ref,
+                    ts1=parsed_dp["ts1"],
+                    ts2=parsed_dp["ts2"],
+                    relink_time=parsed_dp["relink_time"],
+                    user_link=parsed_dp["user_link"],
+                    extra_opts=parsed_dp["opts"],
+                )
+                if rt.client:
+                    rt.client.rpto_options = rt.config.rpto_options
         settings = self.user_settings.get(uid, self.settings)
         for hs_cfg in settings.hotspots:
             if hs_cfg.id == hotspot_id or hs_cfg.id == rt.config.id:
-                if rpto_options is not None:
-                    hs_cfg.rpto_options = rt.config.rpto_options
-                if xlx_module is not None:
-                    hs_cfg.xlx_module = rt.config.xlx_module
-                if dmrplus_reflector is not None:
-                    hs_cfg.dmrplus_reflector = rt.config.dmrplus_reflector
+                hs_cfg.rpto_options = rt.config.rpto_options
+                hs_cfg.xlx_module = rt.config.xlx_module
+                hs_cfg.dmrplus_reflector = rt.config.dmrplus_reflector
                 break
         if uid == 1:
             save_app_settings(settings)
         sent = False
-        if rt.client and rt.client.is_connected and rt.config.rpto_options and getattr(rt.config, "network_type", "bm") != "xlx":
+        if rt.client and rt.client.is_connected and rt.config.rpto_options and net_type_l != "xlx":
             sent = rt.client.send_options(rt.config.rpto_options)
-        if xlx_module is not None and getattr(rt.config, "network_type", "bm") == "xlx" and getattr(rt, "status", None) == BMState.ONLINE:
+        if xlx_module is not None and net_type_l == "xlx" and getattr(rt, "status", None) == BMState.ONLINE:
             await self.send_xlx_module_link_dmr(hotspot_id, rt.config.xlx_module, user_id=uid)
-        if dmrplus_reflector is not None and getattr(rt.config, "network_type", "bm") == "dmrplus" and getattr(rt, "status", None) == BMState.ONLINE:
+        if dmrplus_reflector is not None and net_type_l == "dmrplus" and getattr(rt, "status", None) == BMState.ONLINE:
             await self.send_dmrplus_reflector_link_dmr(hotspot_id, rt.config.dmrplus_reflector, user_id=uid)
         self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
         return {"hotspot": rt.to_dict(), "rpto_sent": sent}
@@ -1428,6 +1637,16 @@ class HotspotManager:
                     cfg.bm_password = h.bm_password
                 if not cfg.bm_api_key and h.bm_api_key:
                     cfg.bm_api_key = h.bm_api_key
+                if not getattr(cfg, "ysf_room_dg_ids", None) and getattr(h, "ysf_room_dg_ids", None):
+                    cfg.ysf_room_dg_ids = dict(h.ysf_room_dg_ids)
+                if new_net == "ysf":
+                    from src.dmr.ysf_directory import resolve_ysf_room_dg_id_settings
+                    old_rid = str(getattr(h, "ysf_room_id", "") or getattr(h, "ysf_room", "") or "").strip()
+                    new_rid = str(getattr(cfg, "ysf_room_id", "") or getattr(cfg, "ysf_room", "") or "").strip()
+                    if new_rid != old_rid or not getattr(cfg, "ysf_dg_id", ""):
+                        rx_dg, tx_dg, _, _ = resolve_ysf_room_dg_id_settings(cfg, new_rid)
+                        cfg.ysf_dg_id = rx_dg
+                        cfg.ysf_tx_dg_id = tx_dg
                 settings.hotspots[i] = cfg
                 break
         if uid == 1:
@@ -1453,8 +1672,11 @@ class HotspotManager:
         # But NEVER connect if hotspot is hidden!
         is_hidden = getattr(cfg, "hidden", False)
         is_collapsed = getattr(cfg, "collapsed", False)
+        self._trigger_adn_sync_for_runtime(rt)
         should_connect = False if (is_hidden or is_collapsed) else (auto_connect if auto_connect is not None else was_connected)
-        if should_connect and rt.client and (getattr(cfg, "network_type", "bm") == "allstar" or (cfg.dmr_id > 0 and cfg.bm_password)):
+        net_l = (getattr(cfg, "network_type", "bm") or "bm").lower()
+        ysf_ready = (net_l == "ysf") and bool(getattr(cfg, "ysf_host", "") or getattr(cfg, "bm_master_host", "") or getattr(cfg, "ysf_room_id", "") or getattr(cfg, "ysf_room", ""))
+        if should_connect and rt.client and (net_l == "allstar" or ysf_ready or (cfg.dmr_id > 0 and cfg.bm_password)):
             logger.info(f"[MANAGER] Reconnecting hotspot '{cfg.name}' (ID {cfg.id}, user {uid}) to {cfg.bm_master_host}...")
             async def _delayed_connect(target_rt, wait_sec: float):
                 if wait_sec > 0:
@@ -1462,8 +1684,8 @@ class HotspotManager:
                 if target_rt and target_rt.client:
                     await target_rt.client.connect()
 
-            # If previous session was active, give BM cluster 1.2s to propagate session release
-            reconnect_delay = 1.2 if was_connected else 0.0
+            # If previous session was active, give BM cluster 1.2s to propagate session release (YSF needs only 0.1s)
+            reconnect_delay = (0.1 if net_l == "ysf" else 1.2) if was_connected else 0.0
             asyncio.create_task(_delayed_connect(rt, reconnect_delay))
 
         return rt
@@ -1472,6 +1694,9 @@ class HotspotManager:
         uid = user_id if user_id is not None else self.active_user_id
         hs_map = self.user_runtimes.get(uid, {})
         if hotspot_id not in hs_map:
+            return False
+        settings_check = self.user_settings.get(uid, self.settings)
+        if settings_check and hasattr(settings_check, "hotspots") and len(settings_check.hotspots) <= 1:
             return False
 
         if self.transcriber and hasattr(self.transcriber, "disable_hotspot"):
@@ -1695,6 +1920,53 @@ class HotspotManager:
             logger.warning(f"[XLX] Failed to link module {mod_clean} on {hid}: {e}")
             return False
 
+    async def send_dmrplus_reflector_link_dmr(self, hid: str, reflector: Optional[str] = None, user_id: Optional[int] = None) -> bool:
+        """
+        Переключает, отключает (4000) или запрашивает статус (5000) рефлектора DMR+ / IPSC2 на TS2.
+        По протоколу IPSC2/MMDVM команды рефлектора передаются как PRIVATE Call на TS2:
+          - '5000' -> PRIVATE Call 5000 на TS2 (голосовой отклик статуса от мастера);
+          - '' / '4000' -> PRIVATE Call 4000 на TS2 (отключение рефлектора);
+          - 4001..4999 -> PRIVATE Call 4000 + пауза 150мс + PRIVATE Call <номер> на TS2.
+        """
+        uid = user_id if user_id is not None else self.active_user_id
+        rt = self.get_runtime(uid, hid)
+        if not rt or not rt.client or getattr(rt, "status", None) != BMState.ONLINE:
+            return False
+
+        ref_raw = str(reflector or "").strip()
+        try:
+            target_ref = int(ref_raw) if ref_raw.isdigit() else 4000
+        except (ValueError, TypeError):
+            target_ref = 4000
+
+        try:
+            if target_ref == 5000:
+                self._send_dmr_cmd_burst(rt, dst_id=5000, slot=2, call_type="PRIVATE")
+                logger.info(f"[DMR+] Requested reflector status (5000 Status) on hotspot '{rt.config.name}' (TS2)")
+                return True
+
+            # Step 1: Send Unlink 4000 on TS2
+            self._send_dmr_cmd_burst(rt, dst_id=4000, slot=2, call_type="PRIVATE")
+            self.clear_dynamic_tgs(rt.config.id, slot=2, user_id=uid)
+
+            if target_ref == 4000 or not (4001 <= target_ref <= 4999):
+                rt.config.dmrplus_reflector = ""
+                logger.info(f"[DMR+] Unlinked reflector (4000 Unlink) on hotspot '{rt.config.name}' (TS2)")
+                self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
+                return True
+
+            # Step 2: Pause 150ms and link target reflector on TS2
+            await asyncio.sleep(0.15)
+            self._send_dmr_cmd_burst(rt, dst_id=target_ref, slot=2, call_type="PRIVATE")
+
+            rt.config.dmrplus_reflector = str(target_ref)
+            logger.info(f"[DMR+] Linked hotspot '{rt.config.name}' to Reflector {target_ref} on TS2 (Voice via TG 9)")
+            self._notify_async({"type": "hotspot_updated", "hotspot": rt.to_dict(), "user_id": uid}, user_id=uid)
+            return True
+        except Exception as e:
+            logger.warning(f"[DMR+] Failed to link reflector '{ref_raw}' on {hid}: {e}")
+            return False
+
     def get_dynamic_tgs(self, hid: str, max_age_sec: float = 900.0, user_id: Optional[int] = None) -> Dict[int, Dict[int, float]]:
         now = time.time()
         rt = self.get_runtime(user_id, hid)
@@ -1811,7 +2083,8 @@ class HotspotManager:
                 for item in getattr(_main_mod, "BM_MASTERS_DEFAULT", []):
                     mid = item.get("id")
                     cc = (item.get("country") or "").upper()
-                    c_name, c_flag = getattr(_main_mod, "COUNTRY_NAMES_RU", {}).get(cc, (cc or "BM", "🌐"))
+                    c_flag = getattr(_main_mod, "COUNTRY_FLAGS", {}).get(cc, "🌐")
+                    c_name = _i18n_country_name(cc or "BM", fallback=cc or "BM")
                     raw_list.append({
                         "id": mid,
                         "country_code": cc,
@@ -1859,16 +2132,22 @@ class HotspotManager:
         return pool[:max(1, int(limit or 15))]
 
     @staticmethod
-    def _format_bm_candidate_label(cand: Optional[Dict[str, Any]]) -> str:
+    def _format_bm_candidate_label(cand: Optional[Dict[str, Any]], lang: Optional[str] = None) -> str:
         if not isinstance(cand, dict):
-            return "неизвестный сервер"
+            return _tr("bm_failover.unknown_server", lang=lang, fallback="unknown server")
         host = str(cand.get("host") or "").strip()
         flag = str(cand.get("flag") or "🌐").strip()
-        c_name = str(cand.get("country_name") or cand.get("country_code") or "").strip()
+        cc = str(cand.get("country_code") or "").strip()
+        raw_cn = str(cand.get("country_name") or "").strip()
+        c_name = _i18n_country_name(cc or raw_cn, lang=lang, fallback=raw_cn or cc) if (cc or raw_cn) else ""
         u_ms = cand.get("udp_ms")
         a_ms = cand.get("avg_ping")
         ping_val = u_ms if u_ms is not None else a_ms
-        ping_str = f"{int(round(float(ping_val)))} мс" if ping_val is not None else "пинг н/д"
+        ping_str = (
+            _tr("bm_failover.ping_ms", lang=lang, fallback="{ms} ms", ms=int(round(float(ping_val))))
+            if ping_val is not None
+            else _tr("bm_failover.ping_na", lang=lang, fallback="ping N/A")
+        )
         if c_name:
             return f"<code>{host}</code> ({flag} {c_name}, {ping_str})"
         return f"<code>{host}</code> ({ping_str})"
@@ -1885,46 +2164,8 @@ class HotspotManager:
         eff_id = rt.client.effective_repeater_id if rt.client else getattr(rt.config, "dmr_id", 0)
         primary_host = str(payload.get("primary_host") or getattr(rt.config, "bm_master_host", ""))
 
-        msg_html = ""
-        if ev == "failover_started":
-            unhealthy_sec = payload.get("unhealthy_seconds", 60)
-            reason = str(payload.get("reason") or "недоступен / неадекватный ответ")
-            next_cand = payload.get("next_candidate") or {}
-            next_idx = payload.get("next_index", 1)
-            total_c = payload.get("total_candidates", 15)
-            cand_label = self._format_bm_candidate_label(next_cand)
-            msg_html = (
-                f"⚠️ <b>Нештатное поведение сервера BrandMeister (&gt;{unhealthy_sec} с)</b>\n"
-                f"Хотспот: <b>{hs_name}</b> ({callsign}, ID <code>{eff_id}</code>)\n"
-                f"Проблемный сервер: <code>{primary_host}</code>\n"
-                f"Причина: <i>{reason}</i>\n"
-                f"🔄 Перестроение на сервер #{next_idx} из {total_c} по таблице пинга:\n"
-                f"➡️ {cand_label}"
-            )
-        elif ev == "candidate_failed_next":
-            failed_cand = payload.get("failed_candidate") or {}
-            failed_idx = payload.get("failed_index", 1)
-            failed_reason = str(payload.get("failed_reason") or "нет ответа")
-            next_cand = payload.get("next_candidate") or {}
-            next_idx = payload.get("next_index", 2)
-            total_c = payload.get("total_candidates", 15)
-            failed_label = self._format_bm_candidate_label(failed_cand)
-            next_label = self._format_bm_candidate_label(next_cand)
-            msg_html = (
-                f"❌ <b>Неудачное подключение к резервному серверу #{failed_idx}/{total_c}</b>\n"
-                f"Хотспот: <b>{hs_name}</b> (ID <code>{eff_id}</code>)\n"
-                f"Сервер: {failed_label}\n"
-                f"Причина: <i>{failed_reason}</i>\n"
-                f"🔄 Переход к следующему серверу #{next_idx}/{total_c}:\n"
-                f"➡️ {next_label}"
-            )
-        elif ev == "failover_succeeded":
+        if ev == "failover_succeeded":
             new_host = str(payload.get("new_host") or "").strip()
-            cand = payload.get("candidate") or {"host": new_host}
-            idx_num = payload.get("index", 1)
-            total_c = payload.get("total_candidates", 15)
-            cand_label = self._format_bm_candidate_label(cand)
-
             if new_host:
                 rt.config.bm_master_host = new_host
                 settings = self.user_settings.get(uid, self.settings)
@@ -1940,28 +2181,118 @@ class HotspotManager:
                     "user_id": uid,
                 }, user_id=uid)
 
-            msg_html = (
-                f"✅ <b>Успешное переключение на резервный сервер BM (#{idx_num}/{total_c})</b>\n"
-                f"Хотспот: <b>{hs_name}</b> ({callsign}, ID <code>{eff_id}</code>)\n"
-                f"Старый сервер: <code>{primary_host}</code>\n"
-                f"Новый сервер: {cand_label}\n"
-                f"Статус: <b>ONLINE</b>"
-            )
-        elif ev == "all_candidates_failed":
-            total_c = payload.get("total_candidates", 15)
-            failed_reason = str(payload.get("failed_reason") or "нет ответа")
-            msg_html = (
-                f"🚨 <b>Не удалось подключиться ни к одному из {total_c} резервных серверов BM</b>\n"
-                f"Хотспот: <b>{hs_name}</b> ({callsign}, ID <code>{eff_id}</code>)\n"
-                f"Последняя ошибка: <i>{failed_reason}</i>\n"
-                f"↩️ Возврат на исходный сервер <code>{primary_host}</code> (повторный перебор не ранее чем через 10 мин)."
-            )
-
-        if msg_html:
+        if ev in ("failover_started", "candidate_failed_next", "failover_succeeded", "all_candidates_failed"):
             async def _send_tg():
                 try:
                     import alerts_config
-                    ok, err = await asyncio.to_thread(alerts_config.send_bm_failover_telegram_alert, msg_html)
+
+                    def _build_and_send():
+                        cfg = alerts_config.load_alerts_config()
+                        tg_lang = str(cfg.get("language") or "en").strip().lower()
+                        msg_html = ""
+                        if ev == "failover_started":
+                            unhealthy_sec = payload.get("unhealthy_seconds", 60)
+                            reason = str(payload.get("reason") or _tr("bm_failover.reason_unhealthy", lang=tg_lang, fallback="unreachable / abnormal response"))
+                            next_cand = payload.get("next_candidate") or {}
+                            next_idx = payload.get("next_index", 1)
+                            total_c = payload.get("total_candidates", 15)
+                            cand_label = self._format_bm_candidate_label(next_cand, lang=tg_lang)
+                            msg_html = _tr(
+                                "bm_failover.tg_started",
+                                lang=tg_lang,
+                                fallback=(
+                                    "⚠️ <b>BrandMeister server abnormal behavior (&gt;{sec}s)</b>\n"
+                                    "Hotspot: <b>{hs}</b> ({callsign}, ID <code>{eff_id}</code>)\n"
+                                    "Problem server: <code>{primary_host}</code>\n"
+                                    "Reason: <i>{reason}</i>\n"
+                                    "🔄 Switching to server #{next_idx} of {total} by ping table:\n"
+                                    "➡️ {cand_label}"
+                                ),
+                                sec=unhealthy_sec,
+                                hs=hs_name,
+                                callsign=callsign,
+                                eff_id=eff_id,
+                                primary_host=primary_host,
+                                reason=reason,
+                                next_idx=next_idx,
+                                total=total_c,
+                                cand_label=cand_label,
+                            )
+                        elif ev == "candidate_failed_next":
+                            failed_cand = payload.get("failed_candidate") or {}
+                            failed_idx = payload.get("failed_index", 1)
+                            failed_reason = str(payload.get("failed_reason") or _tr("bm_failover.reason_no_response", lang=tg_lang, fallback="no response"))
+                            next_cand = payload.get("next_candidate") or {}
+                            next_idx = payload.get("next_index", 2)
+                            total_c = payload.get("total_candidates", 15)
+                            failed_label = self._format_bm_candidate_label(failed_cand, lang=tg_lang)
+                            next_label = self._format_bm_candidate_label(next_cand, lang=tg_lang)
+                            msg_html = _tr(
+                                "bm_failover.tg_candidate_failed",
+                                lang=tg_lang,
+                                fallback=(
+                                    "❌ <b>Backup server connection failed #{failed_idx}/{total}</b>\n"
+                                    "Hotspot: <b>{hs}</b> (ID <code>{eff_id}</code>)\n"
+                                    "Server: {failed_label}\n"
+                                    "Reason: <i>{reason}</i>\n"
+                                    "🔄 Trying next server #{next_idx}/{total}:\n"
+                                    "➡️ {next_label}"
+                                ),
+                                failed_idx=failed_idx,
+                                total=total_c,
+                                hs=hs_name,
+                                eff_id=eff_id,
+                                failed_label=failed_label,
+                                reason=failed_reason,
+                                next_idx=next_idx,
+                                next_label=next_label,
+                            )
+                        elif ev == "failover_succeeded":
+                            new_host = str(payload.get("new_host") or "").strip()
+                            cand = payload.get("candidate") or {"host": new_host}
+                            idx_num = payload.get("index", 1)
+                            total_c = payload.get("total_candidates", 15)
+                            cand_label = self._format_bm_candidate_label(cand, lang=tg_lang)
+                            msg_html = _tr(
+                                "bm_failover.tg_succeeded",
+                                lang=tg_lang,
+                                fallback=(
+                                    "✅ <b>Switched to backup BM server (#{idx}/{total})</b>\n"
+                                    "Hotspot: <b>{hs}</b> ({callsign}, ID <code>{eff_id}</code>)\n"
+                                    "Previous server: <code>{primary_host}</code>\n"
+                                    "New server: {cand_label}\n"
+                                    "Status: <b>ONLINE</b>"
+                                ),
+                                idx=idx_num,
+                                total=total_c,
+                                hs=hs_name,
+                                callsign=callsign,
+                                eff_id=eff_id,
+                                primary_host=primary_host,
+                                cand_label=cand_label,
+                            )
+                        elif ev == "all_candidates_failed":
+                            total_c = payload.get("total_candidates", 15)
+                            failed_reason = str(payload.get("failed_reason") or _tr("bm_failover.reason_no_response", lang=tg_lang, fallback="no response"))
+                            msg_html = _tr(
+                                "bm_failover.tg_all_failed",
+                                lang=tg_lang,
+                                fallback=(
+                                    "🚨 <b>Failed to connect to any of {total} backup BM servers</b>\n"
+                                    "Hotspot: <b>{hs}</b> ({callsign}, ID <code>{eff_id}</code>)\n"
+                                    "Last error: <i>{reason}</i>\n"
+                                    "↩️ Returning to primary server <code>{primary_host}</code> (next retry scan not earlier than 10 min)."
+                                ),
+                                total=total_c,
+                                hs=hs_name,
+                                callsign=callsign,
+                                eff_id=eff_id,
+                                reason=failed_reason,
+                                primary_host=primary_host,
+                            )
+                        return alerts_config.send_bm_failover_telegram_alert(msg_html)
+
+                    ok, err = await asyncio.to_thread(_build_and_send)
                     if not ok:
                         logger.debug(f"[BM-FAILOVER] Telegram alert not sent: {err}")
                     else:
@@ -2013,6 +2344,9 @@ class HotspotManager:
                 rt._active_rx_slot = None
                 rt._last_rx_burst_time = 0.0
             if slot_state.active and (frame.stream_id == slot_state.stream_id or frame.src_id == slot_state.src_id):
+                if hasattr(rt, "rx_jitter_buffers") and rt.rx_jitter_buffers.get(frame.slot):
+                    rt.rx_jitter_buffers[frame.slot].drain_sync()
+                    rt.rx_jitter_buffers[frame.slot].reset()
                 slot_state.active = False
                 slot_state.src_id = 0
                 slot_state.src_callsign = ""
@@ -2032,9 +2366,6 @@ class HotspotManager:
                     self.transcriber.on_call_ended(hid, frame.slot, call_id=active_call.id if active_call else "")
                 if hasattr(self, "recorder") and self.recorder:
                     self.recorder.on_rx_call_ended(hid, frame.slot, call_id=active_call.id if active_call else "")
-                if hasattr(rt, "rx_jitter_buffers") and rt.rx_jitter_buffers.get(frame.slot):
-                    rt.rx_jitter_buffers[frame.slot].drain_sync()
-                    rt.rx_jitter_buffers[frame.slot].reset()
                 rt.vocoder.reset_slot(frame.slot)
                 rt.agc.reset_slot(frame.slot)
                 if hasattr(rt, "equalizer"):
@@ -2130,6 +2461,8 @@ class HotspotManager:
             call_key = f"{hid}_{frame.slot}"
             prev_call = active_calls.get(call_key)
             if prev_call and prev_call.active:
+                if hasattr(rt, "rx_jitter_buffers") and rt.rx_jitter_buffers.get(frame.slot):
+                    rt.rx_jitter_buffers[frame.slot].reset()
                 prev_call.active = False
                 prev_end = slot_state.last_seen if (slot_state.last_seen and slot_state.last_seen > prev_call.timestamp) else now
                 prev_call.duration = max(0.1, round(prev_end - prev_call.timestamp, 1))
@@ -2250,13 +2583,15 @@ class HotspotManager:
         src_id = getattr(frame, "src_id", 0)
         dst_id = getattr(frame, "dst_id", 0)
         is_freedmr_beacon = (
-            (getattr(rt.config, "network_type", "bm") or "bm").lower() == "freedmr"
+            (getattr(rt.config, "network_type", "bm") or "bm").lower() in ("freedmr", "adn")
             and (dst_id == 16777215 or src_id == 5000)
         )
         if is_freedmr_beacon:
             return
 
         slot_state = rt.ts1 if slot == 1 else rt.ts2
+        if not slot_state.active:
+            return
         active_calls = self._get_user_active_calls(uid)
         curr_call = active_calls.get(f"{hid}_{slot}")
 
@@ -2330,6 +2665,8 @@ class HotspotManager:
             await asyncio.sleep(0.5)
             try:
                 now = time.time()
+                if hasattr(self, "recorder") and self.recorder and hasattr(self.recorder, "prune_stale_rx_buffers"):
+                    self.recorder.prune_stale_rx_buffers(max_idle_sec=3.5)
 
                 if now - self._last_prune_time >= 30.0:
                     self._last_prune_time = now
@@ -2346,9 +2683,9 @@ class HotspotManager:
 
                     for hid, rt in hs_dict.items():
                         net_type = (getattr(rt.config, "network_type", "bm") or "bm").lower()
-                        if net_type == "allstar":
-                            # AllStarLink manages carrier lifecycle via its own IAX2 watchdog & _on_asl_carrier_change.
-                            # Do NOT let the 2.5s DMR burst timeout kill active AllStar calls!
+                        if net_type in ("allstar", "ysf"):
+                            # AllStarLink and YSF manage carrier lifecycle via their own watchdogs & carrier callbacks.
+                            # Do NOT let the 2.5s DMR burst timeout extinguish active AllStar or YSF calls!
                             continue
                         if rt._active_rx_slot and (now - rt._last_rx_burst_time > 1.0):
                             rt._active_rx_slot = None
@@ -2356,6 +2693,9 @@ class HotspotManager:
                             if tx_st.active and hid == tx_st.hotspot_id and slot_num == tx_st.slot:
                                 continue
                             if st.active and (now - st.last_seen > 2.5):
+                                if hasattr(rt, "rx_jitter_buffers") and rt.rx_jitter_buffers.get(slot_num):
+                                    rt.rx_jitter_buffers[slot_num].drain_sync()
+                                    rt.rx_jitter_buffers[slot_num].reset()
                                 st.active = False
                                 st.src_id = 0
                                 st.src_callsign = ""
@@ -2375,9 +2715,6 @@ class HotspotManager:
                                     self.transcriber.on_call_ended(hid, slot_num, call_id=active_call.id if active_call else "")
                                 if hasattr(self, "recorder") and self.recorder:
                                     self.recorder.on_rx_call_ended(hid, slot_num, call_id=active_call.id if active_call else "")
-
-                                if hasattr(rt, "rx_jitter_buffers") and rt.rx_jitter_buffers.get(slot_num):
-                                    rt.rx_jitter_buffers[slot_num].reset()
 
                                 rt.vocoder.reset_slot(slot_num)
                                 rt.agc.reset_slot(slot_num)
@@ -2577,8 +2914,8 @@ class HotspotManager:
         uid = user_id if user_id is not None else self.active_user_id
         rts = list(self.user_runtimes.get(uid, {}).values()) if user_id is not None else [rt for hs in self.user_runtimes.values() for rt in hs.values()]
         enh = spectral_enh if spectral_enh is not None else True
-        high_band = float(high_band_gain_db) if high_band_gain_db is not None else 2.5
-        unvoiced = float(unvoiced_gain_db) if unvoiced_gain_db is not None else -0.4
+        high_band = float(high_band_gain_db) if high_band_gain_db is not None else 0.5
+        unvoiced = float(unvoiced_gain_db) if unvoiced_gain_db is not None else -1.5
         for rt in rts:
             if hasattr(rt, "vocoder") and hasattr(rt.vocoder, "set_settings"):
                 rt.vocoder.set_settings(
@@ -2657,6 +2994,19 @@ class HotspotManager:
             elif hasattr(rt, "allstar_client") and rt.allstar_client:
                 rt.allstar_client.start_ptt()
 
+        # YSF: normalize slot 1, room id/name, and signal start of PTT
+        is_ysf = bool(rt and (getattr(rt.config, "network_type", "bm") or "").lower() == "ysf")
+        ysf_room_name = ""
+        if is_ysf:
+            slot = 1
+            call_type = "GROUP"
+            ysf_rid_str = str(getattr(rt.config, "ysf_room_id", "") or getattr(rt.config, "ysf_room", "") or dst_id or "25000").strip()
+            dst_id = int(ysf_rid_str) if ysf_rid_str.isdigit() else 25000
+            ysf_room_name = str(getattr(rt.config, "ysf_room_name", "") or getattr(rt.config, "ysf_name", "") or f"YSF #{dst_id}").strip()
+            src_id = 0
+            if rt.client and hasattr(rt.client, "start_ptt"):
+                rt.client.start_ptt()
+
         tx_st.active = True
         tx_st.is_releasing = False
         tx_st.hotspot_id = effective_hid
@@ -2697,6 +3047,8 @@ class HotspotManager:
         call_history = self._get_user_call_history(uid)
 
         # If an RX call was active on this slot, finalize it cleanly
+        if rt and hasattr(rt, "rx_jitter_buffers") and rt.rx_jitter_buffers.get(slot):
+            rt.rx_jitter_buffers[slot].reset()
         prev_rx = active_calls.pop(f"{effective_hid}_{slot}", None)
         if prev_rx and prev_rx.active:
             prev_rx.active = False
@@ -2739,14 +3091,14 @@ class HotspotManager:
             src_name=src_name,
             talker_alias=talker_alias,
             dst_id=dst_id,
-            dst_name=f"Node {dst_id}" if is_allstar else f"TG {dst_id}",
+            dst_name=f"Node {dst_id}" if is_allstar else (ysf_room_name if is_ysf else f"TG {dst_id}"),
             city=tx_city,
             country=tx_country,
             call_type=tx_st.call_type,
             active=True,
             is_tx=True,
-            network_type="allstar" if is_allstar else getattr(rt.config, "network_type", "bm"),
-            source_type="VoIP" if is_allstar else "RF",
+            network_type="allstar" if is_allstar else ("ysf" if is_ysf else getattr(rt.config, "network_type", "bm")),
+            source_type="VoIP" if (is_allstar or is_ysf) else "RF",
         )
         active_calls[f"tx_{effective_hid}_{slot}"] = tx_call
         call_history.insert(0, tx_call)
@@ -2763,16 +3115,17 @@ class HotspotManager:
             "talker_alias": talker_alias,
             "caller_display": tx_call.format_caller(),
             "dst_id": dst_id,
+            "dst_name": tx_call.dst_name,
             "call_type": tx_st.call_type,
             "active": True,
             "is_tx": True,
             "call_entry": tx_call.to_dict(),
-            "network_type": "allstar" if is_allstar else getattr(rt.config, "network_type", "bm"),
-            "source_type": "VoIP" if is_allstar else "RF",
+            "network_type": tx_call.network_type,
+            "source_type": tx_call.source_type,
             "user_id": uid,
         }, user_id=uid)
 
-        if rt and rt.client and rt.status == BMState.ONLINE:
+        if not is_allstar and not is_ysf and rt and rt.client and rt.status == BMState.ONLINE:
             try:
                 header_payload = self.tx_framer.create_header(
                     src_id=src_id,
@@ -2833,6 +3186,17 @@ class HotspotManager:
                     rt.client.send_tx_audio_chunk(chunk)
                 elif hasattr(rt, "allstar_client") and rt.allstar_client:
                     rt.allstar_client.send_tx_audio_chunk(chunk)
+            return
+
+        if rt and getattr(rt.config, "network_type", "bm") == "ysf":
+            # YSF uses 100ms frames (1600 bytes PCM16 @ 8000Hz)
+            while len(tx_st.audio_buffer) >= 1600:
+                chunk = bytes(tx_st.audio_buffer[:1600])
+                del tx_st.audio_buffer[:1600]
+                if hasattr(rt, "tx_dsp") and rt.tx_dsp:
+                    chunk = rt.tx_dsp.process_burst(chunk)
+                if rt.client and hasattr(rt.client, "send_tx_audio_chunk"):
+                    rt.client.send_tx_audio_chunk(chunk)
             return
 
         # 960 bytes PCM = 480 samples @ 8000 Hz = 60 ms
@@ -2910,7 +3274,27 @@ class HotspotManager:
                 asl_target.stop_ptt()
             tx_st.audio_buffer.clear()
 
-        if rt and rt.client and rt.status == BMState.ONLINE and getattr(rt.config, "network_type", "bm") != "allstar":
+        # YSF: flush remaining 100ms frames (+ padded tail) and stop PTT via YSFClientAdapter
+        if rt and (getattr(rt.config, "network_type", "bm") or "").lower() == "ysf":
+            ysf_target = rt.client if (rt.client and hasattr(rt.client, "stop_ptt")) else None
+            if ysf_target:
+                while len(tx_st.audio_buffer) >= 1600:
+                    chunk = bytes(tx_st.audio_buffer[:1600])
+                    del tx_st.audio_buffer[:1600]
+                    if hasattr(rt, "tx_dsp") and rt.tx_dsp:
+                        chunk = rt.tx_dsp.process_burst(chunk)
+                    if hasattr(ysf_target, "send_tx_audio_chunk"):
+                        ysf_target.send_tx_audio_chunk(chunk)
+                if len(tx_st.audio_buffer) >= 320:
+                    padded = bytes(tx_st.audio_buffer) + (b"\x00" * (1600 - len(tx_st.audio_buffer)))
+                    if hasattr(rt, "tx_dsp") and rt.tx_dsp:
+                        padded = rt.tx_dsp.process_burst(padded)
+                    if hasattr(ysf_target, "send_tx_audio_chunk"):
+                        ysf_target.send_tx_audio_chunk(padded)
+                ysf_target.stop_ptt()
+            tx_st.audio_buffer.clear()
+
+        if rt and rt.client and rt.status == BMState.ONLINE and getattr(rt.config, "network_type", "bm") not in ("allstar", "ysf"):
             try:
                 src_id = rt.config.dmr_id
                 if getattr(rt.config, "network_type", "bm") == "xlx":

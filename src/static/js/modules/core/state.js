@@ -18,10 +18,17 @@ export function resolveHotspotId(hid) {
     return window.resolveHotspotId(hid);
   }
   const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
-  if (!hid || hid === "undefined" || hid === "null" || hid === "default" || hid === "1") {
+  if (!hid || hid === "undefined" || hid === "null") {
     return (hsList && hsList[0] && hsList[0].id) || "default";
   }
-  return String(hid);
+  const sHid = String(hid);
+  if (Array.isArray(hsList) && hsList.some(h => h && String(h.id) === sHid)) {
+    return sHid;
+  }
+  if (sHid === "default" || sHid === "1") {
+    return (hsList && hsList[0] && hsList[0].id) || "default";
+  }
+  return sHid;
 }
 
 export function getHotspotSlot(hid) {

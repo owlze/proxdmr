@@ -54,46 +54,35 @@
   "client_settings": {
     "border_radius": 5,
     "audio_rx": {
-      "active_preset": "1",
-      "jitter_buffer_ms": 1080,
-      "eq10_gains": [
-        -7,
-        -83,
-        -11,
-        4,
-        2,
-        103,
-        118,
-        131,
-        25,
-        -200
-      ],
+      "agc_enabled": true,
+      "boost_pct": 100,
+      "active_preset": "3",
+      "jitter_buffer_ms": 1040,
       "presets": {
         "1": {
-          "name": "Стандарт",
           "eq10Enable": true,
           "eq10Linked": true,
           "eq10Gains": [
-            -7,
-            -83,
-            -11,
-            4,
-            2,
-            103,
-            118,
-            131,
-            25,
-            -200
+            -51,
+            -47,
+            -2,
+            32,
+            74,
+            100,
+            148,
+            169,
+            161,
+            57
           ],
           "agcEnable": true,
-          "agcDepth": 22,
+          "agcDepth": 18,
           "agcGain": 50,
           "limiterEnable": true,
           "jitterBuffer": 1080,
-          "boostPct": 100
+          "boostPct": 100,
+          "name": "Standard"
         },
         "2": {
-          "name": "Мягкий эфир",
           "eq10Enable": true,
           "eq10Linked": true,
           "eq10Gains": [
@@ -113,48 +102,49 @@
           "agcGain": 35,
           "limiterEnable": true,
           "jitterBuffer": 140,
-          "boostDb": 18
+          "boostDb": 18,
+          "name": "Soft Ether"
         },
         "3": {
-          "name": "Разборчивость (DX)",
           "eq10Enable": true,
           "eq10Linked": true,
           "eq10Gains": [
-            15,
-            24,
-            39,
-            39,
-            62,
-            75,
-            57,
-            77,
-            92,
-            50
+            64,
+            53,
+            48,
+            88,
+            83,
+            90,
+            115,
+            122,
+            113,
+            40
           ],
           "agcEnable": true,
-          "agcDepth": 20,
-          "agcGain": 10,
+          "agcDepth": 22,
+          "agcGain": 32,
           "limiterEnable": true,
-          "jitterBuffer": 1500,
-          "boostDb": 22
+          "jitterBuffer": 1040,
+          "boostPct": 100,
+          "name": "Clarity (DX)"
         }
       }
     },
     "ambe_rx": {
-      "name": "Стандарт (mbelib-neo)",
+      "name": "Standard (mbelib-neo)",
       "spectral_enh": true,
       "high_band_gain_db": 2.5,
       "unvoiced_gain_db": -0.5,
       "active_preset": "1",
       "presets": {
         "1": {
-          "name": "Стандарт",
+          "name": "Standard",
           "spectral_enh": true,
           "high_band_gain_db": 2.5,
           "unvoiced_gain_db": -0.5
         },
         "2": {
-          "name": "Мягкий эфир",
+          "name": "Soft Ether",
           "spectral_enh": true,
           "high_band_gain_db": 0.5,
           "unvoiced_gain_db": 2.0
@@ -163,7 +153,9 @@
       }
     },
     "audio_tx": {
-      "mic_gain": 1,
+      "mic_gain": 3,
+      "bt_mic": true,
+      "browser_mic_id": "",
       "noise_suppression": false,
       "browser_agc": false,
       "dsp_agc": true,
@@ -173,15 +165,14 @@
       "hpf_enabled": true,
       "presence_boost": 0,
       "eq_low": -3,
-      "eq_mid": 3,
-      "eq_high": 0,
+      "eq_mid": 8,
+      "eq_high": 2,
       "eq_preset": "custom",
       "active_preset": "1",
       "presets": {
         "1": {
-          "name": "Стандарт",
           "txBtMicEnabled": true,
-          "txMicGain": 1,
+          "txMicGain": 3,
           "txNoiseSuppression": false,
           "txBrowserAgc": false,
           "txDspAgc": true,
@@ -193,7 +184,8 @@
           "txEqLow": -3,
           "txEqMid": 8,
           "txEqHigh": 2,
-          "txEqPreset": "custom"
+          "txEqPreset": "custom",
+          "name": "Standard"
         },
         "2": null,
         "3": null
@@ -207,40 +199,84 @@
     },
     "storage_dump": {
       "proxdmr_border_radius": 5,
-      "proxdmr_jitter_buffer_ms": "1000",
-      "proxdmr_backend_buffer_ms": "1200",
-      "proxdmr_audio_rx_active_preset": "1",
-      "proxdmr_audio_tx_active_preset": "1",
+      "proxdmr_audio_rx_active_preset": "3",
       "proxdmr_asl_audio_rx_active_preset": "1",
-      "proxdmr_asl_audio_tx_active_preset": "1",
+      "proxdmr_audio_tx_active_preset": "1",
+      "proxdmr_asl_audio_tx_active_preset": "3",
       "proxdmr_ambe_active_preset": "1",
-      "proxdmr_audio_rx_preset_1": "{\"name\": \"Стандарт\", \"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [-7, -83, -11, 4, 2, 103, 118, 131, 25, -200], \"agcEnable\": true, \"agcDepth\": 22, \"agcGain\": 50, \"limiterEnable\": true, \"jitterBuffer\": 1080, \"boostPct\": 100}",
-      "proxdmr_asl_audio_rx_preset_1": "{\"name\": \"Стандарт (Linear)\", \"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132], \"agcEnable\": true, \"agcDepth\": 19, \"agcGain\": 10, \"limiterEnable\": true, \"jitterBuffer\": 1100, \"boostPct\": 100}",
-      "proxdmr_audio_tx_preset_1": "{\"name\": \"Стандарт\", \"txBtMicEnabled\": true, \"txMicGain\": 1, \"txNoiseSuppression\": false, \"txBrowserAgc\": false, \"txDspAgc\": true, \"txEchoCancellation\": false, \"txGateEnabled\": true, \"txGateThreshold\": -51, \"txHpfEnabled\": true, \"txPresenceBoost\": 0, \"txEqLow\": -3, \"txEqMid\": 8, \"txEqHigh\": 2, \"txEqPreset\": \"custom\"}",
-      "proxdmr_asl_audio_tx_preset_1": "{\"name\": \"Стандарт\", \"txBtMicEnabled\": false, \"txMicGain\": 0, \"txNoiseSuppression\": false, \"txBrowserAgc\": false, \"txDspAgc\": true, \"txEchoCancellation\": false, \"txGateEnabled\": true, \"txGateThreshold\": -45, \"txHpfEnabled\": true, \"txPresenceBoost\": 0, \"txEqLow\": -15, \"txEqMid\": 8, \"txEqHigh\": 2, \"txEqPreset\": \"custom\"}",
-      "proxdmr_ambe_preset_1": "{\"name\": \"Стандарт\", \"spectral_enh\": true, \"high_band_gain_db\": 2.5, \"unvoiced_gain_db\": -0.5}",
-      "proxdmr_ambe_preset_2": "{\"name\": \"Мягкий эфир\", \"spectral_enh\": true, \"high_band_gain_db\": 0.5, \"unvoiced_gain_db\": 2.0}",
-      "proxdmr_asl_scan_cfg_global": "{\"mode\": \"timer\", \"timerHoldSec\": 15, \"releaseHoldSec\": 20, \"dwellSec\": 5}",
-      "proxdmr_asl_quick_nodes_global": "[{\"node\": \"1999\", \"label\": \"Parrot Echo\", \"flag\": \"🦜\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"2462\", \"label\": \"Alaska Net\", \"flag\": \"🇺🇸\", \"scan\": true, \"role\": \"node\"}, {\"node\": \"27339\", \"label\": \"East Coast\", \"flag\": \"🇺🇸\", \"scan\": true, \"role\": \"node\"}, {\"node\": \"2560\", \"label\": \"WIN System\", \"flag\": \"🌐\", \"scan\": true, \"role\": \"node\", \"prefMode\": \"2\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}]"
+      "proxdmr_jitter_buffer_ms": "1040",
+      "proxdmr_asl_jitter_buffer_ms": "1100",
+      "proxdmr_backend_buffer_ms": "1980",
+      "proxdmr_audio_rx_net": "dmr",
+      "proxdmr_audio_tx_net": "dmr",
+      "proxdmr_ambe_preset_1": "{\"spectral_enh\": true, \"high_band_gain_db\": 2.5, \"unvoiced_gain_db\": -0.5}",
+      "proxdmr_ambe_preset_2": "{\"spectral_enh\": true, \"high_band_gain_db\": 0.5, \"unvoiced_gain_db\": 2.0}",
+      "proxdmr_asl_scan_cfg_global": "{\"mode\": \"timer\", \"timerHoldSec\": 15, \"releaseHoldSec\": 3, \"dwellSec\": 5}",
+      "proxdmr_ysf_scan_cfg_global": "{\"timerHoldSec\": 5, \"pauseOnVoice\": true}",
+      "proxdmr_asl_quick_nodes_global": "[{\"node\": \"1999\", \"label\": \"Parrot Echo\", \"flag\": \"🦜\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"2462\", \"label\": \"Alaska Net\", \"flag\": \"🇺🇸\", \"scan\": true, \"role\": \"node\"}, {\"node\": \"27339\", \"label\": \"East Coast\", \"flag\": \"🇺🇸\", \"scan\": true, \"role\": \"node\"}, {\"node\": \"2560\", \"label\": \"WIN System\", \"flag\": \"🇺🇸\", \"scan\": true, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}, {\"node\": \"\", \"label\": \"\", \"flag\": \"➕\", \"scan\": false, \"role\": \"node\"}]",
+      "proxdmr_audio_rx_preset_1": "{\"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [-51, -47, -2, 32, 74, 100, 148, 169, 161, 57], \"agcEnable\": true, \"agcDepth\": 18, \"agcGain\": 50, \"limiterEnable\": true, \"jitterBuffer\": 1080, \"boostPct\": 100}",
+      "proxdmr_asl_audio_rx_preset_1": "{\"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [53, 38, -27, 32, 32, 61, 69, 85, 67, -102], \"agcEnable\": true, \"agcDepth\": 21, \"agcGain\": 42, \"limiterEnable\": true, \"jitterBuffer\": 1100, \"boostPct\": 100}",
+      "proxdmr_audio_tx_preset_1": "{\"txBtMicEnabled\": true, \"txMicGain\": 3, \"txNoiseSuppression\": false, \"txBrowserAgc\": false, \"txDspAgc\": true, \"txEchoCancellation\": false, \"txGateEnabled\": true, \"txGateThreshold\": -51, \"txHpfEnabled\": true, \"txPresenceBoost\": 0, \"txEqLow\": -3, \"txEqMid\": 8, \"txEqHigh\": 2, \"txEqPreset\": \"custom\"}",
+      "proxdmr_asl_audio_tx_preset_1": "{\"txBtMicEnabled\": true, \"txMicGain\": 0, \"txNoiseSuppression\": false, \"txBrowserAgc\": false, \"txDspAgc\": true, \"txEchoCancellation\": false, \"txGateEnabled\": true, \"txGateThreshold\": -45, \"txHpfEnabled\": true, \"txPresenceBoost\": 0, \"txEqLow\": -3, \"txEqMid\": 8, \"txEqHigh\": 2, \"txEqPreset\": \"custom\"}",
+      "proxdmr_audio_rx_preset_2": "{\"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [-58, -69, -31, 3, 17, 101, 152, 85, -101, -177], \"agcEnable\": true, \"agcDepth\": 20, \"agcGain\": 35, \"limiterEnable\": true, \"jitterBuffer\": 140, \"boostDb\": 18}",
+      "proxdmr_asl_audio_rx_preset_2": "{\"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [-200, -200, -90, 29, 91, 132, 137, 116, 41, -193], \"agcEnable\": false, \"agcDepth\": 12, \"agcGain\": 15, \"limiterEnable\": true, \"jitterBuffer\": 280, \"boostPct\": 100}",
+      "proxdmr_asl_audio_tx_preset_2": "{\"txBtMicEnabled\": true, \"txMicGain\": 2, \"txNoiseSuppression\": false, \"txBrowserAgc\": false, \"txDspAgc\": true, \"txEchoCancellation\": false, \"txGateEnabled\": true, \"txGateThreshold\": -42, \"txHpfEnabled\": true, \"txPresenceBoost\": 0, \"txEqLow\": 0, \"txEqMid\": -1, \"txEqHigh\": 2, \"txEqPreset\": \"standard\"}",
+      "proxdmr_audio_rx_preset_3": "{\"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [64, 53, 48, 88, 83, 90, 115, 122, 113, 40], \"agcEnable\": true, \"agcDepth\": 22, \"agcGain\": 32, \"limiterEnable\": true, \"jitterBuffer\": 1040, \"boostPct\": 100}",
+      "proxdmr_asl_audio_rx_preset_3": "{\"eq10Enable\": true, \"eq10Linked\": true, \"eq10Gains\": [-15, -20, 25, -5, 32, 135, 168, 199, 67, -132], \"agcEnable\": false, \"agcDepth\": 20, \"agcGain\": 30, \"limiterEnable\": true, \"jitterBuffer\": 320, \"boostPct\": 100}",
+      "proxdmr_asl_audio_tx_preset_3": "{\"txBtMicEnabled\": true, \"txMicGain\": 3, \"txNoiseSuppression\": false, \"txBrowserAgc\": false, \"txDspAgc\": true, \"txEchoCancellation\": false, \"txGateEnabled\": true, \"txGateThreshold\": -40, \"txHpfEnabled\": true, \"txPresenceBoost\": 0, \"txEqLow\": -6, \"txEqMid\": 8, \"txEqHigh\": 2, \"txEqPreset\": \"custom\"}"
     },
     "asl_audio_rx": {
+      "boost_pct": 100,
       "active_preset": "1",
       "jitter_buffer_ms": 1100,
-      "eq10_gains": [
-        -15,
-        -20,
-        25,
-        -5,
-        32,
-        135,
-        168,
-        199,
-        67,
-        -132
-      ],
       "presets": {
         "1": {
-          "name": "Стандарт (Linear)",
+          "eq10Enable": true,
+          "eq10Linked": true,
+          "eq10Gains": [
+            53,
+            38,
+            -27,
+            32,
+            32,
+            61,
+            69,
+            85,
+            67,
+            -102
+          ],
+          "agcEnable": true,
+          "agcDepth": 21,
+          "agcGain": 42,
+          "limiterEnable": true,
+          "jitterBuffer": 1100,
+          "boostPct": 100,
+          "name": "Standard (Linear)"
+        },
+        "2": {
+          "eq10Enable": true,
+          "eq10Linked": true,
+          "eq10Gains": [
+            -200,
+            -200,
+            -90,
+            29,
+            91,
+            132,
+            137,
+            116,
+            41,
+            -193
+          ],
+          "agcEnable": false,
+          "agcDepth": 12,
+          "agcGain": 15,
+          "limiterEnable": true,
+          "jitterBuffer": 280,
+          "boostPct": 100,
+          "name": "Soft Ether"
+        },
+        "3": {
           "eq10Enable": true,
           "eq10Linked": true,
           "eq10Gains": [
@@ -255,36 +291,35 @@
             67,
             -132
           ],
-          "agcEnable": true,
-          "agcDepth": 19,
-          "agcGain": 10,
+          "agcEnable": false,
+          "agcDepth": 20,
+          "agcGain": 30,
           "limiterEnable": true,
-          "jitterBuffer": 1100,
-          "boostPct": 100
-        },
-        "2": null,
-        "3": null
+          "jitterBuffer": 320,
+          "boostPct": 100,
+          "name": "Clear"
+        }
       }
     },
     "asl_audio_tx": {
-      "mic_gain": 0,
+      "mic_gain": 3,
+      "bt_mic": true,
       "noise_suppression": false,
       "browser_agc": false,
       "dsp_agc": true,
       "echo_cancellation": false,
       "gate_enabled": true,
-      "gate_threshold": -45,
+      "gate_threshold": -40,
       "hpf_enabled": true,
       "presence_boost": 0,
-      "eq_low": -15,
+      "eq_low": -6,
       "eq_mid": 8,
       "eq_high": 2,
       "eq_preset": "custom",
-      "active_preset": "1",
+      "active_preset": "3",
       "presets": {
         "1": {
-          "name": "Стандарт",
-          "txBtMicEnabled": false,
+          "txBtMicEnabled": true,
           "txMicGain": 0,
           "txNoiseSuppression": false,
           "txBrowserAgc": false,
@@ -294,14 +329,48 @@
           "txGateThreshold": -45,
           "txHpfEnabled": true,
           "txPresenceBoost": 0,
-          "txEqLow": -15,
+          "txEqLow": -3,
           "txEqMid": 8,
           "txEqHigh": 2,
-          "txEqPreset": "custom"
+          "txEqPreset": "custom",
+          "name": "Standard"
         },
-        "2": null,
-        "3": null
-      }
+        "2": {
+          "txBtMicEnabled": true,
+          "txMicGain": 2,
+          "txNoiseSuppression": false,
+          "txBrowserAgc": false,
+          "txDspAgc": true,
+          "txEchoCancellation": false,
+          "txGateEnabled": true,
+          "txGateThreshold": -42,
+          "txHpfEnabled": true,
+          "txPresenceBoost": 0,
+          "txEqLow": 0,
+          "txEqMid": -1,
+          "txEqHigh": 2,
+          "txEqPreset": "standard",
+          "name": "Soft Voice"
+        },
+        "3": {
+          "txBtMicEnabled": true,
+          "txMicGain": 3,
+          "txNoiseSuppression": false,
+          "txBrowserAgc": false,
+          "txDspAgc": true,
+          "txEchoCancellation": false,
+          "txGateEnabled": true,
+          "txGateThreshold": -40,
+          "txHpfEnabled": true,
+          "txPresenceBoost": 0,
+          "txEqLow": -6,
+          "txEqMid": 8,
+          "txEqHigh": 2,
+          "txEqPreset": "custom",
+          "name": "Punchy (DX)"
+        }
+      },
+      "browser_mic_id": ""
     }
   },
   "recordings_settings": {

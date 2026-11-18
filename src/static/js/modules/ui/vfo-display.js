@@ -14,7 +14,7 @@ import {
   adjustPttDescFontSize,
   renderTgTextHtml,
   formatCallerLocation
-} from "../core/formatters.js?v=2.9.547";
+} from "../core/formatters.js?v=2.9.712";
 
 function getActiveHotspotId() {
   return (typeof window !== "undefined" && window.activeHotspotId) || "default";
@@ -73,11 +73,24 @@ export function getStoredLastRx(hid, slot) {
     const target = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
       ? window.resolveHotspotId(hid)
       : (hid || "default");
+    const firstHsId = (typeof window !== "undefined" && Array.isArray(window.currentHotspots) && window.currentHotspots[0])
+      ? window.currentHotspots[0].id
+      : "default";
     let raw = localStorage.getItem(`proxdmr_last_rx_${target}_ts${slot}`);
-    if (!raw && target !== "default") {
+    if (!raw && (target === "default" || target === firstHsId)) {
       raw = localStorage.getItem(`proxdmr_last_rx_default_ts${slot}`);
     }
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const hsNet = getHotspotNetworkType(target);
+        const recNet = String(parsed.network_type || "").toLowerCase();
+        if (recNet && hsNet && ((recNet === "ysf") !== (hsNet === "ysf") || (recNet === "allstar") !== (hsNet === "allstar"))) {
+          return null;
+        }
+      }
+      return parsed;
+    }
   } catch (_) {}
   return null;
 }
@@ -94,7 +107,10 @@ export function saveStoredLastRx(hid, slot, data) {
     const target = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
       ? window.resolveHotspotId(hid)
       : (hid || "default");
+    const resolvedNet = String(data.network_type || getHotspotNetworkType(target) || "").toLowerCase();
     const item = {
+      id: data.id || data.call_id || "",
+      network_type: resolvedNet,
       src_id: data.src_id,
       src_callsign: data.src_callsign || "",
       src_name: data.src_name || "",
@@ -318,6 +334,8 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
   const infoEl = card.querySelector(".ptt-target-info");
   const descEl = card.querySelector(".ptt-target-desc");
   const legacyHint = card.querySelector(".ptt-hint");
+  const pttBtn = card.querySelector(".ptt-button");
+  const isSwlMode = (typeof document !== "undefined" && document.body && document.body.classList.contains("is-swl-mode"));
 
   // Проверка на режим AllStarLink (ASL)
   const isAllStar = (netType === "allstar" || card.classList.contains("card-net-allstar") || card.dataset.networkType === "allstar" || (typeof window.isAllStarHotspot === "function" && window.isAllStarHotspot(cid, card)));
@@ -325,6 +343,11 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
     if (ts1El) ts1El.style.display = "none";
     if (ts2El) ts2El.style.display = "none";
     if (legacyBadge) legacyBadge.style.display = "none";
+    if (pttBtn && !isSwlMode) {
+      pttBtn.classList.remove("hover-slot-1", "hover-slot-2");
+      pttBtn.removeAttribute("title");
+      pttBtn.removeAttribute("data-i18n-title");
+    }
 
     const hsList = (typeof window !== "undefined" && window.currentHotspots) || (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
     const hs = hsList.find(h => String(h.id) === String(cid)) || (cid === "default" ? hsList[0] : null);
@@ -359,7 +382,9 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
       }
       if (descEl) {
         descEl.textContent = `Node ${ownNode}`;
-        descEl.title = `Узел ${ownNode}`;
+        descEl.title = (typeof window !== "undefined" && window.t)
+          ? window.t("asl.node_title", { node: ownNode }, `Node ${ownNode}`)
+          : `Node ${ownNode}`;
         descEl.style.display = "";
       }
     }
@@ -369,9 +394,51 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
     return;
   }
 
-  // Для цифровых режимов (DMR, XLX): восстанавливаем видимость слотов
+  // Проверка на режим YSF (Yaesu System Fusion / C4FM)
+  const isYsf = (netType === "ysf" || card.classList.contains("card-net-ysf") || card.dataset.networkType === "ysf");
+  if (isYsf) {
+    if (ts1El) ts1El.style.display = "none";
+    if (ts2El) ts2El.style.display = "none";
+    if (legacyBadge) legacyBadge.style.display = "none";
+    if (pttBtn && !isSwlMode) {
+      pttBtn.classList.remove("hover-slot-1", "hover-slot-2");
+      pttBtn.removeAttribute("title");
+      pttBtn.removeAttribute("data-i18n-title");
+    }
+
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
+    const hs = hsList.find(h => String(h.id) === String(cid)) || (cid === "default" ? hsList[0] : null);
+    const roomId = String((hs && (hs.config?.ysf_room || hs.ysf_room || hs.room_id)) || "25000").trim();
+    const roomName = String((hs && (hs.config?.ysf_name || hs.ysf_name || hs.name)) || "YSF-Russia").trim();
+    const txDg = Number((hs && (hs.ysf_tx_dg_id || hs.config?.ysf_tx_dg_id)) || 0);
+    const dgSuffix = (txDg >= 1 && txDg <= 99) ? ` · DG ${String(txDg).padStart(2, "0")}` : "";
+
+    if (infoEl) {
+      infoEl.textContent = `#${roomId}${dgSuffix}`;
+      infoEl.className = "ptt-target-info is-ysf-room";
+    }
+    if (descEl) {
+      descEl.textContent = roomName;
+      descEl.title = `#${roomId} · ${roomName}${dgSuffix}`;
+      descEl.style.display = "";
+      adjustPttDescFontSize(descEl, infoEl, roomName);
+    }
+    if (legacyHint) {
+      legacyHint.textContent = `YSF ➔ #${roomId}${dgSuffix} (${roomName})`;
+    }
+    return;
+  }
+
+  // Для цифровых режимов (DMR, XLX): восстанавливаем видимость слотов и подсказку PTT
   if (ts1El) ts1El.style.display = "";
   if (ts2El) ts2El.style.display = "";
+  if (pttBtn && !isSwlMode) {
+    const dualPttTip = (typeof window !== "undefined" && window.t)
+      ? window.t("ptt.dual_slot_ptt_title", {}, "Click left half to TX on TS1, right half — on TS2")
+      : "Click left half to TX on TS1, right half — on TS2";
+    pttBtn.setAttribute("title", dualPttTip);
+    pttBtn.setAttribute("data-i18n-title", "ptt.dual_slot_ptt_title");
+  }
 
   let effectiveSlot = (targetSlot === 1 || targetSlot === 2) ? targetSlot : (card._activeSlot || getHotspotSlot(cid) || 2);
   if (netType === "xlx") {
@@ -397,10 +464,15 @@ export function updateCardPttHintForSlot(card, targetSlot = null) {
     descText = getCleanTgDesc(curTg, full);
   } else if (netType === "xlx") {
     targetText = `TG 9`;
-    descText = "Local / Reflector";
+    descText = (typeof window !== "undefined" && window.t)
+      ? window.t("tg_special.local_reflector", {}, "Local / Reflector")
+      : "Local / Reflector";
   } else {
     targetText = `TG ${curTg}`;
-    const rawName = getNetworkRawTgName(curTg, netType) || (curTg === 9990 ? "Parrot / Echo (Эхо-тест)" : "");
+    const parrotFallback = (typeof window !== "undefined" && window.t)
+      ? window.t("tg_special.parrot_echo_full", {}, "Parrot / Echo (Echo Test)")
+      : "Parrot / Echo (Echo Test)";
+    const rawName = getNetworkRawTgName(curTg, netType) || (curTg === 9990 ? parrotFallback : "");
     descText = getCleanTgDesc(curTg, rawName, null, netType);
   }
 
@@ -445,6 +517,12 @@ export function updateCardPttHint(card) {
   updateCardPttHintForSlot(card, null);
 }
 
+function _syncToolbarRxDotAfterBadgeUpdate() {
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
+  }
+}
+
 /**
  * Update mode badge (STANDBY, RX, TX) on a card
  * @param {HTMLElement} card
@@ -460,17 +538,34 @@ export function updateCardModeBadge(card) {
     : (rawCid || "default");
   const netType = (typeof getHotspotNetworkType === "function") ? getHotspotNetworkType(cid) : "";
   const isAllStar = (netType === "allstar" || card.classList.contains("card-net-allstar") || card.dataset.networkType === "allstar");
+  const isYsf = (netType === "ysf" || card.classList.contains("card-net-ysf") || card.dataset.networkType === "ysf");
+  const isSingleChannel = isAllStar || isYsf;
 
+  const _resHid = (v) => (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(v)
+    : (v || "default");
   const txHid = (typeof window !== "undefined" && window.activeTxHotspotId) || activeHid;
-  if (getIsPttPressed() && (cid === activeHid || cid === txHid)) {
-    const slot = card._activeSlot || getHotspotSlot(cid) || 1;
-    modeBadgeEl.className = "mode-badge mode-tx";
-    const rem = (typeof window !== "undefined" && typeof window.getTotRemainingSeconds === "function") ? window.getTotRemainingSeconds() : null;
-    if (isAllStar) {
+  const recTxHid = (typeof window !== "undefined" && window.activeRecTxHotspotId)
+    ? _resHid(window.activeRecTxHotspotId)
+    : null;
+  const isRecTxHere = Boolean(recTxHid && _resHid(cid) === recTxHid);
+  if ((getIsPttPressed() && (cid === activeHid || cid === txHid)) || isRecTxHere) {
+    const slot = isRecTxHere
+      ? (window.activeRecTxSlot || card._activeSlot || getHotspotSlot(cid) || 1)
+      : (card._activeSlot || getHotspotSlot(cid) || 1);
+    const rem = isRecTxHere
+      ? ((typeof window !== "undefined" && window.activeRecTxRemSec !== null && window.activeRecTxRemSec !== undefined) ? window.activeRecTxRemSec : null)
+      : ((typeof window !== "undefined" && typeof window.getTotRemainingSeconds === "function") ? window.getTotRemainingSeconds() : null);
+    const extraCls = (rem !== null && rem !== undefined)
+      ? (rem <= 10 ? " mode-tx-critical" : (rem <= 30 ? " mode-tx-warn" : ""))
+      : "";
+    modeBadgeEl.className = `mode-badge mode-tx${extraCls}`;
+    if (isSingleChannel) {
       modeBadgeEl.textContent = (rem !== null && rem !== undefined) ? `TX ${rem}s` : `TX`;
     } else {
       modeBadgeEl.textContent = (rem !== null && rem !== undefined) ? `TX TS${slot} ${rem}s` : `TX TS${slot}`;
     }
+    _syncToolbarRxDotAfterBadgeUpdate();
     return;
   }
 
@@ -482,18 +577,15 @@ export function updateCardModeBadge(card) {
   const isTs1Rx = Boolean(vfo1 && vfo1.classList.contains("vfo-rx-active"));
   const isTs2Rx = Boolean(vfo2 && vfo2.classList.contains("vfo-rx-active"));
 
-  if (isAllStar) {
+  if (isSingleChannel) {
     if (isAslRx || isTs1Rx || isTs2Rx) {
       modeBadgeEl.className = "mode-badge mode-rx";
       modeBadgeEl.textContent = "RX";
     } else {
-      const screenTopBar = card.querySelector(".screen-top-bar");
-      if (screenTopBar && screenTopBar.classList.contains("asl-proc-banner-active")) {
-        return;
-      }
       modeBadgeEl.className = "mode-badge mode-standby";
-      modeBadgeEl.textContent = "STANDBY";
+      modeBadgeEl.textContent = (typeof window !== "undefined" && window.t) ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
     }
+    _syncToolbarRxDotAfterBadgeUpdate();
     return;
   }
 
@@ -507,13 +599,10 @@ export function updateCardModeBadge(card) {
     modeBadgeEl.className = "mode-badge mode-rx";
     modeBadgeEl.textContent = "RX TS2";
   } else {
-    const screenTopBar = card.querySelector(".screen-top-bar");
-    if (screenTopBar && screenTopBar.classList.contains("asl-proc-banner-active")) {
-      return;
-    }
     modeBadgeEl.className = "mode-badge mode-standby";
-    modeBadgeEl.textContent = "STANDBY";
+    modeBadgeEl.textContent = (typeof window !== "undefined" && window.t) ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
   }
+  _syncToolbarRxDotAfterBadgeUpdate();
 }
 
 /**
@@ -527,8 +616,16 @@ export function updateCardTgDisplay(card) {
   const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
     ? window.resolveHotspotId(rawCid)
     : (rawCid || "default");
-  const netType = getHotspotNetworkType(cid);
-  const isNonMccNet = (netType === "tgif" || netType === "xlx");
+  const hsNet = String(getHotspotNetworkType(card) || getHotspotNetworkType(cid) || "").toLowerCase();
+  const domNet = String(card.dataset.networkType || "").toLowerCase();
+  const netType = (hsNet && hsNet !== "bm") ? hsNet : (domNet || hsNet || "bm");
+  if (hsNet && hsNet !== "bm" && card.dataset.networkType !== hsNet) {
+    card.dataset.networkType = hsNet;
+  }
+  const isYsf = (netType === "ysf" || card.classList.contains("card-net-ysf"));
+  const isAsl = (netType === "allstar" || card.classList.contains("card-net-allstar"));
+  const isSingleCard = isYsf || isAsl;
+  const isNonMccNet = (netType === "tgif" || netType === "xlx" || isYsf);
   const tg1 = getHotspotTg(cid, 1);
   const tg2 = getHotspotTg(cid, 2);
   const now = Date.now() / 1000;
@@ -537,7 +634,7 @@ export function updateCardTgDisplay(card) {
   // --- For each timeslot, update RX info from heardCalls OR card._lastRx ---
   for (let s = 1; s <= 2; s++) {
     const vfo = card.querySelector(s === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
-    if (!vfo) continue;
+    if (!vfo || vfo.classList.contains("vfo-tx-active")) continue;
 
     const callerCallEl = vfo.querySelector(".ts-caller-call");
     const callerFlagEl = vfo.querySelector(".ts-caller-flag");
@@ -549,13 +646,21 @@ export function updateCardTgDisplay(card) {
     const vuSt = (typeof window !== "undefined" && typeof window.getVuState === "function")
       ? window.getVuState(cid, s)
       : null;
-    const isAudioActive = Boolean(
+    const slotLastRx = card._lastRx && card._lastRx[s];
+    const endedExplicitly = Boolean(
+      slotLastRx &&
+      !slotLastRx.active &&
+      slotLastRx.endTime &&
+      (!slotLastRx.lastAudioTime || slotLastRx.lastAudioTime <= slotLastRx.endTime + 0.05)
+    );
+    const hasVisualHold = Boolean(card._rxVisualHoldTimers && card._rxVisualHoldTimers[s]);
+    const isAudioActive = !endedExplicitly && Boolean(
       (vuSt && (perfNow - vuSt.lastRxTime < 2200)) ||
-      (card._lastRx && card._lastRx[s] && ((now - (card._lastRx[s].lastAudioTime || 0)) < 2.2))
+      (slotLastRx && ((now - (slotLastRx.lastAudioTime || 0)) < 2.2))
     );
 
     // Authoritative slot call: card._lastRx[s] first, or persistent storage, or most recent from heardCalls (RX only)
-    let rxData = card._lastRx && card._lastRx[s];
+    let rxData = slotLastRx;
     if (!rxData) {
       const stored = getStoredLastRx(cid, s);
       if (stored) {
@@ -582,17 +687,49 @@ export function updateCardTgDisplay(card) {
       }
     }
 
-    const isRxActive = isAudioActive || Boolean(rxData && rxData.active);
+    if (rxData && rxData.active && !isAudioActive) {
+      const lastRxTs = rxData.lastAudioTime || rxData.timestamp || 0;
+      if (lastRxTs && (now - lastRxTs) >= 3.0) {
+        rxData.active = false;
+        rxData._fromBinaryOnly = false;
+      }
+    }
+
+    const isRxActive = hasVisualHold || isAudioActive || Boolean(rxData && rxData.active);
 
     if (isRxActive) {
       if (!vfo.classList.contains("vfo-rx-active")) {
         vfo.classList.add("vfo-rx-active");
         updateCardModeBadge(card);
+        if (typeof window !== "undefined" && typeof window.updateCardRecUI === "function") {
+          window.updateCardRecUI(card, cid);
+        }
       }
     } else {
-      if (vfo.classList.contains("vfo-rx-active")) {
+      const rxTagEl = card.querySelector(s === 1 ? ".vfo-ts1-rx" : ".vfo-ts2-rx");
+      const hsListRef = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+      const hsRef = hsListRef.find(h => {
+        const hCid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function") ? window.resolveHotspotId(h.id) : (h.id || "default");
+        return hCid === cid;
+      });
+      if (hsRef) {
+        const slotState = s === 1 ? hsRef.ts1 : hsRef.ts2;
+        if (slotState && slotState.active && !isAudioActive && (!rxData || !rxData.active)) {
+          slotState.active = false;
+        }
+      }
+      const recBtnEl = card.querySelector(".header-rec-btn");
+      if (
+        vfo.classList.contains("vfo-rx-active") ||
+        (rxTagEl && rxTagEl.classList.contains("active")) ||
+        (s === 2 && recBtnEl && recBtnEl.classList.contains("recording") && !getIsPttPressed())
+      ) {
         vfo.classList.remove("vfo-rx-active");
+        if (rxTagEl) rxTagEl.classList.remove("active");
         updateCardModeBadge(card);
+        if (typeof window !== "undefined" && typeof window.updateCardRecUI === "function") {
+          window.updateCardRecUI(card, cid);
+        }
       }
     }
 
@@ -608,9 +745,19 @@ export function updateCardTgDisplay(card) {
     const isWithinHoldTime = isRxActive || (elapsedSinceActivity <= 30.0);
 
     if (rxData) {
+      const isYsfRx = Boolean(
+        isYsf ||
+        String(rxData.network_type || "").toLowerCase() === "ysf" ||
+        String(rxData.id || rxData.call_id || "").startsWith("ysf_") ||
+        String(rxData.dst_name || "").startsWith("YSF #")
+      );
+      const isSingleRx = isSingleCard || isYsfRx;
       // Keep card._lastRx fresh
       if (!card._lastRx) card._lastRx = {};
       if (!card._lastRx[s]) card._lastRx[s] = { ...rxData };
+      if (isYsfRx) {
+        card._lastRx[s].network_type = "ysf";
+      }
       if (isRxActive) {
         card._lastRx[s].lastSeenTime = now;
       }
@@ -622,6 +769,7 @@ export function updateCardTgDisplay(card) {
       const callerCountry = getCallCountryInfo(rxData);
 
       if (callerCallEl) {
+        delete callerCallEl.dataset.standby;
         if (!rxData.src_callsign && rxData.src_id) {
           callerCallEl.innerHTML = `ID: <span class="dmr-id-text">${rxData.src_id}</span>`;
         } else {
@@ -629,18 +777,47 @@ export function updateCardTgDisplay(card) {
         }
         callerCallEl.style.filter = "none";
         callerCallEl.classList.add("caller-active");
-        if (rxData.src_id) {
+        if (rxData.src_id && !isSingleRx) {
           callerCallEl.dataset.radioId = rxData.src_id;
           callerCallEl.dataset.callsign = rxData.src_callsign || "";
           callerCallEl.dataset.name = rxData.src_name || "";
           callerCallEl.title = (typeof window !== "undefined" && window.t)
-            ? window.t("vfo.set_caller_tx_title", { id: rxData.src_id })
-            : `Задать ID ${rxData.src_id} для передачи (Private Call)`;
+            ? window.t("vfo.set_caller_tx_title", { id: rxData.src_id }, `Set ID ${rxData.src_id} for TX (Private Call)`)
+            : `Set ID ${rxData.src_id} for TX (Private Call)`;
         } else {
           delete callerCallEl.dataset.radioId;
           delete callerCallEl.dataset.callsign;
           delete callerCallEl.dataset.name;
           callerCallEl.removeAttribute("title");
+        }
+      }
+      const callerMapBtn = vfo.querySelector(".btn-caller-map");
+      if (callerMapBtn) {
+        const hasCoords = (rxData.lat !== undefined && rxData.lat !== null && rxData.lon !== undefined && rxData.lon !== null) || Boolean(rxData.latitude && rxData.longitude);
+        const lat = rxData.lat ?? rxData.latitude;
+        const lon = rxData.lon ?? rxData.longitude;
+        const grid = rxData.qth_locator || rxData.locator || rxData.grid || "";
+        if (hasCoords || grid) {
+          callerMapBtn.style.display = "inline-flex";
+          if (hasCoords) {
+            callerMapBtn.dataset.lat = lat;
+            callerMapBtn.dataset.lon = lon;
+          } else {
+            delete callerMapBtn.dataset.lat;
+            delete callerMapBtn.dataset.lon;
+          }
+          if (grid) callerMapBtn.dataset.grid = grid;
+          else delete callerMapBtn.dataset.grid;
+          callerMapBtn.dataset.callsign = cCall;
+          callerMapBtn.title = hasCoords
+            ? ((typeof window !== "undefined" && window.t)
+                ? window.t("vfo.show_coords_map", { call: cCall, lat: Number(lat).toFixed(4), lon: Number(lon).toFixed(4) }, `Show coordinates on map: ${cCall} (${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)})`)
+                : `Show coordinates on map: ${cCall} (${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)})`)
+            : ((typeof window !== "undefined" && window.t)
+                ? window.t("vfo.qth_locator_title", { call: cCall, grid }, `QTH locator ${cCall}: ${grid}`)
+                : `QTH locator ${cCall}: ${grid}`);
+        } else {
+          callerMapBtn.style.display = "none";
         }
       }
       if (callerFlagEl) {
@@ -652,15 +829,15 @@ export function updateCardTgDisplay(card) {
         callerIdEl.style.filter = "none";
         const userObj = getUserCallsigns()[rxData.src_id] || {};
         const callerCity = rxData.city || (card._lastRx && card._lastRx[s] && card._lastRx[s].city) || userObj.city || "";
-        if (rxData.src_id) {
+        if (rxData.src_id && !isSingleRx) {
           callerIdEl.dataset.radioId = rxData.src_id;
           callerIdEl.dataset.callsign = rxData.src_callsign || "";
           callerIdEl.dataset.name = rxData.src_name || "";
           callerIdEl.dataset.country = callerCountry?.name_en || "";
           if (callerCity) callerIdEl.dataset.city = callerCity;
           callerIdEl.title = (typeof window !== "undefined" && window.t)
-            ? window.t("vfo.set_caller_tx_title", { id: rxData.src_id })
-            : `Задать ID ${rxData.src_id} для передачи (Private Call)`;
+            ? window.t("vfo.set_caller_tx_title", { id: rxData.src_id }, `Set ID ${rxData.src_id} for TX (Private Call)`)
+            : `Set ID ${rxData.src_id} for TX (Private Call)`;
         } else {
           delete callerIdEl.dataset.radioId;
           delete callerIdEl.dataset.callsign;
@@ -677,21 +854,29 @@ export function updateCardTgDisplay(card) {
         callerCountryEl.style.filter = "none";
       }
 
-      // Bottom row: destination TG of the RECEIVED call
-      const rawTgName = getNetworkRawTgName(rxData.dst_id, netType) || rxData.dst_name || (rxData.dst_id === 9990 ? "Parrot / Echo" : "");
+      // Bottom row: destination room (# for YSF) or TG of the RECEIVED call
+      const rawTgName = isYsfRx
+        ? (rxData.dst_name || (rxData.dst_id ? `YSF #${rxData.dst_id}` : ""))
+        : (getNetworkRawTgName(rxData.dst_id, netType) || rxData.dst_name || (rxData.dst_id === 9990 ? "Parrot / Echo" : ""));
       if (tgFlagEl) {
-        const tgCountryInfo = (rxData.call_type === "GROUP" && isNonMccNet)
-          ? { name: netType.toUpperCase(), name_en: netType.toUpperCase(), flag: "🌐" }
-          : getCountryInfo(rxData.dst_id);
-        updateFlagElement(tgFlagEl, tgCountryInfo, rxData.dst_id === 9990);
+        const tgCountryInfo = isYsfRx
+          ? { name: "YSF", name_en: "YSF", flag: "🌐" }
+          : ((rxData.call_type === "GROUP" && isNonMccNet)
+            ? { name: netType.toUpperCase(), name_en: netType.toUpperCase(), flag: "🌐" }
+            : getCountryInfo(rxData.dst_id));
+        updateFlagElement(tgFlagEl, tgCountryInfo, !isYsfRx && rxData.dst_id === 9990);
         tgFlagEl.style.filter = "none";
       }
       if (tgTextEl) {
-        const tgPrefix = rxData.call_type === "GROUP" ? "TG" : "Call";
-        const tgTitle = (typeof window !== "undefined" && window.t)
-          ? window.t("vfo.set_tg_tx_title", { tg: rxData.dst_id })
-          : `Задать TG ${rxData.dst_id} для передачи на этом хотспоте`;
-        tgTextEl.innerHTML = renderTgTextHtml(rxData.dst_id, tgPrefix, rawTgName, tgTitle, rxData.call_type === "GROUP" ? netType : null);
+        const tgPrefix = isYsfRx ? "#" : (rxData.call_type === "GROUP" ? "TG" : "Call");
+        const tgTitle = isYsfRx
+          ? ((typeof window !== "undefined" && window.t)
+            ? window.t("ysf.vfo_room_title", { id: rxData.dst_id }, `YSF Room #${rxData.dst_id}`)
+            : `YSF Room #${rxData.dst_id}`)
+          : ((typeof window !== "undefined" && window.t)
+            ? window.t("vfo.set_tg_tx_title", { tg: rxData.dst_id }, `Set TG ${rxData.dst_id} for TX on this hotspot`)
+            : `Set TG ${rxData.dst_id} for TX on this hotspot`);
+        tgTextEl.innerHTML = renderTgTextHtml(rxData.dst_id, tgPrefix, rawTgName, tgTitle, isYsfRx ? "ysf" : (rxData.call_type === "GROUP" ? netType : null));
         tgTextEl.dataset.tgId = rxData.dst_id;
         tgTextEl.style.filter = "none";
         tgTextEl.title = tgTitle;
@@ -716,19 +901,31 @@ export function updateCardTgDisplay(card) {
       }
       const defTg = s === 1 ? tg1 : tg2;
       const tgNamesFallback = getTgNamesMap();
-      const defTgName = tgNamesFallback[defTg] || (defTg === 9990 ? "Parrot / Echo" : (defTg === 91 ? "Worldwide" : (defTg === 2501 ? "Россия 1 (National)" : "")));
+      const parrotShort = (typeof window !== "undefined" && window.t) ? window.t("tg_special.9990", {}, "Parrot (Echo)") : "Parrot (Echo)";
+      const wwShort = (typeof window !== "undefined" && window.t) ? window.t("tg_special.91", {}, "Worldwide") : "Worldwide";
+      const ru1Short = (typeof window !== "undefined" && window.t) ? window.t("tg_special.2501", {}, "Russia 1 (National)") : "Russia 1 (National)";
+      const defTgName = tgNamesFallback[defTg] || (defTg === 9990 ? parrotShort : (defTg === 91 ? wwShort : (defTg === 2501 ? ru1Short : "")));
       const defCountry = getCountryInfo(defTg);
 
       if (callerCallEl) {
         callerCallEl.textContent = (typeof window !== "undefined" && window.t)
-          ? window.t("vfo.standby")
-          : "Ожидание вызова...";
+          ? window.t("vfo.standby", {}, "Waiting for call...")
+          : "Waiting for call...";
+        callerCallEl.dataset.standby = "1";
         callerCallEl.style.filter = "none";
         callerCallEl.classList.remove("caller-active");
         delete callerCallEl.dataset.radioId;
         delete callerCallEl.dataset.callsign;
         delete callerCallEl.dataset.name;
         callerCallEl.removeAttribute("title");
+      }
+      const callerMapBtn = vfo.querySelector(".btn-caller-map");
+      if (callerMapBtn) {
+        callerMapBtn.style.display = "none";
+        delete callerMapBtn.dataset.lat;
+        delete callerMapBtn.dataset.lon;
+        delete callerMapBtn.dataset.grid;
+        delete callerMapBtn.dataset.callsign;
       }
       if (callerFlagEl) {
         updateFlagElement(callerFlagEl, null, false);
@@ -770,7 +967,13 @@ export function updateCardTgDisplay(card) {
 
   const quickInp = card.querySelector(".quick-tg-input");
   if (quickInp) {
-    quickInp.placeholder = "TG #";
+    if (netType === "ysf" || card.classList.contains("card-net-ysf")) {
+      quickInp.placeholder = "ID #";
+    } else if (netType === "allstar" || card.classList.contains("card-net-allstar")) {
+      quickInp.placeholder = "Node #";
+    } else {
+      quickInp.placeholder = "TG #";
+    }
   }
 
   updateCardPttHint(card);

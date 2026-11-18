@@ -17,6 +17,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.server_probe")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -30,7 +35,7 @@ KNOWN_TGIF_SERVERS: List[Dict[str, Any]] = [
     {
         "id": "TGIF-US",
         "country": "US",
-        "country_name": "США",
+        "country_name": "USA",
         "name": "TGIF Primary",
         "host": "tgif.network",
         "port": 62031,
@@ -39,21 +44,21 @@ KNOWN_TGIF_SERVERS: List[Dict[str, Any]] = [
 ]
 
 KNOWN_DMRPLUS_SERVERS: List[Dict[str, Any]] = [
-    {"id": "IPSC2-RU", "country": "RU", "country_name": "Россия", "name": "IPSC2-RU", "host": "ipsc2.ru", "port": 62031, "password": "PASSWORD"},
-    {"id": "IPSC2-DE", "country": "DE", "country_name": "Германия", "name": "IPSC2-DL", "host": "ipsc2.dmr-dl.net", "port": 62031, "password": "PASSWORD"},
-    {"id": "IPSC2-AT", "country": "AT", "country_name": "Австрия", "name": "IPSC2-OE", "host": "ipsc2.oevsv.at", "port": 62031, "password": "PASSWORD"},
-    {"id": "IPSC2-IT", "country": "IT", "country_name": "Италия", "name": "IPSC2-Italia", "host": "ipsc2-italia.ham-dl.com", "port": 62031, "password": "PASSWORD"},
-    {"id": "IPSC2-NL", "country": "NL", "country_name": "Нидерланды", "name": "IPSC2-NL", "host": "ipsc2.dutch-dmr.nl", "port": 62031, "password": "PASSWORD"},
-    {"id": "IPSC2-US", "country": "US", "country_name": "США", "name": "IPSC2-QuadNet", "host": "ipsc2.openquad.net", "port": 62031, "password": "PASSWORD"}
+    {"id": "IPSC2-RU", "country": "RU", "country_name": "Russia", "name": "IPSC2-RU", "host": "ipsc2.ru", "port": 62031, "password": "PASSWORD"},
+    {"id": "IPSC2-DE", "country": "DE", "country_name": "Germany", "name": "IPSC2-DL", "host": "ipsc2.dmr-dl.net", "port": 62031, "password": "PASSWORD"},
+    {"id": "IPSC2-AT", "country": "AT", "country_name": "Austria", "name": "IPSC2-OE", "host": "ipsc2.oevsv.at", "port": 62031, "password": "PASSWORD"},
+    {"id": "IPSC2-IT", "country": "IT", "country_name": "Italy", "name": "IPSC2-Italia", "host": "ipsc2-italia.ham-dl.com", "port": 62031, "password": "PASSWORD"},
+    {"id": "IPSC2-NL", "country": "NL", "country_name": "Netherlands", "name": "IPSC2-NL", "host": "ipsc2.dutch-dmr.nl", "port": 62031, "password": "PASSWORD"},
+    {"id": "IPSC2-US", "country": "US", "country_name": "USA", "name": "IPSC2-QuadNet", "host": "ipsc2.openquad.net", "port": 62031, "password": "PASSWORD"}
 ]
 
 KNOWN_XLX_SERVERS: List[Dict[str, Any]] = [
-    {"id": "XLX270", "country": "LU", "country_name": "Люксембург", "name": "XLX270 LU", "host": "158.64.26.132", "port": 62030, "password": "passw0rd"},
-    {"id": "XLX250", "country": "RU", "country_name": "Россия", "name": "XLX250 US/RU", "host": "23.130.172.11", "port": 62030, "password": "passw0rd"},
-    {"id": "XLX777", "country": "RU", "country_name": "Россия", "name": "XLX777 CIS", "host": "194.182.80.219", "port": 62030, "password": "passw0rd"},
-    {"id": "XLX002", "country": "DE", "country_name": "Германия", "name": "XLX002 DE", "host": "223.95.197.217", "port": 62030, "password": "passw0rd"},
-    {"id": "XLX020", "country": "US", "country_name": "США", "name": "XLX020 US", "host": "66.175.215.217", "port": 62030, "password": "passw0rd"},
-    {"id": "XLX950", "country": "GB", "country_name": "Великобритания", "name": "XLX950 UK", "host": "158.64.26.134", "port": 62030, "password": "passw0rd"}
+    {"id": "XLX270", "country": "LU", "country_name": "Luxembourg", "name": "XLX270 LU", "host": "158.64.26.132", "port": 62030, "password": "passw0rd"},
+    {"id": "XLX250", "country": "RU", "country_name": "Russia", "name": "XLX250 US/RU", "host": "23.130.172.11", "port": 62030, "password": "passw0rd"},
+    {"id": "XLX777", "country": "RU", "country_name": "Russia", "name": "XLX777 CIS", "host": "194.182.80.219", "port": 62030, "password": "passw0rd"},
+    {"id": "XLX002", "country": "DE", "country_name": "Germany", "name": "XLX002 DE", "host": "223.95.197.217", "port": 62030, "password": "passw0rd"},
+    {"id": "XLX020", "country": "US", "country_name": "USA", "name": "XLX020 US", "host": "66.175.215.217", "port": 62030, "password": "passw0rd"},
+    {"id": "XLX950", "country": "GB", "country_name": "United Kingdom", "name": "XLX950 UK", "host": "158.64.26.134", "port": 62030, "password": "passw0rd"}
 ]
 
 
@@ -97,7 +102,7 @@ def probe_hb_server(
             "sent": 0,
             "recv": 0,
             "icmp_ms": None,
-            "detail": "Некорректный хост или порт",
+            "detail": _tr("probe.invalid_host_port", fallback="Invalid host or port"),
             "checked_at": now_ts,
         }
 
@@ -116,7 +121,7 @@ def probe_hb_server(
                 "sent": 0,
                 "recv": 0,
                 "icmp_ms": None,
-                "detail": "DNS не отвечает",
+                "detail": _tr("probe.dns_no_reply", fallback="DNS did not respond"),
                 "checked_at": now_ts,
             }
         ip = addr_infos[0][4][0]
@@ -133,7 +138,7 @@ def probe_hb_server(
             "sent": 0,
             "recv": 0,
             "icmp_ms": None,
-            "detail": "Ошибка разрешения доменного имени",
+            "detail": _tr("probe.dns_resolve_error", fallback="Domain name resolution error"),
             "checked_at": now_ts,
         }
 
@@ -202,16 +207,16 @@ def probe_hb_server(
         state = "online"
         udp_ms = round(sum(rtts) / recv_count, 1)
         min_ms = round(min(rtts), 1)
-        detail = f"UDP доступен ({udp_ms} мс)"
+        detail = _tr("probe.udp_available", fallback="UDP available ({ms} ms)", ms=udp_ms)
     else:
         udp_ms = None
         min_ms = None
         if refused:
             state = "refused"
-            detail = "Порт закрыт (Connection refused)"
+            detail = _tr("probe.port_refused", fallback="Port closed (Connection refused)")
         else:
             state = "no_reply"
-            detail = "Нет ответа на UDP запросы"
+            detail = _tr("probe.udp_no_reply", fallback="No reply to UDP requests")
 
         # Check ICMP to verify if physical host is online
         if check_icmp:
@@ -219,9 +224,9 @@ def probe_hb_server(
             if icmp_ms is not None:
                 if net_lower in ("xlx", "dmrplus"):
                     state = "icmp_only"
-                    detail = f"Хост жив (ICMP {icmp_ms} мс), сервис UDP не ответил"
+                    detail = _tr("probe.icmp_only_service_no_reply", fallback="Host alive (ICMP {ms} ms), UDP service did not reply", ms=icmp_ms)
                 else:
-                    detail = f"Сервер не отвечает на UDP {port} (ICMP {icmp_ms} мс)"
+                    detail = _tr("probe.udp_port_no_reply_icmp", fallback="Server not responding on UDP {port} (ICMP {ms} ms)", port=port, ms=icmp_ms)
 
     return {
         "host": clean_host,
@@ -280,6 +285,122 @@ def sort_server_probe_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any
         result.append(d)
 
     return result
+
+
+def probe_ysf_server(
+    host: str,
+    port: int = 42000,
+    count: int = 1,
+    timeout: float = DEFAULT_PROBE_TIMEOUT,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    callsign: str = "N0CALL"
+) -> Dict[str, Any]:
+    """
+    Performs UDP YSFP handshake probe to Yaesu System Fusion reflector (port 42000).
+    Measures RTT and packet loss.
+    """
+    now_ts = time.time()
+    clean_host = (host or "").strip()
+    if not clean_host or port <= 0 or port > 65535:
+        return {
+            "host": clean_host,
+            "port": port,
+            "ip": None,
+            "state": "dns_fail",
+            "udp_ms": None,
+            "min_ms": None,
+            "loss_pct": 100.0,
+            "sent": 0,
+            "recv": 0,
+            "detail": _tr("probe.invalid_host_port", fallback="Invalid host or port"),
+            "checked_at": now_ts,
+        }
+
+    try:
+        addr_infos = socket.getaddrinfo(clean_host, port, socket.AF_INET, socket.SOCK_DGRAM)
+        if not addr_infos:
+            return {
+                "host": clean_host,
+                "port": port,
+                "ip": None,
+                "state": "dns_fail",
+                "udp_ms": None,
+                "min_ms": None,
+                "loss_pct": 100.0,
+                "sent": 0,
+                "recv": 0,
+                "detail": _tr("probe.dns_no_reply", fallback="DNS did not respond"),
+                "checked_at": now_ts,
+            }
+        ip = addr_infos[0][4][0]
+    except Exception as e:
+        return {
+            "host": clean_host,
+            "port": port,
+            "ip": None,
+            "state": "dns_fail",
+            "udp_ms": None,
+            "min_ms": None,
+            "loss_pct": 100.0,
+            "sent": 0,
+            "recv": 0,
+            "detail": _tr("probe.dns_error_detail", fallback="DNS error: {error}", error=e),
+            "checked_at": now_ts,
+        }
+
+    call_padded = f"{callsign:<10.10}".encode("ascii")
+    req_pkt = b"YSFP" + call_padded
+    rtts: List[float] = []
+    sent_count = 0
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        for _ in range(max(1, count)):
+            if cancel_check and cancel_check():
+                break
+            sent_count += 1
+            t_start = time.perf_counter()
+            try:
+                sock.sendto(req_pkt, (ip, port))
+                resp, _ = sock.recvfrom(256)
+                rtt_ms = (time.perf_counter() - t_start) * 1000.0
+                if resp.startswith(b"YSFP") or resp.startswith(b"YSFI"):
+                    rtts.append(rtt_ms)
+            except socket.timeout:
+                pass
+            except Exception:
+                break
+    finally:
+        if sock:
+            sock.close()
+
+    recv_count = len(rtts)
+    loss_pct = 100.0 if sent_count == 0 else round((1.0 - (recv_count / sent_count)) * 100.0, 1)
+    if recv_count > 0:
+        avg_rtt = round(sum(rtts) / recv_count, 1)
+        min_rtt = round(min(rtts), 1)
+        state = "online"
+        detail = _tr("probe.ysf_available", fallback="YSF reflector available")
+    else:
+        avg_rtt = None
+        min_rtt = None
+        state = "no_reply"
+        detail = _tr("probe.ysf_no_reply", fallback="Reflector did not respond to YSFP")
+
+    return {
+        "host": clean_host,
+        "port": port,
+        "ip": ip,
+        "state": state,
+        "udp_ms": avg_rtt,
+        "min_ms": min_rtt,
+        "loss_pct": loss_pct,
+        "sent": sent_count,
+        "recv": recv_count,
+        "detail": detail,
+        "checked_at": now_ts,
+    }
 
 
 class ServerProbeService:
@@ -390,22 +511,32 @@ class ServerProbeService:
                 return
 
             host = srv.get("host") or ""
-            port = int(srv.get("port") or 62031)
+            port = int(srv.get("port") or (42000 if network_type == "ysf" else 62031))
 
             async with sem:
                 if self._cancel_event.is_set():
                     return
                 # Run UDP probe in thread
-                probe_res = await asyncio.to_thread(
-                    probe_hb_server,
-                    host,
-                    port,
-                    probe_id,
-                    DEFAULT_PROBE_COUNT,
-                    DEFAULT_PROBE_TIMEOUT,
-                    self._cancel_event.is_set,
-                    network_type
-                )
+                if network_type == "ysf":
+                    probe_res = await asyncio.to_thread(
+                        probe_ysf_server,
+                        host,
+                        port,
+                        DEFAULT_PROBE_COUNT,
+                        DEFAULT_PROBE_TIMEOUT,
+                        self._cancel_event.is_set
+                    )
+                else:
+                    probe_res = await asyncio.to_thread(
+                        probe_hb_server,
+                        host,
+                        port,
+                        probe_id,
+                        DEFAULT_PROBE_COUNT,
+                        DEFAULT_PROBE_TIMEOUT,
+                        self._cancel_event.is_set,
+                        network_type
+                    )
 
             # Merge server metadata with probe stats
             merged = {**srv, **probe_res}
@@ -443,7 +574,7 @@ class ServerProbeService:
         results_map: Dict[str, Dict[str, Any]] = {}
         for r in sorted_final:
             h = (r.get("host") or "").lower()
-            p = r.get("port") or 62031
+            p = r.get("port") or (42000 if network_type == "ysf" else 62031)
             results_map[f"{h}:{p}"] = r
             results_map[h] = r
 

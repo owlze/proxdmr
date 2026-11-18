@@ -161,17 +161,19 @@ def verify_jwt(token: str) -> dict | None:
 
 def validate_login(login: str) -> str | None:
     """Validate login format. Returns error message or None if valid."""
+    from i18n_backend import tr as _tr
     if not login or len(login.strip()) < LOGIN_MIN_LENGTH:
-        return f"Логин должен быть не менее {LOGIN_MIN_LENGTH} символов"
+        return _tr("auth_api.login_min_length", fallback="Username must be at least {n} characters", n=LOGIN_MIN_LENGTH)
     if len(login) > LOGIN_MAX_LENGTH:
-        return f"Логин не должен превышать {LOGIN_MAX_LENGTH} символов"
+        return _tr("auth_api.login_max_length", fallback="Username must not exceed {n} characters", n=LOGIN_MAX_LENGTH)
     if not LOGIN_PATTERN.match(login):
-        return "Логин может содержать только латинские буквы, цифры, _ . -"
+        return _tr("auth_api.login_chars", fallback="Username may only contain Latin letters, digits, _ . -")
     return None
 
 
 def validate_password(password: str) -> str | None:
     """Validate password strength. Returns error message or None if valid."""
+    from i18n_backend import tr as _tr
     if not password or len(password) < PASSWORD_MIN_LENGTH:
-        return f"Пароль должен быть не менее {PASSWORD_MIN_LENGTH} символов"
+        return _tr("auth_api.password_min_length", fallback="Password must be at least {n} characters", n=PASSWORD_MIN_LENGTH)
     return None

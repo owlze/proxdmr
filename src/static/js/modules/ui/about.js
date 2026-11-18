@@ -3,9 +3,9 @@
  * Module: modules/ui/about.js
  */
 
-import { showToast } from '../core/toast.js';
-import { showLongPressEffect } from './long-press.js';
-import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } from '../core/state.js';
+import { showToast } from '../core/toast.js?v=2.9.699';
+import { showLongPressEffect } from './long-press.js?v=2.9.711';
+import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } from '../core/state.js?v=2.9.698';
 
   // --- About ProxDMR & Open Source Credits Modal ---
   const aboutModal = document.getElementById("aboutModal");
@@ -351,23 +351,13 @@ export function initAboutModal() {
   document.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const logoTarget = (e.target && typeof e.target.closest === "function")
-      ? e.target.closest(".brand-logo-wrap, .brand-title")
+      ? e.target.closest(".brand-logo-wrap")
       : null;
     if (!logoTarget) return;
 
-    // Check if target is inside a hotspot card
-    const card = logoTarget.closest(".radio-container");
-    if (card) {
-      const radiosGrid = card.closest("#radiosGrid, .radios-grid");
-      const isFirstHotspot =
-        card.classList.contains("is-primary-fixed") ||
-        (radiosGrid && radiosGrid.querySelector(".radio-container") === card) ||
-        card.id === "radioContainer" ||
-        card.dataset.hotspotId === "default";
-      if (!isFirstHotspot) {
-        // Hotspots 2..7 are draggable; long press must NOT open About modal
-        return;
-      }
+    // Never intercept clicks/drags on hotspot card headers
+    if (logoTarget.closest(".radio-container")) {
+      return;
     }
 
     cancelLogoLongPress();
@@ -403,8 +393,8 @@ export function initAboutModal() {
   document.addEventListener("pointerup", (e) => {
     if (logoLongPressTriggered) {
       const logoTarget = (e.target && typeof e.target.closest === "function")
-      ? e.target.closest(".brand-logo-wrap, .brand-title")
-      : null;
+        ? e.target.closest(".brand-logo-wrap")
+        : null;
       if (logoTarget) {
         e.preventDefault();
         e.stopPropagation();
@@ -419,7 +409,7 @@ export function initAboutModal() {
 
   document.addEventListener("contextmenu", (e) => {
     const logoTarget = (e.target && typeof e.target.closest === "function")
-      ? e.target.closest(".brand-logo-wrap, .brand-title")
+      ? e.target.closest(".brand-logo-wrap")
       : null;
     if (logoTarget && (logoLongPressTriggered || logoLongPressTimer)) {
       e.preventDefault();

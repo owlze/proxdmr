@@ -76,28 +76,33 @@ def import_settings_bundle(archive_bytes: bytes, password: str) -> tuple[dict, d
                     with open(fpath, "rb") as f:
                         extra_files[fname] = f.read()
     except py7zr.exceptions.Bad7zFile:
-        raise ValueError("Неверный формат архива или неверный пароль")
+        from i18n_backend import tr as _tr
+        raise ValueError(_tr("settings_io.bad_archive", fallback="Invalid archive format or wrong password"))
     except py7zr.exceptions.PasswordRequired:
-        raise ValueError("Требуется пароль")
+        from i18n_backend import tr as _tr
+        raise ValueError(_tr("settings_io.password_required", fallback="Password is required"))
     except (py7zr.exceptions.DecompressionError, py7zr.exceptions.CrcError):
-        raise ValueError("Неверный пароль")
+        from i18n_backend import tr as _tr
+        raise ValueError(_tr("settings_io.wrong_password", fallback="Incorrect password"))
     except Exception as e:
+        from i18n_backend import tr as _tr
         msg = str(e).lower()
         if any(k in msg for k in ("password", "crypt", "corrupt", "crc", "lzma")):
-            raise ValueError("Неверный пароль")
-        raise ValueError(f"Ошибка при распаковке: {e}")
+            raise ValueError(_tr("settings_io.wrong_password", fallback="Incorrect password"))
+        raise ValueError(_tr("settings_io.unpack_error", fallback="Unpack error: {err}", err=e))
 
+    from i18n_backend import tr as _tr
     # Find the settings JSON file
     if settings_data is None:
-        raise ValueError("В архиве не найден файл настроек")
+        raise ValueError(_tr("settings_io.no_settings_file", fallback="Settings file not found in archive"))
 
     try:
         settings = json.loads(settings_data)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        raise ValueError("Некорректный JSON в архиве")
+        raise ValueError(_tr("settings_io.invalid_json", fallback="Invalid JSON in archive"))
 
     if not isinstance(settings, dict):
-        raise ValueError("Настройки должны быть JSON-объектом")
+        raise ValueError(_tr("settings_io.not_json_object", fallback="Settings must be a JSON object"))
 
     return settings, extra_files
 

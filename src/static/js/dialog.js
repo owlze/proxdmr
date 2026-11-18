@@ -32,10 +32,10 @@
         <div style="display: flex; align-items: flex-start; gap: 12px;">
           <span id="appDialogIcon" style="font-size: 1.8rem; line-height: 1; flex-shrink: 0; user-select: none;">💬</span>
           <div style="min-width: 0; flex: 1;">
-            <div id="appDialogTitle" style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary, #fff); line-height: 1.3;" data-i18n="dialog.confirm_title">Подтверждение</div>
+            <div id="appDialogTitle" style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary, #fff); line-height: 1.3;" data-i18n="dialog.confirm_title">Confirmation</div>
             <div id="appDialogSubtitle" style="font-size: 0.78rem; color: var(--text-muted, #8b949e); margin-top: 3px; display: none;"></div>
           </div>
-          <button type="button" id="appDialogCloseBtn" class="icon-btn" style="background: none; border: none; font-size: 1.15rem; cursor: pointer; color: var(--text-secondary, #8b949e); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 0px; padding: 0; margin: -2px -2px 0 0;" title="Закрыть" data-i18n-title="buttons.close">✕</button>
+          <button type="button" id="appDialogCloseBtn" class="icon-btn" style="background: none; border: none; font-size: 1.15rem; cursor: pointer; color: var(--text-secondary, #8b949e); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 0px; padding: 0; margin: -2px -2px 0 0;" title="Close" data-i18n-title="buttons.close">✕</button>
         </div>
 
         <!-- Message Body -->
@@ -45,15 +45,15 @@
         <div id="appDialogInputWrap" style="display: none; margin-top: 2px;">
           <div style="position: relative; display: flex; align-items: center;">
             <input type="text" id="appDialogInput" class="form-input" style="width: 100%; padding: 8px 36px 8px 12px; border-radius: 0px; border: 1px solid var(--border-color, #444); background: var(--bg-input, #2a2a2e); color: var(--text-primary, #fff); font-size: 0.94rem; box-sizing: border-box;" autocomplete="off">
-            <button type="button" id="appDialogTogglePwd" style="position: absolute; right: 6px; background: none; border: none; font-size: 1rem; cursor: pointer; color: var(--text-secondary, #8b949e); display: none; padding: 4px; border-radius: 0px;" title="Показать/скрыть" data-i18n-title="dialog.show_hide">👁️</button>
+            <button type="button" id="appDialogTogglePwd" style="position: absolute; right: 6px; background: none; border: none; font-size: 1rem; cursor: pointer; color: var(--text-secondary, #8b949e); display: none; padding: 4px; border-radius: 0px;" title="Show/hide" data-i18n-title="dialog.show_hide">👁️</button>
           </div>
           <div id="appDialogInputError" style="color: #f85149; font-size: 0.8rem; min-height: 1.1em; margin-top: 4px; display: none;"></div>
         </div>
 
         <!-- Action Buttons Footer -->
         <div id="appDialogFooter" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
-          <button type="button" id="appDialogCancelBtn" class="btn-secondary" style="padding: 7px 16px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; min-width: 80px;" data-i18n="buttons.cancel">Отмена</button>
-          <button type="button" id="appDialogConfirmBtn" class="btn-primary" style="padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px;" data-i18n="buttons.ok">ОК</button>
+          <button type="button" id="appDialogCancelBtn" class="btn-secondary" style="padding: 7px 16px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; min-width: 80px;" data-i18n="buttons.cancel">Cancel</button>
+          <button type="button" id="appDialogConfirmBtn" class="btn-primary" style="padding: 7px 18px; border-radius: 0px; cursor: pointer; font-size: 0.88rem; font-weight: 600; min-width: 80px;" data-i18n="buttons.ok">OK</button>
         </div>
       </div>
     `;
@@ -141,11 +141,11 @@
       opts = Object.assign({}, optionsOrMsg);
     }
 
-    const title = opts.title || (window.t ? window.t('dialog.confirm_title', {}, 'Подтверждение') : 'Подтверждение');
+    const title = opts.title || (window.t ? window.t('dialog.confirm_title', {}, 'Confirmation') : 'Confirmation');
     const message = opts.message || '';
     const icon = opts.icon || (opts.confirmStyle === 'danger' ? '⚠️' : '❓');
-    const confirmText = opts.confirmText || (window.t ? window.t('buttons.confirm', {}, 'Да') : 'Да');
-    const cancelText = opts.cancelText || (window.t ? window.t('buttons.cancel', {}, 'Отмена') : 'Отмена');
+    const confirmText = opts.confirmText || (window.t ? window.t('buttons.confirm', {}, 'Yes') : 'Yes');
+    const cancelText = opts.cancelText || (window.t ? window.t('buttons.cancel', {}, 'Cancel') : 'Cancel');
     const confirmStyle = opts.confirmStyle || 'primary'; // 'primary' | 'danger' | 'success'
 
     const titleEl = document.getElementById('appDialogTitle');
@@ -224,10 +224,10 @@
       opts = Object.assign({}, optionsOrMsg, extraOpts || {});
     }
 
-    const title = opts.title || (window.t ? window.t('dialog.alert_title', {}, 'Внимание') : 'Внимание');
+    const title = opts.title || (window.t ? window.t('dialog.alert_title', {}, 'Notice') : 'Notice');
     const message = opts.message || '';
     const icon = opts.icon || 'ℹ️';
-    const confirmText = opts.confirmText || (window.t ? window.t('buttons.ok', {}, 'ОК') : 'ОК');
+    const confirmText = opts.confirmText || (window.t ? window.t('buttons.ok', {}, 'OK') : 'OK');
 
     const titleEl = document.getElementById('appDialogTitle');
     const subtitleEl = document.getElementById('appDialogSubtitle');
@@ -280,14 +280,14 @@
       opts = Object.assign({}, optionsOrMsg);
     }
 
-    const title = opts.title || (window.t ? window.t('dialog.prompt_title', {}, 'Ввод данных') : 'Ввод данных');
+    const title = opts.title || (window.t ? window.t('dialog.prompt_title', {}, 'Enter Value') : 'Enter Value');
     const message = opts.message || '';
     const icon = opts.icon || (opts.isPassword ? '🔑' : '✏️');
     const placeholder = opts.placeholder || '';
     const defaultValue = opts.defaultValue || '';
     const isPassword = Boolean(opts.isPassword);
-    const confirmText = opts.confirmText || (window.t ? window.t('buttons.ok', {}, 'ОК') : 'ОК');
-    const cancelText = opts.cancelText || (window.t ? window.t('buttons.cancel', {}, 'Отмена') : 'Отмена');
+    const confirmText = opts.confirmText || (window.t ? window.t('buttons.ok', {}, 'OK') : 'OK');
+    const cancelText = opts.cancelText || (window.t ? window.t('buttons.cancel', {}, 'Cancel') : 'Cancel');
     const confirmStyle = opts.confirmStyle || 'primary';
 
     const titleEl = document.getElementById('appDialogTitle');
@@ -470,11 +470,10 @@
       const isSubmit = btn.type === 'submit';
 
       const isSaveBtn = isSubmit ||
-        text.includes('сохранить') ||
-        text.includes('save') ||
+        /сохранить|save|speichern|guardar|enregistrer|salva|opslaan|зберегти/.test(text) ||
         i18n.includes('save') ||
         i18n.includes('btn_save') ||
-        title.includes('сохранить') ||
+        /сохранить|save|speichern|guardar|enregistrer|salva|opslaan|зберегти/.test(title) ||
         btn.classList.contains('btn-preset-save') ||
         (btn.id && btn.id.toLowerCase().includes('save'));
 

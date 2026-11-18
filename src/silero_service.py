@@ -1,6 +1,6 @@
 """
 Silero TTS Service for ProxDMR.
-Provides high-quality offline speech synthesis using Silero Models v5/v4.
+Provides high-quality offline speech synthesis using Silero Models v5.6/v4.
 Runs locally on CPU with in-memory model caching.
 """
 
@@ -12,6 +12,11 @@ import threading
 import time
 import wave
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
 
 logger = logging.getLogger("proxdmr.silero_tts")
 
@@ -27,14 +32,14 @@ except ImportError:
 
 SILERO_VOICES_BY_LANG: Dict[str, List[Dict[str, Any]]] = {
     "ru": [
-        {"id": "kseniya", "name": "Ксения (Женский, v5)", "gender": "female"},
-        {"id": "aidar", "name": "Айдар (Мужской, v5)", "gender": "male"},
-        {"id": "baya", "name": "Бая (Женский, v5)", "gender": "female"},
-        {"id": "eugene", "name": "Евгений (Мужской, v5)", "gender": "male"},
-        {"id": "xenia", "name": "Ксения 2 (Женский, v5)", "gender": "female"},
+        {"id": "kseniya", "name": "Kseniya (Female, v5.6)", "gender": "female"},
+        {"id": "aidar", "name": "Aidar (Male, v5.6)", "gender": "male"},
+        {"id": "baya", "name": "Baya (Female, v5.6)", "gender": "female"},
+        {"id": "eugene", "name": "Eugene (Male, v5.6)", "gender": "male"},
+        {"id": "xenia", "name": "Kseniya 2 (Female, v5.6)", "gender": "female"},
     ],
     "uk": [
-        {"id": "mykyta", "name": "Микита (Чоловічий, v4)", "gender": "male"},
+        {"id": "mykyta", "name": "Mykyta (Male, v4)", "gender": "male"},
     ],
     "en": [
         {"id": "en_0", "name": "Voice 0 (Female)", "gender": "female"},
@@ -43,18 +48,18 @@ SILERO_VOICES_BY_LANG: Dict[str, List[Dict[str, Any]]] = {
         {"id": "en_3", "name": "Voice 3 (Male)", "gender": "male"},
     ],
     "de": [
-        {"id": "eva_k", "name": "Eva (Женский)", "gender": "female"},
-        {"id": "karlsson", "name": "Karlsson (Мужской)", "gender": "male"},
-        {"id": "bernd_ungerer", "name": "Bernd (Мужской)", "gender": "male"},
-        {"id": "friedrich", "name": "Friedrich (Мужской)", "gender": "male"},
+        {"id": "eva_k", "name": "Eva (Female)", "gender": "female"},
+        {"id": "karlsson", "name": "Karlsson (Male)", "gender": "male"},
+        {"id": "bernd_ungerer", "name": "Bernd (Male)", "gender": "male"},
+        {"id": "friedrich", "name": "Friedrich (Male)", "gender": "male"},
     ],
     "es": [
-        {"id": "es_0", "name": "Voz 0 (Femenino)", "gender": "female"},
-        {"id": "es_1", "name": "Voz 1 (Masculino)", "gender": "male"},
+        {"id": "es_0", "name": "Voice 0 (Female)", "gender": "female"},
+        {"id": "es_1", "name": "Voice 1 (Male)", "gender": "male"},
     ],
     "fr": [
-        {"id": "fr_0", "name": "Voix 0 (Féminin)", "gender": "female"},
-        {"id": "fr_1", "name": "Voix 1 (Masculin)", "gender": "male"},
+        {"id": "fr_0", "name": "Voice 0 (Female)", "gender": "female"},
+        {"id": "fr_1", "name": "Voice 1 (Male)", "gender": "male"},
     ]
 }
 
@@ -99,7 +104,14 @@ class SileroService:
         clean_lang = (lang or "ru").lower().strip()
         if clean_lang == "ua":
             clean_lang = "uk"
-        return SILERO_VOICES_BY_LANG.get(clean_lang, [])
+        raw_voices = SILERO_VOICES_BY_LANG.get(clean_lang, [])
+        return [
+            {
+                **v,
+                "name": _tr(f"silero.voice.{v['id']}", fallback=v["name"]),
+            }
+            for v in raw_voices
+        ]
 
     def resolve_voice(self, requested_voice: Optional[str] = None, lang: str = "ru", gender: str = "UNKNOWN") -> str:
         clean_lang = (lang or "ru").lower().strip()[:2]
@@ -128,20 +140,20 @@ class SileroService:
 
     def _get_or_load_model(self, lang: str):
         if not HAVE_TORCH:
-            raise RuntimeError("PyTorch не установлен")
+            raise RuntimeError(_tr("silero.pytorch_not_installed", fallback="PyTorch is not installed"))
         clean_lang = (lang or "ru").lower().strip()
         if clean_lang == "ua":
             clean_lang = "uk"
 
         if clean_lang not in SILERO_VOICES_BY_LANG:
             supported = ", ".join(SILERO_VOICES_BY_LANG.keys()).upper()
-            raise ValueError(f"Язык '{lang}' не поддерживается в Silero TTS (доступны: {supported})")
+            raise ValueError(_tr("silero.lang_unsupported_list", fallback="Language '{lang}' is not supported by Silero TTS (available: {supported})", lang=lang, supported=supported))
 
         with self._lock:
             if clean_lang in self._models:
                 return self._models[clean_lang]
 
-            speaker_tag = "v5_ru" if clean_lang == "ru" else ("v4_ua" if clean_lang == "uk" else f"v3_{clean_lang}")
+            speaker_tag = "v5_6_ru" if clean_lang == "ru" else ("v4_ua" if clean_lang == "uk" else f"v3_{clean_lang}")
             model_lang = "ru" if clean_lang == "ru" else ("ua" if clean_lang == "uk" else clean_lang)
             logger.info(f"[SILERO] Loading model for {clean_lang} ({speaker_tag})...")
             model, _ = torch.hub.load(
@@ -169,7 +181,7 @@ class SileroService:
                 clean_lang = "uk"
 
             if clean_lang not in SILERO_VOICES_BY_LANG:
-                return None, f"Язык '{lang}' не поддерживается в Silero TTS. Выберите Piper TTS или Gemini API."
+                return None, _tr("silero.lang_unsupported_hint", fallback="Language '{lang}' is not supported by Silero TTS. Select Piper TTS or Gemini API.", lang=lang)
 
             model = self._get_or_load_model(lang)
 
@@ -181,16 +193,25 @@ class SileroService:
                 logger.debug(f"[SILERO] Pre-normalization warning: {pe}")
 
             if not text or not text.strip():
-                return None, "Пустой текст после нормализации для Silero TTS"
+                return None, _tr("silero.empty_after_norm", fallback="Empty text after normalization for Silero TTS")
 
             with self._lock:
-                audio = model.apply_tts(
-                    text=text,
-                    speaker=speaker,
-                    sample_rate=sample_rate,
-                    put_accent=(clean_lang == "ru"),
-                    put_yo=(clean_lang == "ru")
-                )
+                tts_kwargs: Dict[str, Any] = {
+                    "text": text,
+                    "speaker": speaker,
+                    "sample_rate": sample_rate,
+                    "put_accent": (clean_lang == "ru"),
+                    "put_yo": (clean_lang == "ru"),
+                }
+                if clean_lang == "ru":
+                    tts_kwargs["put_stress_homo"] = True
+                    tts_kwargs["put_yo_homo"] = True
+                try:
+                    audio = model.apply_tts(**tts_kwargs)
+                except TypeError:
+                    tts_kwargs.pop("put_stress_homo", None)
+                    tts_kwargs.pop("put_yo_homo", None)
+                    audio = model.apply_tts(**tts_kwargs)
             audio_np = (audio.numpy() * 32767).clip(-32768, 32767).astype(np.int16)
             bio = io.BytesIO()
             with wave.open(bio, "wb") as wf:
@@ -202,7 +223,7 @@ class SileroService:
         except Exception as e:
             err_msg = str(e) or type(e).__name__
             logger.warning(f"[SILERO] Synthesis error: {err_msg}")
-            return None, f"Ошибка Silero TTS: {err_msg}"
+            return None, _tr("silero.synthesis_error", fallback="Silero TTS error: {error}", error=err_msg)
 
     async def synthesize_async(
         self,
@@ -213,15 +234,15 @@ class SileroService:
         gender: str = "male"
     ) -> Tuple[Optional[bytes], Optional[str]]:
         if not HAVE_TORCH:
-            return None, "PyTorch не установлен в системе"
+            return None, _tr("silero.pytorch_not_installed", fallback="PyTorch is not installed in the system")
 
         clean_text = (text or "").strip()
         if not clean_text:
-            return None, "Пустой текст для озвучки"
+            return None, _tr("tts.empty_text", fallback="Empty text for speech synthesis")
 
         clean_lang = "uk" if lang in ("ua", "uk") else (lang or "ru").lower().strip()
         if not self.is_lang_supported(clean_lang):
-            return None, f"Язык '{clean_lang.upper()}' не поддерживается в Silero TTS. Рекомендуется использовать Piper TTS или Gemini API."
+            return None, _tr("silero.lang_unsupported_recommend", fallback="Language '{lang}' is not supported by Silero TTS. Piper TTS or Gemini API is recommended.", lang=clean_lang.upper())
 
         actual_voice = self.resolve_voice(voice, lang=clean_lang, gender=gender)
 

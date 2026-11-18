@@ -3,7 +3,7 @@
  * Supports QRZ.com and HamQTH.com
  */
 
-import { showToast } from "../core/toast.js";
+import { showToast } from "../core/toast.js?v=2.9.699";
 
 export function initHamQthSettings() {
   const frame = document.getElementById("hamQthSettingsFrame");
@@ -179,6 +179,9 @@ export function initHamQthSettings() {
       setTimeout(() => {
         if (frame && frame.classList.contains("collapsed")) {
           frame.classList.remove("collapsed");
+        }
+        if (frame && typeof frame.scrollIntoView === "function") {
+          frame.scrollIntoView({ behavior: "smooth", block: "nearest" });
         }
         if (optQrzComUser) optQrzComUser.focus();
       }, 250);

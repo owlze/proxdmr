@@ -4,10 +4,10 @@
  * renders benchmark results table, and handles server selection/migration.
  */
 
-import { safeEscapeHtml, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js?v=2.9.367';
-import { showToast } from '../core/toast.js';
+import { safeEscapeHtml, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js?v=2.9.712';
+import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
-import { ws } from '../network/ws.js?v=2.9.623';
+import { ws } from '../network/ws.js?v=2.9.752';
 
 // Accessors for app functions and state
 const resolveHotspotId = (id) => (window.resolveHotspotId ? window.resolveHotspotId(id) : id);
@@ -31,7 +31,6 @@ let currentBenchmarkNetworkType = "bm";
 const bmBenchmarkModal = document.getElementById("bmBenchmarkModal");
 const closeBmBenchmarkModalBtn = document.getElementById("closeBmBenchmarkModalBtn");
 const btnCloseBmBenchmarkModal = document.getElementById("btnCloseBmBenchmarkModal");
-const btnTestBmServers = document.getElementById("btnTestBmServers");
 const btnBmBenchStart = document.getElementById("btnBmBenchStart");
 const btnBmBenchStop = document.getElementById("btnBmBenchStop");
 const bmBenchStatusBadge = document.getElementById("bmBenchStatusBadge");
@@ -73,35 +72,76 @@ function updateBenchmarkModalHeaders(netType) {
   const titleEl = modal.querySelector(".modal-title-with-badge h3") || document.getElementById("bmBenchmarkModalTitle");
   const subtitleEl = modal.querySelector(".modal-subtitle") || document.getElementById("bmBenchmarkModalSubtitle");
   const thServerEl = modal.querySelector(".bm-bench-table thead tr th:nth-child(2)");
+  const resultsHintEl = modal.querySelector(".bm-bench-results-hint");
 
   const net = (netType || "bm").toLowerCase();
   let titleKey = `server_probe.title_${net}`;
-  let defaultTitle = "⚡ Тест серверов";
-  let defaultSubtitle = "Пинг-тест серверов для выбора наилучшего соединения";
-  let thText = "Сервер";
+  let defaultTitle = "⚡ Server Probe";
+  let defaultSubtitle = window.t
+    ? window.t("bm_bench.modal_subtitle", {}, "Ping test of servers to choose the best connection")
+    : "Ping test of servers to choose the best connection";
+  let thKey = `server_probe.th_server_${net}`;
+  let defaultThText = "Server";
+
+  let hintKey = "bm_bench.results_hint";
+  let defaultHint = "Sorted from lowest to highest ping";
 
   if (net === "bm") {
-    defaultTitle = "⚡ Тестирование серверов BrandMeister";
+    defaultTitle = "⚡ BrandMeister Server Benchmark";
     defaultSubtitle = window.t
-      ? window.t("bm_bench.modal_subtitle_bm", {}, "Пинг-тест всех мастеров BM (до 10 пакетов или 7 секунд) для выбора наилучшего")
-      : "Пинг-тест всех мастеров BM (до 10 пакетов или 7 секунд) для выбора наилучшего";
-    thText = "Сервер BrandMeister";
+      ? window.t("bm_bench.modal_subtitle_bm", {}, "Ping test of all BM masters (up to 10 packets or 7s) to choose the best")
+      : "Ping test of all BM masters (up to 10 packets or 7s) to choose the best";
+    defaultThText = "BrandMeister Server";
+    hintKey = "bm_bench.results_hint";
+    defaultHint = "Sorted from lowest to highest ping";
   } else if (net === "freedmr") {
-    defaultTitle = "⚡ Тестирование серверов FreeDMR";
-    defaultSubtitle = "UDP handshake тест серверов FreeDMR (порт 62031) для выбора наилучшего";
-    thText = "Сервер FreeDMR";
+    defaultTitle = "⚡ FreeDMR Server Benchmark";
+    defaultSubtitle = window.t
+      ? window.t("server_probe.subtitle_freedmr", {}, "UDP handshake test of FreeDMR servers (port 62031) to choose the best")
+      : "UDP handshake test of FreeDMR servers (port 62031) to choose the best";
+    defaultThText = "FreeDMR Server";
+    hintKey = "server_probe.results_hint_freedmr";
+    defaultHint = "UDP handshake test of FreeDMR servers (port 62031). Sorted by latency.";
   } else if (net === "tgif") {
-    defaultTitle = "⚡ Тестирование серверов TGIF";
-    defaultSubtitle = "UDP handshake тест серверов TGIF Network (порт 62031)";
-    thText = "Сервер TGIF";
+    defaultTitle = "⚡ TGIF Server Benchmark";
+    defaultSubtitle = window.t
+      ? window.t("server_probe.subtitle_tgif", {}, "UDP handshake test of TGIF Network servers (port 62031)")
+      : "UDP handshake test of TGIF Network servers (port 62031)";
+    defaultThText = "TGIF Server";
+    hintKey = "server_probe.results_hint_tgif";
+    defaultHint = "UDP handshake test of TGIF servers (port 62031). Sorted by latency.";
   } else if (net === "dmrplus") {
-    defaultTitle = "⚡ Тестирование серверов DMR+ (IPSC2)";
-    defaultSubtitle = "Пинг-тест мастеров DMR+ IPSC2 (порт 62031)";
-    thText = "Мастер DMR+";
+    defaultTitle = "⚡ DMR+ (IPSC2) Server Benchmark";
+    defaultSubtitle = window.t
+      ? window.t("server_probe.subtitle_dmrplus", {}, "Ping test of DMR+ IPSC2 masters (port 62031)")
+      : "Ping test of DMR+ IPSC2 masters (port 62031)";
+    defaultThText = "DMR+ Master";
+    hintKey = "server_probe.results_hint_dmrplus";
+    defaultHint = "Ping test of DMR+ IPSC2 masters (port 62031). Sorted by latency.";
   } else if (net === "xlx") {
-    defaultTitle = "⚡ Тестирование рефлекторов XLX";
-    defaultSubtitle = "Пинг-тест рефлекторов XLX (порт 62030)";
-    thText = "Рефлектор XLX";
+    defaultTitle = "⚡ XLX Reflector Benchmark";
+    defaultSubtitle = window.t
+      ? window.t("server_probe.subtitle_xlx", {}, "Ping test of XLX reflectors (port 62030)")
+      : "Ping test of XLX reflectors (port 62030)";
+    defaultThText = "XLX Reflector";
+    hintKey = "server_probe.results_hint_xlx";
+    defaultHint = "Ping test of XLX reflectors (port 62030). Sorted by latency.";
+  } else if (net === "adn") {
+    defaultTitle = "⚡ ADN Server Benchmark";
+    defaultSubtitle = window.t
+      ? window.t("server_probe.subtitle_adn", {}, "UDP handshake test of Amateur Digital Network servers (port 62031)")
+      : "UDP handshake test of Amateur Digital Network servers (port 62031)";
+    defaultThText = "ADN Server";
+    hintKey = "server_probe.results_hint_adn";
+    defaultHint = "UDP handshake test of ADN servers (port 62031). Sorted by latency.";
+  } else if (net === "ysf") {
+    defaultTitle = "⚡ YSF Reflector Benchmark";
+    defaultSubtitle = window.t
+      ? window.t("server_probe.subtitle_ysf", {}, "UDP handshake test of Yaesu System Fusion reflectors (port 42000)")
+      : "UDP handshake test of Yaesu System Fusion reflectors (port 42000)";
+    defaultThText = "YSF Reflector";
+    hintKey = "server_probe.results_hint_ysf";
+    defaultHint = "UDP handshake test of YSF reflectors (port 42000). Sorted by latency.";
   }
 
   if (titleEl) {
@@ -111,7 +151,11 @@ function updateBenchmarkModalHeaders(netType) {
     subtitleEl.textContent = defaultSubtitle;
   }
   if (thServerEl) {
-    thServerEl.textContent = thText;
+    thServerEl.textContent = window.t ? window.t(thKey, {}, defaultThText) : defaultThText;
+  }
+  if (resultsHintEl) {
+    resultsHintEl.setAttribute("data-i18n", hintKey);
+    resultsHintEl.textContent = (window.t && hintKey) ? window.t(hintKey, {}, defaultHint) : defaultHint;
   }
 }
 
@@ -181,7 +225,11 @@ export function openBmBenchmarkModal(targetHotspotId = null, networkType = null)
               const base = (d2 && Array.isArray(d2.servers)) ? d2.servers : [];
               cachedBenchmarkResults = base;
               renderBmBenchmarkTable(base);
-              if (bmBenchResultsCount) bmBenchResultsCount.textContent = `${base.length} серверов`;
+              if (bmBenchResultsCount) {
+                bmBenchResultsCount.textContent = window.t
+                  ? window.t("bm_bench.servers_count", { count: base.length }, `${base.length} серверов`)
+                  : `${base.length} серверов`;
+              }
             })
             .catch(() => {});
         }
@@ -378,10 +426,37 @@ export function handleServerProbeProgress(msg) {
   const srv = msg.current_server;
   if (srv) {
     const curLang = (typeof window !== "undefined" && window.I18N && (window.I18N.currentLanguage || window.I18N.currentLang)) || "ru";
-    const cCode = srv.country_code || (srv.country ? srv.country.substring(0, 2).toUpperCase() : "");
+    let cCode = srv.country_code || (srv.country ? srv.country.substring(0, 2).toUpperCase() : "");
+    let refName = (srv.reflector_name || "").trim();
+    const rawName = (srv.name || "").trim();
+
+    if (net === "ysf") {
+      if (!refName || !cCode || cCode === "GLOBAL") {
+        const match = rawName.match(/^([A-Za-z]{2})[-_ ]\s*(.*)$/);
+        if (match) {
+          if (!cCode || cCode === "GLOBAL") cCode = match[1].toUpperCase();
+          if (!refName) refName = match[2].trim();
+        }
+      }
+      if (!cCode) cCode = "XX";
+    }
+
+    const isGlobalOrXx = !cCode || cCode === "GLOBAL" || cCode === "XX";
+    const flag = srv.flag || (!isGlobalOrXx ? isoToEmoji(cCode) : "🌐");
     const cName = getLocalizedCountryName(cCode, srv.country_name || srv.country || "DMR", curLang);
-    const flag = srv.flag || (cCode ? isoToEmoji(cCode) : "") || "🌐";
-    const srvTitle = srv.name || `${cName} (${srv.host})`;
+
+    let srvTitle = "";
+    if (net === "ysf") {
+      const localizedCountry = !isGlobalOrXx
+        ? getLocalizedCountryName(cCode, cCode, curLang)
+        : (window.t ? window.t("countries.GLOBAL", {}, "International") : "International");
+      const targetName = refName || localizedCountry;
+      const idTag = srv.id ? ` #${srv.id}` : "";
+      srvTitle = `${cCode} ${targetName}${idTag} (${srv.host || ""})`;
+    } else {
+      srvTitle = srv.name || `${cName} (${srv.host})`;
+    }
+
     if (bmBenchCurrentName) bmBenchCurrentName.textContent = srvTitle;
     if (bmBenchCurrentFlag) bmBenchCurrentFlag.textContent = flag;
 
@@ -396,7 +471,11 @@ export function handleServerProbeProgress(msg) {
     }
 
     if (bmBenchCurrentPackets) {
-      bmBenchCurrentPackets.textContent = `${srv.recv || 0} из ${srv.sent || 4}`;
+      const sRecv = srv.recv || 0;
+      const sSent = srv.sent || 4;
+      bmBenchCurrentPackets.textContent = window.t
+        ? window.t("bm_bench.packets_counter", { recv: sRecv, sent: sSent }, `${sRecv} из ${sSent}`)
+        : `${sRecv} из ${sSent}`;
     }
   }
 
@@ -404,7 +483,9 @@ export function handleServerProbeProgress(msg) {
     cachedBenchmarkResults = msg.results_so_far;
     renderBmBenchmarkTable(msg.results_so_far);
     if (bmBenchResultsCount) {
-      bmBenchResultsCount.textContent = `${msg.results_so_far.length} проверено`;
+      bmBenchResultsCount.textContent = window.t
+        ? window.t("bm_bench.servers_tested", { count: msg.results_so_far.length }, `${msg.results_so_far.length} проверено`)
+        : `${msg.results_so_far.length} проверено`;
     }
   }
 }
@@ -459,6 +540,9 @@ export function handleServerProbeComplete(msg) {
 export function renderBmBenchmarkTable(results) {
   if (!bmBenchTableBody) return;
   if (!results || !results.length) {
+    if (bmBenchResultsCount) {
+      bmBenchResultsCount.textContent = window.t ? window.t("bm_bench.servers_count", { count: 0 }, "0 серверов") : "0 серверов";
+    }
     bmBenchTableBody.innerHTML = `
       <tr class="bm-bench-empty-row">
         <td colspan="5" class="bm-bench-empty-cell">
@@ -466,6 +550,11 @@ export function renderBmBenchmarkTable(results) {
         </td>
       </tr>`;
     return;
+  }
+  if (bmBenchResultsCount) {
+    bmBenchResultsCount.textContent = window.t
+      ? window.t("bm_bench.servers_count", { count: results.length }, `${results.length} серверов`)
+      : `${results.length} серверов`;
   }
 
   let activeHost = "";
@@ -504,9 +593,12 @@ export function renderBmBenchmarkTable(results) {
     let rankBadge = "";
     if (isReachable) {
       const rank = r.rank || (idx + 1);
-      if (rank === 1) rankBadge = `<span class="rank-badge rank-1" title="1-е место (наименьший пинг)">🥇</span>`;
-      else if (rank === 2) rankBadge = `<span class="rank-badge rank-2" title="2-е место">🥈</span>`;
-      else if (rank === 3) rankBadge = `<span class="rank-badge rank-3" title="3-е место">🥉</span>`;
+      const r1Title = window.t ? window.t("bm_bench.rank1_title", {}, "1-е место (наименьший пинг)") : "1-е место (наименьший пинг)";
+      const r2Title = window.t ? window.t("bm_bench.rank2_title", {}, "2-е место") : "2-е место";
+      const r3Title = window.t ? window.t("bm_bench.rank3_title", {}, "3-е место") : "3-е место";
+      if (rank === 1) rankBadge = `<span class="rank-badge rank-1" title="${safeEscapeHtml(r1Title)}">🥇</span>`;
+      else if (rank === 2) rankBadge = `<span class="rank-badge rank-2" title="${safeEscapeHtml(r2Title)}">🥈</span>`;
+      else if (rank === 3) rankBadge = `<span class="rank-badge rank-3" title="${safeEscapeHtml(r3Title)}">🥉</span>`;
       else rankBadge = `<span class="rank-badge rank-other">${rank}</span>`;
     } else {
       rankBadge = '<span class="rank-badge rank-other">-</span>';
@@ -516,27 +608,53 @@ export function renderBmBenchmarkTable(results) {
     const ipClean = (r.ip || "").trim().toLowerCase();
     const isCurrentActive = Boolean(activeHost && (activeHost === hostClean || activeHost === ipClean));
 
-    const cCode = r.country_code || (r.country ? r.country.substring(0, 2).toUpperCase() : "");
-    const flag = r.flag || (cCode ? isoToEmoji(cCode) : "") || "🌐";
+    let cCode = r.country_code || (r.country ? r.country.substring(0, 2).toUpperCase() : "");
+    let refName = (r.reflector_name || "").trim();
+    const rawName = (r.name || "").trim();
+
+    if (currentBenchmarkNetworkType === "ysf") {
+      if (!refName || !cCode || cCode === "GLOBAL") {
+        const match = rawName.match(/^([A-Za-z]{2})[-_ ]\s*(.*)$/);
+        if (match) {
+          if (!cCode || cCode === "GLOBAL") cCode = match[1].toUpperCase();
+          if (!refName) refName = match[2].trim();
+        }
+      }
+      if (!cCode) cCode = "XX";
+    }
+
+    const isGlobalOrXx = !cCode || cCode === "GLOBAL" || cCode === "XX";
+    const flag = r.flag || (!isGlobalOrXx ? isoToEmoji(cCode) : "🌐");
     const cName = getLocalizedCountryName(cCode, r.country_name || r.country || "DMR", curLang);
     const bmId = (currentBenchmarkNetworkType === "bm" && r.id) ? `BM ${r.id}` : "";
-    // Build localized label dynamically if cCode/cName is present, preventing hardcoded Russian server strings from leaking
-    let label = (cCode && cName)
-      ? (bmId ? `${cName} (${bmId})` : (r.id ? `${cName} (${r.id})` : `${cName} (${r.host || ""})`))
-      : (r.name || (r.host || ""));
-    let cleanLabel = (label || "").trim();
-    if (flag && cleanLabel.startsWith(flag)) {
-      cleanLabel = cleanLabel.substring(flag.length).trim();
+
+    let cleanLabel = "";
+    if (currentBenchmarkNetworkType === "ysf") {
+      const localizedCountry = !isGlobalOrXx
+        ? getLocalizedCountryName(cCode, cCode, curLang)
+        : (window.t ? window.t("countries.GLOBAL", {}, "International") : "International");
+      const targetName = refName || localizedCountry;
+      const idTag = r.id ? ` #${r.id}` : "";
+      cleanLabel = `${cCode} ${targetName}${idTag} (${r.host || ""})`;
+    } else {
+      let label = (cCode && cName)
+        ? (bmId ? `${cName} (${bmId})` : (r.id ? `${cName} (${r.id})` : `${cName} (${r.host || ""})`))
+        : (r.name || (r.host || ""));
+      cleanLabel = (label || "").trim();
+      if (flag && cleanLabel.startsWith(flag)) {
+        cleanLabel = cleanLabel.substring(flag.length).trim();
+      }
+      cleanLabel = cleanLabel.replace(/^[^\w\s\u00C0-\u024F\u0400-\u04FF()[\]\u2014\u2013.:,-]+\s*/, "").trim();
+      if (!cleanLabel) cleanLabel = label;
     }
-    cleanLabel = cleanLabel.replace(/^[^\w\s\u00C0-\u024F\u0400-\u04FF()[\]\u2014\u2013.:,-]+\s*/, "").trim();
-    if (!cleanLabel) cleanLabel = label;
 
     let pingBadge = "";
     if (isDead) {
       pingBadge = `<span class="bench-ping-pill ping-dead" style="color: #ef4444; font-weight: 600;" title="${safeEscapeHtml(r.detail || deadTitleLabel)}">🔴 ${unreachableLabel}</span>`;
     } else if (isIcmpOnly) {
       const icmpVal = r.icmp_ms || r.avg_ping || "--";
-      pingBadge = `<span class="bench-ping-pill ping-fair" style="color: #eab308;" title="Только ICMP (UDP не ответил)">🟡 ${icmpVal} ${msUnit}</span>`;
+      const icmpTitle = window.t ? window.t("bm_bench.icmp_only_title", {}, "Только ICMP (UDP не ответил)") : "Только ICMP (UDP не ответил)";
+      pingBadge = `<span class="bench-ping-pill ping-fair" style="color: #eab308;" title="${safeEscapeHtml(icmpTitle)}">🟡 ${icmpVal} ${msUnit}</span>`;
     } else if (pingNum !== null) {
       const rounded = Math.round(pingNum);
       if (rounded < 60) {
@@ -567,7 +685,7 @@ export function renderBmBenchmarkTable(results) {
       const escapedHost = safeEscapeHtml(r.host || "");
       const escapedPort = safeEscapeHtml(String(r.port || 62031));
       const escapedPwd = safeEscapeHtml(String(r.password || ""));
-      const escapedTitle = safeEscapeHtml(`${flag} ${label}`);
+      const escapedTitle = safeEscapeHtml(`${flag} ${cleanLabel}`);
       actBtn = `<button type="button" class="btn-bench-select" data-bench-host="${escapedHost}" data-bench-port="${escapedPort}" data-bench-pwd="${escapedPwd}" data-bench-title="${escapedTitle}">${selectLabel}</button>`;
     }
 
@@ -640,7 +758,7 @@ export async function selectBmBenchmarkServer(serverHost, serverTitle, serverPor
         }
       }
       if (typeof renderBmMastersDropdown === "function") {
-        renderBmMastersDropdown(serverHost);
+        renderBmMastersDropdown(serverHost, currentBenchmarkNetworkType);
       }
     }
   }
@@ -755,10 +873,10 @@ export async function testSingleCustomServer() {
   const host = editHsHost ? editHsHost.value.trim() : "";
   const port = parseInt(editHsPort ? editHsPort.value : 62031, 10) || 62031;
   if (!host) {
-    if (typeof showToast === "function") showToast("Введите адрес сервера для проверки", "warning");
+    if (typeof showToast === "function") showToast(window.t ? window.t("server_probe.enter_host_warn", {}, "Введите адрес сервера для проверки") : "Введите адрес сервера для проверки", "warning");
     return;
   }
-  if (typeof showToast === "function") showToast(`Проверка сервера ${host}:${port}...`, "info");
+  if (typeof showToast === "function") showToast(window.t ? window.t("server_probe.checking_host_info", { host, port }, `Проверка сервера ${host}:${port}...`) : `Проверка сервера ${host}:${port}...`, "info");
   try {
     await fetch("/api/servers/probe", {
       method: "POST",
@@ -774,15 +892,15 @@ export async function testSingleCustomServer() {
     const data = await rRes.json().catch(() => ({}));
     const srv = data && data.results && data.results[0];
     if (srv && srv.state === "online") {
-      if (typeof showToast === "function") showToast(`🟢 Сервер доступен (${srv.udp_ms} мс)`, "success");
+      if (typeof showToast === "function") showToast(window.t ? window.t("server_probe.custom_online_toast", { ms: srv.udp_ms }, `🟢 Сервер доступен (${srv.udp_ms} мс)`) : `🟢 Сервер доступен (${srv.udp_ms} мс)`, "success");
     } else if (srv && srv.state === "icmp_only") {
-      if (typeof showToast === "function") showToast(`🟡 Только ICMP (${srv.icmp_ms} мс). UDP порт не ответил`, "warning");
+      if (typeof showToast === "function") showToast(window.t ? window.t("server_probe.custom_icmp_toast", { ms: srv.icmp_ms }, `🟡 Только ICMP (${srv.icmp_ms} мс). UDP порт не ответил`) : `🟡 Только ICMP (${srv.icmp_ms} мс). UDP порт не ответил`, "warning");
     } else {
-      const det = (srv && srv.detail) ? srv.detail : "Сервер не отвечает";
+      const det = (srv && srv.detail) ? srv.detail : (window.t ? window.t("server_probe.no_reply_detail", {}, "Сервер не отвечает") : "Сервер не отвечает");
       if (typeof showToast === "function") showToast(`🔴 ${det}`, "error");
     }
   } catch (e) {
-    if (typeof showToast === "function") showToast(`🔴 Ошибка проверки: ${e.message}`, "error");
+    if (typeof showToast === "function") showToast(window.t ? window.t("server_probe.check_err_toast", { error: e.message }, `🔴 Ошибка проверки: ${e.message}`) : `🔴 Ошибка проверки: ${e.message}`, "error");
   }
 }
 
@@ -790,7 +908,6 @@ export function initBmBenchmark() {
   const closeBmBenchmarkModalBtn = document.getElementById("closeBmBenchmarkModalBtn");
   const btnCloseBmBenchmarkModal = document.getElementById("btnCloseBmBenchmarkModal");
   const bmBenchmarkModal = document.getElementById("bmBenchmarkModal");
-  const btnTestBmServers = document.getElementById("btnTestBmServers");
   const btnBmBenchStart = document.getElementById("btnBmBenchStart");
   const btnBmBenchStop = document.getElementById("btnBmBenchStop");
 
@@ -806,22 +923,6 @@ export function initBmBenchmark() {
     bmBenchmarkModal._wired = true;
     bmBenchmarkModal.addEventListener("click", (e) => {
       if (e.target === bmBenchmarkModal) closeBmBenchmarkModal();
-    });
-  }
-  if (btnTestBmServers && !btnTestBmServers._wired) {
-    btnTestBmServers._wired = true;
-    btnTestBmServers.addEventListener("click", () => {
-      const editHsId = document.getElementById("editHsId");
-      const hsId = editHsId ? editHsId.value : null;
-      const curHsList = (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : window.currentHotspots) || [];
-      const curHs = curHsList.find(h => h && h.id === hsId);
-      const editHsNetworkType = document.getElementById("editHsNetworkType");
-      const netType = (curHs && curHs.network_type) || (editHsNetworkType ? editHsNetworkType.value : "bm") || "bm";
-      if (netType.toLowerCase() === "custom") {
-        testSingleCustomServer();
-      } else {
-        openBmBenchmarkModal(hsId, netType);
-      }
     });
   }
   if (btnBmBenchStart && !btnBmBenchStart._wired) {

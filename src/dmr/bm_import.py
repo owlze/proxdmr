@@ -6,6 +6,11 @@ import urllib.request
 import urllib.error
 from typing import Optional, Callable, Awaitable
 
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.bm_import")
 
 
@@ -50,10 +55,23 @@ class BmImportTask:
     def cancel(self):
         self.cancelled = True
         self.status = "cancelled"
+        uid = getattr(self, "user_id", None)
         if self.action == "delete":
-            self.message = f"Удаление отменено. Удалено: {len(self.deleted)} из {self.total}"
+            self.message = _tr(
+                "bm_import.cancelled_deleted",
+                user_id=uid,
+                fallback="Deletion cancelled. Deleted: {deleted} of {total}",
+                deleted=len(self.deleted),
+                total=self.total,
+            )
         else:
-            self.message = f"Импорт отменен. Добавлено: {len(self.added)} из {self.total}"
+            self.message = _tr(
+                "bm_import.cancelled_added",
+                user_id=uid,
+                fallback="Import cancelled. Added: {added} of {total}",
+                added=len(self.added),
+                total=self.total,
+            )
 
     def to_dict(self) -> dict:
         return {
@@ -104,10 +122,10 @@ async def execute_bm_import(
             "task": task.to_dict()
         })
 
-    if task.network_type == "freedmr":
+    if task.network_type == "dmrplus":
         try:
             import sys
-            from .constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES
+            from .constants import parse_dmrplus_rpto, build_dmrplus_rpto, DMRPLUS_MAX_STATIC_PER_SLOT, DMRPLUS_MAX_RPTO_BYTES
             hm = hotspot_manager
             if hm is None:
                 for mod_name in ("main", "src.main", "__main__"):
@@ -116,17 +134,101 @@ async def execute_bm_import(
                         hm = getattr(mod, "hotspot_manager")
                         break
             if hm is None:
-                raise RuntimeError("Менеджер хотспотов не инициализирован")
+                raise RuntimeError(_tr("bm_import.manager_not_init", fallback="Hotspot manager is not initialized"))
+            rt = hm.get_runtime(task.user_id, task.hotspot_id)
+            if not rt:
+                task.status = "error"
+                task.message = _tr("bm_import.hotspot_not_found", user_id=task.user_id, fallback="Hotspot '{hotspot_id}' not found", hotspot_id=task.hotspot_id)
+                return
+
+            parsed = parse_dmrplus_rpto(
+                getattr(rt.config, "rpto_options", "") or "",
+                fallback_reflector=getattr(rt.config, "dmrplus_reflector", "") or "",
+            )
+            target_list = parsed["ts1"] if task.slot == 1 else parsed["ts2"]
+            is_delete = (task.action == "delete")
+            for i, tg in enumerate(task.talkgroups):
+                if task.cancelled:
+                    task.status = "cancelled"
+                    break
+                task.current_tg = tg
+                if is_delete:
+                    if tg in target_list:
+                        target_list.remove(tg)
+                        task.deleted.append(tg)
+                    else:
+                        task.errors.append(_tr("bm_import.tg_not_in_slot", user_id=task.user_id, fallback="TG {tg} not found in slot {slot}", tg=tg, slot=task.slot))
+                else:
+                    if tg in (0, 4000, 5000, 9990, 9991, 9999) or (task.slot == 2 and (tg == 9 or 4001 <= tg <= 4999)):
+                        task.errors.append(_tr("bm_import.service_tg", user_id=task.user_id, fallback="TG {tg}: service group", tg=tg))
+                    elif tg in target_list:
+                        task.added.append(tg)
+                    elif len(target_list) >= DMRPLUS_MAX_STATIC_PER_SLOT:
+                        task.errors.append(f"TG {tg}: max {DMRPLUS_MAX_STATIC_PER_SLOT} static groups per slot in DMR+ IPSC2")
+                    else:
+                        target_list.append(tg)
+                        task.added.append(tg)
+                task.current = i + 1
+                if broadcast_fn:
+                    await broadcast_fn(task.user_id, {"type": "bm_import_progress", "task": task.to_dict()})
+                await asyncio.sleep(0.01)
+
+            new_rpto = build_dmrplus_rpto(
+                start_ref=parsed["start_ref"],
+                ts1=parsed["ts1"],
+                ts2=parsed["ts2"],
+                relink_time=parsed["relink_time"],
+                user_link=parsed["user_link"],
+                extra_opts=parsed["opts"],
+            )
+            if len(new_rpto.encode("ascii", errors="ignore")) > DMRPLUS_MAX_RPTO_BYTES:
+                task.status = "error"
+                task.message = f"DMR+ RPTO length limit exceeded ({DMRPLUS_MAX_RPTO_BYTES} bytes)"
+            else:
+                await hm.set_hotspot_rpto(rt.config.id, rpto_options=new_rpto, user_id=task.user_id)
+                task.status = "completed" if not task.cancelled else "cancelled"
+                cnt = len(task.deleted) if is_delete else len(task.added)
+                task.message = f"DMR+ TS{task.slot}: {cnt}/{task.total} updated"
+        except Exception as e:
+            logger.error(f"[DMR+_TASK] Task {task.task_id} failed: {e}")
+            task.status = "error"
+            task.message = f"DMR+ error: {e}"
+        finally:
+            task.finished_at = time.time()
+            if _user_active_bm_import.get(task.user_id) == task.task_id:
+                _user_active_bm_import.pop(task.user_id, None)
+            if broadcast_fn:
+                await broadcast_fn(task.user_id, {"type": "bm_import_finished", "task": task.to_dict()})
+        return
+
+    if task.network_type in ("freedmr", "adn"):
+        is_adn = (task.network_type == "adn")
+        log_prefix = "[ADN_TASK]" if is_adn else "[FREEDMR_TASK]"
+        try:
+            import sys
+            from .constants import parse_freedmr_rpto, build_freedmr_rpto, FREEDMR_MAX_RPTO_BYTES, normalize_freedmr_slots
+            hm = hotspot_manager
+            if hm is None:
+                for mod_name in ("main", "src.main", "__main__"):
+                    mod = sys.modules.get(mod_name)
+                    if mod and hasattr(mod, "hotspot_manager"):
+                        hm = getattr(mod, "hotspot_manager")
+                        break
+            if hm is None:
+                raise RuntimeError(_tr("bm_import.manager_not_init", fallback="Hotspot manager is not initialized"))
 
             rt = hm.get_runtime(task.user_id, task.hotspot_id)
             if not rt:
                 task.status = "error"
-                task.message = f"Хотспот '{task.hotspot_id}' не найден"
+                task.message = _tr("bm_import.hotspot_not_found", user_id=task.user_id, fallback="Hotspot '{hotspot_id}' not found", hotspot_id=task.hotspot_id)
                 return
 
             is_delete = (task.action == "delete")
+            is_duplex = getattr(rt.config, "duplex", True)
+            effective_slot = 2 if not is_duplex else task.slot
             parsed = parse_freedmr_rpto(getattr(rt.config, "rpto_options", "") or "")
-            target_list = parsed["ts1"] if task.slot == 1 else parsed["ts2"]
+            target_list = parsed["ts1"] if effective_slot == 1 else parsed["ts2"]
+            opp_list = parsed["ts2"] if effective_slot == 1 else parsed["ts1"]
 
             for i, tg in enumerate(task.talkgroups):
                 if task.cancelled:
@@ -138,19 +240,22 @@ async def execute_bm_import(
                         target_list.remove(tg)
                         task.deleted.append(tg)
                     else:
-                        task.errors.append(f"TG {tg} не найдена в слоте {task.slot}")
+                        task.errors.append(_tr("bm_import.tg_not_in_slot", user_id=task.user_id, fallback="TG {tg} not found in slot {slot}", tg=tg, slot=task.slot))
                 else:
                     if tg in (0, 4000, 5000, 9990, 9991, 9999):
-                        task.errors.append(f"TG {tg}: служебная группа")
+                        task.errors.append(_tr("bm_import.service_tg", user_id=task.user_id, fallback="TG {tg}: service group", tg=tg))
                     elif tg in target_list:
                         task.added.append(tg)
                     else:
-                        cand_ts1 = list(parsed["ts1"]) + ([tg] if task.slot == 1 else [])
-                        cand_ts2 = list(parsed["ts2"]) + ([tg] if task.slot == 2 else [])
-                        cand_rpto = build_freedmr_rpto(cand_ts1, cand_ts2, parsed["opts"], prefer_slot=task.slot)
+                        cand_ts1 = list(parsed["ts1"]) + ([tg] if effective_slot == 1 else [])
+                        cand_ts2 = list(parsed["ts2"]) + ([tg] if effective_slot == 2 else [])
+                        cand_norm_ts1, cand_norm_ts2 = normalize_freedmr_slots(cand_ts1, cand_ts2, duplex=is_duplex)
+                        cand_rpto = build_freedmr_rpto(cand_norm_ts1, cand_norm_ts2, parsed["opts"], prefer_slot=effective_slot)
                         if len(cand_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
-                            task.errors.append(f"TG {tg}: превышен лимит RPTO ({FREEDMR_MAX_RPTO_BYTES} б)")
+                            task.errors.append(_tr("bm_import.rpto_limit_tg", user_id=task.user_id, fallback="TG {tg}: RPTO limit exceeded ({limit} B)", tg=tg, limit=FREEDMR_MAX_RPTO_BYTES))
                         else:
+                            if tg in opp_list:
+                                opp_list.remove(tg)
                             target_list.append(tg)
                             task.added.append(tg)
 
@@ -159,23 +264,36 @@ async def execute_bm_import(
                     await broadcast_fn(task.user_id, {"type": "bm_import_progress", "task": task.to_dict()})
                 await asyncio.sleep(0.01)
 
-            new_rpto = build_freedmr_rpto(parsed["ts1"], parsed["ts2"], parsed["opts"], prefer_slot=task.slot)
+            norm_ts1, norm_ts2 = normalize_freedmr_slots(parsed["ts1"], parsed["ts2"], duplex=is_duplex)
+            new_rpto = build_freedmr_rpto(norm_ts1, norm_ts2, parsed["opts"], prefer_slot=effective_slot)
             if len(new_rpto.encode("ascii", errors="ignore")) > FREEDMR_MAX_RPTO_BYTES:
                 task.status = "error"
-                task.message = f"Превышен лимит длины строки RPTO FreeDMR ({FREEDMR_MAX_RPTO_BYTES} байт)"
+                if is_adn:
+                    task.message = _tr("bm_import.adn_rpto_limit", user_id=task.user_id, fallback="ADN Systems RPTO string length limit exceeded ({limit} bytes)", limit=FREEDMR_MAX_RPTO_BYTES)
+                else:
+                    task.message = _tr("bm_import.freedmr_rpto_limit", user_id=task.user_id, fallback="FreeDMR RPTO string length limit exceeded ({limit} bytes)", limit=FREEDMR_MAX_RPTO_BYTES)
             else:
                 await hm.set_hotspot_rpto(rt.config.id, rpto_options=new_rpto, user_id=task.user_id)
                 task.status = "completed" if not task.cancelled else "cancelled"
                 if is_delete:
-                    task.message = f"Успешно удалено {len(task.deleted)} из {task.total} групп из TS{task.slot} FreeDMR"
+                    if is_adn:
+                        task.message = _tr("bm_import.adn_deleted", user_id=task.user_id, fallback="Successfully deleted {count} of {total} groups from TS{slot} ADN Systems", count=len(task.deleted), total=task.total, slot=task.slot)
+                    else:
+                        task.message = _tr("bm_import.freedmr_deleted", user_id=task.user_id, fallback="Successfully deleted {count} of {total} groups from TS{slot} FreeDMR", count=len(task.deleted), total=task.total, slot=task.slot)
                 else:
-                    task.message = f"Успешно добавлено {len(task.added)} из {task.total} групп в TS{task.slot} FreeDMR"
+                    if is_adn:
+                        task.message = _tr("bm_import.adn_added", user_id=task.user_id, fallback="Successfully added {count} of {total} groups to TS{slot} ADN Systems", count=len(task.added), total=task.total, slot=task.slot)
+                    else:
+                        task.message = _tr("bm_import.freedmr_added", user_id=task.user_id, fallback="Successfully added {count} of {total} groups to TS{slot} FreeDMR", count=len(task.added), total=task.total, slot=task.slot)
                 if task.errors:
-                    task.message += f" ({len(task.errors)} ошибок)"
+                    task.message += _tr("bm_import.errors_suffix", user_id=task.user_id, fallback=" ({count} errors)", count=len(task.errors))
         except Exception as e:
-            logger.error(f"[FREEDMR_TASK] Task {task.task_id} failed: {e}")
+            logger.error(f"{log_prefix} Task {task.task_id} failed: {e}")
             task.status = "error"
-            task.message = f"Ошибка FreeDMR: {e}"
+            if is_adn:
+                task.message = _tr("bm_import.adn_error", user_id=task.user_id, fallback="ADN Systems error: {error}", error=e)
+            else:
+                task.message = _tr("bm_import.freedmr_error", user_id=task.user_id, fallback="FreeDMR error: {error}", error=e)
         finally:
             task.finished_at = time.time()
             if _user_active_bm_import.get(task.user_id) == task.task_id:
@@ -187,7 +305,7 @@ async def execute_bm_import(
     def _add_single_tg(tg_num: int):
         if task.network_type == "tgif":
             if tg_num in (9, 777, 4000, 9990, 31000):
-                return False, f"TG {tg_num}: служебная группа TGIF (не может быть статической)"
+                return False, _tr("bm_import.tgif_service_tg", user_id=task.user_id, fallback="TG {tg}: TGIF service group (cannot be static)", tg=tg_num)
             url = f"https://api.tgif.network/v1/static-talkgroups/{device_id}"
             req_data = json.dumps({"slot": task.slot, "timeslot": task.slot, "talkgroup": tg_num}).encode("utf-8")
             req = urllib.request.Request(
@@ -296,9 +414,9 @@ async def execute_bm_import(
             if task.cancelled:
                 task.status = "cancelled"
                 if is_delete:
-                    task.message = f"Удаление отменено. Удалено: {len(task.deleted)} из {task.total}"
+                    task.message = _tr("bm_import.delete_cancelled", user_id=task.user_id, fallback="Deletion cancelled. Deleted: {count} of {total}", count=len(task.deleted), total=task.total)
                 else:
-                    task.message = f"Импорт отменен. Добавлено: {len(task.added)} из {task.total}"
+                    task.message = _tr("bm_import.import_cancelled", user_id=task.user_id, fallback="Import cancelled. Added: {count} of {total}", count=len(task.added), total=task.total)
                 break
 
             task.current_tg = tg
@@ -329,17 +447,19 @@ async def execute_bm_import(
         if not task.cancelled:
             task.status = "completed"
             if is_delete:
-                task.message = f"Успешно удалено {len(task.deleted)} из {task.total} групп из TS{task.slot}"
+                task.message = _tr("bm_import.deleted_summary", user_id=task.user_id, fallback="Successfully deleted {count} of {total} groups from TS{slot}", count=len(task.deleted), total=task.total, slot=task.slot)
             else:
-                task.message = f"Успешно добавлено {len(task.added)} из {task.total} групп в TS{task.slot}"
+                task.message = _tr("bm_import.added_summary", user_id=task.user_id, fallback="Successfully added {count} of {total} groups to TS{slot}", count=len(task.added), total=task.total, slot=task.slot)
             if task.errors:
-                task.message += f" ({len(task.errors)} ошибок)"
+                task.message += _tr("bm_import.errors_suffix", user_id=task.user_id, fallback=" ({count} errors)", count=len(task.errors))
 
     except Exception as e:
         logger.error(f"[BM_TASK] Task {task.task_id} failed: {e}")
         task.status = "error"
-        action_name = "удаления" if task.action == "delete" else "импорта"
-        task.message = f"Ошибка {action_name}: {e}"
+        if task.action == "delete":
+            task.message = _tr("bm_import.delete_error", user_id=task.user_id, fallback="Deletion error: {error}", error=e)
+        else:
+            task.message = _tr("bm_import.import_error", user_id=task.user_id, fallback="Import error: {error}", error=e)
     finally:
         task.finished_at = time.time()
         logger.info(

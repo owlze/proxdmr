@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Deque, Optional, Tuple, List, Dict, Any
 
+from i18n_backend import tr as _tr
+
 logger = logging.getLogger("proxdmr.memguard")
 
 SAMPLE_INTERVAL_SEC = 300          # замер раз в 5 минут
@@ -189,17 +191,17 @@ async def _loop():
                     limit = read_cgroup_limit_mb()
                     logger.info(f"[MEMGUARD] RSS={rss} MB, tasks={tasks}, limit={limit or 'none'} MB")
                     if rss >= WARN_RSS_MB:
-                        msg = f"RSS {rss} MB превысил порог {WARN_RSS_MB} MB"
-                        logger.warning(f"[MEMGUARD] {msg}")
+                        msg = _tr("memguard.rss_warn", fallback="RSS {rss} MB exceeded threshold {limit} MB", rss=rss, limit=WARN_RSS_MB)
+                        logger.warning(f"[MEMGUARD] RSS {rss} MB exceeded threshold {WARN_RSS_MB} MB")
                         record_warning(f"[MEMGUARD] {msg}")
                     if limit and rss >= limit * 0.85:
-                        msg = f"RSS {rss} MB ≥ 85% лимита контейнера {limit} MB — близко к OOM"
-                        logger.warning(f"[MEMGUARD] {msg}")
+                        msg = _tr("memguard.rss_oom_warn", fallback="RSS {rss} MB ≥ 85% of container limit {limit} MB — near OOM", rss=rss, limit=limit)
+                        logger.warning(f"[MEMGUARD] RSS {rss} MB >= 85% container limit {limit} MB")
                         record_warning(f"[MEMGUARD] {msg}")
                     growth = growth_over_window_mb()
                     if growth >= GROWTH_WARN_MB:
-                        msg = f"Подозрение на утечку: +{growth} MB за последний час"
-                        logger.warning(f"[MEMGUARD] {msg}")
+                        msg = _tr("memguard.growth_warn", fallback="Possible leak: +{growth} MB over the last hour", growth=growth)
+                        logger.warning(f"[MEMGUARD] Possible leak: +{growth} MB over 1h")
                         record_warning(f"[MEMGUARD] {msg}")
 
             write_heartbeat()
