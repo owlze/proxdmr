@@ -11,7 +11,7 @@ import re
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "2.17b"
+APP_VERSION = "2.17.1b"
 APP_VERSION_DATE = "19.11.2026"
 
 APK_VERSION = "1.35"
