@@ -1,5 +1,5 @@
 <!-- lang:en -->
-# ProxDMR v2.17.1b — Release Notes
+# ProxDMR v2.18 — Release Notes
 
 List of Changes
 
@@ -28,7 +28,7 @@ List of Changes
 I also ask everyone who uses this program to be understanding regarding any bugs and unstable program features; I'm just a hobbyist coder with limited programming experience, and this is a completely amateur project. In any case, if you'd like, feel free to email me at the address listed in the "About" section of the program.
 
 <!-- lang:ru -->
-# ProxDMR v2.17.1b — Список изменений
+# ProxDMR v2.18 — Список изменений
 
 Список изменений
 
@@ -57,7 +57,7 @@ I also ask everyone who uses this program to be understanding regarding any bugs
 Также прошу всех пользователей программы с пониманием относиться к возможным ошибкам и нестабильной работе отдельных функций — я всего лишь программист-любитель с небольшим опытом, и это полностью любительский проект. В любом случае, при желании вы всегда можете написать мне на электронную почту, указанную в разделе «О программе».
 
 <!-- lang:uk -->
-# ProxDMR v2.17.1b — Список змін
+# ProxDMR v2.18 — Список змін
 
 Список змін
 
@@ -86,7 +86,7 @@ I also ask everyone who uses this program to be understanding regarding any bugs
 Також прошу всіх користувачів програми із розумінням ставитися до можливих помилок і нестабільної роботи окремих функцій; я лише програміст-аматор із невеликим досвідом, і це повністю аматорський проєкт. У будь-якому разі, за бажання, можете написати мені на електронну пошту, зазначену в розділі «Про програму».
 
 <!-- lang:de -->
-# ProxDMR v2.17.1b — Änderungsprotokoll
+# ProxDMR v2.18 — Änderungsprotokoll
 
 Liste der Änderungen
 
@@ -115,7 +115,7 @@ Liste der Änderungen
 Ich bitte außerdem alle Nutzer dieses Programms um Verständnis für eventuelle Fehler und instabile Funktionen; ich bin nur ein Hobbyprogrammierer mit begrenzter Erfahrung, und dies ist ein reines Amateurprojekt. Bei Interesse können Sie mir gerne an die im Abschnitt „Über das Programm“ angegebene E-Mail-Adresse schreiben.
 
 <!-- lang:es -->
-# ProxDMR v2.17.1b — Registro de cambios
+# ProxDMR v2.18 — Registro de cambios
 
 Lista de cambios
 
@@ -144,7 +144,7 @@ Lista de cambios
 También pido comprensión a quienes utilicen este programa ante posibles errores y funciones inestables; soy solo un programador aficionado con experiencia limitada y este es un proyecto completamente amateur. En cualquier caso, si lo desean, pueden escribirme al correo indicado en la sección «Acerca de».
 
 <!-- lang:fr -->
-# ProxDMR v2.17.1b — Notes de version
+# ProxDMR v2.18 — Notes de version
 
 Liste des modifications
 
@@ -173,7 +173,7 @@ Liste des modifications
 Je demande également à tous les utilisateurs de faire preuve de compréhension face aux éventuels bogues et fonctionnalités instables ; je suis un développeur amateur avec une expérience limitée et ce projet est entièrement bénévole. N'hésitez pas à m'écrire à l'adresse e-mail indiquée dans la section « À propos » du programme.
 
 <!-- lang:it -->
-# ProxDMR v2.17.1b — Registro delle modifiche
+# ProxDMR v2.18 — Registro delle modifiche
 
 Elenco delle modifiche
 
@@ -202,7 +202,7 @@ Elenco delle modifiche
 Chiedo inoltre comprensione a chiunque utilizzi questo programma per eventuali bug o funzioni instabili; sono solo un programmatore per hobby con esperienza limitata e questo è un progetto amatoriale. In ogni caso, potete scrivermi all'indirizzo e-mail indicato nella sezione « Informazioni ».
 
 <!-- lang:nl -->
-# ProxDMR v2.17.1b — Wijzigingslogboek
+# ProxDMR v2.18 — Wijzigingslogboek
 
 Lijst met wijzigingen
 
