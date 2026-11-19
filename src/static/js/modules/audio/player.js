@@ -92,6 +92,7 @@ export   class RecordingsManager {
       this._recTxTimeBuf = null;
       this._recTxByteBuf = null;
       this._recTxHooked = false;
+      this._txStartToken = 0;
 
       this.isTtsPlaying = false;
       this._ttsPlayToken = 0;
@@ -2412,7 +2413,84 @@ export   class RecordingsManager {
       return { hid, hsObj, net, isSingleSlot, slot, tg, available };
     }
 
+    isTxRestrictedMode() {
+      if (typeof window === "undefined") return false;
+      const body = typeof document !== "undefined" ? document.body : null;
+      const isDemo = Boolean(
+        (typeof window.isDemoMode === "function" ? window.isDemoMode() : window.isDemoMode) ||
+        (body && body.classList.contains("is-demo-mode"))
+      );
+      const isSwl = Boolean(
+        window.isSwl ||
+        window.isUserSwl ||
+        (body && body.classList.contains("is-swl-mode"))
+      );
+      return isDemo || isSwl;
+    }
+
+    getTxRestrictedHint() {
+      const body = typeof document !== "undefined" ? document.body : null;
+      const isDemo = Boolean(
+        (typeof window !== "undefined" && (typeof window.isDemoMode === "function" ? window.isDemoMode() : window.isDemoMode)) ||
+        (body && body.classList.contains("is-demo-mode"))
+      );
+      if (isDemo) {
+        return (typeof window !== "undefined" && window.t)
+          ? window.t("ptt.demo_denied_toast", {}, "🎧 Демо-режим: передача отключена (только приём)")
+          : "🎧 Демо-режим: передача отключена (только приём)";
+      }
+      return (typeof window !== "undefined" && window.t)
+        ? window.t("ptt.swl_denied_toast", {}, "🎧 Режим SWL: передача запрещена (только приём)")
+        : "🎧 Режим SWL: передача запрещена (только приём)";
+    }
+
     updateTxTargetLabel() {
+      const restricted = this.isTxRestrictedMode();
+      if (restricted) {
+        this.isTxArmed = false;
+        this.isTxStreaming = false;
+        if (this.txTargetMenu) {
+          this.txTargetMenu.style.display = "none";
+        }
+        const hint = this.getTxRestrictedHint();
+        if (this.txTargetLabel) {
+          this.txTargetLabel.textContent = `--`;
+        }
+        if (this.txToggleBtn) {
+          this.txToggleBtn.disabled = true;
+          this.txToggleBtn.setAttribute("aria-disabled", "true");
+          this.txToggleBtn.classList.add("rec-tx-unavailable");
+          this.txToggleBtn.classList.remove("active", "transmitting");
+          this.txToggleBtn.title = hint;
+        }
+        if (this.txTargetBtn) {
+          this.txTargetBtn.disabled = true;
+          this.txTargetBtn.setAttribute("aria-disabled", "true");
+          this.txTargetBtn.classList.add("rec-tx-unavailable");
+          this.txTargetBtn.title = hint;
+        }
+        return;
+      }
+
+      if (this.txToggleBtn) {
+        this.txToggleBtn.disabled = false;
+        this.txToggleBtn.removeAttribute("aria-disabled");
+        this.txToggleBtn.classList.remove("rec-tx-unavailable");
+        const txTitle = (typeof window !== "undefined" && window.t)
+          ? window.t("player.tx_toggle_title", {}, "Режим передачи записи в эфир (TX: макс. 1 трек / 60 сек)")
+          : "Режим передачи записи в эфир (TX: макс. 1 трек / 60 сек)";
+        this.txToggleBtn.title = txTitle;
+      }
+      if (this.txTargetBtn) {
+        this.txTargetBtn.disabled = false;
+        this.txTargetBtn.removeAttribute("aria-disabled");
+        this.txTargetBtn.classList.remove("rec-tx-unavailable");
+        const targetTitle = (typeof window !== "undefined" && window.t)
+          ? window.t("player.tx_target_title", {}, "Выбрать целевой хотспот и тайм-слот для передачи записи")
+          : "Выбрать целевой хотспот и тайм-слот для передачи записи";
+        this.txTargetBtn.title = targetTitle;
+      }
+
       if (!this.txTargetLabel) return;
       const { hid, net, isSingleSlot, slot, available } = this.getEffectiveTxTarget();
       const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots))
@@ -2499,6 +2577,10 @@ export   class RecordingsManager {
       if (this.txToggleBtn) {
         this.txToggleBtn.onclick = (e) => {
           e.stopPropagation();
+          if (this.isTxRestrictedMode()) {
+            this.resetTxState();
+            return;
+          }
           if (!this.isTxArmed) {
             const { available } = this.getEffectiveTxTarget();
             if (!available) {
@@ -2519,6 +2601,10 @@ export   class RecordingsManager {
       if (this.txTargetBtn) {
         this.txTargetBtn.onclick = (e) => {
           e.stopPropagation();
+          if (this.isTxRestrictedMode()) {
+            if (this.txTargetMenu) this.txTargetMenu.style.display = "none";
+            return;
+          }
           if (!this.txTargetMenu) return;
           const isOpen = this.txTargetMenu.style.display !== "none";
           if (isOpen) {
@@ -2547,6 +2633,19 @@ export   class RecordingsManager {
             this.onServerRecTxEnded(msg);
           }
         };
+        window.addEventListener("languageChanged", () => {
+          this.updateTxTargetLabel();
+        });
+      }
+      if (typeof document !== "undefined" && document.body && typeof MutationObserver !== "undefined") {
+        const bodyObs = new MutationObserver(() => {
+          if (this.isTxRestrictedMode() && (this.isTxArmed || this.isTxStreaming)) {
+            this.resetTxState();
+          } else {
+            this.updateTxTargetLabel();
+          }
+        });
+        bodyObs.observe(document.body, { attributes: true, attributeFilter: ["class"] });
       }
       const liveMonitorPanel = document.getElementById("liveMonitorPanel");
       if (liveMonitorPanel && typeof MutationObserver !== "undefined") {
@@ -2557,6 +2656,7 @@ export   class RecordingsManager {
         });
         obs.observe(liveMonitorPanel, { attributes: true, attributeFilter: ["class", "style"] });
       }
+      this.updateTxTargetLabel();
     }
 
     onServerRecTxEnded(msg) {
@@ -2882,6 +2982,10 @@ export   class RecordingsManager {
     }
 
     async startRecordingTxStream() {
+      if (this.isTxRestrictedMode()) {
+        this.resetTxState();
+        return;
+      }
       if (!this.isTxArmed || !this.currentRecording) return;
       const recId = this.currentRecording.id || this.currentRecording.call_id;
       if (!recId) return;
@@ -2897,21 +3001,9 @@ export   class RecordingsManager {
         clearTimeout(this._txMaxDurationTimer);
         this._txMaxDurationTimer = null;
       }
+      const reqToken = ++this._txStartToken;
       const { hid, slot, tg } = target;
       const offsetSec = (this.audio && this.audio.currentTime) ? this.audio.currentTime : 0;
-      this.isTxStreaming = true;
-      this.applyRecTxCardVisuals(hid, slot, tg, 60);
-      this.updateTxTargetLabel();
-
-      // 60-second anti-trash continuous TX limit
-      this._txMaxDurationTimer = setTimeout(() => {
-        this._txMaxDurationTimer = null;
-        if (this.isTxStreaming) {
-          this.pause();
-          this.stopRecordingTxStream();
-          showToast(window.t ? window.t("player.tx_limit_60s", {}, "⏱️ Защита эфира: передача записи ограничена 1 минутой") : "⏱️ Защита эфира: передача записи ограничена 1 минутой", 3500);
-        }
-      }, 60000);
 
       try {
         const resp = await fetch(`/api/recordings/${encodeURIComponent(recId)}/tx/start`, {
@@ -2936,14 +3028,50 @@ export   class RecordingsManager {
           this.clearRecTxCardVisuals();
           this.updateTxTargetLabel();
           showToast(errMsg, 3000);
-        } else {
-          try {
-            const okData = await resp.json();
-            if (okData && okData.status === "ok" && okData.dst_id && this._activeTxVisualState && okData.dst_id !== tg) {
-              this.applyRecTxCardVisuals(okData.hotspot_id || hid, okData.slot || slot, okData.dst_id, okData.max_duration_sec || 60);
-            }
-          } catch (_) {}
+          return;
         }
+        // Guard against race: playback paused, TX disarmed, or demo/SWL entered while fetch was in flight
+        if (reqToken !== this._txStartToken || !this.isTxArmed || !this.isPlaying() || this.isTxRestrictedMode()) {
+          try {
+            await fetch("/api/recordings/tx/stop", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin"
+            });
+          } catch (_) {}
+          this.isTxStreaming = false;
+          this.clearRecTxCardVisuals();
+          this.updateTxTargetLabel();
+          return;
+        }
+
+        let effHid = hid;
+        let effSlot = slot;
+        let effTg = tg;
+        let effMaxSec = 60;
+        try {
+          const okData = await resp.json();
+          if (okData && okData.status === "ok") {
+            if (okData.hotspot_id) effHid = okData.hotspot_id;
+            if (okData.slot) effSlot = okData.slot;
+            if (okData.dst_id) effTg = okData.dst_id;
+            if (okData.max_duration_sec) effMaxSec = okData.max_duration_sec;
+          }
+        } catch (_) {}
+
+        this.isTxStreaming = true;
+        this.applyRecTxCardVisuals(effHid, effSlot, effTg, effMaxSec);
+        this.updateTxTargetLabel();
+
+        // 60-second anti-trash continuous TX limit
+        this._txMaxDurationTimer = setTimeout(() => {
+          this._txMaxDurationTimer = null;
+          if (this.isTxStreaming) {
+            this.pause();
+            this.stopRecordingTxStream();
+            showToast(window.t ? window.t("player.tx_limit_60s", {}, "⏱️ Защита эфира: передача записи ограничена 1 минутой") : "⏱️ Защита эфира: передача записи ограничена 1 минутой", 3500);
+          }
+        }, effMaxSec * 1000);
       } catch (err) {
         console.error("[REC_TX] Start error:", err);
         this.isTxStreaming = false;
@@ -2953,6 +3081,7 @@ export   class RecordingsManager {
     }
 
     async stopRecordingTxStream() {
+      this._txStartToken++;
       if (this._txMaxDurationTimer) {
         clearTimeout(this._txMaxDurationTimer);
         this._txMaxDurationTimer = null;
@@ -2972,6 +3101,7 @@ export   class RecordingsManager {
     }
 
     resetTxState() {
+      this._txStartToken++;
       if (this.isTxStreaming) {
         this.stopRecordingTxStream();
       } else {

@@ -26911,6 +26911,45 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
   50% { box-shadow: 0 0 18px rgba(255, 123, 114, 0.95); }
 }
 
+/* Demo / SWL read-only state for History Player TX buttons (keeps 4x2 grid intact) */
+body.is-demo-mode .rec-tx-toggle-btn,
+body.is-demo-mode .rec-tx-target-btn,
+body.is-swl-mode .rec-tx-toggle-btn,
+body.is-swl-mode .rec-tx-target-btn,
+.rec-tx-toggle-btn.rec-tx-unavailable,
+.rec-tx-target-btn.rec-tx-unavailable,
+.rec-tx-toggle-btn:disabled,
+.rec-tx-target-btn:disabled {
+  opacity: 0.34 !important;
+  filter: grayscale(1) !important;
+  color: #6e7681 !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+  animation: none !important;
+  cursor: not-allowed !important;
+}
+body.is-demo-mode .rec-tx-toggle-btn .rec-tx-dot,
+body.is-swl-mode .rec-tx-toggle-btn .rec-tx-dot,
+.rec-tx-toggle-btn.rec-tx-unavailable .rec-tx-dot {
+  background: #6e7681 !important;
+  box-shadow: none !important;
+}
+[data-theme="light"] body.is-demo-mode .rec-tx-toggle-btn,
+[data-theme="light"] body.is-demo-mode .rec-tx-target-btn,
+[data-theme="light"] body.is-swl-mode .rec-tx-toggle-btn,
+[data-theme="light"] body.is-swl-mode .rec-tx-target-btn,
+[data-theme="light"] .rec-tx-toggle-btn.rec-tx-unavailable,
+[data-theme="light"] .rec-tx-target-btn.rec-tx-unavailable {
+  color: #94a3b8 !important;
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+body.is-demo-mode .rec-tx-target-menu,
+body.is-swl-mode .rec-tx-target-menu {
+  display: none !important;
+}
+
 .rec-tx-target-wrap {
   position: relative;
   display: flex;

@@ -1,5 +1,5 @@
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.712';
-import { RecordingsManager } from './modules/audio/player.js?v=2.9.751';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.756';
 import './modules/ui/theme.js?v=2.9.734';
 import './modules/dmr/bm-monitor.js?v=2.9.738';
 import './modules/dmr/log-selection.js?v=2.9.736';
