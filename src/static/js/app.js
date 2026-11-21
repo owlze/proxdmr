@@ -1,0 +1,550 @@
+import './modules/ui/icons.js?v=2.9.770';
+import './modules/ui/pxi-select.js?v=2.9.789';
+import './modules/ui/marquee.js?v=2.9.780';
+import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.787';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.797';
+import './modules/ui/theme.js?v=2.9.799';
+import './modules/ui/color-picker.js?v=2.9.786';
+import './modules/dmr/bm-monitor.js?v=2.9.797';
+import './modules/dmr/log-selection.js?v=2.9.758';
+import {
+  handleCallTranscription,
+  handleTranscriptionError,
+  updateCallLogTranscription,
+  setupSlotTranscribeClick,
+  setupSlotLongPress,
+  setupCaptionBoxLongPress,
+  syncCardSlotTranscribeUI,
+  syncAllTranscribeSlotsToServer,
+  initSlotTranscribeState,
+  initTranscriberSettings,
+  disableAllTranscribe,
+  disableHotspotTranscribe,
+  disableSlotTranscribe,
+  isSlotTranscribeActive,
+  toggleSlotTranscribe,
+  openTranscriberModelPicker,
+  closeTranscriberModelPicker,
+  openTxtQuickSettingsPopover,
+  closeTxtQuickSettingsPopover,
+  setSlotMaximized,
+  updateSlotLangBadge,
+  getCurrentTranscriberModel,
+  selectTranscriberModel
+} from './modules/dmr/transcriber.js?v=2.9.790';
+import { blePtt } from './modules/ptt/ble.js?v=2.9.699';
+import { initApkUpdater } from './modules/core/updater.js?v=2.9.711';
+import { initAndroidBridge } from './modules/core/android.js?v=2.9.782';
+import { initAuth, initAccountManager } from './modules/settings/account.js?v=2.9.699';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.799';
+import { initHamQthSettings } from './modules/settings/hamqth.js?v=2.9.734';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.799';
+import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.711';
+import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.773';
+import { initOrientationLock } from './modules/ui/orientation.js?v=2.9.799';
+import {
+  initQuickAssign,
+  renderQuickMemButtons
+} from './modules/dmr/quick-assign.js?v=2.9.787';
+import { initStationClocks, updateClocks } from './modules/ui/clocks.js?v=2.9.787';
+import {
+  renderTranscriptionSummary
+} from './modules/dmr/transcription.js?v=2.9.787';
+import {
+  initSearchManager,
+  loadCallDbStats,
+  loadTgDbStats,
+  closeCallIdModal
+} from './modules/dmr/search.js?v=2.9.787';
+import {
+  initContactsManager,
+  openContactEditModal,
+  saveContactsToServer,
+  renderContactsTree,
+  findNodeInTree,
+  findParentNodeInTree
+} from './modules/dmr/contacts.js?v=2.9.787';
+import {
+  initWatchdog,
+  startSystemLinkWatchdog,
+  checkBmApiStatus,
+  updateGwStatus
+} from './modules/network/watchdog.js?v=2.9.765';
+import {
+  initHotspotsManager,
+  loadHotspots,
+  renderHotspotSelect,
+  renderHotspotsList,
+  openHotspotSettings,
+  saveCurrentSettingsState,
+  openEditHotspotForm,
+  applyActiveHotspotToUI,
+  switchActiveHotspot
+} from './modules/dmr/hotspots.js?v=2.9.799';
+import {
+  initBmTgStaticManager
+} from './modules/dmr/bm-static-manager.js?v=2.9.798';
+import {
+  initAudioRouting
+} from './modules/audio/routing.js?v=2.9.792';
+import {
+  initAudioDsp,
+  syncActiveAudioRxPreset
+} from './modules/audio/dsp.js?v=2.9.783';
+import {
+  setupDsdfmeModal
+} from './modules/settings/vocoder.js?v=2.9.711';
+import {
+  initPttEngine,
+  updatePttLockUI,
+  checkPttConnectionStatus,
+  notifyPttConnectionBlocked
+} from './modules/ptt/engine.js?v=2.9.792';
+import { initAboutModal } from './modules/ui/about.js?v=2.9.711';
+import { initNavigation, pushNavState, closePrimaryModals } from './modules/ui/navigation.js?v=2.9.614';
+import {
+  initFullscreen,
+  toggleFullscreen,
+  isFullscreenActive,
+  updateFullscreenButtonsUI
+} from './modules/ui/fullscreen.js?v=2.9.699';
+import {
+  initBmBenchmark,
+  renderBmBenchmarkTable,
+  handleBmBenchmarkComplete,
+  handleBmBenchmarkProgress,
+  setBenchmarkRunningUI
+} from './modules/dmr/bm-benchmark.js?v=2.9.799';
+import {
+  getHotspotSlot,
+  setCardSlot,
+  setActiveSlot,
+  getHotspotTg,
+  getHotspotPttTarget,
+  setHotspotPttTarget,
+  updateCardPttHint,
+  updateCardModeBadge,
+  updateCardTgDisplay,
+  updateAllHotspotsTgDisplay,
+  updateTgDisplay,
+  setHotspotTg,
+  setHotspotSlot,
+  setTg,
+  selectHotspotTargetId,
+  getStoredLastRx,
+  saveStoredLastRx
+} from './modules/ui/vfo-display.js?v=2.9.788';
+import {
+  loadCardPingHistory,
+  saveCardPingHistory,
+  getHotspotPingMode,
+  setHotspotPingMode,
+  toggleHotspotPingMode,
+  getHotspotPingScale,
+  setHotspotPingScale,
+  cycleHotspotPingScale,
+  cyclePingScale,
+  renderCardPingSparkline,
+  generateSparklineGradientStops,
+  decimatePingPoints,
+  getPingColor,
+  getClientPingColor,
+  updatePingElement,
+  calculateCardPacketLoss,
+  calculateClientPacketLoss
+} from './modules/network/ping-sparklines.js?v=2.9.712';
+import {
+  getClientSettingsSnapshot,
+  scheduleSyncClientSettings,
+  applyServerClientSettings
+} from './modules/settings/sync.js?v=2.9.788';
+import {
+  initVolumeMute,
+  isMuteOnPttEnabled,
+  setMuteOnPttEnabled,
+  isPttAudioMuted,
+  isSimultaneousSlotsEnabled,
+  setSimultaneousSlotsEnabled,
+  isApkClient,
+  isVolumeUpPttEnabled,
+  setVolumeUpPttEnabled,
+  isVolumeDownPttEnabled,
+  setVolumeDownPttEnabled,
+  toggleVolumeDownPttQuick,
+  isGlobalAudioMuted,
+  setGlobalAudioMute,
+  toggleGlobalAudioMute,
+  isHotspotAudioMuted,
+  setHotspotAudioMute,
+  toggleHotspotAudioMute,
+  isHotspotSoloActive,
+  getActiveSoloHotspotId,
+  toggleHotspotSoloAudio,
+  exitSoloAudio,
+  handleMuteButtonClick,
+  handleMuteButtonDblClick,
+  getHotspotVolume,
+  setHotspotVolume,
+  getHotspotAgc,
+  setHotspotAgc,
+  getHotspotLoop,
+  setHotspotLoop,
+  isHotspotCollapsed,
+  collapseHotspot,
+  expandHotspot,
+  toggleHotspotCollapse,
+  updateHotspotVolumeAndMuteUI,
+  updateAllVolumeAndMuteUI,
+  isHotspotVolumeSyncEnabled,
+  setHotspotVolumeSyncEnabled,
+  isSystemVolumeSyncEnabled,
+  setSystemVolumeSyncEnabled,
+  onSystemVolumeChanged
+} from './modules/audio/volume-mute.js?v=2.9.799';
+import {
+  KNOWN_BM_MASTERS,
+  getBmFlagBadgeHtml,
+  getBmServerInfo,
+  populateBmServerSelect,
+  isHotspotFullyOnline,
+  updateCardBmBanner,
+  refreshAllCardsBmBanner,
+  updateRxBannerFreshness,
+  updateCardRxLiveBanner,
+  updateRxLiveBanner
+} from './modules/dmr/bm-banner.js?v=2.9.799';
+import {
+  currentBmStatus,
+  isTogglingConnection,
+  updateBmStatus,
+  toggleHotspotConnection
+} from './modules/dmr/bm-status.js?v=2.9.799';
+import {
+  connectWebSocket,
+  handleServerMessage,
+  startPing,
+  pendingPings,
+  lastReportedClientRtt,
+  serverClockOffsetSec,
+  pingTimer
+} from './modules/network/ws.js?v=2.9.799';
+
+/**
+ * ProxDMR Duplex & Multi-Instance Web Application
+ * Modular Application Orchestrator & Bootstrapper
+ */
+
+function _generateClientInstanceId() {
+  try {
+    let stored = "";
+    try {
+      stored = sessionStorage.getItem("proxdmr_client_instance_id") || "";
+    } catch (_) {}
+    if (stored && stored.length >= 16) {
+      return stored;
+    }
+    let newId = "";
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      newId = window.crypto.randomUUID();
+    } else {
+      const arr = new Uint8Array(16);
+      window.crypto.getRandomValues(arr);
+      newId = Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+    }
+    try {
+      sessionStorage.setItem("proxdmr_client_instance_id", newId);
+    } catch (_) {}
+    return newId;
+  } catch (_) {
+    return "cid_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 11);
+  }
+}
+
+if (typeof window !== "undefined") {
+  if (!window.PROXDMR_CLIENT_ID) {
+    window.PROXDMR_CLIENT_ID = _generateClientInstanceId();
+  }
+  if (!window._proxdmrCidFetchPatched && typeof window.fetch === "function") {
+    window._proxdmrCidFetchPatched = true;
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+      let isLocalApi = false;
+      try {
+        const urlStr = typeof input === "string" ? input : (input && input.url ? input.url : "");
+        isLocalApi = urlStr.startsWith("/api/") || urlStr.includes(window.location.origin + "/api/");
+        if (isLocalApi) {
+          const activeLang = (window.I18N && window.I18N.currentLang) || (function () { try { return localStorage.getItem("proxdmr_language") || ""; } catch (_) { return ""; } })();
+          if (window.PROXDMR_CLIENT_ID || activeLang) {
+            init = init ? Object.assign({}, init) : {};
+            const hdrs = new Headers(init.headers || (typeof input !== "string" && input && input.headers ? input.headers : undefined));
+            if (window.PROXDMR_CLIENT_ID && !hdrs.has("X-ProxDMR-Client-Id")) {
+              hdrs.set("X-ProxDMR-Client-Id", window.PROXDMR_CLIENT_ID);
+            }
+            if (activeLang && !hdrs.has("X-ProxDMR-Lang")) {
+              hdrs.set("X-ProxDMR-Lang", activeLang);
+            }
+            init.headers = hdrs;
+          }
+        }
+      } catch (_) {}
+      const pending = _origFetch(input, init);
+      if (!isLocalApi) return pending;
+      return pending.then(async (resp) => {
+        try {
+          if (resp.status === 409) {
+            try {
+              const data409 = await resp.clone().json();
+              if (data409 && data409.code === "SESSION_PAUSED") {
+                if (typeof window.enterSessionPausedState === "function") {
+                  window.enterSessionPausedState();
+                }
+              }
+            } catch (_) {}
+            return resp;
+          }
+          if (resp.status !== 403 || typeof window.t !== "function") return resp;
+          const data = await resp.clone().json();
+          if (!data || data.code !== "DEMO_READ_ONLY") return resp;
+          const raw = String(data.detail || data.message || "");
+          const isExportLock = (data.action === "export") || /export|экспорт|експорт|exporter|esport/i.test(raw);
+          const localized = isExportLock
+            ? window.t("demo.export_locked", {}, raw)
+            : window.t("demo.settings_locked", {}, raw);
+          const patched = Object.assign({}, data, { detail: localized, message: localized });
+          return new Response(JSON.stringify(patched), {
+            status: resp.status,
+            statusText: resp.statusText,
+            headers: new Headers({ "Content-Type": "application/json" })
+          });
+        } catch (_) {
+          return resp;
+        }
+      });
+    };
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  window.safeEscapeHtml = safeEscapeHtml;
+  window.escapeHtml = safeEscapeHtml;
+  let isLogVisible = false;
+  window.isLogVisible = false;
+
+  let USER_CALLSIGNS = {};
+  try {
+    const savedUsers = localStorage.getItem("proxdmr_user_callsigns_cache");
+    if (savedUsers) USER_CALLSIGNS = JSON.parse(savedUsers);
+  } catch (e) {}
+
+  let activeSlot = parseInt(localStorage.getItem("proxdmr_active_slot"), 10) || 2;
+  let cachedBmPings = {};
+  window.cachedBmPings = cachedBmPings;
+  let isPttPressed = false;
+  try {
+    Object.defineProperty(window, "activeSlot", {
+      get: () => activeSlot,
+      set: (v) => { activeSlot = v; },
+      configurable: true
+    });
+    Object.defineProperty(window, "isPttPressed", {
+      get: () => isPttPressed,
+      set: (v) => { isPttPressed = v; },
+      configurable: true
+    });
+    Object.defineProperty(window, "USER_CALLSIGNS", {
+      get: () => USER_CALLSIGNS,
+      set: (v) => { USER_CALLSIGNS = v; },
+      configurable: true
+    });
+  } catch (_) {}
+  window.getActiveHotspotId = () => (window.activeHotspotId || "default");
+  window.getCurrentHotspots = () => (window.currentHotspots || []);
+
+  let audioCtx = null;
+  try { Object.defineProperty(window, "audioCtx", { get: () => audioCtx, set: (v) => { audioCtx = v; }, configurable: true }); } catch (_) {}
+  let micStream = null;
+  try { Object.defineProperty(window, "micStream", { get: () => micStream, set: (v) => { micStream = v; }, configurable: true }); } catch (_) {}
+  let micSourceNode = null;
+  try { Object.defineProperty(window, "micSourceNode", { get: () => micSourceNode, set: (v) => { micSourceNode = v; }, configurable: true }); } catch (_) {}
+  let analyserNode = null;
+  try { Object.defineProperty(window, "analyserNode", { get: () => analyserNode, set: (v) => { analyserNode = v; }, configurable: true }); } catch (_) {}
+  let workletNode = null;
+  try { Object.defineProperty(window, "workletNode", { get: () => workletNode, set: (v) => { workletNode = v; }, configurable: true }); } catch (_) {}
+  let audioPlayer = new DMRAudioPlayer();
+  window.audioPlayer = audioPlayer;
+  window.dmrAudioPlayer = audioPlayer;
+  let bmMastersList = [];
+  let txTimer = null;
+  let txStartTime = 0;
+  let animationFrameId = null;
+  try { Object.defineProperty(window, "animationFrameId", { get: () => animationFrameId, set: (v) => { animationFrameId = v; }, configurable: true }); } catch (_) {}
+  let rxVuTimeout = null;
+
+  // Unlock Web Audio on first user interaction (browser autoplay policy)
+  const unlockAudio = (e) => {
+    if (window.audioPlayer) {
+      audioPlayer.ensureInitialized();
+    }
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+    const authModalEl = document.getElementById("authModal");
+    const isAuthOpen = Boolean(authModalEl && authModalEl.classList.contains("active"));
+    const isDemoClick = Boolean(e && e.target && e.target.closest && e.target.closest("#btnAuthDemoLogin"));
+    if (isAuthOpen || isDemoClick || window.isDemoMode || window.isUserSwl || document.body.classList.contains("is-demo-mode")) {
+      return;
+    }
+  };
+  document.addEventListener("pointerdown", unlockAudio, { once: true });
+  document.addEventListener("keydown", unlockAudio, { once: true });
+
+  // Init BLE PTT panel (only active inside APK with AndroidBridge)
+  if (window.blePtt) {
+    try { window.blePtt.init(); } catch(e) { console.warn("[BLE] init error", e); }
+  }
+
+
+  function initRecordingsManager() {
+    window.recordingsManager = new RecordingsManager();
+  }
+
+  // Window bridges for backward compatibility
+  window.updateBmStatus = updateBmStatus;
+  window.toggleHotspotConnection = toggleHotspotConnection;
+  window.refreshAllCardsBmBanner = refreshAllCardsBmBanner;
+  window.openEditHotspotForm = openEditHotspotForm;
+  window.applyActiveHotspotToUI = applyActiveHotspotToUI;
+  window.calculateClientPacketLoss = calculateClientPacketLoss;
+  window.getHotspotPingMode = getHotspotPingMode;
+  window.handleBmBenchmarkComplete = handleBmBenchmarkComplete;
+  window.handleBmBenchmarkProgress = handleBmBenchmarkProgress;
+  window.isGlobalAudioMuted = isGlobalAudioMuted;
+  window.isVolumeUpPttEnabled = isVolumeUpPttEnabled;
+  window.setVolumeUpPttEnabled = setVolumeUpPttEnabled;
+  window.isVolumeDownPttEnabled = isVolumeDownPttEnabled;
+  window.setVolumeDownPttEnabled = setVolumeDownPttEnabled;
+  window.loadCardPingHistory = loadCardPingHistory;
+  window.saveCardPingHistory = saveCardPingHistory;
+  window.loadHotspots = loadHotspots;
+  window.renderBmBenchmarkTable = renderBmBenchmarkTable;
+  window.renderHotspotSelect = renderHotspotSelect;
+  window.renderHotspotsList = renderHotspotsList;
+  window.setBenchmarkRunningUI = setBenchmarkRunningUI;
+  window.updateAllHotspotsTgDisplay = updateAllHotspotsTgDisplay;
+  window.updateCardModeBadge = updateCardModeBadge;
+  window.updatePingElement = updatePingElement;
+  window.switchActiveHotspot = switchActiveHotspot;
+  window.setTg = setTg;
+  window.renderQuickMemButtons = renderQuickMemButtons;
+  window.updateTgDisplay = updateTgDisplay;
+  window.pushNavState = pushNavState;
+  window.setActiveSlot = setActiveSlot;
+  window.renderTranscriptionSummary = renderTranscriptionSummary;
+  window.updateCardRxLiveBanner = updateCardRxLiveBanner;
+  window.openHotspotSettings = openHotspotSettings;
+  window.saveCurrentSettingsState = saveCurrentSettingsState;
+  window.setCardSlot = setCardSlot;
+  window.getHotspotTg = getHotspotTg;
+  window.getHotspotPttTarget = getHotspotPttTarget;
+  window.setHotspotPttTarget = setHotspotPttTarget;
+  window.setHotspotTg = setHotspotTg;
+  window.setHotspotSlot = setHotspotSlot;
+  window.selectHotspotTargetId = selectHotspotTargetId;
+  window.closeCallIdModal = closeCallIdModal;
+  window.openContactEditModal = openContactEditModal;
+  window.saveContactsToServer = saveContactsToServer;
+  window.renderContactsTree = renderContactsTree;
+  window.findNodeInTree = findNodeInTree;
+  window.findParentNodeInTree = findParentNodeInTree;
+  window.scheduleSyncClientSettings = scheduleSyncClientSettings;
+  window.getStoredLastRx = getStoredLastRx;
+  window.saveStoredLastRx = saveStoredLastRx;
+
+  window.__proxdmr.handleServerMessage = handleServerMessage;
+  window.__proxdmr.updateCardTgDisplay = updateCardTgDisplay;
+  window.__proxdmr.updateCardModeBadge = updateCardModeBadge;
+  window.__proxdmr.getStoredLastRx = getStoredLastRx;
+  window.__proxdmr.saveStoredLastRx = saveStoredLastRx;
+  window.__proxdmr.toggleFullscreen = toggleFullscreen;
+  window.__proxdmr.isFullscreenActive = isFullscreenActive;
+
+  // Start initialization of all subsystems
+  initAuth();
+  initStationClocks();
+  updateClocks();
+  updateRxBannerFreshness();
+  setInterval(() => {
+    updateClocks();
+    updateRxBannerFreshness();
+    document.querySelectorAll(".radio-container").forEach(c => updateCardTgDisplay(c));
+  }, 1000);
+
+  initLanguageManager();
+  initVolumeMute();
+  initAudioRouting();
+  initAudioDsp();
+  // syncActiveAudioRxPreset() is intentionally NOT called here.
+  // It would read DOM sliders before the WebAudio graph is built (initSync runs on
+  // first user interaction), resulting in stale/default EQ values being written to filters.
+  // The correct initialization happens in initSync() which force-applies gains directly
+  // from this.eq10Gains (loaded from localStorage in the constructor).
+  setupDsdfmeModal();
+  initPttEngine();
+  initHotspotsManager();
+  initBmBenchmark();
+  initWatchdog();
+  initOrientationLock();
+  initFullscreen();
+  initAndroidBridge();
+  initQuickAssign();
+  initBmTgStaticManager();
+  initAboutModal();
+  initNavigation();
+  initSearchManager();
+  initContactsManager();
+  initAccountManager();
+  if (window.ProxDMRAdmin && window.ProxDMRAdmin.init) window.ProxDMRAdmin.init();
+  initHamQthSettings();
+  initGeneralSettings();
+  initAlertsSettings();
+  initSystemUpdater();
+  initApkUpdater();
+  initSlotTranscribeState();
+  initTranscriberSettings();
+  if (typeof updatePttLockUI === "function") updatePttLockUI();
+  initRecordingsManager();
+
+  loadHotspots();
+  loadTgDbStats();
+  loadCallDbStats();
+  connectWebSocket();
+  startPing();
+  startSystemLinkWatchdog();
+  checkBmApiStatus();
+  setInterval(checkBmApiStatus, 60000);
+
+  // ── Single-Active-Copy Freeze Hook ─────────────────────────────────────
+  // При сворачивании / переключении вкладки или заморозке процесса браузером
+  // мгновенно сбрасываем все ожидающие сохранения данные на сервер.
+  function flushPendingClientStateToServer() {
+    try {
+      if (typeof window.flushPendingClientSettingsSync === "function") {
+        window.flushPendingClientSettingsSync({ keepalive: true });
+      }
+      if (typeof window.flushPendingContactsSave === "function") {
+        window.flushPendingContactsSave();
+      }
+    } catch (err) {
+      console.warn("[FREEZE-HOOK] Flush state error:", err);
+    }
+  }
+  window.flushPendingClientStateToServer = flushPendingClientStateToServer;
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushPendingClientStateToServer();
+    }
+  });
+  window.addEventListener("pagehide", flushPendingClientStateToServer);
+  window.addEventListener("freeze", flushPendingClientStateToServer);
+});

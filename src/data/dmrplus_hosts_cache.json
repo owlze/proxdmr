@@ -1,0 +1,629 @@
+{
+  "status": "ok",
+  "generated_at": 1795256316,
+  "updated_at_iso": "2026-11-21T10:18:36Z",
+  "count": 62,
+  "source": "pistar_live",
+  "servers": [
+    {
+      "id": "IPSC2-DVSPh-B",
+      "name": "IPSC2-DVSPh-B",
+      "host": "158.220.86.14",
+      "ip": "158.220.86.14",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-Australia",
+      "name": "IPSC2-Australia AU (Australia)",
+      "host": "43.245.72.66",
+      "ip": "43.245.72.66",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "AU",
+      "country_name": "Australia"
+    },
+    {
+      "id": "IPSC2-Australia-DMO",
+      "name": "IPSC2-Australia-DMO AU (Australia)",
+      "host": "43.245.72.67",
+      "ip": "43.245.72.67",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "AU",
+      "country_name": "Australia"
+    },
+    {
+      "id": "IPSC2-ANDALUCIA",
+      "name": "IPSC2-ANDALUCIA ES (Spain)",
+      "host": "57.131.25.19",
+      "ip": "57.131.25.19",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "ES",
+      "country_name": "Spain"
+    },
+    {
+      "id": "IPSC2-AmComm",
+      "name": "IPSC2-AmComm US (USA)",
+      "host": "45.33.17.82",
+      "ip": "45.33.17.82",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "US",
+      "country_name": "USA"
+    },
+    {
+      "id": "IPSC2-BG-Hotspot",
+      "name": "IPSC2-BG-Hotspot BG (Bulgaria)",
+      "host": "185.80.0.40",
+      "ip": "185.80.0.40",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "BG",
+      "country_name": "Bulgaria"
+    },
+    {
+      "id": "IPSC2-BRASIL-2",
+      "name": "IPSC2-BRASIL-2 BR (Brazil)",
+      "host": "191.252.103.40",
+      "ip": "191.252.103.40",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "BR",
+      "country_name": "Brazil"
+    },
+    {
+      "id": "IPSC2-BULGARIA",
+      "name": "IPSC2-BULGARIA BG (Bulgaria)",
+      "host": "77.85.192.92",
+      "ip": "77.85.192.92",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "BG",
+      "country_name": "Bulgaria"
+    },
+    {
+      "id": "IPSC2-C-America",
+      "name": "IPSC2-C-America PA (Central America)",
+      "host": "194.164.167.181",
+      "ip": "194.164.167.181",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "PA",
+      "country_name": "Central America"
+    },
+    {
+      "id": "IPSC2-CAN-RPTR-HAMNET",
+      "name": "IPSC2-CAN-RPTR-HAMNET CA (Canada)",
+      "host": "44.31.14.12",
+      "ip": "44.31.14.12",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "CA",
+      "country_name": "Canada"
+    },
+    {
+      "id": "IPSC2-CAN-TRBO-HAMNET",
+      "name": "IPSC2-CAN-TRBO-HAMNET CA (Canada)",
+      "host": "44.31.14.13",
+      "ip": "44.31.14.13",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "CA",
+      "country_name": "Canada"
+    },
+    {
+      "id": "IPSC2-CLAND",
+      "name": "IPSC2-CLAND",
+      "host": "209.225.101.170",
+      "ip": "209.225.101.170",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-Catalunya",
+      "name": "IPSC2-Catalunya ES (Spain)",
+      "host": "212.227.84.193",
+      "ip": "212.227.84.193",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "ES",
+      "country_name": "Spain"
+    },
+    {
+      "id": "IPSC2-Chicago",
+      "name": "IPSC2-Chicago US (USA)",
+      "host": "207.148.14.103",
+      "ip": "207.148.14.103",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "US",
+      "country_name": "USA"
+    },
+    {
+      "id": "IPSC2-DB0FEU",
+      "name": "IPSC2-DB0FEU DE (Germany)",
+      "host": "80.152.206.180",
+      "ip": "80.152.206.180",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DE",
+      "country_name": "Germany"
+    },
+    {
+      "id": "IPSC2-DIG-ITALIA",
+      "name": "IPSC2-DIG-ITALIA IT (Italy)",
+      "host": "145.239.75.155",
+      "ip": "145.239.75.155",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "IT",
+      "country_name": "Italy"
+    },
+    {
+      "id": "IPSC2-DK",
+      "name": "IPSC2-DK DK (Denmark)",
+      "host": "77.243.53.206",
+      "ip": "77.243.53.206",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DK",
+      "country_name": "Denmark"
+    },
+    {
+      "id": "IPSC2-DK-TEST",
+      "name": "IPSC2-DK-TEST DK (Denmark)",
+      "host": "86.52.30.163",
+      "ip": "86.52.30.163",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DK",
+      "country_name": "Denmark"
+    },
+    {
+      "id": "IPSC2-DL-HOTSPOT",
+      "name": "IPSC2-DL-HOTSPOT DE (Germany)",
+      "host": "91.132.144.235",
+      "ip": "91.132.144.235",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DE",
+      "country_name": "Germany"
+    },
+    {
+      "id": "IPSC2-DL-NORD",
+      "name": "IPSC2-DL-NORD DE (Germany)",
+      "host": "176.10.105.252",
+      "ip": "176.10.105.252",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DE",
+      "country_name": "Germany"
+    },
+    {
+      "id": "IPSC2-DL-RPTR",
+      "name": "IPSC2-DL-RPTR DE (Germany)",
+      "host": "152.89.107.65",
+      "ip": "152.89.107.65",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DE",
+      "country_name": "Germany"
+    },
+    {
+      "id": "IPSC2-DMR-DL",
+      "name": "IPSC2-DMR-DL DE (Germany)",
+      "host": "5.28.41.138",
+      "ip": "5.28.41.138",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "DE",
+      "country_name": "Germany"
+    },
+    {
+      "id": "IPSC2-DMR-GATEWAY",
+      "name": "IPSC2-DMR-GATEWAY",
+      "host": "183.98.162.13",
+      "ip": "183.98.162.13",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-DMR-ITALY",
+      "name": "IPSC2-DMR-ITALY IT (Italy)",
+      "host": "80.211.75.13",
+      "ip": "80.211.75.13",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "IT",
+      "country_name": "Italy"
+    },
+    {
+      "id": "IPSC2-DMRQ",
+      "name": "IPSC2-DMRQ",
+      "host": "66.170.180.73",
+      "ip": "66.170.180.73",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-DMRQ-DMO",
+      "name": "IPSC2-DMRQ-DMO",
+      "host": "66.170.180.70",
+      "ip": "66.170.180.70",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-DOMREP",
+      "name": "IPSC2-DOMREP",
+      "host": "172.105.158.111",
+      "ip": "172.105.158.111",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-EA-Hotspot",
+      "name": "IPSC2-EA-Hotspot ES (Spain)",
+      "host": "212.237.3.141",
+      "ip": "212.237.3.141",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "ES",
+      "country_name": "Spain"
+    },
+    {
+      "id": "IPSC2-EA-SPAIN",
+      "name": "IPSC2-EA-SPAIN ES (Spain)",
+      "host": "117.55.230.159",
+      "ip": "117.55.230.159",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "ES",
+      "country_name": "Spain"
+    },
+    {
+      "id": "IPSC2-EA3Master",
+      "name": "IPSC2-EA3Master",
+      "host": "80.211.132.91",
+      "ip": "80.211.132.91",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-EA4Master",
+      "name": "IPSC2-EA4Master",
+      "host": "80.211.226.37",
+      "ip": "80.211.226.37",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-EA5Master",
+      "name": "IPSC2-EA5Master",
+      "host": "212.227.87.198",
+      "ip": "212.227.87.198",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-FRANCE3",
+      "name": "IPSC2-FRANCE3 FR (France)",
+      "host": "135.125.205.227",
+      "ip": "135.125.205.227",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "FR",
+      "country_name": "France"
+    },
+    {
+      "id": "IPSC2-GR-DMO",
+      "name": "IPSC2-GR-DMO",
+      "host": "151.80.232.126",
+      "ip": "151.80.232.126",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-GR-DMO2",
+      "name": "IPSC2-GR-DMO2",
+      "host": "62.38.92.101",
+      "ip": "62.38.92.101",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-GR-RPT",
+      "name": "IPSC2-GR-RPT",
+      "host": "195.251.201.214",
+      "ip": "195.251.201.214",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-HamCloud",
+      "name": "IPSC2-HamCloud",
+      "host": "137.226.79.122",
+      "ip": "137.226.79.122",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-Illinois",
+      "name": "IPSC2-Illinois",
+      "host": "74.91.115.138",
+      "ip": "74.91.115.138",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-KOREA",
+      "name": "IPSC2-KOREA",
+      "host": "112.169.124.96",
+      "ip": "112.169.124.96",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-MINNESOTA",
+      "name": "IPSC2-MINNESOTA",
+      "host": "173.20.7.139",
+      "ip": "173.20.7.139",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-MOLDOVA",
+      "name": "IPSC2-MOLDOVA",
+      "host": "91.211.48.135",
+      "ip": "91.211.48.135",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-Mexico",
+      "name": "IPSC2-Mexico",
+      "host": "167.88.169.17",
+      "ip": "167.88.169.17",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-N-MKD",
+      "name": "IPSC2-N-MKD",
+      "host": "84.74.145.32",
+      "ip": "84.74.145.32",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-NEDECN-HAMNET",
+      "name": "IPSC2-NEDECN-HAMNET",
+      "host": "44.52.120.20",
+      "ip": "44.52.120.20",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-NEWENGLAND",
+      "name": "IPSC2-NEWENGLAND GB (United Kingdom)",
+      "host": "45.76.167.203",
+      "ip": "45.76.167.203",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GB",
+      "country_name": "United Kingdom"
+    },
+    {
+      "id": "IPSC2-NL",
+      "name": "IPSC2-NL NL (Netherlands)",
+      "host": "185.94.244.38",
+      "ip": "185.94.244.38",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "NL",
+      "country_name": "Netherlands"
+    },
+    {
+      "id": "IPSC2-NZ-HOTSPOT",
+      "name": "IPSC2-NZ-HOTSPOT",
+      "host": "182.255.91.35",
+      "ip": "182.255.91.35",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-NewYork",
+      "name": "IPSC2-NewYork",
+      "host": "192.241.175.221",
+      "ip": "192.241.175.221",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-NewZealand",
+      "name": "IPSC2-NewZealand",
+      "host": "125.236.213.71",
+      "ip": "125.236.213.71",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-OE-DMO",
+      "name": "IPSC2-OE-DMO AT (Austria)",
+      "host": "89.185.97.34",
+      "ip": "89.185.97.34",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "AT",
+      "country_name": "Austria"
+    },
+    {
+      "id": "IPSC2-OE-MASTER",
+      "name": "IPSC2-OE-MASTER AT (Austria)",
+      "host": "89.185.97.36",
+      "ip": "89.185.97.36",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "AT",
+      "country_name": "Austria"
+    },
+    {
+      "id": "IPSC2-OE-MLINK",
+      "name": "IPSC2-OE-MLINK AT (Austria)",
+      "host": "89.185.97.38",
+      "ip": "89.185.97.38",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "AT",
+      "country_name": "Austria"
+    },
+    {
+      "id": "IPSC2-OZARK",
+      "name": "IPSC2-OZARK",
+      "host": "45.33.126.247",
+      "ip": "45.33.126.247",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-Poland",
+      "name": "IPSC2-Poland PL (Poland)",
+      "host": "88.220.250.55",
+      "ip": "88.220.250.55",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "PL",
+      "country_name": "Poland"
+    },
+    {
+      "id": "IPSC2-Portugal",
+      "name": "IPSC2-Portugal PT (Portugal)",
+      "host": "164.68.117.231",
+      "ip": "164.68.117.231",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "PT",
+      "country_name": "Portugal"
+    },
+    {
+      "id": "IPSC2-Romania",
+      "name": "IPSC2-Romania",
+      "host": "82.79.68.4",
+      "ip": "82.79.68.4",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-SWEDEN-",
+      "name": "IPSC2-SWEDEN- SE (Sweden)",
+      "host": "46.59.68.211",
+      "ip": "46.59.68.211",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "SE",
+      "country_name": "Sweden"
+    },
+    {
+      "id": "IPSC2-SWISS",
+      "name": "IPSC2-SWISS CH (Switzerland)",
+      "host": "195.225.116.246",
+      "ip": "195.225.116.246",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "CH",
+      "country_name": "Switzerland"
+    },
+    {
+      "id": "IPSC2-SWISS-DMO",
+      "name": "IPSC2-SWISS-DMO CH (Switzerland)",
+      "host": "195.225.116.251",
+      "ip": "195.225.116.251",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "CH",
+      "country_name": "Switzerland"
+    },
+    {
+      "id": "IPSC2-Texas",
+      "name": "IPSC2-Texas",
+      "host": "155.138.244.37",
+      "ip": "155.138.244.37",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-URUGUAY",
+      "name": "IPSC2-URUGUAY",
+      "host": "113.20.7.188",
+      "ip": "113.20.7.188",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    },
+    {
+      "id": "IPSC2-Z-Test",
+      "name": "IPSC2-Z-Test",
+      "host": "94.72.102.219",
+      "ip": "94.72.102.219",
+      "port": 55555,
+      "password": "PASSWORD",
+      "country": "GLOBAL",
+      "country_name": "Global IPSC2"
+    }
+  ]
+}

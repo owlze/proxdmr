@@ -1,0 +1,1809 @@
+/**
+ * ProxDMR - Audio Routing, Timeslot Selective Muting & Stereo Panning Subsystem
+ * Module: modules/audio/routing.js
+ */
+
+import { showToast } from '../core/toast.js?v=2.9.699';
+import { resolveHotspotId as _resolveHotspotId, scheduleSyncClientSettings as _scheduleSyncClientSettings } from '../core/state.js?v=2.9.698';
+import { triggerHaptic } from '../core/haptic.js?v=2.9.711';
+
+function _isPrimaryAlias(cid, hsList = null) {
+  const sCid = String(cid || "");
+  if (sCid === "default") return true;
+  const list = Array.isArray(hsList) ? hsList : ((typeof window !== "undefined" && window.currentHotspots) || []);
+  if (Array.isArray(list) && list.some(h => h && String(h.id) === "default")) {
+    return false;
+  }
+  return Boolean(list && list[0] && String(list[0].id) === sCid);
+}
+
+function _getHotspotDisplayName(hid) {
+  if (typeof window !== "undefined" && typeof window.getHotspotDisplayName === "function") {
+    return window.getHotspotDisplayName(hid);
+  }
+  return String(hid);
+}
+
+function _getTranslation(key, params, fallback) {
+  if (typeof window !== "undefined" && typeof window.t === "function") {
+    return window.t(key, params, fallback);
+  }
+  return fallback;
+}
+
+// --- TTS Solo Mode Muted Tracking ---
+export function getSoloMutedSet() {
+  if (typeof window === "undefined") return new Set();
+  if (window._ttsSoloMutedSlots instanceof Set) return window._ttsSoloMutedSlots;
+  const s = new Set();
+  try {
+    const raw = localStorage.getItem("proxdmr_tts_solo_muted_slots");
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) arr.forEach(k => s.add(k));
+    }
+  } catch (_) {}
+  window._ttsSoloMutedSlots = s;
+  return s;
+}
+
+export function saveSoloMutedSet(s) {
+  if (typeof window === "undefined") return;
+  window._ttsSoloMutedSlots = s;
+  try {
+    if (!s || s.size === 0) {
+      localStorage.removeItem("proxdmr_tts_solo_muted_slots");
+    } else {
+      localStorage.setItem("proxdmr_tts_solo_muted_slots", JSON.stringify(Array.from(s)));
+    }
+  } catch (_) {}
+}
+
+// --- Timeslot Selective Muting (Per Hotspot) ---
+export function getPersistentHotspotMute(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+
+  // 1. Specific hotspot key
+  const v = localStorage.getItem(`proxdmr_mute_${cid}_ts${s}`);
+  if (v !== null) return v === "true";
+
+  // 2. Backward compatibility fallback for the first / primary hotspot ONLY
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = _isPrimaryAlias(cid, hsList);
+  if (isPrimary) {
+    const vDef = localStorage.getItem(`proxdmr_mute_default_ts${s}`);
+    if (vDef !== null) return vDef === "true";
+    const vLeg = localStorage.getItem(`proxdmr_mute_ts${s}`);
+    if (vLeg !== null) return vLeg === "true";
+  }
+
+  // If in Solo or Auto mode by default and neither slot has been explicitly set:
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode === "solo" || mode === "auto") {
+    if (isXlxHotspot(cid)) {
+      return s === 1; // TS1 muted (true), TS2 unmuted (false)
+    }
+    return s === 2; // TS1 unmuted (false), TS2 muted (true)
+  }
+
+  // Default: unmuted
+  return false;
+}
+
+export function getHotspotMute(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+
+  // If slot is temporarily muted by live TTS Solo mode, effective state is true
+  const soloSet = getSoloMutedSet();
+  if (soloSet && (soloSet.has(`${cid}_ts${s}`) || (cid === "default" && soloSet.has(`default_ts${s}`)))) {
+    return true;
+  }
+
+  return getPersistentHotspotMute(hid, slot);
+}
+
+export function setHotspotMute(hid, slot, muted, isTemporary = false) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+  const val = muted ? "true" : "false";
+
+  const soloSet = getSoloMutedSet();
+  const slotKey = `${cid}_ts${s}`;
+
+  if (isTemporary) {
+    // Temporary mute for TTS Solo Mode: DO NOT persist to localStorage or server DB
+    if (muted) {
+      soloSet.add(slotKey);
+    } else {
+      soloSet.delete(slotKey);
+      if (_isPrimaryAlias(cid)) soloSet.delete(`default_ts${s}`);
+    }
+    saveSoloMutedSet(soloSet);
+  } else {
+    // User explicitly changed mute: update persistent storage and sync to server
+    if (soloSet && soloSet.size > 0) {
+      soloSet.delete(slotKey);
+      if (_isPrimaryAlias(cid)) soloSet.delete(`default_ts${s}`);
+      const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+      const isPrimary = _isPrimaryAlias(cid, hsList);
+      if (isPrimary && hsList && hsList[0] && hsList[0].id && _isPrimaryAlias(hsList[0].id, hsList)) {
+        soloSet.delete(`${_resolveHotspotId(hsList[0].id)}_ts${s}`);
+      }
+      saveSoloMutedSet(soloSet);
+    }
+
+    localStorage.setItem(`proxdmr_mute_${cid}_ts${s}`, val);
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const isPrimary = _isPrimaryAlias(cid, hsList);
+    if (isPrimary) {
+      localStorage.setItem(`proxdmr_mute_default_ts${s}`, val);
+      localStorage.setItem(`proxdmr_mute_ts${s}`, val);
+    }
+
+    // Sync to server backend so headless mode & other clients can respect it
+    if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
+      try {
+        window.ws.send(JSON.stringify({
+          type: "set_slot_mute",
+          hotspot_id: cid,
+          slot: s,
+          muted: !!muted
+        }));
+      } catch (err) {
+        console.warn("[AUDIO] Failed to sync slot mute over WS:", err);
+      }
+    }
+  }
+
+  // Update UI for this hotspot
+  updateHotspotCardMuteUI(cid);
+
+  // Apply mute directly to audio player if instance exists
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = _isPrimaryAlias(cid, hsList);
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(cid, s, muted);
+      if (isPrimary && cid !== "default") ap.setSlotMute("default", s, muted);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(cid, s, muted);
+      if (isPrimary && cid !== "default") ap.updateSlotMute("default", s, muted);
+    }
+  }
+
+  // Coordinate ducking and TTS volume on mute state change
+  const ttsMgr = (typeof window !== "undefined" && (window.ttsAudioQueueManager || (window.__proxdmr && window.__proxdmr.ttsAudioQueueManager))) || null;
+  const isSlotTts = (typeof window !== "undefined" && typeof window.isSlotTtsActive === "function")
+    ? window.isSlotTtsActive(cid, s)
+    : false;
+
+  if (!muted) {
+    if (ttsMgr && ttsMgr.isPlaying) {
+      if (typeof ttsMgr.updateLiveDucking === "function") {
+        ttsMgr.updateLiveDucking();
+      }
+    } else if (isSlotTts && ttsMgr && typeof ttsMgr.syncIdleDucking === "function") {
+      ttsMgr.syncIdleDucking(0.12);
+    } else if (ap && typeof ap.setSlotDucking === "function") {
+      ap.setSlotDucking(cid, s, false, 1.0, 0.05);
+      if (isPrimary) ap.setSlotDucking("default", s, false, 1.0, 0.05);
+    }
+  } else {
+    if (ttsMgr && typeof ttsMgr.syncIdleDucking === "function") {
+      ttsMgr.syncIdleDucking(0.12);
+    }
+  }
+
+  if (ttsMgr && typeof ttsMgr.syncCurrentVolume === "function") {
+    ttsMgr.syncCurrentVolume();
+  }
+
+  if (!isTemporary) {
+    _scheduleSyncClientSettings(1000);
+  
+  }
+}
+
+// --- TS Audio Mode (Solo / Doubl / Auto) Subsystem ---
+
+export function isXlxHotspot(hid, card = null) {
+  const cid = _resolveHotspotId(hid);
+  if (card) {
+    const cardNet = (card.dataset && card.dataset.networkType ? card.dataset.networkType : "").toLowerCase();
+    if (cardNet === "xlx" || card.classList.contains("card-net-xlx")) return true;
+  }
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  let hs = null;
+  if (cid === "default") {
+    hs = hsList.find(h => String(h.id) === String(cid)) || hsList[0] || null;
+  } else {
+    hs = hsList.find(h => String(h.id) === String(cid));
+  }
+  if (hs && ((hs.network_type || "").toLowerCase() === "xlx")) {
+    return true;
+  }
+  if (typeof document !== "undefined") {
+    const rc = document.getElementById("radioContainer");
+    const rcMatch = (cid === "default" && rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === "default")) ? rc : null;
+    const el = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
+    if (el) {
+      const net = (el.dataset && el.dataset.networkType ? el.dataset.networkType : "").toLowerCase();
+      if (net === "xlx" || el.classList.contains("card-net-xlx")) return true;
+    }
+  }
+  return false;
+}
+
+export function isAllStarHotspot(hid, card = null) {
+  const cid = _resolveHotspotId(hid);
+  if (card) {
+    const cardNet = (card.dataset && card.dataset.networkType ? card.dataset.networkType : "").toLowerCase();
+    if (cardNet === "allstar" || card.classList.contains("card-net-allstar")) return true;
+  }
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  let hs = null;
+  if (cid === "default") {
+    hs = hsList.find(h => String(h.id) === String(cid)) || hsList[0] || null;
+  } else {
+    hs = hsList.find(h => String(h.id) === String(cid));
+  }
+  if (hs && ((hs.network_type || "").toLowerCase() === "allstar")) {
+    return true;
+  }
+  if (typeof document !== "undefined") {
+    const rc = document.getElementById("radioContainer");
+    const rcMatch = (cid === "default" && rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === "default")) ? rc : null;
+    const el = card || document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
+    if (el) {
+      const net = (el.dataset && el.dataset.networkType ? el.dataset.networkType : "").toLowerCase();
+      if (net === "allstar" || el.classList.contains("card-net-allstar")) return true;
+    }
+  }
+  return false;
+}
+
+export function getHotspotAslMode(hid = null) {
+  const cid = _resolveHotspotId(hid);
+  try {
+    const val = localStorage.getItem(`proxdmr_asl_mode_${cid}`);
+    if (val === "*2" || val === "*3") return val;
+  } catch (e) {}
+  return "*2"; // Default is Monitor (*2)
+}
+
+export function setHotspotAslMode(hid, mode) {
+  const cid = _resolveHotspotId(hid);
+  const safeMode = (mode === "*3") ? "*3" : "*2";
+  try {
+    localStorage.setItem(`proxdmr_asl_mode_${cid}`, safeMode);
+  } catch (e) {}
+}
+
+export function isHotspotAslAddMode(hid = null) {
+  const cid = _resolveHotspotId(hid);
+  try {
+    const val = localStorage.getItem(`proxdmr_asl_add_mode_${cid}`);
+    if (val === null) return false; // Default is Single mode (Add mode OFF)
+    return val === "true";
+  } catch (e) {
+    return false;
+  }
+}
+
+export function setHotspotAslAddMode(hid, enabled) {
+  // Single-node mode enforced
+}
+
+export function getHotspotTsAudioMode(hid) {
+  const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    return "solo";
+  }
+  let v = localStorage.getItem(`proxdmr_ts_mode_${cid}`);
+  if (v === "doubl") {
+    v = "auto";
+    try { localStorage.setItem(`proxdmr_ts_mode_${cid}`, "auto"); } catch (_) {}
+  }
+  if (v && ["solo", "auto"].includes(v)) return v;
+
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = _isPrimaryAlias(cid, hsList);
+  if (isPrimary) {
+    let vDef = localStorage.getItem("proxdmr_ts_mode_default");
+    if (vDef === "doubl") {
+      vDef = "auto";
+      try { localStorage.setItem("proxdmr_ts_mode_default", "auto"); } catch (_) {}
+    }
+    if (vDef && ["solo", "auto"].includes(vDef)) return vDef;
+  }
+  return "solo";
+}
+
+export function setHotspotTsAudioMode(hid, mode, options = {}) {
+  const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    enforceSoloTsMute(cid);
+    updateHotspotTsAudioModeUI(cid);
+    return;
+  }
+  const safeMode = (mode === "auto") ? "auto" : "solo";
+  localStorage.setItem(`proxdmr_ts_mode_${cid}`, safeMode);
+
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = _isPrimaryAlias(cid, hsList);
+  if (isPrimary) {
+    localStorage.setItem("proxdmr_ts_mode_default", safeMode);
+    localStorage.setItem("proxdmr_simultaneous_slots", safeMode === "auto" ? "true" : "false");
+  }
+
+  // If user changed mode directly (not internal TTS enforcer), clear pre-TTS restore state
+  if (!options.fromTtsInternal) {
+    if (typeof window !== "undefined" && window._preTtsAudioModes) {
+      delete window._preTtsAudioModes[cid];
+      if (isPrimary) {
+        delete window._preTtsAudioModes["default"];
+        if (hsList && hsList[0]) delete window._preTtsAudioModes[String(hsList[0].id)];
+      }
+    }
+    try {
+      localStorage.removeItem(`proxdmr_pre_tts_ts_mode_${cid}`);
+      if (isPrimary) {
+        localStorage.removeItem("proxdmr_pre_tts_ts_mode_default");
+        if (hsList && hsList[0]) localStorage.removeItem(`proxdmr_pre_tts_ts_mode_${hsList[0].id}`);
+      }
+    } catch (_) {}
+  }
+
+  // Sync simultaneous_slots to server for primary/default hotspot
+  if (isPrimary && !options.skipServerSync) {
+    const isSimul = (safeMode === "auto");
+    const ws = (typeof getWs === "function" ? getWs() : (typeof window !== "undefined" ? window.ws : null));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_simultaneous_slots", enabled: isSimul }));
+      } catch (_) {}
+    }
+    try {
+      fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simultaneous_slots: isSimul })
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
+  if (safeMode === "solo") {
+    enforceSoloTsMute(cid);
+  } else if (safeMode === "auto") {
+    resetAutoSlotState(cid);
+  }
+
+  updateHotspotTsAudioModeUI(cid);
+
+}
+
+export function cycleHotspotTsAudioMode(hid) {
+  const cid = _resolveHotspotId(hid);
+  if (isAllStarHotspot(cid)) {
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || (typeof getCurrentHotspots === "function" ? getCurrentHotspots() : []);
+    const hs = hsList.find(h => String(h.id) === String(cid)) || (cid === "default" ? hsList[0] : null);
+    const targetNode = String((hs && (hs.connected_node || (Array.isArray(hs.asl_links) && hs.asl_links[0] && hs.asl_links[0].node))) || "").trim();
+
+    if (targetNode === "1999" || targetNode === "9999") {
+      setHotspotAslMode(cid, "*3");
+      updateHotspotTsAudioModeUI(cid);
+      if (typeof showToast === "function") {
+        showToast(_getTranslation("asl.parrot_always_rx_tx", {}, "Parrot #1999 always runs in RX/TX (*3) mode"), "info", 2000);
+      }
+      return;
+    }
+
+    const curAsl = getHotspotAslMode(cid);
+    const nextAsl = (curAsl === "*2") ? "*3" : "*2";
+    setHotspotAslMode(cid, nextAsl);
+    _triggerHaptic(35);
+    updateHotspotTsAudioModeUI(cid);
+
+    const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || (cid === "default" ? document.getElementById("radioContainer") : null);
+    if (card && typeof window.updateCardAllStarPanel === "function") {
+      window.updateCardAllStarPanel(card);
+    }
+    if (card && typeof window.updateCardPttHint === "function") {
+      window.updateCardPttHint(card);
+    }
+
+    if (targetNode && typeof window.aslConnectNodeProcedure === "function") {
+      window.aslConnectNodeProcedure(cid, targetNode, nextAsl, { showStatusBanner: true, showCardEffects: true });
+    } else if (targetNode) {
+      const ws = (typeof getWs === "function" ? getWs() : window.ws);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "allstar_connect_node",
+          hotspot_id: cid,
+          node: targetNode,
+          mode: nextAsl
+        }));
+      }
+    }
+
+    const label = (nextAsl === "*2")
+      ? _getTranslation("routing.asl_mode_monitor_short", {}, "Monitor (*2) — RX only")
+      : _getTranslation("routing.asl_mode_rxtx_short", {}, "RX/TX (*3) — full duplex");
+    if (typeof showToast === "function") {
+      showToast(`AllStarLink: ${label}`, "info", 2000);
+    }
+    return;
+  }
+
+  if (isXlxHotspot(cid)) {
+    _triggerHaptic(20);
+    const msg = _getTranslation("ts_mode.xlx_locked_toast", {}, "XLX network uses only TS2 (Solo mode locked)");
+    showToast(msg, 2000);
+    return;
+  }
+  const cur = getHotspotTsAudioMode(cid);
+  const nextMode = (cur === "solo") ? "auto" : "solo";
+  setHotspotTsAudioMode(cid, nextMode);
+
+  _triggerHaptic(35);
+
+  let toastKey = `ts_mode.${nextMode}_toast`;
+  let fallbackToast = nextMode === "solo"
+    ? "🔊 Solo mode: only one timeslot active"
+    : "🔊 Auto mode: automatic timeslot selection (2s delay)";
+  const msg = _getTranslation(toastKey, {}, fallbackToast);
+  showToast(msg, 1600);
+}
+
+export function enforceSoloTsMute(hid) {
+  const cid = _resolveHotspotId(hid);
+  if (isXlxHotspot(cid)) {
+    setHotspotMute(cid, 2, false);
+    setHotspotMute(cid, 1, true);
+    return;
+  }
+  const m1 = getHotspotMute(cid, 1);
+  const m2 = getHotspotMute(cid, 2);
+  // In solo mode, m1 and m2 must be strictly opposite: m1 !== m2
+  if (m1 === m2) {
+    const activeSlot = (typeof window._getHotspotSlot === "function") ? window._getHotspotSlot(cid) : 1;
+    const keepSlot = (activeSlot === 2) ? 2 : 1;
+    const muteSlot = (keepSlot === 1) ? 2 : 1;
+    setHotspotMute(cid, keepSlot, false);
+    setHotspotMute(cid, muteSlot, true);
+  }
+}
+
+export function enforceSingleTsMute(hid) {
+  const cid = _resolveHotspotId(hid);
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode === "solo") {
+    enforceSoloTsMute(cid);
+  }
+}
+
+export function focusHotspotTsAudio(hid, slot) {
+  const s = parseInt(slot, 10) === 2 ? 2 : 1;
+  const otherS = (s === 1) ? 2 : 1;
+  const cid = _resolveHotspotId(hid);
+  const mode = getHotspotTsAudioMode(cid);
+
+  if (isXlxHotspot(cid)) {
+    enforceSoloTsMute(cid);
+    return;
+  }
+
+  const soloSet = getSoloMutedSet();
+  if (soloSet && soloSet.size > 0) {
+    [1, 2].forEach(sl => {
+      soloSet.delete(`${cid}_ts${sl}`);
+      soloSet.delete(`default_ts${sl}`);
+    });
+    saveSoloMutedSet(soloSet);
+  }
+
+  if (mode === "auto") {
+    const st = _getAutoState(cid);
+    if (st.hangTimer) {
+      clearTimeout(st.hangTimer);
+      st.hangTimer = null;
+    }
+
+    st.lastActiveSlot = s;
+    st.flag = s;
+    st.manualLockUntil = Date.now() + 3000;
+
+    setHotspotMute(cid, s, false);
+    setHotspotMute(cid, otherS, true);
+
+    const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+    if (ap) {
+      if (typeof ap.setSlotMute === "function") {
+        ap.setSlotMute(cid, s, false);
+        ap.setSlotMute(cid, otherS, true);
+      }
+      if (typeof ap.updateSlotMute === "function") {
+        ap.updateSlotMute(cid, s, false);
+        ap.updateSlotMute(cid, otherS, true);
+      }
+    }
+    _renderAutoCardMuteVisuals(cid, s, otherS);
+
+    if (!_isSlotReceivingNow(cid, s)) {
+      st.hangTimer = setTimeout(() => {
+        st.hangTimer = null;
+        st.flag = 0;
+        st.manualLockUntil = 0;
+        _resetAutoSlotAudio(cid);
+      }, 3000);
+    }
+    return;
+  }
+
+  setHotspotMute(cid, s, false);
+  setHotspotMute(cid, otherS, true);
+}
+
+export function toggleHotspotMute(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+  const mode = getHotspotTsAudioMode(cid);
+
+  if (mode === "solo") {
+    if (isXlxHotspot(cid)) {
+      enforceSoloTsMute(cid);
+      return;
+    }
+    // 1. Fully clear any temporary soloSet flags for this hotspot
+    const soloSet = getSoloMutedSet();
+    if (soloSet && soloSet.size > 0) {
+      [1, 2].forEach(sl => {
+        soloSet.delete(`${cid}_ts${sl}`);
+        soloSet.delete(`default_ts${sl}`);
+      });
+      saveSoloMutedSet(soloSet);
+    }
+
+    const curM1 = getPersistentHotspotMute(cid, 1);
+    const curM2 = getPersistentHotspotMute(cid, 2);
+
+    if (curM1 !== curM2) {
+      // Normal Solo state (one slot unmuted, other muted):
+      // Clicking either slot toggles them!
+      setHotspotMute(cid, 1, !curM1);
+      setHotspotMute(cid, 2, !curM2);
+    } else {
+      // If both were in the same state somehow:
+      const otherS = (s === 1) ? 2 : 1;
+      setHotspotMute(cid, s, false);
+      setHotspotMute(cid, otherS, true);
+    }
+    return;
+  }
+
+  if (mode === "auto") {
+    // 1. Fully clear any temporary soloSet flags for this hotspot
+    const soloSet = getSoloMutedSet();
+    if (soloSet && soloSet.size > 0) {
+      [1, 2].forEach(sl => {
+        soloSet.delete(`${cid}_ts${sl}`);
+        soloSet.delete(`default_ts${sl}`);
+      });
+      saveSoloMutedSet(soloSet);
+    }
+
+    const st = _getAutoState(cid);
+    if (st.hangTimer) {
+      clearTimeout(st.hangTimer);
+      st.hangTimer = null;
+    }
+
+    // Determine current active slot (1 or 2):
+    // 1) If an active slot is currently arbitrated: st.flag (1 or 2)
+    // 2) If idle (st.flag === 0): st.lastActiveSlot or persistent mute
+    const curActive = (st.flag === 1 || st.flag === 2)
+      ? st.flag
+      : ((st.lastActiveSlot === 2) ? 2 : (getPersistentHotspotMute(cid, 2) === false ? 2 : 1));
+
+    // Invert the active slot: clicking ANY speaker icon flips active slot between TS1 and TS2 (identical to Solo mode)
+    const targetActiveSlot = (curActive === 1) ? 2 : 1;
+    const targetMutedSlot = (targetActiveSlot === 1) ? 2 : 1;
+
+    st.lastActiveSlot = targetActiveSlot;
+    st.flag = targetActiveSlot;
+    st.manualLockUntil = Date.now() + 3000;
+
+    // Persist mute state and sync with audio player & backend
+    setHotspotMute(cid, targetActiveSlot, false);
+    setHotspotMute(cid, targetMutedSlot, true);
+
+    const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+    if (ap) {
+      if (typeof ap.setSlotMute === "function") {
+        ap.setSlotMute(cid, targetActiveSlot, false);
+        ap.setSlotMute(cid, targetMutedSlot, true);
+      }
+      if (typeof ap.updateSlotMute === "function") {
+        ap.updateSlotMute(cid, targetActiveSlot, false);
+        ap.updateSlotMute(cid, targetMutedSlot, true);
+      }
+    }
+    _renderAutoCardMuteVisuals(cid, targetActiveSlot, targetMutedSlot);
+
+    // If the target slot is not actively receiving, auto-revert arbitration flag to idle (st.flag = 0) after 3s,
+    // staying parked on st.lastActiveSlot
+    if (!_isSlotReceivingNow(cid, targetActiveSlot)) {
+      st.hangTimer = setTimeout(() => {
+        st.hangTimer = null;
+        st.flag = 0;
+        st.manualLockUntil = 0;
+        _resetAutoSlotAudio(cid);
+      }, 3000);
+    }
+    return;
+  }
+
+  const cur = getHotspotMute(cid, s);
+  const newMute = !cur;
+}
+
+// --- Auto Mode Arbitration State Machine (Flag 0, 1, 2 with 2s hold delay) ---
+const _autoArbitrationState = {}; // cid -> { flag: 0, hangTimer: null, lastActiveSlot: 1, manualLockUntil: 0 }
+
+function _getAutoState(cid) {
+  if (!_autoArbitrationState[cid]) {
+    _autoArbitrationState[cid] = { flag: 0, hangTimer: null, lastActiveSlot: 1, manualLockUntil: 0 };
+  }
+  return _autoArbitrationState[cid];
+}
+
+export function getAutoArbitrationFlag(hid) {
+  const cid = _resolveHotspotId(hid);
+  return (_autoArbitrationState[cid] && _autoArbitrationState[cid].flag) || 0;
+}
+
+export function resetAutoSlotState(cid) {
+  const id = _resolveHotspotId(cid);
+  const st = _getAutoState(id);
+  if (st.hangTimer) {
+    clearTimeout(st.hangTimer);
+    st.hangTimer = null;
+  }
+  st.flag = 0;
+
+  // Strict mutual exclusion in Auto mode: exactly ONE slot unmuted, other muted
+  const activeSlot = (typeof window._getHotspotSlot === "function") ? window._getHotspotSlot(id) : 1;
+  const keepSlot = (activeSlot === 2) ? 2 : 1;
+  const muteSlot = (keepSlot === 1) ? 2 : 1;
+  st.lastActiveSlot = keepSlot;
+
+  setHotspotMute(id, keepSlot, false);
+  setHotspotMute(id, muteSlot, true);
+
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(id, keepSlot, false);
+      ap.setSlotMute(id, muteSlot, true);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(id, keepSlot, false);
+      ap.updateSlotMute(id, muteSlot, true);
+    }
+  }
+  _renderAutoCardMuteVisuals(id, keepSlot, muteSlot);
+}
+
+export function handleAutoSlotActivity(hid, slot, active) {
+  const cid = _resolveHotspotId(hid);
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode !== "auto") return;
+
+  const s = parseInt(slot, 10) || 1;
+  const st = _getAutoState(cid);
+
+  if (active) {
+    // Audio / RX signal appeared on slot s
+    if (st.flag === 0) {
+      // Sound appeared first in slot s!
+      st.flag = s;
+      if (st.hangTimer) {
+        clearTimeout(st.hangTimer);
+        st.hangTimer = null;
+      }
+      _applyAutoSlotAudio(cid, s);
+    } else if (st.flag === s) {
+      // Active slot is transmitting
+      if (st.hangTimer) {
+        clearTimeout(st.hangTimer);
+        st.hangTimer = null;
+      }
+    } else {
+      // Sound appeared on opposite slot while st.flag was set to the other slot.
+      // Respect manual user focus lock (3s after user explicitly tapped a TS frame or mute icon)
+      if (st.manualLockUntil && Date.now() < st.manualLockUntil) {
+        return;
+      }
+      // Check if the current flag holder slot is actually transmitting right now.
+      const currentFlagSlot = st.flag;
+      if (!_isSlotReceivingNow(cid, currentFlagSlot)) {
+        // Flag holder is NOT receiving! Hand over immediately to slot s.
+        st.flag = s;
+        st.manualLockUntil = 0;
+        if (st.hangTimer) {
+          clearTimeout(st.hangTimer);
+          st.hangTimer = null;
+        }
+        _applyAutoSlotAudio(cid, s);
+      }
+    }
+    // If sound appeared on opposite slot while active slot is talking, opposite remains muted
+  } else {
+    // Transmission ended on slot s
+    if (st.flag === s) {
+      if (st.hangTimer) {
+        clearTimeout(st.hangTimer);
+      }
+      st.hangTimer = setTimeout(() => {
+        st.hangTimer = null;
+        const otherS = (s === 1) ? 2 : 1;
+        const otherReceiving = _isSlotReceivingNow(cid, otherS);
+        if (otherReceiving) {
+          // Hand over to the other slot
+          st.flag = otherS;
+          _applyAutoSlotAudio(cid, otherS);
+        } else {
+          // Both slots silent for > 2 seconds! Reset flag to 0
+          st.flag = 0;
+          _resetAutoSlotAudio(cid);
+        }
+      }, 2000); // 2 seconds hold delay
+    }
+  }
+}
+
+function _isSlotReceivingNow(cid, slot) {
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  for (let card of cards) {
+    if (card._lastRx && card._lastRx[slot] && card._lastRx[slot].active) {
+      return true;
+    }
+    const row = card.querySelector(slot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+    if (row && row.classList.contains("vfo-rx-active")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function _applyAutoSlotAudio(cid, activeSlot) {
+  const otherSlot = (activeSlot === 1) ? 2 : 1;
+  const st = _getAutoState(cid);
+  st.lastActiveSlot = activeSlot;
+
+  const soloSet = getSoloMutedSet();
+  const soloActiveMuted = Boolean(soloSet && (soloSet.has(`${cid}_ts${activeSlot}`) || (cid === "default" && soloSet.has(`default_ts${activeSlot}`))));
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(cid, activeSlot, soloActiveMuted);
+      ap.setSlotMute(cid, otherSlot, true);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(cid, activeSlot, soloActiveMuted);
+      ap.updateSlotMute(cid, otherSlot, true);
+    }
+  }
+  _renderAutoCardMuteVisuals(cid, activeSlot, otherSlot);
+}
+
+function _resetAutoSlotAudio(cid) {
+  const st = _getAutoState(cid);
+  // Stay parked on last active slot (strictly 1 unmuted, 1 muted)
+  const activeSlot = (st.lastActiveSlot === 2) ? 2 : 1;
+  const otherSlot = (activeSlot === 1) ? 2 : 1;
+
+  const soloSet = getSoloMutedSet();
+  const soloActiveMuted = Boolean(soloSet && (soloSet.has(`${cid}_ts${activeSlot}`) || (cid === "default" && soloSet.has(`default_ts${activeSlot}`))));
+
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    if (typeof ap.setSlotMute === "function") {
+      ap.setSlotMute(cid, activeSlot, soloActiveMuted);
+      ap.setSlotMute(cid, otherSlot, true);
+    }
+    if (typeof ap.updateSlotMute === "function") {
+      ap.updateSlotMute(cid, activeSlot, soloActiveMuted);
+      ap.updateSlotMute(cid, otherSlot, true);
+    }
+  }
+  _renderAutoCardMuteVisuals(cid, activeSlot, otherSlot);
+}
+
+function _renderAutoCardMuteVisuals(cid, activeSlot, mutedSlot) {
+  const st = _getAutoState(cid);
+  const effectiveActive = (activeSlot === 1 || activeSlot === 2)
+    ? activeSlot
+    : ((st.lastActiveSlot === 2) ? 2 : 1);
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  cards.forEach(card => {
+    const btn1 = card.querySelector(".btn-mute-ts1");
+    const btn2 = card.querySelector(".btn-mute-ts2");
+    if (btn1) renderMutePanBtnContent(btn1, effectiveActive !== 1, getHotspotPan(cid, 1), 1);
+    if (btn2) renderMutePanBtnContent(btn2, effectiveActive !== 2, getHotspotPan(cid, 2), 2);
+  });
+}
+
+// --- TS Audio Mode Button UI Wiring and Rendering ---
+export function renderTsAudioModeBtnContent(btn, mode, isXlx = false) {
+  if (!btn) return;
+  const badge = btn.querySelector(".ts-audio-mode-badge");
+  if (!badge) return;
+
+  const card = btn.closest(".radio-container");
+  const cid = _resolveHotspotId(card ? card.dataset.hotspotId : null);
+  const isYsf = (card && (card.classList.contains("card-net-ysf") || (card.dataset.networkType || "").toLowerCase() === "ysf")) || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(cid) === "ysf");
+  const isM17 = (card && (card.classList.contains("card-net-m17") || (card.dataset.networkType || "").toLowerCase() === "m17")) || (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(cid) === "m17");
+
+  if (isYsf || isM17) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.removeProperty("display");
+
+  const isAsl = isAllStarHotspot(cid, card);
+
+  if (isAsl) {
+    const aslMode = getHotspotAslMode(cid);
+    badge.classList.remove("ts-mode-auto", "ts-mode-solo", "ts-mode-locked");
+    badge.classList.toggle("asl-mode-monitor", aslMode === "*2");
+    badge.classList.toggle("asl-mode-tx", aslMode !== "*2");
+    btn.classList.remove("ts-mode-locked");
+    btn.style.cursor = "pointer";
+
+    if (aslMode === "*2") {
+      badge.textContent = "*2 Monitor";
+      const title = window.t ? window.t("routing.asl_mode_2_title", {}, "AllStarLink: *2 Monitor mode (RX only, PTT blocked). Click to switch to *3 RX/TX") : "AllStarLink: *2 Monitor mode (RX only, PTT blocked). Click to switch to *3 RX/TX";
+      btn.title = title;
+      btn.setAttribute("title", title);
+    } else {
+      badge.textContent = "*3 RX/TX";
+      const title = window.t ? window.t("routing.asl_mode_3_title", {}, "AllStarLink: *3 RX/TX mode (Full duplex: RX + TX). Click to switch to *2 Monitor") : "AllStarLink: *3 RX/TX mode (Full duplex: RX + TX). Click to switch to *2 Monitor";
+      btn.title = title;
+      btn.setAttribute("title", title);
+    }
+    return;
+  }
+
+  const isLockedXlx = Boolean(isXlx) || (card && ((card.dataset.networkType || "").toLowerCase() === "xlx" || card.classList.contains("card-net-xlx")));
+
+  if (isLockedXlx) {
+    badge.classList.remove("ts-mode-auto");
+    badge.classList.add("ts-mode-solo");
+    badge.textContent = "TS1/2 Solo";
+    const titleKey = "ts_mode.xlx_locked_title";
+    const fallbackTitle = "Mode: Solo (locked for XLX network, only TS2 available)";
+    const titleText = _getTranslation(titleKey, {}, fallbackTitle);
+    btn.title = titleText;
+    btn.setAttribute("data-i18n-title", titleKey);
+    btn.classList.add("ts-mode-locked");
+    btn.style.cursor = "not-allowed";
+    return;
+  }
+
+  btn.classList.remove("ts-mode-locked");
+  btn.style.cursor = "";
+
+  const safeMode = (mode === "auto") ? "auto" : "solo";
+  badge.classList.remove("ts-mode-solo", "ts-mode-auto");
+  badge.classList.add(`ts-mode-${safeMode}`);
+
+  let label = "TS1/2 Solo";
+  let titleKey = "ts_mode.solo_title";
+  let fallbackTitle = "Mode: Solo — only one timeslot plays at a time (TS1 and TS2 are mutually exclusive). Click to change mode";
+
+  if (safeMode === "auto") {
+    label = "TS1/2 Auto";
+    titleKey = "ts_mode.auto_title";
+    fallbackTitle = "Mode: Auto — automatic selection of active timeslot by first signal (2s delay). Click to change mode";
+  }
+
+  badge.textContent = label;
+  const titleText = _getTranslation(titleKey, {}, fallbackTitle);
+  btn.title = titleText;
+  btn.setAttribute("data-i18n-title", titleKey);
+}
+
+export function updateCardTsAudioModeUI(card, hid) {
+  if (!card) return;
+  const cid = _resolveHotspotId(hid || card.dataset.hotspotId);
+  const btn = card.querySelector(".ts-audio-mode-btn");
+  if (!btn) return;
+  setupTsAudioModeButton(btn, card, cid);
+  const isXlx = isXlxHotspot(cid, card);
+  const mode = isXlx ? "solo" : getHotspotTsAudioMode(cid);
+  renderTsAudioModeBtnContent(btn, mode, isXlx);
+  if (mode === "solo") {
+    enforceSoloTsMute(cid);
+  }
+}
+
+export function updateHotspotTsAudioModeUI(hid) {
+  if (!hid) {
+    updateAllHotspotTsAudioModeUI();
+    return;
+  }
+  const cid = _resolveHotspotId(hid);
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  cards.forEach(card => updateCardTsAudioModeUI(card, cid));
+  if (_isPrimaryAlias(cid)) {
+    const mainCard = document.getElementById("radioContainer");
+    if (mainCard && (!mainCard.dataset.hotspotId || mainCard.dataset.hotspotId === cid || mainCard.dataset.hotspotId === "default")) {
+      updateCardTsAudioModeUI(mainCard, cid);
+    }
+  }
+}
+
+export function updateAllHotspotTsAudioModeUI() {
+  const cards = document.querySelectorAll(".radio-container");
+  cards.forEach(card => {
+    const cid = _resolveHotspotId(card.dataset.hotspotId);
+    updateCardTsAudioModeUI(card, cid);
+  });
+}
+
+export function setupTsAudioModeButton(btn, card, hid) {
+  if (!btn || btn._wiredTsAudioMode) return;
+  btn._wiredTsAudioMode = true;
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const targetCid = _resolveHotspotId(hid || (card ? card.dataset.hotspotId : null) || (window.activeHotspotId || "default"));
+    cycleHotspotTsAudioMode(targetCid);
+  });
+}
+
+export function syncAllSlotMutesToServer() {
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  if (!hsList || hsList.length === 0) return;
+  const mutes = [];
+  hsList.forEach(hs => {
+    const cid = _resolveHotspotId(hs.id);
+    mutes.push({ hotspot_id: cid, slot: 1, muted: getHotspotMute(cid, 1) });
+    mutes.push({ hotspot_id: cid, slot: 2, muted: getHotspotMute(cid, 2) });
+  });
+  if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
+    try {
+      window.ws.send(JSON.stringify({ type: "sync_slot_mutes", mutes }));
+    } catch (err) {
+      console.warn("[AUDIO] Failed to sync all slot mutes over WS:", err);
+    }
+  }
+}
+
+function _triggerHaptic(ms = 40) {
+  try {
+    triggerHaptic(ms);
+  } catch (_) {}
+}
+
+function _isSingleChannelNet(cid, card = null) {
+  if (card) {
+    const cNet = String(card.dataset.networkType || "").toLowerCase();
+    if (card.classList.contains("card-net-ysf") || card.classList.contains("card-net-m17") || card.classList.contains("card-net-allstar") || cNet === "ysf" || cNet === "m17" || cNet === "allstar") {
+      return true;
+    }
+    if (cNet && cNet !== "ysf" && cNet !== "m17" && cNet !== "allstar") {
+      return false;
+    }
+  }
+  const resolved = _resolveHotspotId(cid);
+  const hsList = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+  const hs = hsList.find(h => h && _resolveHotspotId(h.id) === resolved) || (resolved === "default" ? hsList[0] : null);
+  const net = String((hs && hs.network_type) || (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function" ? window.getHotspotNetworkType(resolved) : "") || "").toLowerCase();
+  return net === "ysf" || net === "m17" || net === "allstar";
+}
+
+function _showPanToast(cid, slot, nextPan) {
+  const panLabel = nextPan === "L"
+    ? _getTranslation("vfo.pan_l_short", {}, "Left (L)")
+    : (nextPan === "R"
+      ? _getTranslation("vfo.pan_r_short", {}, "Right (R)")
+      : _getTranslation("vfo.pan_lr_short", {}, "Stereo (L+R)"));
+  const hsName = _getHotspotDisplayName(cid);
+  const isSingle = _isSingleChannelNet(cid);
+  const msg = isSingle
+    ? ((typeof window !== "undefined" && window.t)
+      ? window.t("audio.pan_single_toast", { name: hsName, pan: panLabel }, `🎧 [${hsName}]: Pan — ${panLabel}`)
+      : `🎧 [${hsName}]: Pan — ${panLabel}`)
+    : ((typeof window !== "undefined" && window.t)
+      ? window.t("audio.pan_toast", { name: hsName, slot, pan: panLabel }, `🎧 [${hsName}] TS${slot}: Pan — ${panLabel}`)
+      : `🎧 [${hsName}] TS${slot}: Pan — ${panLabel}`);
+  showToast(msg, 1800);
+}
+
+const VFO_MUTE_SVG_ON = '<svg class="vfo-mute-svg vfo-mute-svg-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.9"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
+const VFO_MUTE_SVG_OFF = '<svg class="vfo-mute-svg vfo-mute-svg-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" fill-opacity="0.28"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" opacity="0.45"/><line x1="4" y1="4" x2="20" y2="20" stroke-width="2.3"/></svg>';
+
+export function renderMutePanBtnContent(btn, isMuted, panMode, slot) {
+  if (!btn) return;
+  const s = parseInt(slot, 10) || 1;
+  const safePan = ["L", "R", "LR"].includes(panMode) ? panMode : "LR";
+  btn.classList.toggle("muted", !!isMuted);
+  btn.dataset.pan = safePan;
+  btn.dataset.muted = isMuted ? "true" : "false";
+
+  const spkIconHtml = isMuted ? VFO_MUTE_SVG_OFF : VFO_MUTE_SVG_ON;
+  const nextIconState = isMuted ? "muted" : "active";
+  const lClass = safePan === "R" ? "inactive" : "active";
+  const rClass = safePan === "L" ? "inactive" : "active";
+
+  const panDesc = safePan === "L"
+    ? _getTranslation("vfo.pan_mode_l", {}, "left only")
+    : (safePan === "R"
+      ? _getTranslation("vfo.pan_mode_r", {}, "right only")
+      : _getTranslation("vfo.pan_mode_lr", {}, "both channels"));
+  const actionDesc = isMuted
+    ? _getTranslation("vfo.action_unmute", {}, "unmute")
+    : _getTranslation("vfo.action_mute", {}, "mute");
+
+  const panRowHint = _getTranslation("vfo.pan_row_hint", {}, "Hold: switch L / R / L+R");
+  const panLHint = _getTranslation("vfo.pan_l_hint", {}, "Left channel (L)");
+  const panRHint = _getTranslation("vfo.pan_r_hint", {}, "Right channel (R)");
+
+  let tagL = btn.querySelector(".vfo-pan-tag.tag-l");
+  let spkWrap = btn.querySelector(".vfo-mute-speaker-wrap");
+  let tagR = btn.querySelector(".vfo-pan-tag.tag-r");
+
+  if (tagL && spkWrap && tagR) {
+    tagL.className = `vfo-pan-tag tag-l ${lClass}`;
+    tagL.title = panLHint;
+    if (spkWrap.dataset.iconState !== nextIconState || !spkWrap.querySelector("svg.vfo-mute-svg")) {
+      spkWrap.innerHTML = spkIconHtml;
+      spkWrap.dataset.iconState = nextIconState;
+    }
+    spkWrap.title = actionDesc;
+    tagR.className = `vfo-pan-tag tag-r ${rClass}`;
+    tagR.title = panRHint;
+  } else {
+    btn.innerHTML = `
+      <span class="vfo-pan-tag tag-l ${lClass}" data-pan-target="L" title="${panLHint}">L</span>
+      <span class="vfo-mute-speaker-wrap" data-icon-state="${nextIconState}" title="${actionDesc}">${spkIconHtml}</span>
+      <span class="vfo-pan-tag tag-r ${rClass}" data-pan-target="R" title="${panRHint}">R</span>
+    `;
+  }
+
+  const card = btn.closest(".radio-container");
+  const cid = card ? _resolveHotspotId(card.dataset.hotspotId) : null;
+  const isSingle = _isSingleChannelNet(cid, card);
+  btn.removeAttribute("data-i18n-title");
+  if (isSingle) {
+    btn.title = _getTranslation(
+      "vfo.mute_pan_single_combined_title",
+      { pan: panDesc, action: actionDesc },
+      _getTranslation("audio.pan_mode_single_hint", { pan: panDesc, action: actionDesc }, `[${panDesc}]: Click — ${actionDesc}, hold — switch L / R / L+R`)
+    );
+  } else {
+    btn.title = _getTranslation("vfo.mute_pan_combined_title", { slot: s, pan: panDesc, action: actionDesc },
+      (window.t ? window.t("audio.pan_mode_hint", { slot: s, pan: panDesc, action: actionDesc }, `TS${s} [${panDesc}]: Click — ${actionDesc}, hold — switch L / R / L+R`) : `TS${s} [${panDesc}]: Click — ${actionDesc}, hold — switch L / R / L+R`));
+  }
+}
+
+export function setupMutePanButtonEvents(btn, card, slot) {
+  if (!btn || btn._mutePanBound) return;
+  btn._mutePanBound = true;
+  const s = parseInt(slot, 10) || 1;
+
+  btn.style.touchAction = "none";
+
+  let pressTimer = null;
+  let isLongPress = false;
+  let lastLongPressTime = 0;
+  let longPressResetTimer = null;
+  let activePointerId = null;
+  let startX = 0;
+  let startY = 0;
+  const LONG_PRESS_MS = 450;
+
+  const getCid = () => {
+    const parentCard = card || btn.closest(".radio-container");
+    return _resolveHotspotId(parentCard && parentCard.dataset.hotspotId);
+  };
+
+  const cancelPress = () => {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+    btn.classList.remove("vfo-mute-pressing");
+    if (activePointerId !== null) {
+      try { btn.releasePointerCapture(activePointerId); } catch (_) {}
+      activePointerId = null;
+    }
+  };
+
+  const startPress = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    isLongPress = false;
+    if (longPressResetTimer) {
+      clearTimeout(longPressResetTimer);
+      longPressResetTimer = null;
+    }
+    startX = e.clientX || 0;
+    startY = e.clientY || 0;
+    activePointerId = e.pointerId !== undefined ? e.pointerId : null;
+    if (activePointerId !== null) {
+      try { btn.setPointerCapture(activePointerId); } catch (_) {}
+    }
+    btn.classList.add("vfo-mute-pressing");
+
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      isLongPress = true;
+      lastLongPressTime = Date.now();
+      btn.classList.remove("vfo-mute-pressing");
+
+      _triggerHaptic(40);
+      const cid = getCid();
+      const nextPan = cycleHotspotPan(cid, s);
+      _showPanToast(cid, s, nextPan);
+    }, LONG_PRESS_MS);
+  };
+
+  const movePress = (e) => {
+    if (!pressTimer) return;
+    const curX = e.clientX || 0;
+    const curY = e.clientY || 0;
+    const isTouch = e.pointerType === "touch" || (e.touches && e.touches.length > 0);
+    const threshold = isTouch ? 36 : 14;
+    if (Math.hypot(curX - startX, curY - startY) > threshold) {
+      cancelPress();
+    }
+  };
+
+  const endPress = () => {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+    btn.classList.remove("vfo-mute-pressing");
+    if (activePointerId !== null) {
+      try { btn.releasePointerCapture(activePointerId); } catch (_) {}
+      activePointerId = null;
+    }
+    if (isLongPress) {
+      if (longPressResetTimer) clearTimeout(longPressResetTimer);
+      longPressResetTimer = setTimeout(() => {
+        isLongPress = false;
+      }, 1000);
+    }
+  };
+
+  btn.addEventListener("pointerdown", startPress);
+  btn.addEventListener("pointermove", movePress);
+  btn.addEventListener("pointerup", endPress);
+  btn.addEventListener("pointercancel", cancelPress);
+  btn.addEventListener("pointerleave", () => {
+    // If user is actively pressing, ignore pointerleave caused by CSS scale(0.93) or edge touch
+    if (activePointerId !== null) return;
+    cancelPress();
+  });
+
+  btn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const elapsed = Date.now() - lastLongPressTime;
+    if (isLongPress || elapsed < 800) {
+      // Long press already handled it! Prevent Android touch contextmenu collision
+      return;
+    }
+    cancelPress();
+    const cid = getCid();
+    const nextPan = cycleHotspotPan(cid, s);
+    _triggerHaptic(30);
+    _showPanToast(cid, s, nextPan);
+  });
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const elapsed = Date.now() - lastLongPressTime;
+    if (isLongPress || elapsed < 800) {
+      isLongPress = false;
+      if (longPressResetTimer) {
+        clearTimeout(longPressResetTimer);
+        longPressResetTimer = null;
+      }
+      return;
+    }
+    const cid = getCid();
+    toggleHotspotMute(cid, s);
+  });
+
+  btn.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      const cid = getCid();
+      toggleHotspotMute(cid, s);
+    }
+  });
+}
+
+export function updateCardMuteUI(card, hid) {
+  if (!card) return;
+  const cid = _resolveHotspotId(hid || card.dataset.hotspotId);
+  const btn1 = card.querySelector(".btn-mute-ts1");
+  const btn2 = card.querySelector(".btn-mute-ts2");
+
+  if (btn1) setupMutePanButtonEvents(btn1, card, 1);
+  if (btn2) setupMutePanButtonEvents(btn2, card, 2);
+
+  const mode = getHotspotTsAudioMode(cid);
+  if (mode === "auto") {
+    const soloSet = getSoloMutedSet();
+    const solo1 = Boolean(soloSet && (soloSet.has(`${cid}_ts1`) || (cid === "default" && soloSet.has("default_ts1"))));
+    const solo2 = Boolean(soloSet && (soloSet.has(`${cid}_ts2`) || (cid === "default" && soloSet.has("default_ts2"))));
+    const st = _getAutoState(cid);
+    const activeSlot = (st.flag === 1 || st.flag === 2)
+      ? st.flag
+      : ((st.lastActiveSlot === 2) ? 2 : 1);
+    if (btn1) renderMutePanBtnContent(btn1, solo1 || activeSlot !== 1, getHotspotPan(cid, 1), 1);
+    if (btn2) renderMutePanBtnContent(btn2, solo2 || activeSlot !== 2, getHotspotPan(cid, 2), 2);
+    return;
+  }
+
+  if (btn1) {
+    const cur1 = getHotspotMute(cid, 1);
+    const pan1 = getHotspotPan(cid, 1);
+    renderMutePanBtnContent(btn1, cur1, pan1, 1);
+  }
+  if (btn2) {
+    const cur2 = getHotspotMute(cid, 2);
+    const pan2 = getHotspotPan(cid, 2);
+    renderMutePanBtnContent(btn2, cur2, pan2, 2);
+  }
+}
+
+export function updateHotspotCardMuteUI(hid) {
+  if (!hid) {
+    const allCards = document.querySelectorAll(".radio-container");
+    allCards.forEach(card => {
+      const cid = _resolveHotspotId(card.dataset.hotspotId);
+      updateCardMuteUI(card, cid);
+    });
+    return;
+  }
+  const cid = String(_resolveHotspotId(hid));
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  if (cards.length > 0) {
+    cards.forEach(card => updateCardMuteUI(card, cid));
+  } else {
+    const allCards = document.querySelectorAll(".radio-container");
+    allCards.forEach(card => {
+      const cardCid = String(_resolveHotspotId(card.dataset.hotspotId));
+      if (cardCid === cid || (card.id === "radioContainer" && _isPrimaryAlias(cid) && (!card.dataset.hotspotId || card.dataset.hotspotId === cid || card.dataset.hotspotId === "default"))) {
+        updateCardMuteUI(card, cid);
+      }
+    });
+  }
+}
+
+// --- Timeslot Stereo Panning (Per Hotspot & Per Slot: L / R / L+R) ---
+export function getHotspotPan(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+  if (typeof localStorage === "undefined") return "LR";
+  const val = localStorage.getItem(`proxdmr_pan_${cid}_ts${s}`);
+  if (val && ["L", "R", "LR"].includes(val)) return val;
+
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const isPrimary = _isPrimaryAlias(cid, hsList);
+  if (isPrimary) {
+    const vDef = localStorage.getItem(`proxdmr_pan_default_ts${s}`);
+    if (vDef && ["L", "R", "LR"].includes(vDef)) return vDef;
+  }
+  return "LR";
+}
+
+export function setHotspotPan(hid, slot, mode) {
+  const s = parseInt(slot, 10) || 1;
+  const cid = _resolveHotspotId(hid);
+  const safeMode = ["L", "R", "LR"].includes(mode) ? mode : "LR";
+
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(`proxdmr_pan_${cid}_ts${s}`, safeMode);
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const isPrimary = _isPrimaryAlias(cid, hsList);
+    if (isPrimary) {
+      localStorage.setItem(`proxdmr_pan_default_ts${s}`, safeMode);
+    }
+  }
+
+  const ap = (typeof window !== "undefined" && (window.audioPlayer || (window.__proxdmr && window.__proxdmr.audioPlayer))) || null;
+  if (ap) {
+    const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+    const isPrimary = _isPrimaryAlias(cid, hsList);
+    if (typeof ap.setSlotPan === "function") {
+      ap.setSlotPan(cid, s, safeMode);
+      if (isPrimary && cid !== "default") ap.setSlotPan("default", s, safeMode);
+    }
+    if (typeof ap.updateSlotPan === "function") {
+      ap.updateSlotPan(cid, s, safeMode);
+      if (isPrimary && cid !== "default") ap.updateSlotPan("default", s, safeMode);
+    }
+  }
+
+  updateHotspotCardPanUI(cid);
+  _scheduleSyncClientSettings(1000);
+
+}
+
+export function cycleHotspotPan(hid, slot) {
+  const s = parseInt(slot, 10) || 1;
+  const current = getHotspotPan(hid, s);
+  const modes = ["L", "R", "LR"];
+  const idx = modes.indexOf(current);
+  const next = modes[(idx + 1) % modes.length];
+  setHotspotPan(hid, s, next);
+  return next;
+}
+
+export function getPanTitle(mode, slot, isSingle = false) {
+  const s = parseInt(slot, 10) || 1;
+  if (isSingle) {
+    if (mode === "L") {
+      return _getTranslation("vfo.pan_single_title_l", {}, "Pan: LEFT channel only (click to switch)");
+    } else if (mode === "R") {
+      return _getTranslation("vfo.pan_single_title_r", {}, "Pan: RIGHT channel only (click to switch)");
+    }
+    return _getTranslation("vfo.pan_single_title_lr", {}, "Pan: Stereo L+R (click to switch)");
+  }
+  if (mode === "L") {
+    return _getTranslation("vfo.pan_title_l", { slot: s }, `Pan TS${s}: LEFT channel only (click to switch)`);
+  } else if (mode === "R") {
+    return _getTranslation("vfo.pan_title_r", { slot: s }, `Pan TS${s}: RIGHT channel only (click to switch)`);
+  }
+  return _getTranslation("vfo.pan_title_lr", { slot: s }, `Pan TS${s}: Stereo L+R (click to switch)`);
+}
+
+export function renderPanBtnContent(btn, mode) {
+  if (!btn) return;
+  const safeMode = mode === "L" || mode === "R" ? mode : "LR";
+  btn.dataset.pan = safeMode;
+
+  btn.classList.remove("pan-state-l", "pan-state-r", "pan-state-lr", "panning-side");
+  if (safeMode === "L") {
+    btn.classList.add("pan-state-l", "panning-side");
+  } else if (safeMode === "R") {
+    btn.classList.add("pan-state-r", "panning-side");
+  } else {
+    btn.classList.add("pan-state-lr");
+  }
+
+  btn.innerHTML = "";
+  if (safeMode === "L") {
+    const spanL = document.createElement("span");
+    spanL.className = "pan-l active pan-single";
+    spanL.textContent = "L";
+    btn.appendChild(spanL);
+  } else if (safeMode === "R") {
+    const spanR = document.createElement("span");
+    spanR.className = "pan-r active pan-single";
+    spanR.textContent = "R";
+    btn.appendChild(spanR);
+  } else {
+    const spanL = document.createElement("span");
+    spanL.className = "pan-l active";
+    spanL.textContent = "L";
+
+    const sep = document.createElement("span");
+    sep.className = "pan-sep";
+    sep.textContent = "+";
+
+    const spanR = document.createElement("span");
+    spanR.className = "pan-r active";
+    spanR.textContent = "R";
+
+    btn.appendChild(spanL);
+    btn.appendChild(sep);
+    btn.appendChild(spanR);
+  }
+}
+
+export function updateCardPanUI(card, hid) {
+  if (!card) return;
+  const cid = _resolveHotspotId(hid || card.dataset.hotspotId);
+
+  // Synchronize mute/pan combined button indicators
+  updateCardMuteUI(card, cid);
+
+  const b1 = card.querySelector(".btn-pan-ts1");
+  const b2 = card.querySelector(".btn-pan-ts2");
+  const p1 = getHotspotPan(cid, 1);
+  const p2 = getHotspotPan(cid, 2);
+
+  const isSingle = _isSingleChannelNet(cid, card);
+  if (b1) {
+    renderPanBtnContent(b1, p1);
+    b1.removeAttribute("data-i18n-title");
+    b1.title = getPanTitle(p1, 1, isSingle);
+  }
+  if (b2) {
+    renderPanBtnContent(b2, p2);
+    b2.removeAttribute("data-i18n-title");
+    b2.title = getPanTitle(p2, 2, isSingle);
+  }
+}
+
+export function updateHotspotCardPanUI(hid) {
+  if (!hid) {
+    const allCards = document.querySelectorAll(".radio-container");
+    allCards.forEach(card => {
+      const cid = _resolveHotspotId(card.dataset.hotspotId);
+      updateCardPanUI(card, cid);
+    });
+    return;
+  }
+  const cid = String(_resolveHotspotId(hid));
+  const cards = document.querySelectorAll(`.radio-container[data-hotspot-id="${cid}"]`);
+  if (cards.length > 0) {
+    cards.forEach(card => updateCardPanUI(card, cid));
+  } else {
+    const allCards = document.querySelectorAll(".radio-container");
+    allCards.forEach(card => {
+      const cardCid = String(_resolveHotspotId(card.dataset.hotspotId));
+      if (cardCid === cid || (card.id === "radioContainer" && _isPrimaryAlias(cid) && (!card.dataset.hotspotId || card.dataset.hotspotId === cid || card.dataset.hotspotId === "default"))) {
+        updateCardPanUI(card, cid);
+      }
+    });
+  }
+}
+
+// --- Hotspot Audio Auto-Recording State & 3-State R Button ---
+if (typeof window !== "undefined" && !window.activeRecordingHotspotIds) {
+  window.activeRecordingHotspotIds = new Set();
+}
+
+function _isGlobalAutoRecordEnabled() {
+  if (typeof window !== "undefined" && typeof window.__proxdmrGlobalAutoRecord === "boolean") {
+    return window.__proxdmrGlobalAutoRecord;
+  }
+  try {
+    const raw = localStorage.getItem("proxdmr_rec_settings");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.auto_record === false) return false;
+      if (parsed && parsed.auto_record_rx === false && parsed.auto_record_tx === false) return false;
+    }
+  } catch (_) {}
+  const chk = typeof document !== "undefined" ? document.getElementById("recOptAutoRecord") : null;
+  if (chk && typeof window !== "undefined" && window.__proxdmrRecSettingsLoaded && !chk.checked) {
+    return false;
+  }
+  return true;
+}
+
+export function updateCardRecUI(card, hid) {
+  if (!card) return;
+  const recBtn = card.querySelector(".header-rec-btn");
+  if (!recBtn) return;
+
+  const rawHid = hid || card.dataset.hotspotId || "default";
+  const cid = _resolveHotspotId(rawHid);
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const hs = hsList.find(h => _resolveHotspotId(h.id) === cid) ||
+             hsList.find(h => h.id === rawHid);
+
+  // 1. Is auto_record enabled both per-hotspot AND globally? (Default true if not set)
+  const isPerHotspotAutoRec = hs ? (hs.auto_record !== false) : (localStorage.getItem("proxdmr_autorec_" + cid) !== "0");
+  const isAutoRecEnabled = Boolean(isPerHotspotAutoRec && _isGlobalAutoRecordEnabled());
+
+  // 2. Is this hotspot actively recording audio?
+  let isActivelyRecording = false;
+  if (isAutoRecEnabled) {
+    const activeIds = (typeof window !== "undefined" && window.activeRecordingHotspotIds) || new Set();
+    const isPttActive = typeof window !== "undefined" && window.isPttPressed;
+    const activeTxId = typeof window !== "undefined" && window.activeTxHotspotId;
+    const activeHsId = typeof window !== "undefined" && window.activeHotspotId;
+    const isPttOnThisCard = Boolean(isPttActive && _resolveHotspotId(activeTxId || activeHsId) === cid);
+    const isMasterSessionRec = Boolean(typeof window !== "undefined" && window.recordingsManager && window.recordingsManager.isSessionActive);
+    const isAslCard = card.classList.contains("card-net-allstar") || String(card.dataset.networkType || "").toLowerCase() === "allstar";
+    const isYsfCard = card.classList.contains("card-net-ysf") || String(card.dataset.networkType || "").toLowerCase() === "ysf";
+    const isM17Card = card.classList.contains("card-net-m17") || String(card.dataset.networkType || "").toLowerCase() === "m17";
+
+    let hasLiveRxOnCard = false;
+    if (isAslCard) {
+      hasLiveRxOnCard = Boolean(
+        (hs && (hs._aslCarrierRx || (hs.ts1 && hs.ts1.active))) ||
+        card.querySelector(".vfo-allstar-row.allstar-rx-active") ||
+        (card._lastRx && card._lastRx[1] && card._lastRx[1].active)
+      );
+    } else {
+      const s1Active = Boolean(
+        (card._lastRx && card._lastRx[1] && card._lastRx[1].active) ||
+        (hs && hs.ts1 && hs.ts1.active) ||
+        (isYsfCard && hs && hs._ysfCarrierRx) ||
+        (isM17Card && hs && hs._m17CarrierRx)
+      );
+      const s2Active = Boolean(
+        (card._lastRx && card._lastRx[2] && card._lastRx[2].active) ||
+        (hs && hs.ts2 && hs.ts2.active)
+      );
+      const domRxActive = Boolean(card.querySelector(".vfo-ts1-row.vfo-rx-active, .vfo-ts2-row.vfo-rx-active, .vfo-ts1-rx.active, .vfo-ts2-rx.active"));
+      hasLiveRxOnCard = Boolean(s1Active || s2Active || domRxActive);
+    }
+
+    if (isPttOnThisCard || hasLiveRxOnCard || isMasterSessionRec) {
+      isActivelyRecording = true;
+    } else if (activeIds && activeIds.size > 0) {
+      activeIds.delete(cid);
+      activeIds.delete(String(rawHid));
+      if (_isPrimaryAlias(cid, hsList)) {
+        activeIds.delete("default");
+      }
+    }
+  }
+
+  recBtn.classList.remove("rec-off", "rec-standby", "recording");
+  const isSingle = _isSingleChannelNet(cid, card);
+
+  if (!isAutoRecEnabled) {
+    recBtn.classList.add("rec-off");
+    const i18nKey = isSingle ? "recordings.rec_off_single_title" : "recordings.rec_off_title";
+    const fallback = isSingle ? "Auto-record off (click to enable)" : "TS1/2 auto-record off (click to enable)";
+    const title = _getTranslation(i18nKey, {}, fallback);
+    recBtn.title = title;
+    recBtn.setAttribute("aria-label", title);
+    recBtn.setAttribute("data-i18n-title", i18nKey);
+    recBtn.setAttribute("data-i18n-aria-label", i18nKey);
+  } else if (isActivelyRecording) {
+    recBtn.classList.add("recording");
+    const title = _getTranslation("recordings.rec_active_title", {}, "Recording call...");
+    recBtn.title = title;
+    recBtn.setAttribute("aria-label", title);
+    recBtn.setAttribute("data-i18n-title", "recordings.rec_active_title");
+    recBtn.setAttribute("data-i18n-aria-label", "recordings.rec_active_title");
+  } else {
+    recBtn.classList.add("rec-standby");
+    const i18nKey = isSingle ? "recordings.rec_standby_single_title" : "recordings.rec_standby_title";
+    const fallback = isSingle ? "Auto-record on (standby)" : "TS1/2 auto-record on (standby)";
+    const title = _getTranslation(i18nKey, {}, fallback);
+    recBtn.title = title;
+    recBtn.setAttribute("aria-label", title);
+    recBtn.setAttribute("data-i18n-title", i18nKey);
+    recBtn.setAttribute("data-i18n-aria-label", i18nKey);
+  }
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
+  }
+}
+
+export function updateHotspotCardRecUI(hid) {
+  if (!hid) {
+    if (typeof window !== "undefined" && typeof window.updatePttLockUI === "function") {
+      window.updatePttLockUI();
+    }
+    updateAllHotspotRecUI();
+    return;
+  }
+  const cid = _resolveHotspotId(hid);
+  const cards = document.querySelectorAll(".radio-container");
+  cards.forEach(card => {
+    const cardCid = _resolveHotspotId(card.dataset.hotspotId);
+    if (cardCid === cid || card.dataset.hotspotId === hid) {
+      updateCardRecUI(card, cardCid);
+    }
+  });
+}
+
+export function updateAllHotspotRecUI() {
+  const cards = document.querySelectorAll(".radio-container");
+  cards.forEach(card => {
+    const cid = _resolveHotspotId(card.dataset.hotspotId);
+    updateCardRecUI(card, cid);
+  });
+}
+
+export async function toggleHotspotAutoRecord(rawHid) {
+  const cid = _resolveHotspotId(rawHid);
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const hs = hsList.find(h => _resolveHotspotId(h.id) === cid) ||
+             hsList.find(h => h.id === rawHid);
+  if (!hs) return;
+  if (hs._isTogglingAutoRec) return;
+  hs._isTogglingAutoRec = true;
+
+  const currentVal = hs.auto_record !== false;
+  const newVal = !currentVal;
+  hs.auto_record = newVal;
+  try {
+    localStorage.setItem("proxdmr_autorec_" + cid, newVal ? "1" : "0");
+  } catch (_) {}
+
+  updateAllHotspotRecUI();
+  if (typeof window !== "undefined" && typeof window.renderHotspotsList === "function") {
+    const modal = document.getElementById("hotspotsModal");
+    if (modal && modal.classList.contains("show")) {
+      window.renderHotspotsList();
+    }
+  }
+
+  const hsName = hs.name || _getHotspotDisplayName(cid);
+
+  try {
+    const res = await fetch(`/api/hotspots/${encodeURIComponent(cid)}/auto-record`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: newVal })
+    });
+    if (res.ok) {
+      const msg = newVal
+        ? _getTranslation("recordings.toast_autorec_enabled", { name: hsName }, `✅ [${hsName}]: Auto-record enabled`)
+        : _getTranslation("recordings.toast_autorec_disabled", { name: hsName }, `⏸️ [${hsName}]: Auto-record disabled`);
+      showToast(msg, 2500);
+    } else {
+      throw new Error(`Server returned ${res.status}`);
+    }
+  } catch (err) {
+    console.error("Failed to toggle auto_record:", err);
+    hs.auto_record = currentVal;
+    try {
+      localStorage.setItem("proxdmr_autorec_" + cid, currentVal ? "1" : "0");
+    } catch (_) {}
+    updateAllHotspotRecUI();
+    showToast(window.t ? window.t("audio.autorec_err_toast", { name: hsName }, `⚠️ Error saving auto-record setting for ${hsName}`) : `⚠️ Error saving auto-record setting for ${hsName}`, 3000);
+  } finally {
+    hs._isTogglingAutoRec = false;
+  }
+}
+
+export function initAudioRouting() {
+  updateHotspotCardMuteUI();
+  updateHotspotCardPanUI();
+
+  const mainCard = document.getElementById("radioContainer");
+  const btnMuteTs1 = document.getElementById("btnMuteTs1");
+  const btnMuteTs2 = document.getElementById("btnMuteTs2");
+  if (btnMuteTs1) {
+    setupMutePanButtonEvents(btnMuteTs1, mainCard, 1);
+  }
+  if (btnMuteTs2) {
+    setupMutePanButtonEvents(btnMuteTs2, mainCard, 2);
+  }
+
+  const btnPanTs1 = document.getElementById("btnPanTs1");
+  const btnPanTs2 = document.getElementById("btnPanTs2");
+  if (btnPanTs1) {
+    btnPanTs1.onclick = (e) => {
+      e.stopPropagation();
+      const card = btnPanTs1.closest(".radio-container") || mainCard;
+      const cid = _resolveHotspotId(card && card.dataset.hotspotId);
+      cycleHotspotPan(cid, 1);
+    };
+  }
+  if (btnPanTs2) {
+    btnPanTs2.onclick = (e) => {
+      e.stopPropagation();
+      const card = btnPanTs2.closest(".radio-container") || mainCard;
+      const cid = _resolveHotspotId(card && card.dataset.hotspotId);
+      cycleHotspotPan(cid, 2);
+    };
+  }
+
+  const masterRecBtnEl = document.getElementById("headerMasterRecBtn");
+  if (masterRecBtnEl) {
+    masterRecBtnEl.onclick = (e) => {
+      e.stopPropagation();
+      const rawHid = masterRecBtnEl.dataset.hotspotId || (masterRecBtnEl.closest(".radio-container") ? masterRecBtnEl.closest(".radio-container").dataset.hotspotId : "default");
+      const cid = _resolveHotspotId(rawHid);
+      toggleHotspotAutoRecord(cid);
+    };
+  }
+
+  const mainTsModeBtn = document.getElementById("tsAudioModeToggleBtn");
+  if (mainTsModeBtn) {
+    setupTsAudioModeButton(mainTsModeBtn, mainCard, "default");
+    updateCardTsAudioModeUI(mainCard, "default");
+  }
+  updateAllHotspotTsAudioModeUI();
+}
+
+// Global window registration for backward compatibility
+if (typeof window !== "undefined") {
+  window.getHotspotMute = getHotspotMute;
+  window.getPersistentHotspotMute = getPersistentHotspotMute;
+  window.setHotspotMute = setHotspotMute;
+  window.toggleHotspotMute = toggleHotspotMute;
+  window.enforceSingleTsMute = enforceSingleTsMute;
+  window.enforceSoloTsMute = enforceSoloTsMute;
+  window.isXlxHotspot = isXlxHotspot;
+  window.isAllStarHotspot = isAllStarHotspot;
+  window.getHotspotAslMode = getHotspotAslMode;
+  window.setHotspotAslMode = setHotspotAslMode;
+  window.isHotspotAslAddMode = isHotspotAslAddMode;
+  window.setHotspotAslAddMode = setHotspotAslAddMode;
+  window.getHotspotTsAudioMode = getHotspotTsAudioMode;
+  window.setHotspotTsAudioMode = setHotspotTsAudioMode;
+  window.cycleHotspotTsAudioMode = cycleHotspotTsAudioMode;
+  window.renderTsAudioModeBtnContent = renderTsAudioModeBtnContent;
+  window.updateCardTsAudioModeUI = updateCardTsAudioModeUI;
+  window.updateHotspotTsAudioModeUI = updateHotspotTsAudioModeUI;
+  window.updateAllHotspotTsAudioModeUI = updateAllHotspotTsAudioModeUI;
+  window.setupTsAudioModeButton = setupTsAudioModeButton;
+  window.handleAutoSlotActivity = handleAutoSlotActivity;
+  window.resetAutoSlotState = resetAutoSlotState;
+  window.getAutoArbitrationFlag = getAutoArbitrationFlag;
+  window.syncAllSlotMutesToServer = syncAllSlotMutesToServer;
+  window.renderMutePanBtnContent = renderMutePanBtnContent;
+  window.setupMutePanButtonEvents = setupMutePanButtonEvents;
+  window.updateCardMuteUI = updateCardMuteUI;
+  window.updateHotspotCardMuteUI = updateHotspotCardMuteUI;
+  window.getHotspotPan = getHotspotPan;
+  window.setHotspotPan = setHotspotPan;
+  window.cycleHotspotPan = cycleHotspotPan;
+  window.getPanTitle = getPanTitle;
+  window.renderPanBtnContent = renderPanBtnContent;
+  window.updateCardPanUI = updateCardPanUI;
+  window.updateHotspotCardPanUI = updateHotspotCardPanUI;
+  window.updateCardRecUI = updateCardRecUI;
+  window.updateHotspotCardRecUI = updateHotspotCardRecUI;
+  window.updateAllHotspotRecUI = updateAllHotspotRecUI;
+  window.getSoloMutedSet = getSoloMutedSet;
+  window.saveSoloMutedSet = saveSoloMutedSet;
+  window.focusHotspotTsAudio = focusHotspotTsAudio;
+  window.toggleHotspotAutoRecord = toggleHotspotAutoRecord;
+  window.initAudioRouting = initAudioRouting;
+
+  window.__proxdmr = window.__proxdmr || {};
+  window.__proxdmr.routing = {
+    getHotspotMute,
+    getPersistentHotspotMute,
+    setHotspotMute,
+    getSoloMutedSet,
+    saveSoloMutedSet,
+    focusHotspotTsAudio,
+    toggleHotspotMute,
+    enforceSingleTsMute,
+    enforceSoloTsMute,
+    isAllStarHotspot,
+    getHotspotAslMode,
+    setHotspotAslMode,
+    isHotspotAslAddMode,
+    setHotspotAslAddMode,
+    getHotspotTsAudioMode,
+    setHotspotTsAudioMode,
+    cycleHotspotTsAudioMode,
+    renderTsAudioModeBtnContent,
+    updateCardTsAudioModeUI,
+    updateHotspotTsAudioModeUI,
+    updateAllHotspotTsAudioModeUI,
+    setupTsAudioModeButton,
+    handleAutoSlotActivity,
+    resetAutoSlotState,
+    getAutoArbitrationFlag,
+    syncAllSlotMutesToServer,
+    renderMutePanBtnContent,
+    setupMutePanButtonEvents,
+    updateCardMuteUI,
+    updateHotspotCardMuteUI,
+    getHotspotPan,
+    setHotspotPan,
+    cycleHotspotPan,
+    getPanTitle,
+    renderPanBtnContent,
+    updateCardPanUI,
+    updateHotspotCardPanUI,
+    updateCardRecUI,
+    updateHotspotCardRecUI,
+    updateAllHotspotRecUI,
+    toggleHotspotAutoRecord,
+    initAudioRouting
+  };
+}

@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Copyright (C) 2025 by arancormonk <180709949+arancormonk@users.noreply.github.com>
+ */
+
+/**
+ * @file
+ * @brief Internal helpers for AMBE 3600x{2400,2450} ECC and demodulation.
+ *
+ * Declares common routines used by both AMBE 3600x2400 and 3600x2450
+ * implementations to correct C0 with Golay24-compatible behavior
+ * (Golay(23,12) + parity bit handling), demodulate C1, and extract the
+ * 49-bit parameter vector.
+ */
+
+#ifndef MBELIB_NEO_INTERNAL_AMBE_COMMON_H
+#define MBELIB_NEO_INTERNAL_AMBE_COMMON_H
+
+#include "mbelib-neo/mbelib.h"
+
+/**
+ * @brief Correct C0 for AMBE 3600x{2400,2450} with Golay24 parity behavior.
+ *
+ * Applies Golay(23,12) decoding to `fr[0][1..23]` and then applies
+ * Golay24 parity-bit correction on `fr[0][0]` when the protected
+ * 23-bit codeword has zero syndrome.
+ *
+ * @param fr AMBE frame as 4x24 bitplanes (modified).
+ * @return Number of corrected bit errors in C0.
+ */
+int mbe_eccAmbe3600C0_common(char fr[4][24]);
+int mbe_eccAmbe3600C0Soft_common(mbe_soft_bit fr[4][24]);
+
+/**
+ * @brief Correct C0 and count its errors as TIA-102.BABA-1 5.5 does.
+ *
+ * Corrects the Golay(23,12) codeword in `fr[0][1..23]`, parity bits
+ * included, and counts every bit that differs from the corrected codeword;
+ * the extended parity bit `fr[0][0]` is checked against that codeword and
+ * counted when it disagrees, so three corrected errors plus a parity
+ * disagreement give 4, a detected uncorrectable pattern.
+ *
+ * @param fr AMBE frame as 4x24 bitplanes (modified).
+ * @return Bit errors corrected or detected in C0 (0..4).
+ */
+int mbe_eccAmbe3600C0Counted_common(char fr[4][24]);
+
+/**
+ * @brief Soft-decision twin of mbe_eccAmbe3600C0Counted_common().
+ *
+ * The count is the soft decoder's own cost: the summed reliability, in units
+ * of a fully reliable bit (255) and rounded, of the received bits that
+ * disagree with the chosen codeword and of a disagreeing extended parity bit.
+ * Fully reliable input counts as hard input does; a flip the channel already
+ * marked unreliable counts little, as in DVSI's soft-decision decoding.
+ *
+ * @param fr AMBE frame as 4x24 soft bitplanes (bits modified).
+ * @return Weighted bit errors corrected or detected in C0.
+ */
+int mbe_eccAmbe3600C0SoftCounted_common(mbe_soft_bit fr[4][24]);
+
+/**
+ * @brief Demodulate AMBE 3600x{2400,2450} C1 in-place.
+ *
+ * Uses a pseudo-random sequence derived from the C0 payload to remove
+ * the interleaving/modulation applied to C1.
+ *
+ * @param fr AMBE frame as 4x24 bitplanes (modified).
+ */
+void mbe_demodulateAmbe3600Data_common(char fr[4][24]);
+void mbe_demodulateAmbe3600DataSoft_common(mbe_soft_bit fr[4][24]);
+
+/**
+ * @brief Extract 49 parameter bits from C0..C3 with ECC.
+ *
+ * Copies C0, demodulates C1 and applies Golay(23,12), and copies C2/C3
+ * into the 49-bit output parameter vector.
+ *
+ * @param fr     AMBE frame as 4x24 bitplanes (modified by demodulation).
+ * @param out49  Output parameter bits (49 entries).
+ * @return Number of corrected bit errors in protected fields.
+ */
+int mbe_eccAmbe3600Data_common(char fr[4][24], char* out49);
+int mbe_eccAmbe3600DataSoft_common(mbe_soft_bit fr[4][24], char* out49);
+
+/**
+ * @brief As mbe_eccAmbe3600Data_common(), counting C1's errors as
+ *        TIA-102.BABA-1 5.5 does: every bit of the received (demodulated)
+ *        codeword that differs from the corrected one, parity bits included.
+ * @return Bit errors corrected in C1 (0..3).
+ */
+int mbe_eccAmbe3600DataCounted_common(char fr[4][24], char* out49);
+/** @brief Soft-decision twin of mbe_eccAmbe3600DataCounted_common(), counting as
+ *         mbe_eccAmbe3600C0SoftCounted_common() does. */
+int mbe_eccAmbe3600DataSoftCounted_common(mbe_soft_bit fr[4][24], char* out49);
+
+/** AMBE+2 silence-frame fundamental 2*pi/32, TIA-102.BABA-1 4.1 eq 1 (radians/sample). */
+#define MBE_AMBE_SILENCE_W0           ((float)0.19634954084936207)
+/** AMBE+2 silence-frame harmonic count, TIA-102.BABA-1 4.1 eq 2. D-STAR's b0 124
+ *  decodes with it; rate 33 plays its silence frames on 15 bands, as DVSI's
+ *  decoder does (MBE_AMBE2450_SILENCE_L in ambe3600x2450.c). */
+#define MBE_AMBE_SILENCE_L            14
+
+/*
+ * Initial AMBE model. TIA-102.BABA-1 fixes only the initial prediction state:
+ * gamma(-1) = 0, L(-1) = 15 and a constant log magnitude (a constant cancels
+ * exactly in eq 43, so 0 is equivalent to the spec's 1). The initial
+ * fundamental is unspecified; the silence fundamental keeps every initial
+ * harmonic below Nyquist (15 * 2*pi/32 < pi).
+ */
+#define MBE_AMBE_INIT_W0              MBE_AMBE_SILENCE_W0
+#define MBE_AMBE_INIT_L               15
+
+/*
+ * Amplitude (int16 scale) of the uniform noise the D-STAR and rate-33 paths
+ * mute to, the level of DVSI's muted output in both modes. The int16 output of
+ * both paths rounds to nearest (mbe_floattoshort_nearest()), so the noise is 0
+ * on two thirds of the samples and +-1 on the rest, as DVSI's muted D-STAR
+ * output is (dam_e10_hd: 67% 0, 16.5% each +-1); DVSI's muted rate-33 frames
+ * of dam_e10_hd have a median rms of 0.59. The float noise stays under one 16-bit
+ * step: a caller of the float entry points who truncates hears silence. P25's
+ * IMBE path keeps TIA-102.BABA 7.8's MBE_SPEC_MUTE_NOISE_AMPLITUDE.
+ */
+#define MBE_AMBE_MUTE_NOISE_AMPLITUDE 0.75f
+
+/**
+ * @brief Set the initial AMBE model: w0, L, K = 0, gamma = 0, unit unvoiced amplitudes.
+ *
+ * Used by mbe_initAmbeParms_common() for the initial state of the AMBE
+ * decode paths.
+ *
+ * @param mp Parameter set to rewrite (phase, error and synthesis state untouched).
+ */
+void mbe_setAmbeDefaultModel_common(mbe_parms* mp);
+
+/**
+ * @brief Initialize AMBE parameter state to the initial AMBE model.
+ *
+ * Sets the model from mbe_setAmbeDefaultModel_common() with zero phases,
+ * default smoothing and error state, the AMBE muting threshold and a cold
+ * unvoiced-noise start, and copies it to all three parameter sets.
+ *
+ * @param cur_mp  Output current parameter state.
+ * @param prev_mp Output previous parameter state.
+ * @param prev_mp_enhanced Output enhanced previous parameter state.
+ */
+void mbe_initAmbeParms_common(mbe_parms* cur_mp, mbe_parms* prev_mp, mbe_parms* prev_mp_enhanced);
+
+/**
+ * @brief Ensure AMBE parameter state is initialized with AMBE defaults.
+ *
+ * If the previous state does not appear to be AMBE-initialized, this
+ * routine resets all three state structs via mbe_initAmbeParms_common().
+ *
+ * @param cur_mp  In/out current parameter state.
+ * @param prev_mp In/out previous parameter state.
+ * @param prev_mp_enhanced In/out enhanced previous parameter state.
+ */
+void mbe_ensureAmbeDefaults_common(mbe_parms* cur_mp, mbe_parms* prev_mp, mbe_parms* prev_mp_enhanced);
+
+#endif /* MBELIB_NEO_INTERNAL_AMBE_COMMON_H */

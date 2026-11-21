@@ -1,0 +1,2456 @@
+import { showToast } from '../core/toast.js?v=2.9.699';
+import { resolveHotspotId, pushNavState, notifyNavClosed } from '../core/state.js?v=2.9.698';
+import { attachTgLivePreview } from '../core/formatters.js?v=2.9.787';
+
+/**
+ * ProxDMR BrandMeister Static & Dynamic TalkGroups Manager Module
+ * Handles BrandMeister static/dynamic TG subscriptions, drop dynamic,
+ * CSV/JSON import/export, and mobile dual-slot views.
+ */
+
+function setHotspotSlot(hid, slot, notifyServer = true) {
+  if (typeof window.setHotspotSlot === "function") {
+    return window.setHotspotSlot(hid, slot, notifyServer);
+  }
+}
+
+function setHotspotTg(hid, slot, tg, tune = true) {
+  if (typeof window.setHotspotTg === "function") {
+    return window.setHotspotTg(hid, slot, tg, tune);
+  }
+}
+
+// BrandMeister TalkGroups Action Buttons & Modal Elements
+const btnBmTgStaticEdit = document.getElementById("btnBmTgStaticEdit");
+const btnBmTgDynamicReset = document.getElementById("btnBmTgDynamicReset");
+const bmTgStaticModal = document.getElementById("bmTgStaticModal");
+const closeBmTgModalBtn = document.getElementById("closeBmTgModalBtn");
+const btnCloseBmTgModalBottom = document.getElementById("btnCloseBmTgModalBottom");
+const btnRefreshBmTg = document.getElementById("btnRefreshBmTg");
+const bmModalDeviceBadge = document.getElementById("bmModalDeviceBadge");
+const bmTgModalLoading = document.getElementById("bmTgModalLoading");
+const bmTgModalAlert = document.getElementById("bmTgModalAlert");
+const bmModalStatusText = document.getElementById("bmModalStatusText");
+const bmTabBtnStatic = document.getElementById("bmTabBtnStatic");
+const bmTabBtnDynamic = document.getElementById("bmTabBtnDynamic");
+const bmTabContentStatic = document.getElementById("bmTabContentStatic");
+const bmTabContentDynamic = document.getElementById("bmTabContentDynamic");
+const bmStaticTotalBadge = document.getElementById("bmStaticTotalBadge");
+const bmDynTotalBadge = document.getElementById("bmDynTotalBadge");
+const bmMobileSlotTs1Count = document.getElementById("bmMobileSlotTs1Count");
+const bmMobileSlotTs2Count = document.getElementById("bmMobileSlotTs2Count");
+const bmSlotColTs1 = document.getElementById("bmSlotColTs1");
+const bmSlotColTs2 = document.getElementById("bmSlotColTs2");
+const bmDynSlotColTs1 = document.getElementById("bmDynSlotColTs1");
+const bmDynSlotColTs2 = document.getElementById("bmDynSlotColTs2");
+const btnDropAllDynamic = document.getElementById("btnDropAllDynamic");
+const btnDropDynamicTs1 = document.getElementById("btnDropDynamicTs1");
+const btnDropDynamicTs2 = document.getElementById("btnDropDynamicTs2");
+const bmDynTs1Count = document.getElementById("bmDynTs1Count");
+const bmDynTs2Count = document.getElementById("bmDynTs2Count");
+const bmDynTs1List = document.getElementById("bmDynTs1List");
+const bmDynTs2List = document.getElementById("bmDynTs2List");
+
+// TS1 DOM Elements
+const bmTs1Count = document.getElementById("bmTs1Count");
+const chkSelectAllTs1 = document.getElementById("chkSelectAllTs1");
+const btnDeleteSelectedTs1 = document.getElementById("btnDeleteSelectedTs1");
+const selCountTs1 = document.getElementById("selCountTs1");
+const bmTs1List = document.getElementById("bmTs1List");
+const inputAddTgTs1 = document.getElementById("inputAddTgTs1");
+const btnAddTgTs1 = document.getElementById("btnAddTgTs1");
+const selectPresetTs1 = document.getElementById("selectPresetTs1");
+const btnAddPresetTs1 = document.getElementById("btnAddPresetTs1");
+
+// TS2 DOM Elements
+const bmTs2Count = document.getElementById("bmTs2Count");
+const chkSelectAllTs2 = document.getElementById("chkSelectAllTs2");
+const btnDeleteSelectedTs2 = document.getElementById("btnDeleteSelectedTs2");
+const selCountTs2 = document.getElementById("selCountTs2");
+const bmTs2List = document.getElementById("bmTs2List");
+const inputAddTgTs2 = document.getElementById("inputAddTgTs2");
+const btnAddTgTs2 = document.getElementById("btnAddTgTs2");
+const selectPresetTs2 = document.getElementById("selectPresetTs2");
+const btnAddPresetTs2 = document.getElementById("btnAddPresetTs2");
+
+// File Import Elements
+const inputFileTs1 = document.getElementById("inputFileTs1");
+const btnUploadFileTs1 = document.getElementById("btnUploadFileTs1");
+const btnExportFileTs1 = document.getElementById("btnExportFileTs1");
+const inputFileTs2 = document.getElementById("inputFileTs2");
+const btnUploadFileTs2 = document.getElementById("btnUploadFileTs2");
+const btnExportFileTs2 = document.getElementById("btnExportFileTs2");
+const bmFileConfirmModal = document.getElementById("bmFileConfirmModal");
+const closeFileConfirmBtn = document.getElementById("closeFileConfirmBtn");
+const btnCancelFileImport = document.getElementById("btnCancelFileImport");
+const btnConfirmFileImport = document.getElementById("btnConfirmFileImport");
+const bmFileStatName = document.getElementById("bmFileStatName");
+const bmFileStatSlotBadge = document.getElementById("bmFileStatSlotBadge");
+const bmStatFound = document.getElementById("bmStatFound");
+const bmStatUnique = document.getElementById("bmStatUnique");
+const bmStatAlready = document.getElementById("bmStatAlready");
+const bmStatNew = document.getElementById("bmStatNew");
+const bmFilePreviewList = document.getElementById("bmFilePreviewList");
+const bmFileConfirmPrompt = document.getElementById("bmFileConfirmPrompt");
+let pendingFileImport = null;
+
+// BM Background Import Elements
+const headerBmUploadIndicator = document.getElementById("headerBmUploadIndicator");
+const headerBmUploadPercent = document.getElementById("headerBmUploadPercent");
+const bmImportProgressCard = document.getElementById("bmImportProgressCard");
+const bmImportProgressTitleText = document.getElementById("bmImportProgressTitleText");
+const bmImportProgressPercent = document.getElementById("bmImportProgressPercent");
+const bmImportBarFill = document.getElementById("bmImportBarFill");
+const bmImportProgressCount = document.getElementById("bmImportProgressCount");
+const bmImportProgressSlot = document.getElementById("bmImportProgressSlot");
+const bmImportProgressErrors = document.getElementById("bmImportProgressErrors");
+const btnMinimizeBmImport = document.getElementById("btnMinimizeBmImport");
+const btnCancelBmImport = document.getElementById("btnCancelBmImport");
+
+let currentBmImportTask = null;
+let bmImportFinishedTimer = null;
+
+const POPULAR_TG_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_ru_main",
+    group: "Russia (Main & Federal Districts)",
+    items: [
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia (General / CIS)" },
+      { tg: 2501, labelKey: "bmtg_static.preset_2501", name: "2501 - Russia 1 (National)" },
+      { tg: 2502, labelKey: "bmtg_static.preset_2502", name: "2502 - Moscow & Region" },
+      { tg: 2503, labelKey: "bmtg_static.preset_2503", name: "2503 - St. Petersburg & NWFD" },
+      { tg: 2504, labelKey: "bmtg_static.preset_2504", name: "2504 - Central Federal District" },
+      { tg: 2505, labelKey: "bmtg_static.preset_2505", name: "2505 - Southern & Caucasus FD" },
+      { tg: 2506, labelKey: "bmtg_static.preset_2506", name: "2506 - Volga Federal District" },
+      { tg: 2507, labelKey: "bmtg_static.preset_2507", name: "2507 - Ural Federal District" },
+      { tg: 2508, labelKey: "bmtg_static.preset_2508", name: "2508 - Siberian Federal District" },
+      { tg: 2509, labelKey: "bmtg_static.preset_2509", name: "2509 - Far Eastern Federal District" },
+      { tg: 25020, labelKey: "bmtg_static.preset_25020", name: "25020 - ROSHAM Conference" },
+    ]
+  },
+  {
+    groupKey: "bmtg_static.preset_grp_ru_regions",
+    group: "Russian Regions & Oblasts",
+    items: [
+      { tg: 25011, labelKey: "bmtg_static.preset_25011", name: "25011 - Kaliningrad Oblast" },
+      { tg: 25033, labelKey: "bmtg_static.preset_25033", name: "25033 - Leningrad Oblast" },
+      { tg: 250601, labelKey: "bmtg_static.preset_250601", name: "250601 - Volgograd Oblast" },
+      { tg: 250602, labelKey: "bmtg_static.preset_250602", name: "250602 - Rostov Oblast" },
+      { tg: 250603, labelKey: "bmtg_static.preset_250603", name: "250603 - Armenia / Local" },
+      { tg: 250641, labelKey: "bmtg_static.preset_250641", name: "250641 - Krasnodar Krai" },
+      { tg: 250647, labelKey: "bmtg_static.preset_250647", name: "250647 - Stavropol Krai" },
+      { tg: 250907, labelKey: "bmtg_static.preset_250907", name: "250907 - Primorsky Krai" },
+    ]
+  },
+  {
+    groupKey: "bmtg_static.preset_grp_intl",
+    group: "International & Test",
+    items: [
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 92, labelKey: "bmtg_static.preset_92", name: "92 - Europe" },
+      { tg: 262, labelKey: "bmtg_static.preset_262", name: "262 - Germany" },
+      { tg: 310, labelKey: "bmtg_static.preset_310", name: "310 - USA (TAC 310)" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Echo Test (Parrot)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink / Reset" },
+    ]
+  }
+];
+
+// --- BrandMeister & TGIF TalkGroups Action Buttons & Static Manager Modal ---
+
+const POPULAR_TGIF_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_tgif",
+    group: "TGIF Network (Popular)",
+    items: [
+      { tg: 777, labelKey: "bmtg_static.preset_777", name: "777 - TGIF Multi-Lang (Main)" },
+      { tg: 31665, labelKey: "bmtg_static.preset_31665", name: "31665 - The Mothership (Main English)" },
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia / CIS" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Parrot (Echo Test)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink (Disconnect)" },
+    ]
+  }
+];
+
+const POPULAR_FREEDMR_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_freedmr",
+    group: "FreeDMR Network (Popular)",
+    items: [
+      { tg: 2501, labelKey: "bmtg_static.preset_2501", name: "2501 - Russia 1 (Main)" },
+      { tg: 2502, labelKey: "bmtg_static.preset_2502", name: "2502 - Russia 2" },
+      { tg: 2503, labelKey: "bmtg_static.preset_2503", name: "2503 - Russia 3" },
+      { tg: 2505, labelKey: "bmtg_static.preset_2505", name: "2505 - Russia South" },
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia (General)" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 92, labelKey: "bmtg_static.preset_92", name: "92 - Europe" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Parrot (Echo Test)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink (Disconnect)" },
+    ]
+  }
+];
+
+const POPULAR_ADN_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_adn",
+    group: "ADN Systems (Popular)",
+    items: [
+      { tg: 250, labelKey: "bmtg_static.preset_250", name: "250 - Russia (National)" },
+      { tg: 2501, labelKey: "bmtg_static.preset_2501", name: "2501 - Russia Central" },
+      { tg: 2502, labelKey: "bmtg_static.preset_2502", name: "2502 - Russia Northwest" },
+      { tg: 2503, labelKey: "bmtg_static.preset_2503", name: "2503 - Russia Volga" },
+      { tg: 2504, labelKey: "bmtg_static.preset_2504", name: "2504 - Russia Urals" },
+      { tg: 2505, labelKey: "bmtg_static.preset_2505", name: "2505 - Russia South" },
+      { tg: 91, labelKey: "bmtg_static.preset_91", name: "91 - Worldwide" },
+      { tg: 92, labelKey: "bmtg_static.preset_92", name: "92 - Europe" },
+      { tg: 93, labelKey: "bmtg_static.preset_93", name: "93 - North America" },
+      { tg: 9990, labelKey: "bmtg_static.preset_9990", name: "9990 - Parrot (Echo Test)" },
+      { tg: 4000, labelKey: "bmtg_static.preset_4000", name: "4000 - Unlink (Disconnect)" },
+    ]
+  }
+];
+
+const POPULAR_XLX_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_xlx",
+    group: "XLX Reflector (TS2 Modules)",
+    items: [
+      { tg: 4004, labelKey: "bmtg_static.preset_xlx_4004", name: "Module D (TG 4004 - Main)" },
+      { tg: 4001, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "A", tg: 4001 }, name: "Module A (TG 4001)" },
+      { tg: 4002, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "B", tg: 4002 }, name: "Module B (TG 4002)" },
+      { tg: 4003, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "C", tg: 4003 }, name: "Module C (TG 4003)" },
+      { tg: 4005, labelKey: "bmtg_static.preset_xlx_mod", labelParams: { mod: "E", tg: 4005 }, name: "Module E (TG 4005)" },
+      { tg: 9, labelKey: "bmtg_static.preset_xlx_9", name: "TG 9 - Reflector Voice Call" },
+      { tg: 4000, labelKey: "bmtg_static.preset_xlx_4000", name: "TG 4000 - Disconnect Module (Unlink)" },
+    ]
+  }
+];
+
+const POPULAR_DMRPLUS_PRESETS = [
+  {
+    groupKey: "bmtg_static.preset_grp_dmrplus_refl",
+    group: "DMR+ Reflectors (TS2)",
+    items: [
+      { tg: 4530, name: "4530 - Reflector RU (Russia / CIS)" },
+      { tg: 4001, name: "4001 - Reflector DL (Germany General)" },
+      { tg: 4020, name: "4020 - Reflector HB9 (Switzerland)" },
+      { tg: 4030, name: "4030 - Reflector OE (Austria)" },
+      { tg: 4300, name: "4300 - Reflector F (France)" },
+      { tg: 4350, name: "4350 - Reflector I (Italy)" },
+      { tg: 4400, name: "4400 - Reflector UK (United Kingdom)" },
+      { tg: 4500, name: "4500 - Reflector EA (Spain)" },
+      { tg: 4700, name: "4700 - Reflector US (North America)" },
+      { tg: 4800, name: "4800 - Reflector PY (Brazil)" },
+      { tg: 4000, name: "4000 - Unlink Reflector" },
+    ]
+  },
+  {
+    groupKey: "bmtg_static.preset_grp_dmrplus_ts1",
+    group: "DMR+ Static TalkGroups (TS1 / TS2)",
+    items: [
+      { tg: 1, name: "1 - Worldwide" },
+      { tg: 2, name: "2 - Europe" },
+      { tg: 8, name: "8 - Regional Net" },
+      { tg: 13, name: "13 - Worldwide English" },
+      { tg: 20, name: "20 - DACH (DE/AT/CH)" },
+      { tg: 250, name: "250 - Russia National" },
+      { tg: 262, name: "262 - Germany" },
+      { tg: 208, name: "208 - France" },
+      { tg: 222, name: "222 - Italy" },
+      { tg: 235, name: "235 - United Kingdom" },
+    ]
+  }
+];
+
+export function resolveNetworkInfo(taskOrHsOrNetType, fallbackHs = null) {
+  let netType = "";
+  if (typeof taskOrHsOrNetType === "string") {
+    netType = taskOrHsOrNetType;
+  } else if (taskOrHsOrNetType && typeof taskOrHsOrNetType === "object") {
+    netType = taskOrHsOrNetType.network_type || "";
+    if (!netType && taskOrHsOrNetType.hotspot_id) {
+      const foundHs = (window.currentHotspots || []).find(h => h.id === taskOrHsOrNetType.hotspot_id);
+      if (foundHs) netType = foundHs.network_type || "";
+    }
+  }
+  if (!netType && fallbackHs) {
+    netType = fallbackHs.network_type || "";
+  }
+  if (!netType) {
+    const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
+    if (curHs) netType = curHs.network_type || "";
+  }
+  netType = (netType || "bm").toLowerCase();
+
+  const isTgif = (netType === "tgif");
+  const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
+  const isXlx = (netType === "xlx");
+  const isDmrPlus = (netType === "dmrplus");
+  const isBm = (!isTgif && !isFreeDmr && !isAdn && !isXlx && !isDmrPlus);
+
+  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isAdn ? "ADN" : (isXlx ? "XLX" : (isDmrPlus ? "DMR+" : "BM"))));
+  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isAdn ? "ADN Systems" : (isXlx ? "XLX Reflector" : (isDmrPlus ? "DMR+ / IPSC2" : "BrandMeister"))));
+
+  return { netType, isTgif, isFreeDmr, isAdn, isXlx, isDmrPlus, isBm, netShort, netFull };
+}
+
+function populatePresetSelects(netType = "bm") {
+  const isTgif = (netType === "tgif");
+  const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
+  const isXlx = (netType === "xlx");
+  const isDmrPlus = (netType === "dmrplus");
+  let presets = POPULAR_TG_PRESETS;
+  if (isTgif) presets = POPULAR_TGIF_PRESETS;
+  else if (isFreeDmr) presets = POPULAR_FREEDMR_PRESETS;
+  else if (isAdn) presets = POPULAR_ADN_PRESETS;
+  else if (isXlx) presets = POPULAR_XLX_PRESETS;
+  else if (isDmrPlus) presets = POPULAR_DMRPLUS_PRESETS;
+
+  [selectPresetTs1, selectPresetTs2].forEach((sel, idx) => {
+    if (!sel) return;
+    const defPlaceholder = window.t ? window.t("bmtg_static.select_preset_placeholder", {}, "-- Select from list --") : "-- Select from list --";
+    sel.innerHTML = "";
+    const defOpt = document.createElement("option");
+    defOpt.value = "";
+    if (isXlx && idx === 0) {
+      defOpt.textContent = window.t ? window.t("bmtg_static.xlx_ts1_unsupported", {}, "-- TS1 is not supported in XLX --") : "-- TS1 is not supported in XLX --";
+      sel.appendChild(defOpt);
+      return;
+    }
+    defOpt.textContent = defPlaceholder;
+    sel.appendChild(defOpt);
+    presets.forEach(group => {
+      const optgroup = document.createElement("optgroup");
+      optgroup.label = (group.groupKey && window.t) ? window.t(group.groupKey, {}, group.group) : group.group;
+      group.items.forEach(item => {
+        const opt = document.createElement("option");
+        opt.value = item.tg;
+        opt.textContent = (item.labelKey && window.t)
+          ? window.t(item.labelKey, item.labelParams || {}, item.name)
+          : item.name;
+        optgroup.appendChild(opt);
+      });
+      sel.appendChild(optgroup);
+    });
+  });
+}
+populatePresetSelects();
+
+function applyManagerNetworkBranding(netType, hs, apiData = null) {
+  const isTgif = (netType === "tgif");
+  const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
+  const isXlx = (netType === "xlx");
+  const isDmrPlus = (netType === "dmrplus");
+  const netShort = isTgif ? "TGIF" : (isFreeDmr ? "FreeDMR" : (isAdn ? "ADN" : (isXlx ? "XLX" : (isDmrPlus ? "DMR+" : "BM"))));
+  const netFull = isTgif ? "TGIF Network" : (isFreeDmr ? "FreeDMR Network" : (isAdn ? "ADN Systems" : (isXlx ? "XLX Reflector" : (isDmrPlus ? "DMR+ / IPSC2" : "BrandMeister"))));
+
+  const modalTitleEl = document.getElementById("bmModalTitleText");
+  if (modalTitleEl) {
+    if (isTgif) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_tgif", {}, "⚡ Управление TalkGroups TGIF") : "⚡ Управление TalkGroups TGIF";
+    } else if (isFreeDmr) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_freedmr", {}, "⚡ Управление TalkGroups FreeDMR") : "⚡ Управление TalkGroups FreeDMR";
+    } else if (isAdn) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_adn", {}, "⚡ Управление TalkGroups ADN Systems") : "⚡ Управление TalkGroups ADN Systems";
+    } else if (isXlx) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_xlx", {}, "⚡ Управление модулями XLX") : "⚡ Управление модулями XLX";
+    } else if (isDmrPlus) {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title_dmrplus", {}, "⚡ Рефлекторы и TG DMR+ (IPSC2)") : "⚡ Рефлекторы и TG DMR+ (IPSC2)";
+    } else {
+      modalTitleEl.textContent = window.t ? window.t("bmtg.title", {}, "⚡ Управление TalkGroups BrandMeister") : "⚡ Управление TalkGroups BrandMeister";
+    }
+  }
+
+  if (bmModalDeviceBadge) {
+    if (hs) {
+      const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid > 0) ? String(hs.bm_ssid).padStart(2, "0") : "";
+      const effId = apiData?.device_id || (hs.dmr_id ? `${hs.dmr_id}${ssidStr}` : "---");
+      const hsLabel = hs.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot");
+      if (isTgif && apiData && apiData.limit !== undefined) {
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_tgif_limit", { name: hsLabel, id: effId, limit: apiData.limit }, `${hsLabel} (ID: ${effId} • limit: ${apiData.limit})`)
+          : `${hsLabel} (ID: ${effId} • limit: ${apiData.limit})`;
+      } else if (isXlx) {
+        const curMod = apiData?.xlx_module || hs.xlx_module || "D";
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_xlx_mod", { name: hsLabel, id: effId, mod: curMod }, `${hsLabel} (ID: ${effId} • Module: ${curMod})`)
+          : `${hsLabel} (ID: ${effId} • Module: ${curMod})`;
+      } else if (isDmrPlus) {
+        const curRef = (apiData && apiData.dmrplus_reflector !== undefined) ? (apiData.dmrplus_reflector || "Unlinked") : (hs.dmrplus_reflector || "Unlinked");
+        const rptoLen = ((apiData && apiData.rpto_options) || hs.rpto_options || "").length;
+        bmModalDeviceBadge.textContent = `${hsLabel} (ID: ${effId} • Ref: ${curRef} • RPTO: ${rptoLen}/255 B)`;
+      } else if (isFreeDmr && hs.rpto_options) {
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_freedmr_rpto", { name: hsLabel, id: effId, len: hs.rpto_options.length }, `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`)
+          : `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`;
+      } else if (isAdn && hs.rpto_options) {
+        bmModalDeviceBadge.textContent = window.t
+          ? window.t("bmtg_static.badge_adn_rpto", { name: hsLabel, id: effId, len: hs.rpto_options.length }, `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`)
+          : `${hsLabel} (ID: ${effId} • RPTO: ${hs.rpto_options.length}/255 B)`;
+      } else {
+        bmModalDeviceBadge.textContent = `${hsLabel} (ID: ${effId})`;
+      }
+    } else {
+      bmModalDeviceBadge.textContent = "ID: ---";
+    }
+  }
+
+  if (btnRefreshBmTg) {
+    if (isTgif) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_tgif", {}, "Синхронизировать с TGIF API") : "Синхронизировать с TGIF API";
+    } else if (isFreeDmr) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_freedmr", {}, "Синхронизировать с RPTO FreeDMR") : "Синхронизировать с RPTO FreeDMR";
+    } else if (isAdn) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_adn", {}, "Синхронизировать с RPTO ADN Systems") : "Синхронизировать с RPTO ADN Systems";
+    } else if (isXlx) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_xlx", {}, "Синхронизировать состояние модулей XLX") : "Синхронизировать состояние модулей XLX";
+    } else if (isDmrPlus) {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title_dmrplus", {}, "Синхронизировать с RPTO DMR+ / IPSC2") : "Синхронизировать с RPTO DMR+ / IPSC2";
+    } else {
+      btnRefreshBmTg.title = window.t ? window.t("bmtg_static.refresh_title", {}, "Синхронизировать с BM API") : "Синхронизировать с BM API";
+    }
+  }
+
+  const loadingTextEl = document.getElementById("bmTgModalLoadingText");
+  if (loadingTextEl) {
+    if (isTgif) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_tgif", {}, "Загрузка данных TGIF API...") : "Загрузка данных TGIF API...";
+    } else if (isFreeDmr) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_freedmr", {}, "Загрузка конфигурации FreeDMR...") : "Загрузка конфигурации FreeDMR...";
+    } else if (isAdn) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_adn", {}, "Загрузка конфигурации ADN Systems...") : "Загрузка конфигурации ADN Systems...";
+    } else if (isXlx) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_xlx", {}, "Загрузка модулей рефлектора XLX...") : "Загрузка модулей рефлектора XLX...";
+    } else if (isDmrPlus) {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading_dmrplus", {}, "Загрузка конфигурации DMR+ / IPSC2...") : "Загрузка конфигурации DMR+ / IPSC2...";
+    } else {
+      loadingTextEl.textContent = window.t ? window.t("bmtg_static.loading", {}, "Загрузка данных BM API...") : "Загрузка данных BM API...";
+    }
+  }
+
+  const progressTitleEl = document.getElementById("bmImportProgressTitleText");
+  if (progressTitleEl && currentBmImportTask) {
+    const taskInfo = resolveNetworkInfo(currentBmImportTask, hs);
+    const titleKey = currentBmImportTask.action === "delete" ? "bmtg_static.progress_title_del" : "bmtg_static.progress_title_imp";
+    progressTitleEl.textContent = window.t ? window.t(titleKey, { net: taskInfo.netFull }) : taskInfo.netFull;
+  }
+
+  populatePresetSelects(netType);
+}
+
+window.__bmStaticState = window.__bmStaticState || {
+  staticTgsTs1: [],
+  staticTgsTs2: [],
+  dynamicTgsTs1: [],
+  dynamicTgsTs2: [],
+  selectedTs1: new Set(),
+  selectedTs2: new Set()
+};
+let staticTgsTs1 = window.__bmStaticState.staticTgsTs1;
+let staticTgsTs2 = window.__bmStaticState.staticTgsTs2;
+let dynamicTgsTs1 = window.__bmStaticState.dynamicTgsTs1;
+let dynamicTgsTs2 = window.__bmStaticState.dynamicTgsTs2;
+let selectedTs1 = window.__bmStaticState.selectedTs1;
+let selectedTs2 = window.__bmStaticState.selectedTs2;
+let isBmTgLoading = false;
+let currentStaticModalHotspotId = null;
+let currentBmTgActiveTab = "static";
+let currentBmMobileSlot = 1;
+
+function switchBmTgTab(tabName) {
+  currentBmTgActiveTab = (tabName === "dynamic") ? "dynamic" : "static";
+  try {
+    localStorage.setItem("proxdmr_bmtg_active_tab", currentBmTgActiveTab);
+  } catch (e) {}
+
+  const isDynamic = currentBmTgActiveTab === "dynamic";
+  if (bmTabBtnStatic) {
+    bmTabBtnStatic.classList.toggle("active", !isDynamic);
+    bmTabBtnStatic.setAttribute("aria-selected", !isDynamic ? "true" : "false");
+  }
+  if (bmTabBtnDynamic) {
+    bmTabBtnDynamic.classList.toggle("active", isDynamic);
+    bmTabBtnDynamic.setAttribute("aria-selected", isDynamic ? "true" : "false");
+  }
+  if (bmTabContentStatic) {
+    bmTabContentStatic.classList.toggle("active", !isDynamic);
+  }
+  if (bmTabContentDynamic) {
+    bmTabContentDynamic.classList.toggle("active", isDynamic);
+  }
+
+  updateMobileSlotBadges();
+}
+
+function switchBmMobileSlot(slotNum) {
+  currentBmMobileSlot = slotNum === 2 ? 2 : 1;
+  const isSlot1 = currentBmMobileSlot === 1;
+
+  document.querySelectorAll(".bm-mobile-slot-btn").forEach(btn => {
+    const btnSlot = parseInt(btn.getAttribute("data-mobile-slot"), 10);
+    btn.classList.toggle("active", btnSlot === currentBmMobileSlot);
+  });
+
+  if (bmSlotColTs1) bmSlotColTs1.classList.toggle("mobile-active", isSlot1);
+  if (bmSlotColTs2) bmSlotColTs2.classList.toggle("mobile-active", !isSlot1);
+  if (bmDynSlotColTs1) bmDynSlotColTs1.classList.toggle("mobile-active", isSlot1);
+  if (bmDynSlotColTs2) bmDynSlotColTs2.classList.toggle("mobile-active", !isSlot1);
+}
+
+function updateMobileSlotBadges() {
+  const isDynamic = currentBmTgActiveTab === "dynamic";
+  const ts1Count = isDynamic ? dynamicTgsTs1.length : staticTgsTs1.length;
+  const ts2Count = isDynamic ? dynamicTgsTs2.length : staticTgsTs2.length;
+  if (bmMobileSlotTs1Count) bmMobileSlotTs1Count.textContent = ts1Count;
+  if (bmMobileSlotTs2Count) bmMobileSlotTs2Count.textContent = ts2Count;
+}
+
+function openBmTgStaticModal(targetHid) {
+  const resolvedHid = resolveHotspotId(targetHid || (typeof window !== "undefined" ? window.activeHotspotId : null));
+  currentStaticModalHotspotId = resolvedHid;
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  const hs = hsList.find(h => h.id === currentStaticModalHotspotId) || hsList[0];
+  const netType = ((hs && hs.network_type) || "bm").toLowerCase();
+
+  applyManagerNetworkBranding(netType, hs);
+
+  // Always reset lists immediately so stale groups from another hotspot never show
+  staticTgsTs1 = [];
+  staticTgsTs2 = [];
+  dynamicTgsTs1 = [];
+  dynamicTgsTs2 = [];
+  selectedTs1.clear();
+  selectedTs2.clear();
+  renderSlotList(1);
+  renderSlotList(2);
+  renderDynamicSlotList(1);
+  renderDynamicSlotList(2);
+
+  // Restore last active tab from localStorage
+  let savedTab = "static";
+  try {
+    savedTab = localStorage.getItem("proxdmr_bmtg_active_tab") || "static";
+  } catch (e) {}
+  switchBmTgTab(savedTab);
+  switchBmMobileSlot(currentBmMobileSlot || 1);
+
+  if (typeof window.closePrimaryModals === "function") {
+    window.closePrimaryModals("bmTgStaticModal");
+  }
+
+  if (bmTgStaticModal) {
+    bmTgStaticModal.style.display = "flex";
+    bmTgStaticModal.classList.add("active");
+    pushNavState("modal", "bmTgStaticModal");
+  }
+
+  loadBmTgStaticGroups(currentStaticModalHotspotId);
+  checkBmImportStatus();
+}
+
+function showBmTgAlert(msg, type = "error") {
+  if (!bmTgModalAlert) return;
+  if (!msg) {
+    bmTgModalAlert.className = "bm-modal-alert hidden";
+    bmTgModalAlert.textContent = "";
+    return;
+  }
+  bmTgModalAlert.className = `bm-modal-alert alert-${type}`;
+  bmTgModalAlert.textContent = msg;
+}
+
+async function loadBmTgStaticGroups(targetHid) {
+  if (isBmTgLoading) return;
+  isBmTgLoading = true;
+  showBmTgAlert(null);
+  if (bmTgModalLoading) bmTgModalLoading.classList.remove("hidden");
+  const hid = targetHid || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : "default");
+  const curHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+  const hs = curHotspots.find(h => h.id === hid) || curHotspots[0];
+  const { isTgif: isTgifInitial, isFreeDmr: isFreeDmrInitial, isAdn: isAdnInitial, isXlx: isXlxInitial, netShort: netShortInitial } = resolveNetworkInfo(hs);
+
+  if (bmModalStatusText) {
+    bmModalStatusText.textContent = isTgifInitial
+      ? (window.t ? window.t("bmtg_static.requesting_tgif", {}, "Запрос к TGIF API...") : "Запрос к TGIF API...")
+      : (isFreeDmrInitial
+        ? (window.t ? window.t("bmtg_static.requesting_freedmr", {}, "Запрос к FreeDMR...") : "Запрос к FreeDMR...")
+        : (isAdnInitial
+          ? (window.t ? window.t("bmtg_static.requesting_adn", {}, "Запрос к ADN Systems...") : "Запрос к ADN Systems...")
+          : (isXlxInitial
+            ? (window.t ? window.t("bmtg_static.requesting_xlx", {}, "Запрос к XLX...") : "Запрос к XLX...")
+            : (window.t ? window.t("bmtg_static.requesting", {}, "Запрос к BM API...") : "Запрос к BM API..."))));
+  }
+
+  if (bmModalDeviceBadge && hs) {
+    const ssidStr = (hs.bm_ssid !== undefined && hs.bm_ssid > 0) ? String(hs.bm_ssid).padStart(2, "0") : "";
+    const effId = hs.dmr_id ? `${hs.dmr_id}${ssidStr}` : "---";
+    const hsLabel = hs.name || (window.t ? window.t("hotspots.default_name", {}, "Hotspot") : "Hotspot");
+    bmModalDeviceBadge.textContent = `${hsLabel} (ID: ${effId})`;
+  }
+
+  try {
+    const url = hid ? `/api/bm/static-groups?hotspot_id=${encodeURIComponent(hid)}` : "/api/bm/static-groups";
+    const resp = await fetch(url);
+    const rawText = await resp.text().catch(() => "");
+    let data;
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      data = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+    }
+
+    if (data.status !== "ok") {
+      staticTgsTs1 = [];
+      staticTgsTs2 = [];
+      dynamicTgsTs1 = [];
+      dynamicTgsTs2 = [];
+      selectedTs1.clear();
+      selectedTs2.clear();
+      renderSlotList(1);
+      renderSlotList(2);
+      renderDynamicSlotList(1);
+      renderDynamicSlotList(2);
+      if (bmStaticTotalBadge) bmStaticTotalBadge.textContent = "0";
+      if (bmDynTotalBadge) bmDynTotalBadge.textContent = "0";
+      updateMobileSlotBadges();
+      if (data.code === "NO_API_KEY" && isTgifInitial) {
+        const noKeyMsg = window.t ? window.t("bmtg_static.tgif_no_api_key") : "Enter TGIF API Key in hotspot settings.";
+        showBmTgAlert(data.detail || noKeyMsg, "info");
+      } else {
+        const failMsg = window.t ? window.t("bmtg_static.fetch_failed", { net: netShortInitial }) : `Failed to load groups from ${netShortInitial}`;
+        showBmTgAlert(data.detail || failMsg, "error");
+      }
+      if (bmModalStatusText) bmModalStatusText.textContent = window.t ? window.t("bmtg_static.sync_error") : "Ошибка синхронизации";
+      return;
+    }
+
+    const netType = String(data.network_type || (hs && hs.network_type) || "bm").toLowerCase();
+    if (data.rpto_options !== undefined && hs) {
+      hs.rpto_options = data.rpto_options;
+    }
+    if (data.xlx_module !== undefined && hs) {
+      hs.xlx_module = data.xlx_module;
+    }
+    if (data.dmrplus_reflector !== undefined && hs) {
+      hs.dmrplus_reflector = data.dmrplus_reflector;
+    }
+    applyManagerNetworkBranding(netType, hs, data);
+
+    if (data.tg_names) {
+      if (netType === "tgif") {
+        if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+        Object.assign(window.TGIF_TG_NAMES, data.tg_names);
+        try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+      } else if (netType === "freedmr") {
+        if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+        Object.assign(window.FREEDMR_TG_NAMES, data.tg_names);
+        try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+      } else if (netType === "adn") {
+        if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+        Object.assign(window.ADN_TG_NAMES, data.tg_names);
+        try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (_) {}
+      } else if (netType === "dmrplus") {
+        if (!window.DMRPLUS_TG_NAMES) window.DMRPLUS_TG_NAMES = {};
+        Object.assign(window.DMRPLUS_TG_NAMES, data.tg_names);
+        try { localStorage.setItem("proxdmr_dmrplus_tg_names_cache", JSON.stringify(window.DMRPLUS_TG_NAMES)); } catch (_) {}
+      } else {
+        Object.assign((window.TG_NAMES || {}), data.tg_names);
+        try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
+      }
+    }
+
+    staticTgsTs1 = data.ts1 || [];
+    staticTgsTs2 = data.ts2 || [];
+    dynamicTgsTs1 = data.dynamic_ts1 || [];
+    dynamicTgsTs2 = data.dynamic_ts2 || [];
+    selectedTs1.clear();
+    selectedTs2.clear();
+    if (window.__bmStaticState) {
+      window.__bmStaticState.staticTgsTs1 = staticTgsTs1;
+      window.__bmStaticState.staticTgsTs2 = staticTgsTs2;
+      window.__bmStaticState.dynamicTgsTs1 = dynamicTgsTs1;
+      window.__bmStaticState.dynamicTgsTs2 = dynamicTgsTs2;
+      window.__bmStaticState.selectedTs1 = selectedTs1;
+      window.__bmStaticState.selectedTs2 = selectedTs2;
+    }
+
+    renderSlotList(1);
+    renderSlotList(2);
+    renderDynamicSlotList(1);
+    renderDynamicSlotList(2);
+
+    if (bmStaticTotalBadge) bmStaticTotalBadge.textContent = staticTgsTs1.length + staticTgsTs2.length;
+    if (bmDynTotalBadge) bmDynTotalBadge.textContent = dynamicTgsTs1.length + dynamicTgsTs2.length;
+    updateMobileSlotBadges();
+
+    if (netType !== "bm" && netType !== "tgif" && netType !== "freedmr" && netType !== "adn" && netType !== "xlx" && netType !== "dmrplus") {
+      const netLabel = netType.toUpperCase();
+      const dynOnlyMsg = window.t ? window.t("bmtg_static.no_static_dynamic_only", { net: netLabel }) : `${netLabel}: dynamic talkgroups via PTT only.`;
+      showBmTgAlert(dynOnlyMsg, "info");
+      if (currentBmTgActiveTab === "static") {
+        switchBmTgTab("dynamic");
+      }
+    }
+
+    const timeStr = new Date().toLocaleTimeString();
+    if (bmModalStatusText) {
+      bmModalStatusText.textContent = window.t 
+        ? window.t("bmtg_static.synced_at", { time: timeStr, ts1: staticTgsTs1.length, ts2: staticTgsTs2.length })
+        : `Синхронизировано в ${timeStr} (TS1: ${staticTgsTs1.length}, TS2: ${staticTgsTs2.length})`;
+    }
+  } catch (err) {
+    staticTgsTs1 = [];
+    staticTgsTs2 = [];
+    dynamicTgsTs1 = [];
+    dynamicTgsTs2 = [];
+    selectedTs1.clear();
+    selectedTs2.clear();
+    renderSlotList(1);
+    renderSlotList(2);
+    renderDynamicSlotList(1);
+    renderDynamicSlotList(2);
+    if (bmStaticTotalBadge) bmStaticTotalBadge.textContent = "0";
+    if (bmDynTotalBadge) bmDynTotalBadge.textContent = "0";
+    updateMobileSlotBadges();
+    const netErrMsg = window.t ? window.t("bmtg_static.net_err_detail", { err }) : `Network error: ${err}`;
+    showBmTgAlert(netErrMsg, "error");
+    if (bmModalStatusText) bmModalStatusText.textContent = window.t ? window.t("bmtg_static.net_error") : "Сетевая ошибка";
+  } finally {
+    isBmTgLoading = false;
+    if (bmTgModalLoading) bmTgModalLoading.classList.add("hidden");
+  }
+}
+
+function renderSlotList(slot) {
+  const isSlot1 = slot === 1;
+  const items = isSlot1 ? (window.__bmStaticState?.staticTgsTs1 || staticTgsTs1) : (window.__bmStaticState?.staticTgsTs2 || staticTgsTs2);
+  const selectedSet = isSlot1 ? (window.__bmStaticState?.selectedTs1 || selectedTs1) : (window.__bmStaticState?.selectedTs2 || selectedTs2);
+  const listEl = isSlot1 ? bmTs1List : bmTs2List;
+  const countEl = isSlot1 ? bmTs1Count : bmTs2Count;
+  const chkAllEl = isSlot1 ? chkSelectAllTs1 : chkSelectAllTs2;
+  const btnBulkDelEl = isSlot1 ? btnDeleteSelectedTs1 : btnDeleteSelectedTs2;
+  const selCountEl = isSlot1 ? selCountTs1 : selCountTs2;
+
+  if (!listEl) return;
+
+  const curHs = (window.currentHotspots || []).find(h => h.id === (currentStaticModalHotspotId || window.activeHotspotId)) || null;
+  const netType = ((curHs && curHs.network_type) || "bm").toLowerCase();
+  const isTgif = (netType === "tgif");
+  const isFreeDmr = (netType === "freedmr");
+  const isAdn = (netType === "adn");
+  const isXlx = (netType === "xlx");
+  const isDmrPlus = (netType === "dmrplus");
+
+  if (isSlot1 && isXlx) {
+    if (countEl) countEl.textContent = window.t ? window.t("bmtg_static.xlx_ts1_off", {}, "TS1 disabled in XLX") : "TS1 disabled in XLX";
+    if (selCountEl) selCountEl.textContent = "0";
+    if (btnBulkDelEl) { btnBulkDelEl.classList.add("disabled"); btnBulkDelEl.disabled = true; }
+    if (chkAllEl) { chkAllEl.checked = false; chkAllEl.disabled = true; }
+    const explainHtml = window.t ? window.t("bmtg_static.xlx_ts1_explain") : "XLX Reflectors (MMDVM) operate exclusively on <b>Timeslot 2 (TS2)</b>.";
+    listEl.innerHTML = `<div class="bm-empty-msg" style="color:var(--text-muted); padding:16px 12px; text-align:center;">${explainHtml}</div>`;
+    return;
+  }
+
+  if (!isSlot1 && isXlx) {
+    const curMod = (curHs?.xlx_module || (items[0]?.module) || "").toUpperCase() || "";
+    const activeModTg = curMod ? (4000 + Math.max(1, Math.min(26, curMod.charCodeAt(0) - 64))) : 0;
+    if (countEl) {
+      countEl.textContent = curMod
+        ? (window.t ? window.t("bmtg_static.xlx_mod_badge", { mod: curMod, tg: activeModTg }, `Module ${curMod} (TG ${activeModTg})`) : `Module ${curMod} (TG ${activeModTg})`)
+        : (window.t ? window.t("bmtg_static.xlx_mod_none", {}, "Module not selected") : "Module not selected");
+    }
+    if (selCountEl) selCountEl.textContent = "0";
+    if (btnBulkDelEl) { btnBulkDelEl.classList.add("disabled"); btnBulkDelEl.disabled = true; }
+    if (chkAllEl) { chkAllEl.checked = false; chkAllEl.disabled = true; }
+
+    const xlxGridTitle = window.t ? window.t("bmtg_static.xlx_grid_title", {}, "⚡ XLX MODULES (A–Z) ON TS2:") : "⚡ XLX MODULES (A–Z) ON TS2:";
+    const xlxUnlinkTitle = window.t ? window.t("bmtg_static.xlx_unlink_title", {}, "Disconnect module (TG 4000)") : "Disconnect module (TG 4000)";
+    const xlxUnlinkBtn = window.t ? window.t("bmtg_static.xlx_unlink_btn", {}, "🔌 Unlink (4000)") : "🔌 Unlink (4000)";
+    const xlxGridHint = window.t ? window.t("bmtg_static.xlx_grid_hint") : "Click a module letter for instant switching (TG 4001–4026).";
+
+    let gridHtml = `
+      <div style="margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.22); border-radius: 0px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.75rem; font-weight:700; color:#fbbf24;">${xlxGridTitle}</span>
+          <button type="button" class="btn-xlx-unlink" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius: 0px; padding:3px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" title="${xlxUnlinkTitle}">${xlxUnlinkBtn}</button>
+        </div>
+        <div class="xlx-modules-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(44px, 1fr)); gap:5px;">
+    `;
+
+    for (let i = 0; i < 26; i++) {
+      const letter = String.fromCharCode(65 + i);
+      const tgNum = 4001 + i;
+      const isActive = (curMod === letter);
+      const bgStyle = isActive
+        ? "background:#f59e0b; color:#000; font-weight:800; border:1px solid #d97706; box-shadow:0 0 8px rgba(245,158,11,0.5);"
+        : "background:rgba(255,255,255,0.06); color:var(--text-primary); border:1px solid rgba(255,255,255,0.14);";
+      gridHtml += `<button type="button" class="btn-xlx-mod-tile" data-module="${letter}" data-tg="${tgNum}" style="${bgStyle} border-radius: 0px; padding:6px 2px; font-size:0.75rem; cursor:pointer; text-align:center; transition:all 0.15s ease;">${letter}<br><span style="font-size:0.6rem; opacity:0.85;">${tgNum}</span></button>`;
+    }
+    gridHtml += `</div>
+      <div style="font-size:0.68rem; color:var(--text-muted); margin-top:8px; line-height:1.35;">
+        ${xlxGridHint}
+      </div>
+    </div>`;
+
+    listEl.innerHTML = gridHtml;
+
+    listEl.querySelectorAll(".btn-xlx-mod-tile").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const targetTg = parseInt(btn.dataset.tg, 10);
+        const targetMod = btn.dataset.module;
+        if (targetTg >= 4001 && targetTg <= 4026) {
+          if (curHs) curHs.xlx_module = targetMod;
+          await executeAddTg(2, targetTg);
+        }
+      });
+    });
+
+    const btnUnlink = listEl.querySelector(".btn-xlx-unlink");
+    if (btnUnlink) {
+      btnUnlink.addEventListener("click", async () => {
+        if (curHs) curHs.xlx_module = "";
+        await executeDeleteTgs(2, [4000]);
+      });
+    }
+
+    return;
+  }
+
+  if (countEl) {
+    if (isDmrPlus) {
+      countEl.textContent = `${items.length} / 5 (IPSC2)`;
+    } else {
+      const gText = items.length === 1
+        ? (window.t ? window.t("bmtg_static.group_one", { count: items.length }) : `${items.length} группа`)
+        : (window.t ? window.t("bmtg_static.groups_count", { count: items.length }) : `${items.length} групп`);
+      countEl.textContent = gText;
+    }
+  }
+
+  if (selCountEl) selCountEl.textContent = selectedSet.size;
+  if (btnBulkDelEl) {
+    btnBulkDelEl.classList.toggle("disabled", selectedSet.size === 0);
+    btnBulkDelEl.disabled = selectedSet.size === 0;
+  }
+  if (chkAllEl) {
+    chkAllEl.checked = items.length > 0 && selectedSet.size === items.length;
+  }
+
+  listEl.innerHTML = "";
+
+  if (!isSlot1 && isDmrPlus) {
+    const curRef = String((curHs && curHs.dmrplus_reflector) || "").trim();
+    const dmrpNames = (typeof window !== "undefined" && window.DMRPLUS_TG_NAMES) || {};
+    const curRefDesc = curRef ? (dmrpNames[curRef] || `Reflector ${curRef}`) : "Unlinked (TG 4000)";
+    const quickRefs = [
+      { id: "4530", label: "4530 RU" },
+      { id: "4001", label: "4001 DL" },
+      { id: "4020", label: "4020 HB" },
+      { id: "4030", label: "4030 OE" },
+      { id: "4300", label: "4300 FR" },
+      { id: "4350", label: "4350 IT" },
+      { id: "4400", label: "4400 UK" },
+      { id: "4500", label: "4500 ES" },
+      { id: "4700", label: "4700 US" },
+      { id: "4800", label: "4800 BR" },
+    ];
+    const reflBox = document.createElement("div");
+    reflBox.style.cssText = "margin-bottom:10px; padding:10px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.28);";
+    let tilesHtml = "";
+    quickRefs.forEach(r => {
+      const isAct = (curRef === r.id);
+      const tStyle = isAct
+        ? "background:#8b5cf6; color:#fff; font-weight:800; border:1px solid #a78bfa;"
+        : "background:rgba(255,255,255,0.06); color:var(--text-primary); border:1px solid rgba(255,255,255,0.14);";
+      tilesHtml += `<button type="button" class="btn-dmrplus-modal-tile" data-ref="${r.id}" title="${dmrpNames[r.id] || r.label}" style="${tStyle} padding:5px 4px; font-size:0.72rem; cursor:pointer; text-align:center;">${r.label}</button>`;
+    });
+    reflBox.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="font-size:0.76rem; font-weight:700; color:#c4b5fd;">📡 DMR+ Reflector (TS2 • Voice TG 9): <b>${curRefDesc}</b></span>
+        <div style="display:flex; gap:5px;">
+          <button type="button" class="btn-dmrplus-modal-status" style="background:rgba(59,130,246,0.16); border:1px solid rgba(59,130,246,0.4); color:#93c5fd; padding:3px 7px; font-size:0.7rem; cursor:pointer;">ℹ️ 5000 Status</button>
+          <button type="button" class="btn-dmrplus-modal-unlink" style="background:rgba(239,68,68,0.16); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; padding:3px 7px; font-size:0.7rem; cursor:pointer;">🔌 4000 Unlink</button>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(66px, 1fr)); gap:5px;">${tilesHtml}</div>
+    `;
+    reflBox.querySelectorAll(".btn-dmrplus-modal-tile").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const refTg = parseInt(btn.dataset.ref, 10);
+        if (refTg >= 4001 && refTg <= 4999) {
+          await executeAddTg(2, refTg);
+        }
+      });
+    });
+    const btnMStatus = reflBox.querySelector(".btn-dmrplus-modal-status");
+    if (btnMStatus) {
+      btnMStatus.addEventListener("click", async () => {
+        await executeAddTg(2, 5000);
+      });
+    }
+    const btnMUnlink = reflBox.querySelector(".btn-dmrplus-modal-unlink");
+    if (btnMUnlink) {
+      btnMUnlink.addEventListener("click", async () => {
+        await executeAddTg(2, 4000);
+      });
+    }
+    listEl.appendChild(reflBox);
+  }
+
+  if (items.length === 0) {
+    const noTgSlot = window.t ? window.t("bmtg_static.no_groups_ts", { slot }) : `Нет статических групп на TS${slot}`;
+    const emptyEl = document.createElement("div");
+    emptyEl.className = "bm-empty-msg";
+    emptyEl.textContent = noTgSlot;
+    listEl.appendChild(emptyEl);
+    return;
+  }
+
+  items.forEach(item => {
+    const tg = item.talkgroup;
+    const isSelected = selectedSet.has(tg);
+    const defTgName = isTgif
+      ? (window.t ? window.t("bmtg_static.default_group_name_tgif", {}, "Группа TGIF") : "Группа TGIF")
+      : (isFreeDmr
+        ? (window.t ? window.t("bmtg_static.default_group_name_freedmr", {}, "Группа FreeDMR") : "Группа FreeDMR")
+        : (isAdn
+          ? (window.t ? window.t("bmtg_static.default_group_name_adn", {}, "Группа ADN") : "Группа ADN")
+          : (isDmrPlus
+            ? (window.t ? window.t("bmtg_static.default_group_name_dmrplus", {}, "Группа DMR+") : "Группа DMR+")
+            : (window.t ? window.t("bmtg_static.default_group_name", {}, "Группа BM") : "Группа BM"))));
+    const rawLookup = (isDmrPlus && typeof window !== "undefined" && window.DMRPLUS_TG_NAMES && window.DMRPLUS_TG_NAMES[tg])
+      ? window.DMRPLUS_TG_NAMES[tg]
+      : ((typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
+        ? window.getNetworkRawTgName(tg, netType)
+        : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (isAdn ? (window.ADN_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]))));
+    const rawCandidate = item.name || rawLookup || "";
+    const cleanLookup = (typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+      ? window.getCleanTgDesc(tg, rawCandidate, null, netType)
+      : "";
+    const tgName = (isDmrPlus ? rawCandidate : cleanLookup) || cleanLookup || rawCandidate || defTgName;
+
+    const row = document.createElement("div");
+    row.className = `bm-static-item ${isSelected ? "item-selected" : ""}`;
+
+    row.innerHTML = `
+      <div class="bm-static-left">
+        <input type="checkbox" class="chk-tg-item" data-slot="${slot}" data-tg="${tg}" ${isSelected ? "checked" : ""}>
+        <span class="bm-tg-num">TG ${tg}</span>
+        <span class="bm-tg-name" data-tg="${tg}" title="${tgName}">${tgName}</span>
+      </div>
+      <button type="button" class="btn-del-single" data-slot="${slot}" data-tg="${tg}" title="${window.t ? window.t("bmtg_static.del_tg_title", { tg, slot }) : `Удалить TG ${tg} из TS${slot}`}">🗑️</button>
+    `;
+
+    const chk = row.querySelector(".chk-tg-item");
+    chk.addEventListener("change", (e) => {
+      e.stopPropagation();
+      if (chk.checked) {
+        selectedSet.add(tg);
+      } else {
+        selectedSet.delete(tg);
+      }
+      renderSlotList(slot);
+    });
+
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".btn-del-single") || e.target.closest("input")) return;
+      if (selectedSet.has(tg)) {
+        selectedSet.delete(tg);
+      } else {
+        selectedSet.add(tg);
+      }
+      renderSlotList(slot);
+    });
+
+    const btnDel = row.querySelector(".btn-del-single");
+    btnDel.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const confSingle = window.t 
+        ? window.t("bmtg_static.confirm_del_single", { tg, name: tgName, slot })
+        : `Удалить статическую группу TG ${tg} (${tgName}) из слота TS${slot}?`;
+      const ok = await (window.showAppConfirm ? window.showAppConfirm({
+        title: window.t ? window.t("bmtg_static.del_title", {}, "Delete Static TG") : "Delete Static TG",
+        icon: "⚡",
+        message: confSingle,
+        confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
+        confirmStyle: "danger"
+      }) : Promise.resolve(confirm(confSingle)));
+      if (ok) {
+        await executeDeleteTgs(slot, [tg]);
+      }
+    });
+
+    listEl.appendChild(row);
+  });
+
+  // Background lookup for any groups that lack a descriptive name
+  const unknownTgs = items
+    .map(it => it.talkgroup)
+    .filter(tg => {
+      const n = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
+        ? window.getNetworkRawTgName(tg, netType)
+        : (window.TG_NAMES || {})[tg];
+      return !n || n === "Группа BrandMeister" || n === "Группа BM" || n === "Группа FreeDMR" || n === "Группа ADN" || n === "Группа TGIF" || n === "BM Group" || n === "FreeDMR Group" || n === "ADN Group" || n === "TGIF Group" || n === `TG ${tg}`;
+    });
+
+  if (unknownTgs.length > 0) {
+    fetch("/api/tg/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ talkgroups: unknownTgs, network: netType })
+    })
+      .then(r => r.json())
+      .then(res => {
+        if (res.status === "ok" && res.names) {
+          if (netType === "tgif") {
+            if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+            Object.assign(window.TGIF_TG_NAMES, res.names);
+            try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+          } else if (netType === "freedmr") {
+            if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+            Object.assign(window.FREEDMR_TG_NAMES, res.names);
+            try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+          } else if (netType === "adn") {
+            if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+            Object.assign(window.ADN_TG_NAMES, res.names);
+            try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (_) {}
+          } else {
+            Object.assign((window.TG_NAMES || {}), res.names);
+            try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
+          }
+          Object.entries(res.names).forEach(([tgId, name]) => {
+            const cleanName = (!isDmrPlus && typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+              ? (window.getCleanTgDesc(tgId, name, null, netType) || name)
+              : name;
+            document.querySelectorAll(`.bm-tg-name[data-tg="${tgId}"]`).forEach(el => {
+              el.textContent = cleanName;
+              el.title = cleanName;
+            });
+          });
+        }
+      })
+      .catch(() => {});
+  }
+}
+
+if (!window.__bmStaticManagerSelectAllAttached) {
+  window.__bmStaticManagerSelectAllAttached = true;
+  if (chkSelectAllTs1) {
+    chkSelectAllTs1.addEventListener("change", () => {
+      const items = window.__bmStaticState ? window.__bmStaticState.staticTgsTs1 : staticTgsTs1;
+      const sel = window.__bmStaticState ? window.__bmStaticState.selectedTs1 : selectedTs1;
+      if (chkSelectAllTs1.checked) {
+        items.forEach(item => sel.add(item.talkgroup));
+      } else {
+        sel.clear();
+      }
+      renderSlotList(1);
+    });
+  }
+
+  if (chkSelectAllTs2) {
+    chkSelectAllTs2.addEventListener("change", () => {
+      const items = window.__bmStaticState ? window.__bmStaticState.staticTgsTs2 : staticTgsTs2;
+      const sel = window.__bmStaticState ? window.__bmStaticState.selectedTs2 : selectedTs2;
+      if (chkSelectAllTs2.checked) {
+        items.forEach(item => sel.add(item.talkgroup));
+      } else {
+        sel.clear();
+      }
+      renderSlotList(2);
+    });
+  }
+}
+
+if (btnDeleteSelectedTs1) {
+  btnDeleteSelectedTs1.addEventListener("click", async () => {
+    const tgs = Array.from(selectedTs1);
+    if (tgs.length === 0) return;
+    const confMulti1 = window.t
+      ? window.t("bmtg_static.confirm_del_multi", { count: tgs.length, slot: 1 })
+      : `Удалить выбранные группы (${tgs.length}) из таймслота TS1?`;
+    const ok = await (window.showAppConfirm ? window.showAppConfirm({
+      title: window.t ? window.t("bmtg_static.del_multi_title", { slot: 1 }, "Delete TS1 Groups") : "Delete TS1 Groups",
+      icon: "⚡",
+      message: confMulti1,
+      confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
+      confirmStyle: "danger"
+    }) : Promise.resolve(confirm(confMulti1)));
+    if (ok) {
+      await executeDeleteTgs(1, tgs);
+    }
+  });
+}
+
+if (btnDeleteSelectedTs2) {
+  btnDeleteSelectedTs2.addEventListener("click", async () => {
+    const tgs = Array.from(selectedTs2);
+    if (tgs.length === 0) return;
+    const confMulti2 = window.t
+      ? window.t("bmtg_static.confirm_del_multi", { count: tgs.length, slot: 2 })
+      : `Удалить выбранные группы (${tgs.length}) из таймслота TS2?`;
+    const ok = await (window.showAppConfirm ? window.showAppConfirm({
+      title: window.t ? window.t("bmtg_static.del_multi_title", { slot: 2 }, "Delete TS2 Groups") : "Delete TS2 Groups",
+      icon: "⚡",
+      message: confMulti2,
+      confirmText: window.t ? window.t("buttons.delete", {}, "Delete") : "Delete",
+      confirmStyle: "danger"
+    }) : Promise.resolve(confirm(confMulti2)));
+    if (ok) {
+      await executeDeleteTgs(2, tgs);
+    }
+  });
+}
+
+async function executeDeleteTgs(slot, tgs) {
+  if (!tgs || tgs.length === 0) return;
+  showBmTgAlert(null);
+
+  // If deleting more than 5 groups, offload to background task
+  if (tgs.length > 5) {
+    if (bmModalStatusText) {
+      bmModalStatusText.textContent = window.t
+        ? window.t("bmtg_static.bg_del_starting", { count: tgs.length, slot })
+        : `Starting background deletion of ${tgs.length} groups from TS${slot}...`;
+    }
+    try {
+      const resp = await fetch("/api/bm/static-groups/task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: currentStaticModalHotspotId,
+          slot: slot,
+          talkgroups: tgs,
+          action: "delete",
+          filename: window.t ? window.t("bmtg_static.batch_delete_name", {}, "Batch delete") : "Batch delete"
+        })
+      });
+      const rawText = await resp.text().catch(() => "");
+      let res;
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch (_) {
+        res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+      }
+      if (!resp.ok && res.status !== "error") {
+        res.status = "error";
+        if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+      }
+      if (res.status === "ok" && res.task) {
+        currentBmImportTask = res.task;
+        updateBmImportUI(currentBmImportTask);
+        showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_delete_started", { count: tgs.length }, `Фоновое удаление ${tgs.length} групп запущено. Окно можно закрыть.`) : `Фоновое удаление ${tgs.length} групп запущено. Окно можно закрыть.`, 3500);
+      } else if (res.status === "busy") {
+        if (res.task) {
+          currentBmImportTask = res.task;
+          updateBmImportUI(res.task);
+        }
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.task_busy") : "Operation already in progress"), "info");
+      } else {
+        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
+        const { netShort } = resolveNetworkInfo(curHs);
+        const errDetail = res.detail || res.message || (window.t ? window.t("bmtg_static.err_unknown_net", { net: netShort }) : `Unknown error ${netShort}`);
+        showBmTgAlert(window.t ? window.t("bmtg_static.err_start_del", { err: errDetail }) : errDetail, "error");
+      }
+    } catch (err) {
+      showBmTgAlert(window.t ? window.t("bmtg_static.net_err_del", { err }) : `Network error: ${err}`, "error");
+    }
+    return;
+  }
+
+  // 5 or fewer groups: fast synchronous deletion
+  if (bmModalStatusText) {
+    bmModalStatusText.textContent = window.t ? window.t("bmtg_static.deleting_slot", { slot }) : `Deleting TG from TS${slot}...`;
+  }
+  try {
+    const resp = await fetch("/api/bm/static-groups", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: currentStaticModalHotspotId,
+        slot: slot,
+        talkgroups: tgs
+      })
+    });
+    const rawText = await resp.text().catch(() => "");
+    let res;
+    try {
+      res = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+    }
+    if (!resp.ok && res.status !== "error") {
+      res.status = "error";
+      if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+    }
+    if (res.status === "ok") {
+      if (currentStaticModalHotspotId) {
+        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId);
+        if (curHs) {
+          if (res.rpto_options !== undefined) curHs.rpto_options = res.rpto_options;
+          if (res.xlx_module !== undefined) curHs.xlx_module = res.xlx_module;
+          if (res.dmrplus_reflector !== undefined) curHs.dmrplus_reflector = res.dmrplus_reflector;
+        }
+        if (res.dmrplus_reflector !== undefined && typeof window.renderRadiosGrid === "function") {
+          window.renderRadiosGrid();
+        }
+      }
+      if (res.background && res.task) {
+        currentBmImportTask = res.task;
+        updateBmImportUI(currentBmImportTask);
+        showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_delete_started", { count: tgs.length }, `Фоновое удаление ${tgs.length} групп запущено. Окно можно закрыть.`) : `Фоновое удаление ${tgs.length} групп запущено. Окно можно закрыть.`, 3500);
+      } else {
+        const delCnt = res.deleted ? res.deleted.length : tgs.length;
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.deleted_count", { count: delCnt }) : `Deleted: ${delCnt}`), "success");
+        await loadBmTgStaticGroups(currentStaticModalHotspotId);
+      }
+    } else {
+      showBmTgAlert(res.detail || (window.t ? window.t("bmtg_static.err_del") : "Failed to delete groups"), "error");
+    }
+  } catch (err) {
+    showBmTgAlert(window.t ? window.t("bmtg_static.net_err_del", { err }) : `Network error: ${err}`, "error");
+  }
+}
+
+async function executeBatchAddTgs(slot, tgs, sourceTitle = "") {
+  if (!tgs || tgs.length === 0) return;
+  const validTgs = tgs.map(Number).filter(x => x > 0 && x <= 9999999);
+  if (validTgs.length === 0) return;
+
+  // If adding more than 5 groups, offload to background task
+  if (validTgs.length > 5) {
+    showBmTgAlert(null);
+    if (bmModalStatusText) {
+      bmModalStatusText.textContent = window.t
+        ? window.t("bmtg_static.bg_add_starting", { count: validTgs.length, slot })
+        : `Starting background addition of ${validTgs.length} groups to TS${slot}...`;
+    }
+    try {
+      const resp = await fetch("/api/bm/static-groups/task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: currentStaticModalHotspotId,
+          slot: slot,
+          talkgroups: validTgs,
+          action: "add",
+          filename: sourceTitle || (window.t ? window.t("bmtg_static.batch_add_name", {}, "Batch add") : "Batch add")
+        })
+      });
+      const rawText = await resp.text().catch(() => "");
+      let res;
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch (_) {
+        res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+      }
+      if (!resp.ok && res.status !== "error") {
+        res.status = "error";
+        if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+      }
+      if (res.status === "ok" && res.task) {
+        currentBmImportTask = res.task;
+        updateBmImportUI(currentBmImportTask);
+        showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_add_started", { count: validTgs.length }, `Фоновое добавление ${validTgs.length} групп запущено. Окно можно закрыть.`) : `Фоновое добавление ${validTgs.length} групп запущено. Окно можно закрыть.`, 3500);
+      } else if (res.status === "busy") {
+        if (res.task) {
+          currentBmImportTask = res.task;
+          updateBmImportUI(res.task);
+        }
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.task_busy") : "Operation already in progress"), "info");
+      } else {
+        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
+        const { netShort } = resolveNetworkInfo(curHs);
+        const errDetail = res.detail || res.message || (window.t ? window.t("bmtg_static.err_unknown_net", { net: netShort }) : `Unknown error ${netShort}`);
+        showBmTgAlert(window.t ? window.t("bmtg_static.err_start_add", { err: errDetail }) : errDetail, "error");
+      }
+    } catch (err) {
+      showBmTgAlert(window.t ? window.t("bmtg_static.net_err_detail", { err }) : `Network error: ${err}`, "error");
+    }
+    return;
+  }
+
+  // 5 or fewer groups: sequential addition
+  for (const tg of validTgs) {
+    await executeAddTg(slot, tg);
+  }
+}
+window.executeBatchAddTgs = executeBatchAddTgs;
+window.executeDeleteTgs = executeDeleteTgs;
+
+async function executeAddTg(slot, tg) {
+  if (!tg || tg <= 0 || tg > 9999999) {
+    showBmTgAlert(window.t ? window.t("bmtg_static.invalid_tg_num") : "Please enter a valid TalkGroup number (1-9999999)", "error");
+    return;
+  }
+  showBmTgAlert(null);
+  if (bmModalStatusText) {
+    bmModalStatusText.textContent = window.t ? window.t("bmtg_static.adding_tg", { tg, slot }) : `Adding TG ${tg} to TS${slot}...`;
+  }
+  try {
+    const resp = await fetch("/api/bm/static-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hotspot_id: currentStaticModalHotspotId,
+        slot: slot,
+        talkgroup: tg,
+        talkgroups: [tg]
+      })
+    });
+    const rawText = await resp.text().catch(() => "");
+    let res;
+    try {
+      res = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+    }
+    if (!resp.ok && res.status !== "error") {
+      res.status = "error";
+      if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+    }
+    if (res.status === "ok") {
+      if (currentStaticModalHotspotId) {
+        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId);
+        if (curHs) {
+          if (res.rpto_options !== undefined) curHs.rpto_options = res.rpto_options;
+          if (res.xlx_module !== undefined) curHs.xlx_module = res.xlx_module;
+          if (res.dmrplus_reflector !== undefined) curHs.dmrplus_reflector = res.dmrplus_reflector;
+        }
+        if (res.dmrplus_reflector !== undefined && typeof window.renderRadiosGrid === "function") {
+          window.renderRadiosGrid();
+        }
+      }
+      if (res.moved_from_other_slot && res.moved_from_other_slot.length > 0) {
+        const fromSlot = slot === 1 ? 2 : 1;
+        const movedStr = res.moved_from_other_slot.join(", ");
+        showToast(window.t ? window.t("bmtg_static.moved_slot_toast", { tgs: movedStr, from: fromSlot, to: slot }) : `TG ${movedStr} moved from TS${fromSlot} to TS${slot}`, 2800);
+      }
+      showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.added_tg", { tg, slot }) : `TG ${tg} added to TS${slot}!`), "success");
+      await loadBmTgStaticGroups(currentStaticModalHotspotId);
+    } else {
+      const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
+      const { netShort } = resolveNetworkInfo(curHs);
+      showBmTgAlert(res.detail || (window.t ? window.t("bmtg_static.err_add_net", { net: netShort }) : `Failed to add group to ${netShort}`), "error");
+    }
+  } catch (err) {
+    showBmTgAlert(window.t ? window.t("bmtg_static.net_err_add", { err }) : `Network error: ${err}`, "error");
+  }
+}
+
+if (btnAddTgTs1 && inputAddTgTs1) {
+  const previewCtrlTs1 = attachTgLivePreview(inputAddTgTs1, {
+    anchorEl: inputAddTgTs1.closest(".bm-add-manual-row") || inputAddTgTs1.parentElement,
+    popupClass: "in-bm-static-modal",
+    mode: "tg",
+    actionHint: "+ TS1 ⏎",
+    onAction: () => {
+      btnAddTgTs1.click();
+    }
+  });
+  btnAddTgTs1.addEventListener("click", () => {
+    const val = parseInt(inputAddTgTs1.value, 10);
+    if (previewCtrlTs1 && previewCtrlTs1.hidePreview) previewCtrlTs1.hidePreview();
+    if (val > 0) {
+      executeAddTg(1, val);
+      inputAddTgTs1.value = "";
+    }
+  });
+  inputAddTgTs1.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      btnAddTgTs1.click();
+    }
+  });
+}
+
+if (btnAddPresetTs1 && selectPresetTs1) {
+  btnAddPresetTs1.addEventListener("click", () => {
+    const val = parseInt(selectPresetTs1.value, 10);
+    if (val > 0) {
+      executeAddTg(1, val);
+      selectPresetTs1.value = "";
+    }
+  });
+}
+
+if (btnAddTgTs2 && inputAddTgTs2) {
+  const previewCtrlTs2 = attachTgLivePreview(inputAddTgTs2, {
+    anchorEl: inputAddTgTs2.closest(".bm-add-manual-row") || inputAddTgTs2.parentElement,
+    popupClass: "in-bm-static-modal",
+    mode: "tg",
+    actionHint: "+ TS2 ⏎",
+    onAction: () => {
+      btnAddTgTs2.click();
+    }
+  });
+  btnAddTgTs2.addEventListener("click", () => {
+    const val = parseInt(inputAddTgTs2.value, 10);
+    if (previewCtrlTs2 && previewCtrlTs2.hidePreview) previewCtrlTs2.hidePreview();
+    if (val > 0) {
+      executeAddTg(2, val);
+      inputAddTgTs2.value = "";
+    }
+  });
+  inputAddTgTs2.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      btnAddTgTs2.click();
+    }
+  });
+}
+
+if (btnAddPresetTs2 && selectPresetTs2) {
+  btnAddPresetTs2.addEventListener("click", () => {
+    const val = parseInt(selectPresetTs2.value, 10);
+    if (val > 0) {
+      executeAddTg(2, val);
+      selectPresetTs2.value = "";
+    }
+  });
+}
+
+// --- File Import & Export for BrandMeister Static Groups ---
+function parseTgIdsFromText(text) {
+  if (!text) return { totalCount: 0, validCount: 0, uniqueIds: [] };
+  const lines = text.split(/\r?\n/);
+  const validIds = [];
+  let totalCount = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    // Skip empty lines and comment headers
+    if (!line || line.startsWith("#") || line.startsWith("//") || line.startsWith(";")) continue;
+
+    // Match the primary TG number at start of line, e.g. "2501 # Russia" or "2501,Russia" or "2501"
+    const match = line.match(/^(\d{1,8})\b/);
+    if (match) {
+      totalCount++;
+      const id = parseInt(match[1], 10);
+      if (id >= 1 && id <= 16777215) {
+        validIds.push(id);
+      }
+    } else {
+      // Fallback: match any number in line (for space or comma delimited numbers)
+      const anyMatches = line.match(/\b\d{1,8}\b/g) || [];
+      anyMatches.forEach(m => {
+        totalCount++;
+        const id = parseInt(m, 10);
+        if (id >= 1 && id <= 16777215) {
+          validIds.push(id);
+        }
+      });
+    }
+  }
+
+  // If line-by-line parsing yielded nothing, fallback to global regex
+  if (validIds.length === 0) {
+    const matches = text.match(/\b\d{1,8}\b/g) || [];
+    const allNumbers = matches.map(m => parseInt(m, 10));
+    const fallbackValid = allNumbers.filter(id => !isNaN(id) && id >= 1 && id <= 16777215);
+    return {
+      totalCount: allNumbers.length,
+      validCount: fallbackValid.length,
+      uniqueIds: Array.from(new Set(fallbackValid))
+    };
+  }
+
+  const uniqueIds = Array.from(new Set(validIds));
+  return {
+    totalCount: totalCount,
+    validCount: validIds.length,
+    uniqueIds: uniqueIds
+  };
+}
+
+function exportSlotTgsToFile(slot) {
+  const isSlot1 = slot === 1;
+  const items = isSlot1 ? staticTgsTs1 : staticTgsTs2;
+  if (!items || items.length === 0) {
+    showBmTgAlert(window.t ? window.t("bmtg_static.no_groups_ts", { slot }) : `В слоте TS${slot} нет статических групп для экспорта.`, "info");
+    return;
+  }
+
+  const curHid = currentStaticModalHotspotId || window.activeHotspotId || "default";
+  const hs = (window.currentHotspots || []).find(h => h.id === curHid) || window.currentHotspots[0] || {};
+  const hsName = hs.name ? hs.name.replace(/[^\w\d_-]+/g, "_") : "hotspot";
+  const dmrId = hs.dmr_id || "";
+  const { isTgif, isFreeDmr, isAdn, isXlx, netFull: netFullName } = resolveNetworkInfo(hs);
+  const netFilePrefix = isTgif ? "tgif" : (isFreeDmr ? "freedmr" : (isAdn ? "adn" : (isXlx ? "xlx" : "bm")));
+
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toTimeString().slice(0, 8);
+
+  const lines = [
+    `# ProxDMR ${netFullName} Static TalkGroups Export`,
+    `# Timeslot: TS${slot}`,
+    `# Hotspot: ${hs.name || 'Default'} (DMR ID: ${dmrId})`,
+    `# Exported: ${dateStr} ${timeStr}`,
+    `# Total Groups: ${items.length}`,
+    `# ----------------------------------------------------`
+  ];
+
+  // Sort by TG ID numerically
+  const sorted = [...items].sort((a, b) => Number(a.talkgroup) - Number(b.talkgroup));
+  const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (isAdn ? (window.ADN_TG_NAMES || {}) : (window.TG_NAMES || {})));
+  sorted.forEach(it => {
+    const tg = it.talkgroup;
+    const rawName = it.name || nameMap[tg] || "";
+    const name = (typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+      ? (window.getCleanTgDesc(tg, rawName, null, netType) || rawName)
+      : rawName;
+    if (name && !name.startsWith("TG ")) {
+      lines.push(`${tg} # ${name}`);
+    } else {
+      lines.push(`${tg}`);
+    }
+  });
+
+  const fileContent = lines.join("\n") + "\n";
+  const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const filename = `${netFilePrefix}_static_tgs_ts${slot}_${hsName}_${dateStr}.txt`;
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  if (typeof showToast === "function") {
+    showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_exported", { count: items.length, slot, filename }, `📤 Экспортировано ${items.length} групп из TS${slot} в файл ${filename}`) : `📤 Экспортировано ${items.length} групп из TS${slot} в файл ${filename}`, 2800);
+  } else {
+    const expMsg = (typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_exported", { count: items.length, slot, filename }) : `Exported ${items.length} groups from TS${slot} to ${filename}`;
+    showBmTgAlert(expMsg, "success");
+  }
+}
+
+function handleFileSelected(slot, file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target.result || "";
+    const parsed = parseTgIdsFromText(content);
+
+    if (parsed.uniqueIds.length === 0) {
+      const msg = window.t ? window.t("bm_file.no_valid_tgs") : "No valid TalkGroup numbers found in the file.";
+      if (window.showAppAlert) {
+        window.showAppAlert(msg, { title: window.t ? window.t("bm_file.err_import_title", {}, "TalkGroups Import") : "TalkGroups Import", icon: "⚠️" });
+      } else {
+        alert(msg);
+      }
+      return;
+    }
+
+    const curHid = currentStaticModalHotspotId || window.activeHotspotId || "default";
+    const hs = (window.currentHotspots || []).find(h => h.id === curHid) || {};
+    const { netType, isTgif, isFreeDmr, isAdn, isXlx } = resolveNetworkInfo(hs);
+    const nameMap = isTgif ? (window.TGIF_TG_NAMES || {}) : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {}) : (isAdn ? (window.ADN_TG_NAMES || {}) : (window.TG_NAMES || {})));
+
+    const currentGroups = (slot === 1 ? staticTgsTs1 : staticTgsTs2).map(g => Number(g.talkgroup));
+    const currentSet = new Set(currentGroups);
+    const alreadyInSlot = parsed.uniqueIds.filter(id => currentSet.has(id));
+    const newToAdd = parsed.uniqueIds.filter(id => !currentSet.has(id));
+
+    if (bmFileStatName) {
+      const sizeStr = file.size < 1024
+        ? (window.t ? window.t("bmtg_static.size_bytes", { size: file.size }, `${file.size} B`) : `${file.size} B`)
+        : (window.t ? window.t("bmtg_static.size_kb", { size: (file.size / 1024).toFixed(1) }, `${(file.size / 1024).toFixed(1)} KB`) : `${(file.size / 1024).toFixed(1)} KB`);
+      bmFileStatName.textContent = `${file.name} (${sizeStr})`;
+    }
+    if (bmFileStatSlotBadge) {
+      bmFileStatSlotBadge.textContent = `TS ${slot}`;
+      bmFileStatSlotBadge.className = `bm-slot-badge ts${slot}-badge`;
+    }
+    if (bmStatFound) bmStatFound.textContent = parsed.totalCount;
+    if (bmStatUnique) bmStatUnique.textContent = parsed.uniqueIds.length;
+    if (bmStatAlready) bmStatAlready.textContent = alreadyInSlot.length;
+    if (bmStatNew) bmStatNew.textContent = newToAdd.length;
+
+    if (bmFilePreviewList) {
+      bmFilePreviewList.innerHTML = "";
+      if (newToAdd.length === 0) {
+        const alreadyMsg = window.t ? window.t("bmtg_static.file_already_in_slot", { count: alreadyInSlot.length, slot }) : `All ${alreadyInSlot.length} groups are already in TS${slot}.`;
+        bmFilePreviewList.innerHTML = `<span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">${alreadyMsg}</span>`;
+      } else {
+        newToAdd.forEach(tg => {
+          const badge = document.createElement("span");
+          badge.className = "bm-preview-badge";
+          badge.setAttribute("data-tg", tg);
+          const rawName = nameMap[tg] || "";
+          const name = (typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+            ? (window.getCleanTgDesc(tg, rawName, null, netType) || rawName)
+            : rawName;
+          badge.textContent = name ? `TG ${tg} (${name})` : `TG ${tg}`;
+          bmFilePreviewList.appendChild(badge);
+        });
+
+        // If some groups don't have known names yet, look them up immediately
+        const missingNames = newToAdd.filter(tg => !nameMap[tg] || nameMap[tg].startsWith("TG "));
+        if (missingNames.length > 0) {
+          fetch("/api/tg/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ talkgroups: missingNames, network: netType })
+          })
+            .then(r => r.json())
+            .then(res => {
+              if (res.status === "ok" && res.names) {
+                if (isTgif) {
+                  if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+                  Object.assign(window.TGIF_TG_NAMES, res.names);
+                  try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (_) {}
+                } else if (isFreeDmr) {
+                  if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+                  Object.assign(window.FREEDMR_TG_NAMES, res.names);
+                  try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (_) {}
+                } else {
+                  Object.assign((window.TG_NAMES || {}), res.names);
+                  try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (_) {}
+                }
+                Object.entries(res.names).forEach(([tgId, name]) => {
+                  const badge = bmFilePreviewList.querySelector(`.bm-preview-badge[data-tg="${tgId}"]`);
+                  if (badge) {
+                    const cleanName = (typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+                      ? (window.getCleanTgDesc(tgId, name, null, netType) || name)
+                      : name;
+                    badge.textContent = `TG ${tgId} (${cleanName})`;
+                  }
+                });
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    }
+
+    if (bmFileConfirmPrompt && btnConfirmFileImport) {
+      if (newToAdd.length === 0) {
+        bmFileConfirmPrompt.textContent = window.t
+          ? window.t("bm_file.prompt_all_present", { count: parsed.uniqueIds.length, slot })
+          : `Все ${parsed.uniqueIds.length} групп уже присутствуют в слоте TS${slot}. Новых групп для добавления нет.`;
+        btnConfirmFileImport.style.display = "none";
+      } else {
+        bmFileConfirmPrompt.textContent = window.t
+          ? window.t("bm_file.prompt_continue", { count: newToAdd.length, slot })
+          : `Продолжить добавление ${newToAdd.length} новых групп в слот TS${slot}?`;
+        btnConfirmFileImport.style.display = "";
+      }
+    }
+
+    pendingFileImport = {
+      slot: slot,
+      fileName: file.name,
+      groupsToAdd: newToAdd
+    };
+
+    if (bmFileConfirmModal) {
+      bmFileConfirmModal.classList.add("active");
+      pushNavState("modal", "bmFileConfirmModal");
+    }
+  };
+  reader.onerror = () => {
+    const msg = window.t ? window.t("bm_file.err_read") : "Failed to read file.";
+    if (window.showAppAlert) {
+      window.showAppAlert(msg, { title: window.t ? window.t("bm_file.err_read_title", {}, "Read Error") : "Read Error", icon: "⚠️" });
+    } else {
+      alert(msg);
+    }
+  };
+  reader.readAsText(file, "UTF-8");
+}
+
+// Bind file upload and export buttons
+if (btnUploadFileTs1 && inputFileTs1) {
+  btnUploadFileTs1.addEventListener("click", () => {
+    inputFileTs1.value = "";
+    inputFileTs1.click();
+  });
+  inputFileTs1.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) handleFileSelected(1, file);
+  });
+}
+
+if (btnExportFileTs1) {
+  btnExportFileTs1.addEventListener("click", () => exportSlotTgsToFile(1));
+}
+
+if (btnUploadFileTs2 && inputFileTs2) {
+  btnUploadFileTs2.addEventListener("click", () => {
+    inputFileTs2.value = "";
+    inputFileTs2.click();
+  });
+  inputFileTs2.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) handleFileSelected(2, file);
+  });
+}
+
+if (btnExportFileTs2) {
+  btnExportFileTs2.addEventListener("click", () => exportSlotTgsToFile(2));
+}
+
+// Confirmation modal handlers
+if (closeFileConfirmBtn && bmFileConfirmModal) {
+  closeFileConfirmBtn.addEventListener("click", () => {
+    bmFileConfirmModal.classList.remove("active");
+    pendingFileImport = null;
+    notifyNavClosed();
+  });
+}
+
+if (btnCancelFileImport && bmFileConfirmModal) {
+  btnCancelFileImport.addEventListener("click", () => {
+    bmFileConfirmModal.classList.remove("active");
+    pendingFileImport = null;
+    notifyNavClosed();
+  });
+}
+
+if (bmFileConfirmModal) {
+  bmFileConfirmModal.addEventListener("click", (e) => {
+    if (e.target === bmFileConfirmModal) {
+      bmFileConfirmModal.classList.remove("active");
+      pendingFileImport = null;
+      notifyNavClosed();
+    }
+  });
+}
+
+// --- BM Background Import UI & Logic ---
+
+function findHotspotCard(hid) {
+  const targetHid = resolveHotspotId(hid);
+  if (targetHid) {
+    const card = document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`);
+    if (card) return card;
+  }
+  if (hid && hid !== targetHid) {
+    const card = document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+    if (card) return card;
+  }
+  const hsList = (typeof window !== "undefined" && window.currentHotspots) || [];
+  if (!hid || hid === "default" || (hsList.length && hsList[0]?.id === hid)) {
+    return document.querySelector(".radio-container");
+  }
+  if (typeof window !== "undefined" && window.activeHotspotId) {
+    const card = document.querySelector(`.radio-container[data-hotspot-id="${window.activeHotspotId}"]`);
+    if (card) return card;
+  }
+  return document.querySelector(".radio-container");
+}
+
+function hideAllBmUploadIndicators() {
+  if (typeof window !== "undefined") {
+    window.__proxdmrBmUploadState = null;
+  }
+  document.querySelectorAll(".header-bm-upload-indicator").forEach(el => {
+    el.style.display = "none";
+  });
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
+  }
+}
+
+function updateBmImportUI(task) {
+  if (!task) {
+    hideAllBmUploadIndicators();
+    if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+    return;
+  }
+
+  const isDelete = (task.action === "delete");
+
+  const curHs = (window.currentHotspots || []).find(h => h.id === (task.hotspot_id || currentStaticModalHotspotId)) || null;
+  const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(task, curHs);
+
+  const current = task.current !== undefined ? task.current : (task.processed || 0);
+  const total = task.total || 0;
+  const percent = task.percent !== undefined ? task.percent : (total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0);
+  const errorCount = task.error_count !== undefined ? task.error_count : (Array.isArray(task.errors) ? task.errors.length : (task.errors || 0));
+  const doneCount = isDelete
+    ? (task.deleted_count !== undefined ? task.deleted_count : (Array.isArray(task.deleted) ? task.deleted.length : 0))
+    : (task.added_count !== undefined ? task.added_count : (task.imported || (Array.isArray(task.added) ? task.added.length : 0)));
+  const isErr = task.status === "error" || task.status === "failed";
+
+  // 1. Header Indicator on the target hotspot card
+  const targetHid = task.hotspot_id || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : null);
+  const targetCard = findHotspotCard(targetHid);
+  const targetIndicator = targetCard ? targetCard.querySelector(".header-bm-upload-indicator") : document.getElementById("headerBmUploadIndicator");
+  const targetPercent = targetIndicator ? targetIndicator.querySelector(".bm-upload-percent") : document.getElementById("headerBmUploadPercent");
+
+  // Hide all indicators except the target one
+  document.querySelectorAll(".header-bm-upload-indicator").forEach(el => {
+    if (el !== targetIndicator) {
+      el.style.display = "none";
+    }
+  });
+
+  if (typeof window !== "undefined") {
+    window.__proxdmrBmUploadState = (task.status === "running" || task.status === "completed")
+      ? { hotspotId: targetHid, status: task.status, percent }
+      : null;
+  }
+  if (targetIndicator) {
+    if (task.status === "running") {
+      targetIndicator.style.display = "inline-flex";
+      if (targetPercent) targetPercent.textContent = `${percent}%`;
+      const devStr = task.device_id ? ` (ID: ${task.device_id})` : "";
+      const runKey = isDelete ? "bmtg_static.indicator_running_del" : "bmtg_static.indicator_running_imp";
+      targetIndicator.title = window.t
+        ? window.t(runKey, { net: netFull, dev: devStr, current, total, percent })
+        : `${netFull}${devStr}: ${current}/${total} (${percent}%)`;
+    } else if (task.status === "completed") {
+      targetIndicator.style.display = "inline-flex";
+      if (targetPercent) targetPercent.textContent = "100%";
+      const doneKey = isDelete ? "bmtg_static.indicator_done_del" : "bmtg_static.indicator_done_imp";
+      targetIndicator.title = window.t ? window.t(doneKey, { net: netFull }) : `${netFull} completed`;
+    } else {
+      targetIndicator.style.display = "none";
+    }
+  }
+  if (typeof window !== "undefined" && typeof window.refreshToolbarProcessIndicators === "function") {
+    window.refreshToolbarProcessIndicators();
+  }
+
+  // 2. Modal Progress Card
+  if (bmImportProgressCard) {
+    const isSameHotspot = !task.hotspot_id || !currentStaticModalHotspotId || (resolveHotspotId(task.hotspot_id) === resolveHotspotId(currentStaticModalHotspotId));
+    if (!isSameHotspot) {
+      bmImportProgressCard.classList.add("hidden");
+      return;
+    }
+    if (task.status === "running" || task.status === "completed" || task.status === "cancelled" || isErr) {
+      bmImportProgressCard.classList.remove("hidden");
+    }
+
+    if (bmImportProgressPercent) {
+      bmImportProgressPercent.textContent = `${percent}%`;
+    }
+    if (bmImportBarFill) {
+      bmImportBarFill.style.width = `${percent}%`;
+    }
+    if (bmImportProgressSlot) {
+      bmImportProgressSlot.textContent = `TS ${task.slot || 1}`;
+    }
+
+    if (bmImportProgressCount) {
+      const skippedText = task.skipped
+        ? (window.t ? window.t("bmtg_static.skipped_exists", { count: task.skipped }) : ` (${task.skipped} skipped)`)
+        : "";
+      bmImportProgressCount.textContent = window.t
+        ? window.t("bmtg_static.progress_count", { current, total, skipped: skippedText })
+        : `${current} / ${total}${skippedText}`;
+    }
+
+    if (bmImportProgressErrors) {
+      if (errorCount > 0) {
+        bmImportProgressErrors.style.display = "inline-flex";
+        bmImportProgressErrors.textContent = window.t
+          ? window.t("bmtg_static.progress_errors", { count: errorCount, net: netShort })
+          : `${errorCount} errors (${netShort})`;
+      } else {
+        bmImportProgressErrors.style.display = "none";
+      }
+    }
+
+    if (bmImportProgressTitleText) {
+      if (task.status === "running") {
+        if (task.current_tg) {
+          const titleKeyTg = isDelete ? "bmtg_static.progress_title_del_tg" : "bmtg_static.progress_title_imp_tg";
+          bmImportProgressTitleText.textContent = window.t
+            ? window.t(titleKeyTg, { net: netFull, tg: task.current_tg })
+            : `${netFull} (TG ${task.current_tg})`;
+        } else {
+          const titleKey = isDelete ? "bmtg_static.progress_title_del" : "bmtg_static.progress_title_imp";
+          bmImportProgressTitleText.textContent = window.t ? window.t(titleKey, { net: netFull }) : netFull;
+        }
+        if (btnCancelBmImport) {
+          btnCancelBmImport.disabled = false;
+          btnCancelBmImport.textContent = window.t ? window.t("buttons.cancel", {}, "Cancel") : "Cancel";
+          btnCancelBmImport.style.display = "";
+        }
+      } else if (task.status === "completed") {
+        const compKey = isDelete ? "bmtg_static.completed_del" : "bmtg_static.completed_imp";
+        bmImportProgressTitleText.textContent = window.t ? window.t(compKey, { count: doneCount }) : `Completed (${doneCount})`;
+        if (btnCancelBmImport) btnCancelBmImport.style.display = "none";
+      } else if (task.status === "cancelled") {
+        bmImportProgressTitleText.textContent = isDelete
+          ? ((typeof window !== "undefined" && window.t) ? window.t("bmtg.delete_cancelled_by_user", {}, "Deletion cancelled by user") : "Deletion cancelled by user")
+          : ((typeof window !== "undefined" && window.t) ? window.t("bmtg.import_cancelled_by_user", {}, "Import cancelled by user") : "Import cancelled by user");
+        if (btnCancelBmImport) btnCancelBmImport.style.display = "none";
+      } else if (isErr) {
+        const errMsg = task.message || task.error_message || (window.t ? window.t("bmtg_static.api_fail_net", { net: netShort }) : `${netShort} API error`);
+        bmImportProgressTitleText.textContent = isDelete
+          ? ((typeof window !== "undefined" && window.t) ? window.t("bmtg.delete_error", { error: errMsg }, `Deletion error: ${errMsg}`) : `Deletion error: ${errMsg}`)
+          : ((typeof window !== "undefined" && window.t) ? window.t("bmtg.import_error", { error: errMsg }, `Import error: ${errMsg}`) : `Import error: ${errMsg}`);
+        if (btnCancelBmImport) btnCancelBmImport.style.display = "none";
+      }
+    }
+  }
+}
+
+function onBmImportProgress(data) {
+  currentBmImportTask = data;
+  if (bmImportFinishedTimer) {
+    clearTimeout(bmImportFinishedTimer);
+    bmImportFinishedTimer = null;
+  }
+  updateBmImportUI(data);
+}
+
+function onBmImportFinished(data) {
+  currentBmImportTask = data;
+  updateBmImportUI(data);
+
+  const isDelete = (data.action === "delete");
+
+  if (isDelete) {
+    selectedTs1.clear();
+    selectedTs2.clear();
+    renderSlotList(1);
+    renderSlotList(2);
+  }
+
+  // If modal is open, reload static groups
+  if (bmTgStaticModal && bmTgStaticModal.classList.contains("active")) {
+    loadBmTgStaticGroups(currentStaticModalHotspotId);
+  }
+
+  const current = data.current !== undefined ? data.current : (data.processed || 0);
+  const total = data.total || 0;
+  const doneCount = isDelete
+    ? (data.deleted_count !== undefined ? data.deleted_count : (Array.isArray(data.deleted) ? data.deleted.length : 0))
+    : (data.added_count !== undefined ? data.added_count : (data.imported || 0));
+  const isErr = data.status === "error" || data.status === "failed";
+
+  const curHs = (window.currentHotspots || []).find(h => h.id === (data.hotspot_id || currentStaticModalHotspotId)) || null;
+  const { isTgif: isTgifTask, isFreeDmr: isFreeDmrTask, isAdn: isAdnTask, isXlx: isXlxTask, netShort, netFull } = resolveNetworkInfo(data, curHs);
+
+  // Toast feedback
+  if (data.status === "completed") {
+    const toastKey = isDelete
+      ? (isTgifTask ? "bmtg.toast_delete_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_completed_freedmr" : (isAdnTask ? "bmtg.toast_delete_completed_adn" : "bmtg.toast_delete_completed")))
+      : (isTgifTask ? "bmtg.toast_import_completed_tgif" : (isFreeDmrTask ? "bmtg.toast_import_completed_freedmr" : (isAdnTask ? "bmtg.toast_import_completed_adn" : "bmtg.toast_import_completed")));
+    const defMsg = isDelete
+      ? `Deletion from ${netFull} completed: deleted ${doneCount} groups on TS${data.slot}`
+      : `Import to ${netFull} completed: added ${doneCount} groups on TS${data.slot}`;
+    const msg = (typeof window !== "undefined" && window.t)
+      ? window.t(toastKey, { count: doneCount, slot: data.slot }, defMsg)
+      : defMsg;
+    showToast(msg, 4000);
+  } else if (data.status === "cancelled") {
+    const toastKey = isDelete
+      ? (isTgifTask ? "bmtg.toast_delete_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_cancelled_freedmr" : (isAdnTask ? "bmtg.toast_delete_cancelled_adn" : "bmtg.toast_delete_cancelled")))
+      : (isTgifTask ? "bmtg.toast_import_cancelled_tgif" : (isFreeDmrTask ? "bmtg.toast_import_cancelled_freedmr" : (isAdnTask ? "bmtg.toast_import_cancelled_adn" : "bmtg.toast_import_cancelled")));
+    const defMsg = isDelete
+      ? `Deletion from ${netFull} stopped (${current}/${total} processed)`
+      : `Import to ${netFull} stopped (${current}/${total} processed)`;
+    const msg = (typeof window !== "undefined" && window.t)
+      ? window.t(toastKey, { current, total }, defMsg)
+      : defMsg;
+    showToast(msg, 3000);
+  } else if (isErr) {
+    const errMsg = data.message || data.error_message || (window.t ? window.t("common.unknown_error", {}, "Unknown error") : "Unknown error");
+    const toastKey = isDelete
+      ? (isTgifTask ? "bmtg.toast_delete_error_tgif" : (isFreeDmrTask ? "bmtg.toast_delete_error_freedmr" : (isAdnTask ? "bmtg.toast_delete_error_adn" : "bmtg.toast_delete_error")))
+      : (isTgifTask ? "bmtg.toast_import_error_tgif" : (isFreeDmrTask ? "bmtg.toast_import_error_freedmr" : (isAdnTask ? "bmtg.toast_import_error_adn" : "bmtg.toast_import_error")));
+    const defMsg = isDelete
+      ? `${netShort} deletion error: ${errMsg}`
+      : `${netShort} import error: ${errMsg}`;
+    const msg = (typeof window !== "undefined" && window.t)
+      ? window.t(toastKey, { error: errMsg }, defMsg)
+      : defMsg;
+    showToast(msg, 5000);
+  }
+
+  // Fade out / hide after 4.5 seconds
+  if (bmImportFinishedTimer) clearTimeout(bmImportFinishedTimer);
+  bmImportFinishedTimer = setTimeout(() => {
+    hideAllBmUploadIndicators();
+    if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+    currentBmImportTask = null;
+    bmImportFinishedTimer = null;
+  }, 4500);
+}
+
+async function checkBmImportStatus() {
+  try {
+    const hidParam = currentStaticModalHotspotId ? `?hotspot_id=${encodeURIComponent(currentStaticModalHotspotId)}` : "";
+    const resp = await fetch(`/api/bm/static-groups/import/status${hidParam}`);
+    if (!resp.ok) return;
+    const res = await resp.json();
+    if (res.status === "ok" && res.task && res.task.status === "running") {
+      currentBmImportTask = res.task;
+      updateBmImportUI(res.task);
+    } else {
+      currentBmImportTask = null;
+      hideAllBmUploadIndicators();
+      if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+    }
+  } catch (e) {
+    // Non-fatal network glitch
+  }
+}
+
+if (btnConfirmFileImport) {
+  btnConfirmFileImport.addEventListener("click", async () => {
+    if (!pendingFileImport || pendingFileImport.groupsToAdd.length === 0) return;
+    const { slot, fileName, groupsToAdd } = pendingFileImport;
+    if (bmFileConfirmModal) bmFileConfirmModal.classList.remove("active");
+    pendingFileImport = null;
+
+    showBmTgAlert(null);
+    if (bmModalStatusText) {
+      bmModalStatusText.textContent = window.t
+        ? window.t("bmtg_static.bg_import_starting", { count: groupsToAdd.length, slot })
+        : `Starting background import of ${groupsToAdd.length} groups to TS${slot}...`;
+    }
+
+    try {
+      const resp = await fetch("/api/bm/static-groups/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: currentStaticModalHotspotId,
+          slot: slot,
+          talkgroups: groupsToAdd,
+          filename: fileName
+        })
+      });
+      const rawText = await resp.text().catch(() => "");
+      let res;
+      try {
+        res = rawText ? JSON.parse(rawText) : {};
+      } catch (_) {
+        res = { status: "error", detail: rawText || `HTTP ${resp.status}` };
+      }
+      if (!resp.ok && res.status !== "error") {
+        res.status = "error";
+        if (!res.detail && !res.message) res.detail = rawText || `HTTP ${resp.status}`;
+      }
+      if (res.status === "ok" && res.task) {
+        currentBmImportTask = res.task;
+        updateBmImportUI(currentBmImportTask);
+        showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_import_started", { count: groupsToAdd.length }, `Импорт ${groupsToAdd.length} групп запущен в фоновом режиме. Окно можно закрыть.`) : `Импорт ${groupsToAdd.length} групп запущен в фоновом режиме. Окно можно закрыть.`, 3500);
+      } else if (res.status === "busy") {
+        if (res.task) {
+          currentBmImportTask = res.task;
+          updateBmImportUI(res.task);
+        }
+        showBmTgAlert(res.message || (window.t ? window.t("bmtg_static.import_busy") : "Import is already running"), "info");
+      } else {
+        const curHs = (window.currentHotspots || []).find(h => h.id === currentStaticModalHotspotId) || null;
+        const { netShort } = resolveNetworkInfo(curHs);
+        const errDetail = res.detail || res.message || (window.t ? window.t("bmtg_static.err_unknown_net", { net: netShort }) : `Unknown error ${netShort}`);
+        showBmTgAlert(window.t ? window.t("bmtg_static.err_start_import", { err: errDetail }) : errDetail, "error");
+      }
+    } catch (err) {
+      showBmTgAlert(window.t ? window.t("bmtg_static.net_err_import", { err }) : `Network error: ${err}`, "error");
+    }
+  });
+}
+
+// Global delegated click & keydown handlers for any hotspot's BM upload indicator
+document.addEventListener("click", (e) => {
+  const ind = e.target.closest(".header-bm-upload-indicator");
+  if (!ind) return;
+  const card = ind.closest(".radio-container");
+  const rawHid = card?.dataset?.hotspotId || currentBmImportTask?.hotspot_id || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : null);
+  const hid = resolveHotspotId(rawHid);
+  openBmTgStaticModal(hid);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const ind = e.target.closest(".header-bm-upload-indicator");
+  if (!ind) return;
+  e.preventDefault();
+  const card = ind.closest(".radio-container");
+  const rawHid = card?.dataset?.hotspotId || currentBmImportTask?.hotspot_id || currentStaticModalHotspotId || (typeof window !== "undefined" ? window.activeHotspotId : null);
+  const hid = resolveHotspotId(rawHid);
+  openBmTgStaticModal(hid);
+});
+
+if (btnMinimizeBmImport) {
+  btnMinimizeBmImport.addEventListener("click", () => {
+    closeBmTgStaticModal();
+    const isDel = Boolean(currentBmImportTask && currentBmImportTask.action === "delete");
+    const act = window.t ? window.t(isDel ? "bmtg.action_delete" : "bmtg.action_import", {}, isDel ? "Deletion" : "Import") : (isDel ? "Deletion" : "Import");
+    showToast((typeof window !== "undefined" && window.t) ? window.t("bmtg.toast_bg_action_continue", { action: act }, `${act} continues in background.`) : `${act} continues in background.`, 3000);
+  });
+}
+
+if (btnCancelBmImport) {
+  btnCancelBmImport.addEventListener("click", async () => {
+    if (!currentBmImportTask) {
+      if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+      return;
+    }
+    btnCancelBmImport.disabled = true;
+    btnCancelBmImport.textContent = window.t ? window.t("bmtg_static.cancelling_btn", {}, "Cancelling...") : "Cancelling...";
+    try {
+      const resp = await fetch("/api/bm/static-groups/import/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: currentBmImportTask.task_id })
+      });
+      const res = await resp.json().catch(() => ({}));
+      const finishedTask = (res && res.task) ? res.task : { ...currentBmImportTask, status: "cancelled" };
+      onBmImportFinished(finishedTask);
+    } catch (e) {
+      console.error("[BM Import] Cancel error:", e);
+      if (bmImportProgressCard) bmImportProgressCard.classList.add("hidden");
+      hideAllBmUploadIndicators();
+      currentBmImportTask = null;
+    }
+  });
+}
+
+function renderDynamicSlotList(slot) {
+  const isSlot1 = slot === 1;
+  const items = isSlot1 ? dynamicTgsTs1 : dynamicTgsTs2;
+  const listEl = isSlot1 ? bmDynTs1List : bmDynTs2List;
+  const countEl = isSlot1 ? bmDynTs1Count : bmDynTs2Count;
+
+  if (countEl) {
+    const gText = items.length === 1
+      ? (window.t ? window.t("bmtg_static.group_one", { count: items.length }) : `${items.length} группа`)
+      : (window.t ? window.t("bmtg_static.groups_count", { count: items.length }) : `${items.length} групп`);
+    countEl.textContent = gText;
+  }
+
+  if (!listEl) return;
+
+  if (items.length === 0) {
+    const emptyKey = isSlot1 ? "bmtg.dyn_empty_ts1" : "bmtg.dyn_empty_ts2";
+    const defMsg = isSlot1 ? "No dynamic talkgroups on TS1" : "No dynamic talkgroups on TS2";
+    listEl.innerHTML = `<div class="bm-empty-msg">${window.t ? window.t(emptyKey, {}, defMsg) : defMsg}</div>`;
+    return;
+  }
+
+  const curHs = (window.currentHotspots || []).find(h => h.id === (currentStaticModalHotspotId || window.activeHotspotId)) || null;
+  const { netType, isTgif, isFreeDmr, isAdn, isXlx, isDmrPlus } = resolveNetworkInfo(curHs);
+
+  listEl.innerHTML = "";
+  items.forEach(item => {
+    const tg = item.talkgroup;
+    const defTgName = isTgif
+      ? (window.t ? window.t("bmtg_static.default_group_name_tgif", {}, "TGIF TalkGroup") : "TGIF TalkGroup")
+      : (isFreeDmr
+        ? (window.t ? window.t("bmtg_static.default_group_name_freedmr", {}, "FreeDMR TalkGroup") : "FreeDMR TalkGroup")
+        : (isAdn
+          ? (window.t ? window.t("bmtg_static.default_group_name_adn", {}, "ADN TalkGroup") : "ADN TalkGroup")
+          : (isXlx
+            ? (window.t ? window.t("bmtg_static.default_group_name_xlx", {}, "XLX Module") : "XLX Module")
+            : (isDmrPlus
+              ? (window.t ? window.t("bmtg_static.default_group_name_dmrplus", {}, "DMR+ TalkGroup") : "DMR+ TalkGroup")
+              : (window.t ? window.t("bmtg_static.default_group_name", {}, "BM TalkGroup") : "BM TalkGroup")))));
+    const rawLookup = (isDmrPlus && typeof window !== "undefined" && window.DMRPLUS_TG_NAMES && window.DMRPLUS_TG_NAMES[tg])
+      ? window.DMRPLUS_TG_NAMES[tg]
+      : ((typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
+        ? window.getNetworkRawTgName(tg, netType)
+        : (isTgif ? (window.TGIF_TG_NAMES || {})[tg] : (isFreeDmr ? (window.FREEDMR_TG_NAMES || {})[tg] : (isAdn ? (window.ADN_TG_NAMES || {})[tg] : (window.TG_NAMES || {})[tg]))));
+    const cleanLookup = (typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+      ? window.getCleanTgDesc(tg, item.name || rawLookup, null, netType)
+      : "";
+    const tgName = (isDmrPlus ? (item.name || rawLookup) : cleanLookup) || cleanLookup || item.name || rawLookup || defTgName;
+    const tuneText = window.t ? window.t("bmtg.btn_tune", {}, "--->PTT") : "--->PTT";
+
+    const row = document.createElement("div");
+    row.className = "bm-dyn-item";
+    row.innerHTML = `
+      <div class="bm-dyn-left">
+        <span class="bm-slot-badge ${isSlot1 ? "ts1-badge" : "ts2-badge"}">TS ${slot}</span>
+        <span class="bm-tg-num">TG ${tg}</span>
+        <span class="bm-tg-name" data-tg="${tg}" title="${tgName}">${tgName}</span>
+      </div>
+      <button type="button" class="btn-dyn-tune" data-slot="${slot}" data-tg="${tg}" title="${window.t ? window.t("bmtg.tune_title", { tg, slot }, `Set TG ${tg} (TS${slot}) as PTT target`) : `Set TG ${tg} (TS${slot}) as PTT target`}">
+        ${tuneText}
+      </button>
+    `;
+
+    const tuneBtn = row.querySelector(".btn-dyn-tune");
+    if (tuneBtn) {
+      tuneBtn.addEventListener("click", () => {
+        tuneToTalkgroup(tg, slot);
+      });
+    }
+
+    listEl.appendChild(row);
+  });
+
+  items.forEach(item => {
+    const tg = item.talkgroup;
+    const known = (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function")
+      ? window.getNetworkRawTgName(tg, netType)
+      : (window.TG_NAMES || {})[tg];
+    if (!item.name && !known) {
+      fetch("/api/tg/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ talkgroups: [tg], network: netType })
+      })
+        .then(res => res.json())
+        .then(data => {
+          const resolvedName = data && data.names && data.names[tg];
+          if (data.status === "ok" && resolvedName) {
+            if (netType === "tgif") {
+              if (!window.TGIF_TG_NAMES) window.TGIF_TG_NAMES = {};
+              window.TGIF_TG_NAMES[tg] = resolvedName;
+              try { localStorage.setItem("proxdmr_tgif_tg_names_cache", JSON.stringify(window.TGIF_TG_NAMES)); } catch (e) {}
+            } else if (netType === "freedmr") {
+              if (!window.FREEDMR_TG_NAMES) window.FREEDMR_TG_NAMES = {};
+              window.FREEDMR_TG_NAMES[tg] = resolvedName;
+              try { localStorage.setItem("proxdmr_freedmr_tg_names_cache", JSON.stringify(window.FREEDMR_TG_NAMES)); } catch (e) {}
+            } else if (netType === "adn") {
+              if (!window.ADN_TG_NAMES) window.ADN_TG_NAMES = {};
+              window.ADN_TG_NAMES[tg] = resolvedName;
+              try { localStorage.setItem("proxdmr_adn_tg_names_cache", JSON.stringify(window.ADN_TG_NAMES)); } catch (e) {}
+            } else {
+              (window.TG_NAMES || {})[tg] = resolvedName;
+              try { localStorage.setItem("proxdmr_tg_names_cache", JSON.stringify((window.TG_NAMES || {}))); } catch (e) {}
+            }
+            const cleanResolved = (!isDmrPlus && typeof window !== "undefined" && typeof window.getCleanTgDesc === "function")
+              ? (window.getCleanTgDesc(tg, resolvedName, null, netType) || resolvedName)
+              : resolvedName;
+            const nameEls = listEl.querySelectorAll(`.bm-tg-name[data-tg="${tg}"]`);
+            nameEls.forEach(el => {
+              el.textContent = cleanResolved;
+              el.title = cleanResolved;
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  });
+}
+
+function tuneToTalkgroup(tg, slot) {
+  const mainCard = document.getElementById("radioContainer");
+  const hid = currentStaticModalHotspotId || resolveHotspotId(mainCard?.dataset.hotspotId || "default");
+  const s = slot === 1 ? 1 : 2;
+  if (typeof setHotspotSlot === "function") {
+    setHotspotSlot(hid, s, true);
+  }
+  if (typeof setHotspotTg === "function") {
+    setHotspotTg(hid, s, tg, true);
+  }
+  if (bmModalStatusText) {
+    bmModalStatusText.textContent = window.t
+      ? window.t("bmtg_static.tuned_status", { tg, slot: s })
+      : `Transceiver tuned to TG ${tg} (TS${s})`;
+  }
+}
+
+async function executeDropDynamic(slot = 0, btn = null) {
+  const hid = currentStaticModalHotspotId || window.activeHotspotId;
+  const origHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    const dropTxt = window.t ? window.t("bmtg.dropping", {}, "Dropping...") : "Dropping...";
+    btn.innerHTML = `⏳ <span>${dropTxt}</span>`;
+    btn.disabled = true;
+  }
+
+  try {
+    const payload = { hotspot_id: hid };
+    if (slot === 1 || slot === 2) {
+      payload.slot = slot;
+    }
+    const resp = await fetch("/api/bm/drop-dynamic", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const res = await resp.json();
+
+    if (res.status === "ok") {
+      if (btn) {
+        const droppedTxt = window.t ? window.t("bmtg.dropped_btn", {}, "Dropped!") : "Dropped!";
+        btn.innerHTML = `✅ <span>${droppedTxt}</span>`;
+        setTimeout(() => {
+          btn.innerHTML = origHtml;
+          btn.disabled = false;
+        }, 1500);
+      }
+      if (bmModalStatusText) {
+        bmModalStatusText.textContent = window.t ? window.t("bmtg.dyn_dropped") : "Dynamic groups dropped";
+      }
+      await loadBmTgStaticGroups(hid);
+    } else {
+      const unk = window.t ? window.t("common.unknown_error", {}, "Unknown error") : "Unknown error";
+      showBmTgAlert(window.t ? window.t("bmtg.err_drop", { err: res.detail || unk }) : `Drop error: ${res.detail || unk}`, "error");
+      if (btn) {
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
+      }
+    }
+  } catch (err) {
+    showBmTgAlert(window.t ? window.t("bmtg.net_err_drop", { err }) : `Network error: ${err}`, "error");
+    if (btn) {
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+    }
+  }
+}
+
+async function dropDynamicTGs(targetHid, btnElement) {
+  await executeDropDynamic(0, btnElement);
+}
+
+function closeBmTgStaticModal() {
+  if (bmTgStaticModal && bmTgStaticModal.classList.contains("active")) {
+    bmTgStaticModal.classList.remove("active");
+    bmTgStaticModal.style.display = "";
+    notifyNavClosed();
+  }
+}
+window.closeBmTgStaticModal = closeBmTgStaticModal;
+
+if (closeBmTgModalBtn) {
+  closeBmTgModalBtn.addEventListener("click", closeBmTgStaticModal);
+}
+
+if (btnCloseBmTgModalBottom) {
+  btnCloseBmTgModalBottom.addEventListener("click", closeBmTgStaticModal);
+}
+
+if (bmTgStaticModal) {
+  bmTgStaticModal.addEventListener("click", (e) => {
+    if (e.target === bmTgStaticModal) closeBmTgStaticModal();
+  });
+}
+
+if (btnRefreshBmTg) {
+  btnRefreshBmTg.addEventListener("click", () => {
+    loadBmTgStaticGroups(currentStaticModalHotspotId);
+  });
+}
+
+if (bmTabBtnStatic) {
+  bmTabBtnStatic.addEventListener("click", () => switchBmTgTab("static"));
+}
+if (bmTabBtnDynamic) {
+  bmTabBtnDynamic.addEventListener("click", () => switchBmTgTab("dynamic"));
+}
+document.querySelectorAll(".bm-mobile-slot-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const slot = parseInt(btn.getAttribute("data-mobile-slot"), 10);
+    switchBmMobileSlot(slot);
+  });
+});
+if (btnDropAllDynamic) {
+  btnDropAllDynamic.addEventListener("click", () => executeDropDynamic(0, btnDropAllDynamic));
+}
+if (btnDropDynamicTs1) {
+  btnDropDynamicTs1.addEventListener("click", () => executeDropDynamic(1, btnDropDynamicTs1));
+}
+if (btnDropDynamicTs2) {
+  btnDropDynamicTs2.addEventListener("click", () => executeDropDynamic(2, btnDropDynamicTs2));
+}
+
+
+
+// --- Initialization Entry Point ---
+function initBmTgStaticManager() {
+  populatePresetSelects();
+
+  if (closeBmTgModalBtn) closeBmTgModalBtn.addEventListener("click", closeBmTgStaticModal);
+  if (btnCloseBmTgModalBottom) btnCloseBmTgModalBottom.addEventListener("click", closeBmTgStaticModal);
+  if (bmTgStaticModal) {
+    bmTgStaticModal.addEventListener("click", (e) => {
+      if (e.target === bmTgStaticModal) closeBmTgStaticModal();
+    });
+  }
+  if (btnRefreshBmTg) {
+    btnRefreshBmTg.addEventListener("click", () => {
+      loadBmTgStaticGroups(currentStaticModalHotspotId);
+    });
+  }
+  if (bmTabBtnStatic) {
+    bmTabBtnStatic.addEventListener("click", () => switchBmTgTab("static"));
+  }
+  if (bmTabBtnDynamic) {
+    bmTabBtnDynamic.addEventListener("click", () => switchBmTgTab("dynamic"));
+  }
+  document.querySelectorAll(".bm-mobile-slot-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const slot = parseInt(btn.getAttribute("data-mobile-slot"), 10);
+      switchBmMobileSlot(slot);
+    });
+  });
+  if (btnDropAllDynamic) {
+    btnDropAllDynamic.addEventListener("click", () => executeDropDynamic(0, btnDropAllDynamic));
+  }
+  if (btnDropDynamicTs1) {
+    btnDropDynamicTs1.addEventListener("click", () => executeDropDynamic(1, btnDropDynamicTs1));
+  }
+  if (btnDropDynamicTs2) {
+    btnDropDynamicTs2.addEventListener("click", () => executeDropDynamic(2, btnDropDynamicTs2));
+  }
+
+  checkBmImportStatus();
+}
+
+export {
+  openBmTgStaticModal,
+  closeBmTgStaticModal,
+  loadBmTgStaticGroups,
+  dropDynamicTGs,
+  renderSlotList,
+  renderDynamicSlotList,
+  switchBmTgTab,
+  switchBmMobileSlot,
+  POPULAR_TG_PRESETS,
+  initBmTgStaticManager,
+  onBmImportProgress,
+  onBmImportFinished,
+  checkBmImportStatus,
+  updateBmImportUI
+};
+
+if (typeof window !== "undefined") {
+  window.openBmTgStaticModal = openBmTgStaticModal;
+  window.closeBmTgStaticModal = closeBmTgStaticModal;
+  window.loadBmTgStaticGroups = loadBmTgStaticGroups;
+  window.dropDynamicTGs = dropDynamicTGs;
+  window.renderSlotList = renderSlotList;
+  window.initBmTgStaticManager = initBmTgStaticManager;
+  window.onBmImportProgress = onBmImportProgress;
+  window.onBmImportFinished = onBmImportFinished;
+  window.checkBmImportStatus = checkBmImportStatus;
+  window.updateBmImportUI = updateBmImportUI;
+
+  window.__proxdmr = window.__proxdmr || {};
+  window.__proxdmr.openBmTgStaticModal = openBmTgStaticModal;
+  window.__proxdmr.closeBmTgStaticModal = closeBmTgStaticModal;
+  window.__proxdmr.loadBmTgStaticGroups = loadBmTgStaticGroups;
+  window.__proxdmr.dropDynamicTGs = dropDynamicTGs;
+
+  // Immediate check on script load
+  checkBmImportStatus();
+
+  window.addEventListener("languageChanged", () => {
+    const hsList = Array.isArray(window.currentHotspots) ? window.currentHotspots : [];
+    const hs = hsList.find(h => h.id === currentStaticModalHotspotId) || hsList[0] || null;
+    const netType = ((hs && hs.network_type) || "bm").toLowerCase();
+    applyManagerNetworkBranding(netType, hs);
+    if (bmTgStaticModal && bmTgStaticModal.classList.contains("active")) {
+      renderSlotList(1);
+      renderSlotList(2);
+      renderDynamicSlotList(1);
+      renderDynamicSlotList(2);
+    }
+    if (currentBmImportTask) {
+      updateBmImportUI(currentBmImportTask);
+    }
+  });
+}

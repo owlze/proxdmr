@@ -1,0 +1,907 @@
+/**
+ * ProxDMR - Network Watchdog Subsystem (modules/network/watchdog.js)
+ * Manages ProxDMR Gateway status, 7-second sequential link watchdog (GW -> BM),
+ * BrandMeister REST API status checks, and card status interaction wiring.
+ */
+
+// State flags
+export let isManualGwDisconnect = false;
+export let isManualBmDisconnect = false;
+export let wasGwConnected = false;
+export let gwIsFastReconnecting = false;
+export let gwConnectAttempt = 1;
+export let isGwToggling = false;
+export let wsReconnectTimer = null;
+
+export function setIsManualGwDisconnect(val) {
+  isManualGwDisconnect = Boolean(val);
+  try { window.isManualGwDisconnect = isManualGwDisconnect; } catch (_) {}
+}
+export function setIsManualBmDisconnect(val) {
+  isManualBmDisconnect = Boolean(val);
+  try { window.isManualBmDisconnect = isManualBmDisconnect; } catch (_) {}
+}
+export function setWasGwConnected(val) {
+  wasGwConnected = Boolean(val);
+  try { window.wasGwConnected = wasGwConnected; } catch (_) {}
+}
+export function setGwIsFastReconnecting(val) {
+  gwIsFastReconnecting = Boolean(val);
+  try { window.gwIsFastReconnecting = gwIsFastReconnecting; } catch (_) {}
+}
+export function setGwConnectAttempt(val) {
+  gwConnectAttempt = val;
+  try { window.gwConnectAttempt = gwConnectAttempt; } catch (_) {}
+}
+export function setIsGwToggling(val) {
+  isGwToggling = Boolean(val);
+  try { window.isGwToggling = isGwToggling; } catch (_) {}
+}
+export function setWsReconnectTimer(val) {
+  wsReconnectTimer = val;
+  try { window.wsReconnectTimer = wsReconnectTimer; } catch (_) {}
+}
+export function clearWsReconnectTimer() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+    try { window.wsReconnectTimer = null; } catch (_) {}
+  }
+}
+
+try {
+  Object.defineProperty(window, "isManualGwDisconnect", {
+    get: () => isManualGwDisconnect,
+    set: (v) => { isManualGwDisconnect = Boolean(v); },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(window, "isManualBmDisconnect", {
+    get: () => isManualBmDisconnect,
+    set: (v) => { isManualBmDisconnect = Boolean(v); },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(window, "wasGwConnected", {
+    get: () => wasGwConnected,
+    set: (v) => { wasGwConnected = Boolean(v); },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(window, "gwIsFastReconnecting", {
+    get: () => gwIsFastReconnecting,
+    set: (v) => { gwIsFastReconnecting = Boolean(v); },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(window, "gwConnectAttempt", {
+    get: () => gwConnectAttempt,
+    set: (v) => { gwConnectAttempt = v; },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(window, "isGwToggling", {
+    get: () => isGwToggling,
+    set: (v) => { isGwToggling = Boolean(v); },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(window, "wsReconnectTimer", {
+    get: () => wsReconnectTimer,
+    set: (v) => { wsReconnectTimer = v; },
+    configurable: true,
+    enumerable: true
+  });
+} catch (_) {}
+
+// --- Per-Hotspot GW Disconnect State (Decoupled GW) ---
+export function isHotspotGwDisconnected(hid) {
+  const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(hid)
+    : (hid || "default");
+  try {
+    return localStorage.getItem(`proxdmr_gw_disconnected_${cid}`) === "true";
+  } catch (_) {
+    return false;
+  }
+}
+
+export function setHotspotGwDisconnected(hid, disconnected) {
+  const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(hid)
+    : (hid || "default");
+  try {
+    if (disconnected) {
+      localStorage.setItem(`proxdmr_gw_disconnected_${cid}`, "true");
+    } else {
+      localStorage.removeItem(`proxdmr_gw_disconnected_${cid}`);
+    }
+  } catch (_) {}
+}
+
+export function resetManualDisconnectFlags() {
+  isManualGwDisconnect = false;
+  isManualBmDisconnect = false;
+  const currentHotspots = window.currentHotspots;
+  if (currentHotspots && Array.isArray(currentHotspots)) {
+    currentHotspots.forEach(h => {
+      h.isManualBmDisconnect = false;
+      try { localStorage.removeItem(`proxdmr_gw_disconnected_${h.id}`); } catch (_) {}
+    });
+  }
+  try { localStorage.removeItem("proxdmr_gw_disconnected_default"); } catch (_) {}
+  console.log("[WATCHDOG] Manual disconnect flags reset (clean state).");
+}
+
+window.addEventListener("beforeunload", resetManualDisconnectFlags);
+window.addEventListener("unload", resetManualDisconnectFlags);
+window.resetManualDisconnectFlags = resetManualDisconnectFlags;
+
+export function updateHotspotGwStatus(hid, isOnline, detail = "") {
+  const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(hid)
+    : (hid || "default");
+  const host = window.location.host || "localhost:8266";
+  const ws = window.ws;
+  const isDisconnectedByUser = isHotspotGwDisconnected(cid);
+  const effectiveOnline = isOnline && !isDisconnectedByUser;
+
+  const isDefaultAlias = (typeof window !== "undefined" && typeof window.isPrimaryDefaultAlias === "function")
+    ? window.isPrimaryDefaultAlias(cid)
+    : (cid === "default");
+  const rc = document.getElementById("radioContainer");
+  const rcMatch = (isDefaultAlias && rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === cid || rc.dataset.hotspotId === "default")) ? rc : null;
+  const card = document.querySelector(`.radio-container[data-hotspot-id="${cid}"]`) || rcMatch;
+  if (!card) return;
+
+  const isConnecting = !effectiveOnline && !isDisconnectedByUser && (
+    (ws && ws.readyState === WebSocket.CONNECTING) ||
+    wsReconnectTimer !== null ||
+    Boolean(window._gwIsConnectingPhase) ||
+    (detail && /попытк|повтор|подключ|пауза|быстр|восстанов|attempt|retry|reconnect|connect|pause|fast|restor|спроб|підключ|versuch|wiederverb|intento|reconect|tentativ|poging|herverbind/i.test(detail))
+  );
+
+  let badgeClass = "status-offline bm-offline";
+  let badgeText = "GW:OFFLINE";
+  if (window.isSessionPausedByAnotherDevice) {
+    badgeClass = "status-connecting bm-connecting";
+    badgeText = "GW:PAUSED";
+  } else if (effectiveOnline) {
+    badgeClass = "status-online bm-online";
+    badgeText = "GW:ONLINE";
+  } else if (isConnecting) {
+    badgeClass = "status-connecting bm-connecting";
+    badgeText = "GW:CONNECTING";
+  }
+
+  const defaultComment = effectiveOnline
+    ? (window.t ? window.t("status.gw_wss_active", { host }, `${host} (WSS активен)`) : `${host} (WSS активен)`)
+    : (isDisconnectedByUser
+        ? (window.t ? window.t("status.gw_disconnected_user", {}, "Отключено пользователем") : "Отключено пользователем")
+        : (window.t ? window.t("status.gw_unavailable", { host }, `Шлюз ${host} недоступен`) : `Шлюз ${host} недоступен`));
+  const comment = detail || defaultComment;
+  const actionHint = effectiveOnline
+    ? (window.t ? window.t("status.gw_click_disconnect", {}, "клик для отключения") : "клик для отключения")
+    : (window.t ? window.t("status.gw_click_connect", {}, "клик для подключения") : "клик для подключения");
+  const icon = effectiveOnline ? "🟢" : (isConnecting ? "🟡" : "⚪");
+  const ttip = window.t ? window.t("status.gw_tooltip", { icon, comment, action: actionHint }, `${icon} Шлюз ProxDMR: ${comment} (${actionHint})`) : `${icon} Шлюз ProxDMR: ${comment} (${actionHint})`;
+
+  const badge = card.querySelector(".gw-status-badge");
+  if (badge) {
+    badge.className = `status-badge bm-badge gw-status-badge ${badgeClass}`;
+    badge.textContent = badgeText;
+    badge.title = ttip;
+  }
+
+  const row = card.querySelector(".gw-status-row");
+  if (row) {
+    row.title = ttip;
+  }
+
+  const detailEl = card.querySelector(".gw-detail-text");
+  if (detailEl) {
+    detailEl.textContent = comment;
+    detailEl.title = ttip;
+  }
+}
+
+export function updateGwStatus(isOnline, detail = "") {
+  const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
+  if (currentHotspots.length > 0) {
+    currentHotspots.forEach(hs => {
+      updateHotspotGwStatus(hs.id, isOnline, detail);
+    });
+  } else {
+    updateHotspotGwStatus("default", isOnline, detail);
+  }
+
+  if (typeof window.refreshAllCardsBmBanner === "function") {
+    window.refreshAllCardsBmBanner();
+  }
+}
+
+export const triggerHotspotGwAction = async (hid) => {
+  if (window.isSessionPausedByAnotherDevice) {
+    if (typeof window.restorePausedSession === "function") {
+      window.restorePausedSession();
+    }
+    return;
+  }
+  if (isGwToggling) return;
+  isGwToggling = true;
+  setTimeout(() => { isGwToggling = false; }, 350);
+
+  const cid = (typeof window !== "undefined" && typeof window.resolveHotspotId === "function")
+    ? window.resolveHotspotId(hid)
+    : (hid || window.activeHotspotId || "default");
+
+  const isDisconnectedByUser = isHotspotGwDisconnected(cid);
+  const ws = window.ws;
+  const isWsOpen = Boolean(ws && ws.readyState === WebSocket.OPEN);
+  const isCurrentlyConnected = isWsOpen && !isDisconnectedByUser;
+
+  if (isCurrentlyConnected) {
+    // Disconnect GW for THIS hotspot
+    console.log(`[GW] Hotspot [${cid}] GW manually disconnected by user.`);
+    setHotspotGwDisconnected(cid, true);
+    const allHs = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+    const allDisconnected = allHs.length > 0 && allHs.every(h => isHotspotGwDisconnected(h.id));
+    setIsManualGwDisconnect(allDisconnected);
+    updateHotspotGwStatus(cid, false, window.t ? window.t("gw.disconnected_user", {}, "Отключено пользователем") : "Отключено пользователем");
+
+    // Also disconnect BM for this hotspot
+    try {
+      const hs = ((typeof window !== "undefined" && window.currentHotspots) || []).find(h => {
+        const hCid = (typeof window.resolveHotspotId === "function") ? window.resolveHotspotId(h.id) : h.id;
+        return hCid === cid;
+      });
+      if (hs) {
+        await fetch(`/api/hotspots/${cid}/disconnect`, { method: "POST" });
+        const gwOffTxt = window.t ? window.t("status.gw_off_bm_disconnected", {}, "Отключено (GW выкл)") : "Отключено (GW выкл)";
+        hs.status = "DISCONNECTED";
+        hs.detail = gwOffTxt;
+        if (typeof window.updateBmStatus === "function") {
+          window.updateBmStatus("DISCONNECTED", gwOffTxt, cid);
+        }
+      }
+    } catch (err) {
+      console.warn(`[GW] Error disconnecting BM for ${cid}:`, err);
+    }
+  } else {
+    // Reconnect / Connect GW for THIS hotspot
+    console.log(`[GW] Hotspot [${cid}] GW manually reconnecting/connecting by user.`);
+    setHotspotGwDisconnected(cid, false);
+    setIsManualGwDisconnect(false);
+    clearWsReconnectTimer();
+    setGwConnectAttempt(1);
+    setGwIsFastReconnecting(false);
+
+    const isWsConnected = Boolean(ws && ws.readyState === WebSocket.OPEN);
+    if (isWsConnected) {
+      updateHotspotGwStatus(cid, true);
+    } else {
+      updateHotspotGwStatus(cid, false, window.t ? window.t("status.gw_connecting_manual", {}, "Подключение к шлюзу...") : "Подключение к шлюзу...");
+      if (typeof window.connectWebSocket === "function") {
+        window.connectWebSocket(true);
+      }
+    }
+
+    // Also reconnect BM for this hotspot if autoconnect was enabled
+    try {
+      const hs = ((typeof window !== "undefined" && window.currentHotspots) || []).find(h => {
+        const hCid = (typeof window.resolveHotspotId === "function") ? window.resolveHotspotId(h.id) : h.id;
+        return hCid === cid;
+      });
+      if (hs && hs.autoconnect !== false) {
+        await fetch(`/api/hotspots/${cid}/connect`, { method: "POST" });
+        if (typeof window.updateBmStatus === "function") {
+          window.updateBmStatus("CONNECTING", window.t ? window.t("status.bm_connecting_status", {}, "Подключение...") : "Подключение...", cid);
+        }
+      }
+    } catch (err) {
+      console.warn(`[GW] Error connecting BM for ${cid}:`, err);
+    }
+  }
+
+  if (typeof window.refreshAllCardsBmBanner === "function") {
+    window.refreshAllCardsBmBanner();
+  }
+};
+
+export const triggerGwAction = () => {
+  const activeHid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+  triggerHotspotGwAction(activeHid);
+};
+
+// --- 7-Second System Link Watchdog (GW -> BM sequentially) ---
+let systemLinkWatchdogTimer = null;
+let lastGwWatchdogAttemptTime = 0;
+let isSystemLinkChecking = false;
+
+export async function runSystemLinkCheck() {
+  if (window.isSessionPausedByAnotherDevice) return;
+  if (isSystemLinkChecking) return;
+  isSystemLinkChecking = true;
+
+  try {
+    const now = Date.now();
+    const ws = window.ws;
+
+    // Step 1: Check link to GW (ProxDMR Gateway WebSocket)
+    if (isManualGwDisconnect) {
+      console.log("[WATCHDOG 7s] GW was manually disconnected by user. Auto-reconnect stopped.");
+      return;
+    }
+
+    if (window._isServerRestarting) {
+      if (now - lastGwWatchdogAttemptTime >= 4000) {
+        lastGwWatchdogAttemptTime = now;
+        updateGwStatus(false, window.t ? window.t("gw.restarting_wait", {}, "Перезагрузка сервера... Ожидание готовности") : "Перезагрузка сервера... Ожидание готовности");
+        if (typeof window.connectWebSocket === "function") {
+          window.connectWebSocket(true);
+        }
+      }
+      return;
+    }
+
+    const isGwOnline = ws && ws.readyState === WebSocket.OPEN;
+    const isGwConnecting = ws && ws.readyState === WebSocket.CONNECTING;
+
+    if (!isGwOnline) {
+      if (isGwConnecting) {
+        if (now - lastGwWatchdogAttemptTime > 7000) {
+          console.warn("[WATCHDOG 7s] GW socket stuck in CONNECTING (>7s). Resetting socket...");
+          try { ws.close(); } catch (_) {}
+          lastGwWatchdogAttemptTime = now;
+          if (typeof window.connectWebSocket === "function") {
+            window.connectWebSocket(true);
+          }
+          return;
+        } else {
+          console.log("[WATCHDOG 7s] GW link is currently connecting. Waiting for next tick...");
+          return;
+        }
+      }
+
+      if (now - lastGwWatchdogAttemptTime >= 6000) {
+        console.warn("[WATCHDOG 7s] GW link is absent. Attempting connection to GW...");
+        lastGwWatchdogAttemptTime = now;
+        if (wsReconnectTimer) {
+          clearTimeout(wsReconnectTimer);
+          wsReconnectTimer = null;
+        }
+        updateGwStatus(false, window.t ? window.t("gw.timer_reconnect", {}, "Попытка подключения к шлюзу (таймер 7с)...") : "Попытка подключения к шлюзу (таймер 7с)...");
+        if (typeof window.connectWebSocket === "function") {
+          window.connectWebSocket(true);
+        }
+      }
+      return;
+    }
+
+    // Step 2: GW link exists -> Now check link to BM
+    const currentHotspots = window.currentHotspots || [];
+    const activeHotspotId = window.activeHotspotId || "default";
+    const currentBmStatus = window.currentBmStatus || "OFFLINE";
+    const isHotspotCollapsed = typeof window.isHotspotCollapsed === "function" ? window.isHotspotCollapsed : () => false;
+    const isHotspotLiveCollapsed = typeof window.isHotspotLiveCollapsed === "function" ? window.isHotspotLiveCollapsed : () => false;
+    const updateBmStatus = typeof window.updateBmStatus === "function" ? window.updateBmStatus : () => {};
+    const renderHotspotsList = typeof window.renderHotspotsList === "function" ? window.renderHotspotsList : () => {};
+    const renderHotspotSelect = typeof window.renderHotspotSelect === "function" ? window.renderHotspotSelect : () => {};
+
+    const hsList = (currentHotspots && currentHotspots.length > 0)
+      ? currentHotspots
+      : [{ id: activeHotspotId || "default", status: currentBmStatus }];
+
+    const uncollapsedHotspots = hsList.filter(h => !isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id));
+    const targetHotspots = uncollapsedHotspots.length > 0 ? uncollapsedHotspots : [hsList[0]];
+
+    for (const hs of targetHotspots) {
+      const hid = hs.id || "default";
+
+      if (isHotspotGwDisconnected(hid) || hs.isManualBmDisconnect || (hid === activeHotspotId && isManualBmDisconnect)) {
+        console.log(`[WATCHDOG 7s] BM/GW for [${hs.name || hid}] was manually disconnected by user. Auto-reconnect stopped.`);
+        continue;
+      }
+
+      const status = hs.status || (hid === activeHotspotId ? currentBmStatus : "") || "OFFLINE";
+      if (String(hs.network_type || "").toLowerCase() === "ysf") {
+        const hasYsfTarget = Boolean(String(hs.ysf_room || hs.ysf_room_id || hs.ysf_host || hs.bm_master_host || "").trim());
+        if (!hasYsfTarget || String(status).toUpperCase() === "STANDBY") {
+          continue;
+        }
+      }
+      if (String(hs.network_type || "").toLowerCase() === "m17") {
+        const hasM17Target = Boolean(String(hs.m17_reflector || hs.m17_host || hs.bm_master_host || "").trim());
+        if (!hasM17Target || String(status).toUpperCase() === "STANDBY") {
+          continue;
+        }
+      }
+      const isBmOnline = status === "ONLINE";
+      const isBmConnecting = status === "CONNECTING" || status === "AUTHENTICATING" || status === "CONFIGURING";
+
+      if (!isBmOnline) {
+        if (isBmConnecting) {
+          console.log(`[WATCHDOG 7s] BM link for [${hs.name || hid}] is connecting (${status})...`);
+          continue;
+        }
+
+        if (now - (hs._lastBmWatchdogAttempt || 0) < 6000) {
+          continue;
+        }
+
+        console.warn(`[WATCHDOG 7s] BM link is absent for [${hs.name || hid}] (status=${status}). Attempting connection to BM...`);
+        hs._lastBmWatchdogAttempt = now;
+
+        updateBmStatus("CONNECTING", window.t ? window.t("gw.timer_bm_reconnect", {}, "Подключение к BM (таймер 7с)...") : "Подключение к BM (таймер 7с)...", hid);
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ type: "bm_connect", hotspot_id: hid }));
+          } catch (_) {}
+        } else {
+          try {
+            const res = await fetch(`/api/hotspots/${hid}/connect?auto=1`, { method: "POST" });
+            const data = await res.json().catch(() => ({}));
+            if (data && data.bm_status) {
+              hs.status = data.bm_status;
+              hs.detail = data.detail || "";
+              updateBmStatus(data.bm_status, data.detail || "", hid);
+              renderHotspotsList();
+              renderHotspotSelect();
+            }
+          } catch (err) {
+            console.warn(`[WATCHDOG 7s] Error connecting BM for ${hid}:`, err);
+          }
+        }
+
+        break;
+      }
+    }
+  } catch (e) {
+    console.error("[WATCHDOG 7s] Error in runSystemLinkCheck:", e);
+  } finally {
+    isSystemLinkChecking = false;
+  }
+}
+
+export function startSystemLinkWatchdog() {
+  if (systemLinkWatchdogTimer) {
+    clearInterval(systemLinkWatchdogTimer);
+    systemLinkWatchdogTimer = null;
+  }
+  systemLinkWatchdogTimer = setInterval(runSystemLinkCheck, 7000);
+  console.log("[WATCHDOG 7s] System link watchdog timer started (7000ms)");
+}
+
+export function wireCardStatusInteractions(card, hs = null) {
+  if (!card) return;
+
+  const activeHotspotId = window.activeHotspotId || "default";
+  const toggleHotspotConnection = typeof window.toggleHotspotConnection === "function" ? window.toggleHotspotConnection : () => {};
+  const openHotspotSettings = typeof window.openHotspotSettings === "function" ? window.openHotspotSettings : () => {};
+
+  const bmToggle = card.querySelector(".bm-status-toggle");
+  if (bmToggle && !bmToggle._statusWired) {
+    bmToggle._statusWired = true;
+    bmToggle.addEventListener("click", (e) => {
+      if (e.target.closest(".toggle-control") || e.target.closest("input")) return;
+      e.stopPropagation();
+      const cid = card.dataset.hotspotId || (hs && hs.id) || activeHotspotId || "default";
+      toggleHotspotConnection(cid);
+    });
+    bmToggle.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        const cid = card.dataset.hotspotId || (hs && hs.id) || activeHotspotId || "default";
+        toggleHotspotConnection(cid);
+      }
+    });
+  }
+
+  const gwRow = card.querySelector(".gw-status-row");
+  if (gwRow && !gwRow._statusWired) {
+    gwRow._statusWired = true;
+    const cid = card.dataset.hotspotId || (hs && hs.id) || activeHotspotId || "default";
+    gwRow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      triggerHotspotGwAction(cid);
+    });
+    gwRow.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerHotspotGwAction(cid);
+      }
+    });
+  }
+
+  const apiRow = card.querySelector(".api-status-row");
+  if (apiRow && !apiRow._statusWired) {
+    apiRow._statusWired = true;
+    const handleApiRowActivate = (e) => {
+      e.stopPropagation();
+      const cid = card.dataset.hotspotId || (hs && hs.id) || activeHotspotId || "default";
+      const curHs = (window.currentHotspots || []).find(h => h.id === cid) || hs;
+      const netType = ((curHs && curHs.network_type) || "bm").toLowerCase();
+      if (netType !== "bm" && netType !== "tgif") {
+        if (netType === "freedmr" || netType === "adn" || netType === "xlx") {
+          if (typeof window.openBmTgStaticModal === "function") {
+            window.openBmTgStaticModal(cid);
+            return;
+          }
+        }
+        openHotspotSettings(curHs, "tab-edit-hs");
+        setTimeout(() => {
+          const targetId = netType === "xlx" ? "editHsXlxModule" : "editHsRptoOptions";
+          const el = document.getElementById(targetId);
+          if (el && typeof el.focus === "function") {
+            el.focus();
+            if (typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+        }, 140);
+        return;
+      }
+      if (curHs && (!curHs.bm_api_key || curHs.bm_api_key.trim().length <= 8)) {
+        openHotspotSettings(curHs, "tab-edit-hs");
+        setTimeout(() => {
+          const el = document.getElementById("editHsApiKey");
+          if (el && typeof el.focus === "function") {
+            el.focus();
+            if (typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+        }, 140);
+      } else {
+        checkBmApiStatus(true, cid);
+      }
+    };
+    apiRow.addEventListener("click", handleApiRowActivate);
+    apiRow.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleApiRowActivate(e);
+      }
+    });
+  }
+}
+
+export function renderHotspotAuxStatusBadge(card, hs) {
+  if (!card || !hs) return false;
+  const netType = (hs.network_type || "bm").toLowerCase();
+  if (netType === "bm" || netType === "tgif" || netType === "ysf" || netType === "m17" || netType === "allstar" || netType === "asl") return false;
+
+  const badge = card.querySelector(".api-status-badge");
+  const row = card.querySelector(".api-status-row");
+  const dt = card.querySelector(".api-detail-text");
+
+  let badgeClass = "status-online bm-online";
+  let badgeText = "NET:DIRECT";
+  let comment = "";
+  let tooltip = "";
+
+  if (netType === "xlx") {
+    const mod = ((hs.xlx_module || "D").trim().toUpperCase().slice(0, 1)) || "D";
+    const tgNum = 4000 + Math.max(1, Math.min(26, mod.charCodeAt(0) - 64));
+    badgeClass = "status-online bm-online";
+    badgeText = `XLX:MOD_${mod}`;
+    comment = window.t ? window.t("status.xlx_mod_detail", { mod, tg: tgNum }, `Модуль ${mod} (TG ${tgNum}) • клик для смены`) : `Модуль ${mod} (TG ${tgNum}) • клик для смены`;
+    tooltip = window.t ? window.t("status.xlx_mod_tooltip", { mod, tg: tgNum }, `🟣 XLX Reflector Module ${mod} (TG ${tgNum}). Нажмите для выбора модуля A–Z`) : `🟣 XLX Reflector Module ${mod} (TG ${tgNum}). Нажмите для выбора модуля A–Z`;
+  } else if (netType === "freedmr") {
+    const rpto = (hs.rpto_options || "").trim();
+    if (rpto) {
+      badgeClass = "status-online bm-online";
+      badgeText = "FREEDMR_RPTO:ACTIVE";
+      comment = `FreeDMR: ${rpto}`;
+      tooltip = window.t ? window.t("status.freedmr_rpto_ready_tooltip", { rpto }, `🟢 FreeDMR RPTO: ${rpto}. Нажмите для управления статическими TG`) : `🟢 FreeDMR RPTO: ${rpto}. Нажмите для управления статическими TG`;
+    } else {
+      badgeClass = "status-offline bm-offline";
+      badgeText = "FREEDMR_RPTO:READY";
+      comment = window.t ? window.t("status.freedmr_rpto_empty_detail", {}, "FreeDMR RPTO (клик для настройки TG)") : "FreeDMR RPTO (клик для настройки TG)";
+      tooltip = window.t ? window.t("status.freedmr_rpto_empty_tooltip", {}, "⚪ FreeDMR RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ FreeDMR RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)";
+    }
+  } else if (netType === "adn") {
+    const rpto = (hs.rpto_options || "").trim();
+    if (rpto) {
+      badgeClass = "status-online bm-online";
+      badgeText = "ADN_RPTO:ACTIVE";
+      comment = `ADN: ${rpto}`;
+      tooltip = window.t ? window.t("status.adn_rpto_ready_tooltip", { rpto }, `🟢 ADN Systems RPTO: ${rpto}. Нажмите для управления статическими TG`) : `🟢 ADN Systems RPTO: ${rpto}. Нажмите для управления статическими TG`;
+    } else {
+      badgeClass = "status-offline bm-offline";
+      badgeText = "ADN_RPTO:READY";
+      comment = window.t ? window.t("status.adn_rpto_empty_detail", {}, "ADN RPTO (клик для настройки TG)") : "ADN RPTO (клик для настройки TG)";
+      tooltip = window.t ? window.t("status.adn_rpto_empty_tooltip", {}, "⚪ ADN RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ ADN RPTO не заданы. Нажмите для настройки статических TG (TS1/TS2)";
+    }
+  } else if (netType === "tgif") {
+    badgeClass = "status-online bm-online";
+    badgeText = "TGIF:DIRECT";
+    comment = window.t ? window.t("status.tgif_direct_detail", {}, "PTT роутинг (4000 — откл.)") : "PTT роутинг (4000 — откл.)";
+    tooltip = window.t ? window.t("status.tgif_direct_tooltip", {}, "🟢 TGIF Network: управление группами напрямую через PTT или TG 4000") : "🟢 TGIF Network: управление группами напрямую через PTT или TG 4000";
+  } else {
+    const rpto = (hs.rpto_options || "").trim();
+    if (rpto) {
+      badgeClass = "status-online bm-online";
+      badgeText = "RPTO:READY";
+      comment = `RPTO: ${rpto}`;
+      tooltip = window.t ? window.t("status.rpto_ready_tooltip", { rpto }, `🟢 RPTO Options: ${rpto}. Нажмите для изменения статических TG`) : `🟢 RPTO Options: ${rpto}. Нажмите для изменения статических TG`;
+    } else {
+      badgeClass = "status-offline bm-offline";
+      badgeText = "RPTO:CFG";
+      comment = window.t ? window.t("status.rpto_empty_detail", {}, "Опции RPTO (клик для настройки TG)") : "Опции RPTO (клик для настройки TG)";
+      tooltip = window.t ? window.t("status.rpto_empty_tooltip", {}, "⚪ RPTO Options не заданы. Нажмите для настройки статических TG (TS1/TS2)") : "⚪ RPTO Options не заданы. Нажмите для настройки статических TG (TS1/TS2)";
+    }
+  }
+
+  if (badge) {
+    badge.className = `status-badge bm-badge api-status-badge ${badgeClass}`;
+    badge.textContent = badgeText;
+    badge.title = tooltip;
+  }
+  if (row) row.title = tooltip;
+  if (dt) {
+    dt.textContent = comment;
+    dt.title = tooltip;
+  }
+  return true;
+}
+
+// --- BrandMeister REST API Status (Per Hotspot) ---
+let isCheckingApi = false;
+
+export async function checkBmApiStatus(arg1 = false, arg2 = null) {
+  if (window.isSessionPausedByAnotherDevice) return;
+  let force = false;
+  let hotspotId = null;
+  if (typeof arg1 === "string") {
+    hotspotId = arg1;
+    force = Boolean(arg2);
+  } else if (typeof arg2 === "string") {
+    force = Boolean(arg1);
+    hotspotId = arg2;
+  } else {
+    force = Boolean(arg1);
+    hotspotId = null;
+  }
+
+  if (isCheckingApi && !force) return;
+  isCheckingApi = true;
+
+  const currentHotspots = window.currentHotspots || [];
+  const resolveHotspotId = typeof window.resolveHotspotId === "function" ? window.resolveHotspotId : (id) => id;
+  const isHotspotCollapsed = typeof window.isHotspotCollapsed === "function" ? window.isHotspotCollapsed : () => false;
+  const isHotspotLiveCollapsed = typeof window.isHotspotLiveCollapsed === "function" ? window.isHotspotLiveCollapsed : () => false;
+
+  // Render non-BM / non-TGIF badges immediately
+  currentHotspots.forEach(h => {
+    const nt = (h.network_type || "bm").toLowerCase();
+    if (nt !== "bm" && nt !== "tgif") {
+      const c = document.querySelector(`.radio-container[data-hotspot-id="${h.id}"]`);
+      if (c) renderHotspotAuxStatusBadge(c, h);
+    }
+  });
+
+  const findStrictCard = (hidVal) => {
+    const exact = document.querySelector(`.radio-container[data-hotspot-id="${hidVal}"]`);
+    if (exact) return exact;
+    const rc = document.getElementById("radioContainer");
+    if (rc && (!rc.dataset.hotspotId || rc.dataset.hotspotId === String(hidVal))) return rc;
+    return null;
+  };
+
+  let targets = [];
+  if (hotspotId) {
+    const realId = resolveHotspotId(hotspotId);
+    const found = currentHotspots.find(h => h.id === realId) ||
+                  currentHotspots.find(h => String(h.id) === String(hotspotId)) ||
+                  (realId === "default" ? currentHotspots[0] : null);
+    if (found) {
+      const fnt = (found.network_type || "bm").toLowerCase();
+      if (fnt !== "bm" && fnt !== "tgif") {
+        const c = findStrictCard(found.id);
+        if (c) renderHotspotAuxStatusBadge(c, found);
+        isCheckingApi = false;
+        return;
+      }
+      targets.push(found);
+    } else if (currentHotspots.length) {
+      targets.push(currentHotspots[0]);
+    }
+  } else {
+    targets = currentHotspots.filter(h => {
+      const nt = (h.network_type || "bm").toLowerCase();
+      return (nt === "bm" || nt === "tgif") && h.bm_api_key && h.bm_api_key.trim().length > 8 && (!isHotspotCollapsed(h.id) || isHotspotLiveCollapsed(h.id));
+    });
+  }
+
+  if (hotspotId && (!targets.length || !targets[0].bm_api_key || targets[0].bm_api_key.trim().length <= 8)) {
+    const targetHsId = targets[0]?.id || resolveHotspotId(hotspotId);
+    const targetHs = targets[0] || currentHotspots.find(h => h.id === targetHsId);
+    if (targetHs) {
+      const tnt = (targetHs.network_type || "bm").toLowerCase();
+      if (tnt !== "bm" && tnt !== "tgif") {
+        const card = findStrictCard(targetHsId);
+        if (card) renderHotspotAuxStatusBadge(card, targetHs);
+        isCheckingApi = false;
+        return;
+      }
+      targetHs._apiStatus = "NO_KEY";
+      targetHs._apiDetail = "";
+      const isTgif = (tnt === "tgif");
+      const netShort = isTgif ? "TGIF" : "BM";
+      const card = findStrictCard(targetHsId);
+      if (card) {
+        const badge = card.querySelector(".api-status-badge");
+        const row = card.querySelector(".api-status-row");
+        const dt = card.querySelector(".api-detail-text");
+        const ttip = window.t ? window.t("status.api_no_key_tooltip", { net: netShort }, `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`) : `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+        if (badge) {
+          badge.className = "status-badge bm-badge api-status-badge status-offline bm-offline";
+          badge.textContent = "API:NO KEY";
+          badge.title = ttip;
+        }
+        if (row) row.title = ttip;
+        if (dt) {
+          dt.textContent = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
+          dt.title = ttip;
+        }
+      }
+    }
+    isCheckingApi = false;
+    return;
+  }
+
+  try {
+    for (const hs of targets) {
+      hs._apiStatus = "CHECKING";
+      const card = findStrictCard(hs.id);
+      const badge = card ? card.querySelector(".api-status-badge") : null;
+      const row = card ? card.querySelector(".api-status-row") : null;
+      const dt = card ? card.querySelector(".api-detail-text") : null;
+
+      const hsNet = (hs.network_type || "bm").toLowerCase();
+      const isTgif = hsNet === "tgif";
+      const netShort = isTgif ? "TGIF" : "BM";
+      const netVersion = isTgif ? "v1" : "v2";
+      const apiDomain = isTgif ? "api.tgif.network" : "api.brandmeister.network";
+
+      const checkingTtip = window.t ? window.t("status.api_checking_tooltip", { net: netShort }, `🟡 ${netShort} API: Проверка соединения...`) : `🟡 ${netShort} API: Проверка соединения...`;
+      const checkingDetail = isTgif
+        ? (window.t ? window.t("status.api_checking_tgif", {}, "Проверка токена TGIF...") : "Проверка токена TGIF...")
+        : (window.t ? window.t("status.api_checking_detail", {}, "Проверка токена v2...") : "Проверка токена v2...");
+      if (badge) {
+        badge.className = "status-badge bm-badge api-status-badge status-connecting bm-connecting";
+        badge.textContent = "API:CHECKING";
+        badge.title = checkingTtip;
+      }
+      if (row) row.title = checkingTtip;
+      if (dt) {
+        dt.textContent = checkingDetail;
+        dt.title = checkingTtip;
+      }
+
+      try {
+        const res = await fetch(`/api/bm/api-status?hotspot_id=${encodeURIComponent(hs.id)}`);
+        const data = await res.json();
+        const status = data.status || "OFFLINE";
+        hs._apiStatus = status;
+        hs._apiDetail = data.detail || "";
+
+        if (badge) {
+          badge.className = "status-badge bm-badge api-status-badge";
+          let comment = "";
+          let tooltip = "";
+          if (status === "ONLINE") {
+            badge.classList.add("status-online", "bm-online");
+            badge.textContent = "API:ONLINE";
+            const authShort = window.t ? window.t("status.api_authorized_short", {}, "Авторизован") : "Авторизован";
+            comment = data.device_id ? `${apiDomain} (ID: ${data.device_id})` : `${apiDomain} (${authShort})`;
+            tooltip = window.t ? window.t("status.api_online_tooltip", { net: netShort, ver: netVersion }, `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`) : `🟢 ${netShort} API ${netVersion}: Авторизован. Клик для повторной проверки`;
+          } else if (status === "AUTH_FAILED") {
+            badge.classList.add("status-error", "bm-error");
+            badge.textContent = "API:AUTH FAIL";
+            comment = data.detail || (isTgif ? (window.t ? window.t("status.api_auth_tgif_detail", {}, "Неверный токен TGIF (401)") : "Неверный токен TGIF (401)") : (window.t ? window.t("status.api_auth_detail") : "Неверный токен (401 Unauthorized)"));
+            tooltip = window.t ? window.t("status.api_auth_tooltip", { net: netShort, comment }, `🔴 ${netShort} API: ${comment}. Нажмите для настройки`) : `🔴 ${netShort} API: ${comment}. Нажмите для настройки`;
+          } else if (status === "NO_KEY") {
+            badge.classList.add("status-offline", "bm-offline");
+            badge.textContent = "API:NO KEY";
+            comment = window.t ? window.t("status.api_no_key_detail") : "Ключ не настроен (клик для ввода)";
+            tooltip = window.t ? window.t("status.api_no_key_tooltip", { net: netShort }, `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`) : `⚪ ${netShort} API: Ключ не настроен. Нажмите для ввода`;
+          } else {
+            badge.classList.add("status-error", "bm-error");
+            badge.textContent = "API:ERROR";
+            comment = data.detail || (window.t ? window.t("status.api_server_unavailable", { domain: apiDomain }, `Сервер ${apiDomain} недоступен`) : `Сервер ${apiDomain} недоступен`);
+            tooltip = window.t ? window.t("status.api_error_tooltip", { net: netShort, comment }, `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`) : `🔴 ${netShort} API: ${comment}. Клик для повторной проверки`;
+          }
+
+          if (dt) {
+            dt.textContent = comment;
+            dt.title = tooltip;
+          }
+          badge.title = tooltip;
+          if (row) row.title = tooltip;
+        }
+      } catch (e) {
+        console.error(`[API] Failed to check ${netShort} API status for ${hs.id}:`, e);
+        hs._apiStatus = "ERROR";
+        const gwErr = window.t ? window.t("status.api_gateway_error") : "Ошибка связи со шлюзом";
+        const errTtip = window.t ? window.t("status.api_error_tooltip", { net: netShort, comment: gwErr }, `🔴 ${netShort} API: ${gwErr}. Клик для повторной проверки`) : `🔴 ${netShort} API: ${gwErr}. Клик для повторной проверки`;
+        if (badge) {
+          badge.className = "status-badge bm-badge api-status-badge status-error bm-error";
+          badge.textContent = "API:ERROR";
+          badge.title = errTtip;
+        }
+        if (row) row.title = errTtip;
+        if (dt) {
+          dt.textContent = gwErr;
+          dt.title = errTtip;
+        }
+      }
+    }
+  } finally {
+    isCheckingApi = false;
+  }
+}
+
+export function openHotspotApiSettings() {
+  const currentHotspots = window.currentHotspots || [];
+  const activeHotspotId = window.activeHotspotId || "default";
+  const openEditHotspotForm = typeof window.openEditHotspotForm === "function" ? window.openEditHotspotForm : () => {};
+  const settingsModal = document.getElementById("settingsModal");
+  const editHsApiKey = document.getElementById("editHsApiKey");
+
+  const hs = currentHotspots.find(h => h.id === activeHotspotId) || currentHotspots[0];
+  if (hs) {
+    openEditHotspotForm(hs);
+  }
+  if (settingsModal) {
+    settingsModal.classList.add("active");
+  }
+  setTimeout(() => {
+    if (editHsApiKey) {
+      editHsApiKey.focus();
+      editHsApiKey.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, 150);
+}
+
+export function initWatchdog() {
+  const mainRadioCard = document.getElementById("radioContainer");
+  if (mainRadioCard) {
+    wireCardStatusInteractions(mainRadioCard);
+  }
+}
+
+// Global attachment
+window.runSystemLinkCheck = runSystemLinkCheck;
+window.startSystemLinkWatchdog = startSystemLinkWatchdog;
+window.checkBmApiStatus = checkBmApiStatus;
+window.updateGwStatus = updateGwStatus;
+window.updateHotspotGwStatus = updateHotspotGwStatus;
+window.triggerGwAction = triggerGwAction;
+window.triggerHotspotGwAction = triggerHotspotGwAction;
+window.isHotspotGwDisconnected = isHotspotGwDisconnected;
+window.setHotspotGwDisconnected = setHotspotGwDisconnected;
+window.wireCardStatusInteractions = wireCardStatusInteractions;
+window.renderHotspotAuxStatusBadge = renderHotspotAuxStatusBadge;
+window.openHotspotApiSettings = openHotspotApiSettings;
+window.initWatchdog = initWatchdog;
+
+window.__proxdmr = window.__proxdmr || {};
+window.__proxdmr.resetManualDisconnectFlags = resetManualDisconnectFlags;
+window.__proxdmr.updateGwStatus = updateGwStatus;
+window.__proxdmr.updateHotspotGwStatus = updateHotspotGwStatus;
+window.__proxdmr.triggerGwAction = triggerGwAction;
+window.__proxdmr.triggerHotspotGwAction = triggerHotspotGwAction;
+window.__proxdmr.isHotspotGwDisconnected = isHotspotGwDisconnected;
+window.__proxdmr.setHotspotGwDisconnected = setHotspotGwDisconnected;
+window.__proxdmr.runSystemLinkCheck = runSystemLinkCheck;
+window.__proxdmr.startSystemLinkWatchdog = startSystemLinkWatchdog;
+window.__proxdmr.wireCardStatusInteractions = wireCardStatusInteractions;
+window.__proxdmr.renderHotspotAuxStatusBadge = renderHotspotAuxStatusBadge;
+window.__proxdmr.checkBmApiStatus = checkBmApiStatus;
+window.__proxdmr.openHotspotApiSettings = openHotspotApiSettings;
+window.__proxdmr.initWatchdog = initWatchdog;

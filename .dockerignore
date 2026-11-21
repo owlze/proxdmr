@@ -1,0 +1,60 @@
+# Version control
+.git
+.gitignore
+
+# Documentation and tests (not needed inside production runtime image)
+docs/
+tests/
+
+# Compiled objects from host (must be built inside container)
+src/c_vocoder/*.o
+src/c_vocoder/*.so
+src/c_vocoder/imbe_vocoder/*.o
+src/c_vocoder/mbe/*.o
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Config and user data (mounted via volumes)
+config/
+data/
+src/data/*.db*
+src/data/*.json
+!src/data/piper_voices.json
+!src/data/tgif_tg_names_cache.json
+!src/data/freedmr_tg_names_cache.json
+!src/data/adn_tg_names_cache.json
+!src/data/adn_hosts_cache.json
+!src/data/dmrplus_hosts_cache.json
+!src/data/freedmr_hosts_cache.json
+!src/data/xlx_hosts_cache.json
+!src/data/ysf_hosts_cache.json
+!src/data/ysf_top_active_cache.json
+!src/data/m17_hosts_cache.json
+!src/data/dstar_hosts_cache.json
+
+# Logs
+*.log
+crash_log.txt
+docker_log.txt
+docker_tail.log
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.env
+
+# Scripts and archives
+*.zip
+*.tar.gz
+*.7z
+setup.sh
+setup.bat
+setup.ps1
+
+# Watchdog container build context
+watchdog/

@@ -1,0 +1,1037 @@
+import asyncio
+import hashlib
+import logging
+import struct
+import time
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Optional
+
+try:
+    from i18n_backend import tr as _tr
+except ImportError:
+    from src.i18n_backend import tr as _tr
+
+logger = logging.getLogger("proxdmr.homebrew")
+
+@dataclass
+class DMRFrame:
+    slot: int          # 1 or 2
+    call_type: str     # "GROUP" or "PRIVATE"
+    frame_type: int    # 0=voice, 1=voice sync, etc.
+    src_id: int        # 24-bit caller DMR ID
+    dst_id: int        # 24-bit target TG or unit ID
+    stream_id: int     # 32-bit stream identifier
+    payload: bytes     # 33 bytes payload (AMBE+2 & signaling)
+    seq_no: int        # Frame sequence number
+    ber: int = 0       # Bit Error Rate
+    rssi: int = 0      # RSSI
+
+class BMState(str, Enum):
+    DISCONNECTED = "OFFLINE"
+    OFFLINE = "OFFLINE"
+    CONNECTING = "CONNECTING"
+    AUTHENTICATING = "AUTHENTICATING"
+    CONFIGURING = "CONFIGURING"
+    ONLINE = "ONLINE"
+    AUTH_FAILED = "AUTH_FAILED"
+    ERROR = "ERROR"
+
+class HomeBrewProtocol(asyncio.DatagramProtocol):
+    def __init__(self, on_datagram_received: Callable[[bytes], None], on_error: Callable[[Exception], None]):
+        self.on_datagram_received = on_datagram_received
+        self.on_error = on_error
+        self.transport: Optional[asyncio.DatagramTransport] = None
+
+    def connection_made(self, transport: asyncio.DatagramTransport):
+        self.transport = transport
+
+    def datagram_received(self, data: bytes, addr):
+        self.on_datagram_received(data)
+
+    def error_received(self, exc: Exception):
+        logger.error(f"[HB] Protocol error: {exc}")
+        self.on_error(exc)
+
+    def connection_lost(self, exc: Optional[Exception]):
+        if exc:
+            logger.warning(f"[HB] Connection lost: {exc}")
+
+class HomeBrewClient:
+    def __init__(
+        self,
+        repeater_id: int,
+        callsign: str,
+        password: str,
+        master_host: str = "2322.master.brandmeister.network",
+        master_port: int = 62031,
+        ssid: int = 1,
+        duplex: bool = True,
+        rx_freq: int = 438800000,
+        tx_freq: int = 431200000,
+        color_code: int = 1,
+        network_type: str = "bm",
+        rpto_options: str = "",
+        xlx_module: str = "D",
+        on_status_change: Optional[Callable[[BMState, str], None]] = None,
+        on_frame_received: Optional[Callable[[bytes], None]] = None,
+        on_dmr_frame: Optional[Callable[[DMRFrame], None]] = None,
+        check_credentials_valid_cb: Optional[Callable[[], bool]] = None,
+        get_failover_candidates_cb: Optional[Callable[[str, int], list]] = None,
+        on_failover_event_cb: Optional[Callable[[dict], None]] = None,
+        user_id: Optional[int] = None,
+    ):
+        self.base_repeater_id = repeater_id
+        self.ssid = ssid
+        self.callsign = callsign.strip().upper()
+        self.password = password
+        self.master_host = master_host.strip()
+        self.master_port = master_port
+        self.duplex = duplex
+        self.rx_freq = rx_freq
+        self.tx_freq = tx_freq
+        self.color_code = color_code
+        self.network_type = (network_type or "bm").strip().lower()
+        self.rpto_options = (rpto_options or "").strip()
+        self.xlx_module = (xlx_module or "D").strip().upper()[:1] or "D"
+        self.on_status_change = on_status_change
+        self.on_frame_received = on_frame_received
+        self.on_dmr_frame = on_dmr_frame
+        self.check_credentials_valid_cb = check_credentials_valid_cb
+        self.get_failover_candidates_cb = get_failover_candidates_cb
+        self.on_failover_event_cb = on_failover_event_cb
+        self.user_id = user_id
+
+        self.state: BMState = BMState.DISCONNECTED
+        self.transport: Optional[asyncio.DatagramTransport] = None
+        self.protocol: Optional[HomeBrewProtocol] = None
+        self.keepalive_task: Optional[asyncio.Task] = None
+        self.handshake_timeout_task: Optional[asyncio.Task] = None
+        self.last_keepalive_rx: float = 0.0
+        self.salt: bytes = b""
+        self.connect_attempt: int = 0
+        self.max_retries: int = 5
+        self._retry_task: Optional[asyncio.Task] = None
+        self._was_connected: bool = False
+        self._ever_authenticated_ok: bool = False
+        self._is_fast_reconnecting: bool = False
+        self._is_manual_disconnect: bool = False
+        self._connect_gen: int = 0
+        self.failed_cycles: int = 0
+        self._connect_lock: Optional[asyncio.Lock] = None
+
+        # BM Auto-Failover tracking (60s threshold, up to 15 sorted backup servers)
+        self._unhealthy_since: float = 0.0
+        self._unhealthy_reason: str = ""
+        self._failover_active: bool = False
+        self._failover_primary_host: str = self.master_host
+        self._failover_candidates: list = []
+        self._failover_index: int = 0
+        self._failover_candidate_attempts: int = 0
+        self._failover_cooldown_until: float = 0.0
+
+    @property
+    def network_label(self) -> str:
+        nt = (self.network_type or "bm").lower()
+        if nt == "tgif":
+            return "TGIF"
+        if nt == "freedmr":
+            return "FreeDMR"
+        if nt == "dmrplus":
+            return "DMR+"
+        if nt == "xlx":
+            return "XLX"
+        if nt == "custom":
+            return "HBP"
+        if nt == "adn":
+            return "ADN"
+        return "BM"
+
+    @property
+    def connect_lock(self) -> asyncio.Lock:
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        return self._connect_lock
+
+    @property
+    def is_connected(self) -> bool:
+        return self.state == BMState.ONLINE
+
+    @property
+    def effective_repeater_id(self) -> int:
+        if self.base_repeater_id <= 0:
+            return 0
+        if getattr(self, "network_type", "").lower() == "xlx":
+            return self.base_repeater_id
+        s_id = str(self.base_repeater_id)
+        if len(s_id) == 7 and 1 <= self.ssid <= 99:
+            return int(f"{s_id}{self.ssid:02d}")
+        return self.base_repeater_id
+
+    def set_state(self, new_state: BMState, detail: str = ""):
+        self.state = new_state
+        logger.info(f"[HB] State changed -> {new_state.value} ({detail})")
+        if self.on_status_change:
+            try:
+                self.on_status_change(new_state, detail)
+            except Exception as e:
+                logger.error(f"[HB] Error in status callback: {e}")
+
+    async def connect(self, max_retries: int = 5, retry_delay: float = 2.0, force: bool = False) -> bool:
+        async with self.connect_lock:
+            if not force:
+                if self.is_connected and self.transport and not self.transport.is_closing():
+                    logger.info(f"[HB] Hotspot '{self.callsign}' (ID {self.effective_repeater_id}, host {self.master_host}) is already ONLINE, skipping redundant connect")
+                    return True
+                if self.state in (BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING):
+                    logger.info(f"[HB] Hotspot '{self.callsign}' (ID {self.effective_repeater_id}, host {self.master_host}) connection is already in progress ({self.state.value}), skipping redundant connect")
+                    return True
+
+            if self._retry_task and not self._retry_task.done():
+                self._retry_task.cancel()
+                self._retry_task = None
+
+            if self.handshake_timeout_task and not self.handshake_timeout_task.done():
+                self.handshake_timeout_task.cancel()
+                self.handshake_timeout_task = None
+
+            if self.transport and not self.transport.is_closing():
+                logger.warning("[HB] Connect called while active, closing previous transport...")
+                await self.disconnect(is_retry=True)
+
+            self._connect_gen += 1
+            self._is_manual_disconnect = False
+            self._was_connected = False
+            self._is_fast_reconnecting = False
+            self.connect_attempt = 1
+            return await self._start_connection_attempt()
+
+    async def _start_connection_attempt(self) -> bool:
+        my_gen = self._connect_gen
+        if self._is_manual_disconnect or my_gen != self._connect_gen:
+            return False
+
+        # Close any lingering transport before creating a new endpoint
+        if self.transport and not self.transport.is_closing():
+            try:
+                self.transport.close()
+            except Exception:
+                pass
+            self.transport = None
+
+        rep_id = self.effective_repeater_id
+        if rep_id <= 0:
+            self.set_state(BMState.ERROR, _tr("hb.no_dmr_id", user_id=self.user_id, fallback="DMR ID is not specified"))
+            return False
+
+        if not self.password:
+            self.set_state(BMState.ERROR, _tr("hb.no_password", user_id=self.user_id, fallback="Hotspot password is not specified (SelfCare)"))
+            return False
+
+        if self._is_fast_reconnecting:
+            attempt_text = _tr("hb.fast_reconnecting", user_id=self.user_id, fallback="Fast reconnecting to {host}:{port} ({attempt} of 5)...", host=self.master_host, port=self.master_port, attempt=self.connect_attempt)
+        else:
+            attempt_text = _tr("hb.connecting_attempt", user_id=self.user_id, fallback="Connecting to {host}:{port} (attempt {attempt} of 5)...", host=self.master_host, port=self.master_port, attempt=self.connect_attempt)
+
+        self.set_state(BMState.CONNECTING, attempt_text)
+        loop = asyncio.get_running_loop()
+
+        try:
+            transport, protocol = await loop.create_datagram_endpoint(
+                lambda: HomeBrewProtocol(self.handle_datagram, self.handle_error),
+                remote_addr=(self.master_host, self.master_port),
+            )
+        except Exception as e:
+            if self._is_manual_disconnect or my_gen != self._connect_gen:
+                logger.info(f"[HB] Aborting stale connection attempt to {self.master_host} after socket error")
+                return False
+            logger.error(f"[HB] UDP Socket create failed: {e}")
+            return self._handle_attempt_failure(_tr("hb.socket_error", user_id=self.user_id, fallback="Socket error: {error}", error=e))
+
+        if self._is_manual_disconnect or my_gen != self._connect_gen:
+            try:
+                transport.close()
+            except Exception:
+                pass
+            return False
+
+        self.transport, self.protocol = transport, protocol
+        self.send_login()
+        if self.handshake_timeout_task and not self.handshake_timeout_task.done():
+            self.handshake_timeout_task.cancel()
+        self.handshake_timeout_task = asyncio.create_task(self._handshake_timeout_watcher())
+        return True
+
+    def _emit_failover_event(self, payload: dict):
+        if self.on_failover_event_cb:
+            try:
+                self.on_failover_event_cb(payload)
+            except Exception as e:
+                logger.error(f"[HB] Error in failover event callback: {e}")
+
+    def _check_or_advance_bm_failover(self, error_detail: str) -> Optional[float]:
+        """
+        Tracks abnormal BM master behavior for 60 seconds and coordinates switching
+        across up to 15 next best BM servers sorted by ping.
+        Returns a custom retry delay (float) if failover switched servers, else None.
+        """
+        if (self.network_type or "bm").lower() != "bm":
+            return None
+
+        now = time.time()
+        if self._unhealthy_since <= 0.0:
+            self._unhealthy_since = now
+            if not self._failover_active:
+                self._failover_primary_host = self.master_host
+        self._unhealthy_reason = error_detail
+
+        # Case 1: Currently testing a backup candidate server (#1..#15)
+        if self._failover_active:
+            self._failover_candidate_attempts += 1
+            # Give each backup server up to 2 attempts before declaring it failed
+            if self._failover_candidate_attempts < 2:
+                return 1.5
+
+            failed_cand = (
+                self._failover_candidates[self._failover_index]
+                if 0 <= self._failover_index < len(self._failover_candidates)
+                else {"host": self.master_host}
+            )
+            failed_idx_num = self._failover_index + 1
+            total_cands = len(self._failover_candidates)
+
+            next_index = self._failover_index + 1
+            if next_index < total_cands:
+                self._failover_index = next_index
+                self._failover_candidate_attempts = 0
+                next_cand = self._failover_candidates[next_index]
+                next_host = str(next_cand.get("host") or "").strip()
+                self.master_host = next_host
+                self.connect_attempt = 1
+                self._is_fast_reconnecting = False
+                logger.warning(
+                    f"[HB-FAILOVER] Backup server #{failed_idx_num}/{total_cands} ({failed_cand.get('host')}) "
+                    f"failed ({error_detail}). Switching to #{next_index + 1}/{total_cands}: {next_host}"
+                )
+                self._emit_failover_event({
+                    "event": "candidate_failed_next",
+                    "primary_host": self._failover_primary_host,
+                    "failed_candidate": failed_cand,
+                    "failed_index": failed_idx_num,
+                    "failed_reason": error_detail,
+                    "next_candidate": next_cand,
+                    "next_index": next_index + 1,
+                    "total_candidates": total_cands,
+                })
+                return 1.0
+            else:
+                # All 15 backup candidates exhausted -> return to primary host with 10m cooldown
+                primary_host = self._failover_primary_host or self.master_host
+                logger.error(
+                    f"[HB-FAILOVER] All {total_cands} backup BM servers failed! "
+                    f"Reverting to primary server {primary_host}."
+                )
+                self._emit_failover_event({
+                    "event": "all_candidates_failed",
+                    "primary_host": primary_host,
+                    "failed_candidate": failed_cand,
+                    "failed_index": failed_idx_num,
+                    "failed_reason": error_detail,
+                    "total_candidates": total_cands,
+                })
+                self._failover_active = False
+                self._failover_candidates = []
+                self._failover_index = 0
+                self._failover_candidate_attempts = 0
+                self._unhealthy_since = now
+                self._failover_cooldown_until = now + 600.0
+                self.master_host = primary_host
+                self.connect_attempt = 1
+                self._is_fast_reconnecting = False
+                return 5.0
+
+        # Case 2: On primary server — check if 60 seconds of continuous failure have elapsed
+        elapsed = now - self._unhealthy_since
+        if elapsed < 60.0 or now < self._failover_cooldown_until:
+            return None
+
+        if not self.get_failover_candidates_cb:
+            return None
+
+        try:
+            candidates = self.get_failover_candidates_cb(self.master_host, 15) or []
+        except Exception as e:
+            logger.error(f"[HB-FAILOVER] Failed to get failover candidates: {e}")
+            candidates = []
+
+        if not candidates:
+            logger.warning(f"[HB-FAILOVER] No backup BM servers available for {self.master_host}")
+            self._failover_cooldown_until = now + 120.0
+            return None
+
+        self._failover_primary_host = self.master_host
+        self._failover_candidates = candidates[:15]
+        self._failover_index = 0
+        self._failover_candidate_attempts = 0
+        self._failover_active = True
+
+        first_cand = self._failover_candidates[0]
+        next_host = str(first_cand.get("host") or "").strip()
+        total_cands = len(self._failover_candidates)
+        self.master_host = next_host
+        self.connect_attempt = 1
+        self._is_fast_reconnecting = False
+
+        logger.warning(
+            f"[HB-FAILOVER] Primary BM master {self._failover_primary_host} unhealthy for {int(elapsed)}s "
+            f"({error_detail}). Starting failover to #1/{total_cands}: {next_host}"
+        )
+        self._emit_failover_event({
+            "event": "failover_started",
+            "primary_host": self._failover_primary_host,
+            "unhealthy_seconds": int(round(elapsed)),
+            "reason": error_detail,
+            "next_candidate": first_cand,
+            "next_index": 1,
+            "total_candidates": total_cands,
+        })
+        return 1.0
+
+    def _handle_attempt_failure(self, error_detail: str) -> bool:
+        my_gen = self._connect_gen
+        if self._is_manual_disconnect or my_gen != self._connect_gen:
+            return False
+
+        failover_delay = self._check_or_advance_bm_failover(error_detail)
+        if failover_delay is not None:
+            idx_num = self._failover_index + 1
+            total_c = len(self._failover_candidates)
+            if self._failover_active:
+                status_msg = _tr(
+                    "hb.failover_switching",
+                    user_id=self.user_id,
+                    fallback="Switching to backup server #{idx}/{total}: {host}...",
+                    idx=idx_num,
+                    total=total_c,
+                    host=self.master_host,
+                )
+            else:
+                status_msg = _tr(
+                    "hb.failover_returning",
+                    user_id=self.user_id,
+                    fallback="Returning to primary server {host}...",
+                    host=self.master_host,
+                )
+            self.set_state(BMState.CONNECTING, status_msg)
+
+            async def _do_failover_step():
+                await self.disconnect(is_retry=True)
+                await asyncio.sleep(failover_delay)
+                if not self._is_manual_disconnect and my_gen == self._connect_gen:
+                    await self._start_connection_attempt()
+
+            if self._retry_task and not self._retry_task.done():
+                self._retry_task.cancel()
+            self._retry_task = asyncio.create_task(_do_failover_step())
+            return False
+
+        if self._is_fast_reconnecting:
+            # Mode A: Fast reconnect sequence (5 attempts with 1s pause between each)
+            if self.connect_attempt < 5:
+                next_attempt = self.connect_attempt + 1
+                delay = 1.0
+                logger.warning(
+                    f"[HB] Fast reconnect attempt {self.connect_attempt}/5 failed ({error_detail}). "
+                    f"Retrying in 1s ({next_attempt}/5)..."
+                )
+                self.set_state(
+                    BMState.CONNECTING,
+                    _tr("hb.fast_retry_in_1s", user_id=self.user_id, fallback="Fast retry in 1s ({attempt} of 5)...", attempt=next_attempt),
+                )
+
+                async def _do_fast_retry():
+                    await self.disconnect(is_retry=True)
+                    await asyncio.sleep(delay)
+                    if not self._is_manual_disconnect and my_gen == self._connect_gen:
+                        self.connect_attempt = next_attempt
+                        await self._start_connection_attempt()
+
+                if self._retry_task and not self._retry_task.done():
+                    self._retry_task.cancel()
+                self._retry_task = asyncio.create_task(_do_fast_retry())
+                return False
+            else:
+                # All 5 fast attempts failed -> 7s pause, then transition to standard progressive cycle
+                logger.warning(
+                    f"[HB] All 5 fast reconnect attempts failed ({error_detail}). "
+                    f"Pausing 7s before transitioning to standard retry protocol..."
+                )
+                self.set_state(BMState.CONNECTING, _tr("hb.fast_reconnect_failed_pause", user_id=self.user_id, fallback="Fast reconnect failed. Pausing 7s before retry cycle..."))
+                self._is_fast_reconnecting = False
+                self.connect_attempt = 1
+                delay = 7.0
+
+                async def _do_transition_to_standard():
+                    await self.disconnect(is_retry=True)
+                    await asyncio.sleep(delay)
+                    if not self._is_manual_disconnect and my_gen == self._connect_gen:
+                        await self._start_connection_attempt()
+
+                if self._retry_task and not self._retry_task.done():
+                    self._retry_task.cancel()
+                self._retry_task = asyncio.create_task(_do_transition_to_standard())
+                return False
+
+        else:
+            # Mode B: Standard progressive protocol:
+            # Attempts 1..5: pause 2s, 3s, 4s, 5s. After 5th: pause 7s before repeating cycle.
+            if self.connect_attempt < 5:
+                next_attempt = self.connect_attempt + 1
+                delay = float(self.connect_attempt + 1)  # 1->2s, 2->3s, 3->4s, 4->5s
+                logger.warning(
+                    f"[HB] Attempt {self.connect_attempt}/5 failed ({error_detail}). "
+                    f"Retrying in {int(delay)}s ({next_attempt}/5)..."
+                )
+                self.set_state(BMState.CONNECTING, _tr("hb.retry_in", user_id=self.user_id, fallback="Retrying in {delay}s ({attempt} of 5)...", delay=int(delay), attempt=next_attempt))
+
+                async def _do_standard_retry():
+                    await self.disconnect(is_retry=True)
+                    await asyncio.sleep(delay)
+                    if not self._is_manual_disconnect and my_gen == self._connect_gen:
+                        self.connect_attempt = next_attempt
+                        await self._start_connection_attempt()
+
+                if self._retry_task and not self._retry_task.done():
+                    self._retry_task.cancel()
+                self._retry_task = asyncio.create_task(_do_standard_retry())
+                return False
+            else:
+                # All 5 standard attempts failed -> 7s pause, then start next cycle from Attempt 1
+                logger.warning(
+                    f"[HB] All 5 connection attempts failed ({error_detail}). "
+                    f"Pausing 7s before repeating connection cycle..."
+                )
+                self.set_state(BMState.CONNECTING, _tr("hb.all_attempts_failed_pause", user_id=self.user_id, fallback="All 5 attempts failed. Pausing 7s before retrying..."))
+                self.connect_attempt = 1
+                delay = 7.0
+
+                async def _do_next_standard_cycle():
+                    await self.disconnect(is_retry=True)
+                    await asyncio.sleep(delay)
+                    if not self._is_manual_disconnect and my_gen == self._connect_gen:
+                        await self._start_connection_attempt()
+
+                if self._retry_task and not self._retry_task.done():
+                    self._retry_task.cancel()
+                self._retry_task = asyncio.create_task(_do_next_standard_cycle())
+                return False
+
+    def _handle_unexpected_disconnect(self, reason: str):
+        my_gen = self._connect_gen
+        if self._is_manual_disconnect or my_gen != self._connect_gen:
+            return
+        if self._unhealthy_since <= 0.0:
+            self._unhealthy_since = time.time()
+            if not self._failover_active:
+                self._failover_primary_host = self.master_host
+        self._unhealthy_reason = reason
+        logger.warning(
+            f"[HB] Unexpected disconnect from BM ({reason}). "
+            f"Starting fast reconnect protocol (5 attempts, 1s interval)..."
+        )
+        self.set_state(
+            BMState.CONNECTING,
+            _tr(
+                "hb.unexpected_disconnect_fast",
+                user_id=self.user_id,
+                fallback="BM connection lost: {reason}. Fast reconnect (1 of 5)...",
+                reason=reason,
+            ),
+        )
+        self._is_fast_reconnecting = True
+        self.connect_attempt = 1
+
+        async def _do_fast_start():
+            await self.disconnect(is_retry=True)
+            await asyncio.sleep(1.0)
+            if not self._is_manual_disconnect and my_gen == self._connect_gen:
+                await self._start_connection_attempt()
+
+        if self._retry_task and not self._retry_task.done():
+            self._retry_task.cancel()
+        self._retry_task = asyncio.create_task(_do_fast_start())
+
+    def send_login(self):
+        rep_id = self.effective_repeater_id
+        packet = b"RPTL" + struct.pack(">I", rep_id)
+        logger.info(f"[HB] Sending RPTL login for ID: {rep_id} to {self.master_host}...")
+        self.send_raw(packet)
+
+    def send_auth_key(self, salt: bytes):
+        rep_id = self.effective_repeater_id
+        # HomeBrew challenge response: sha256(salt[:4] + password)
+        challenge = salt[:4] + self.password.encode("ascii", errors="ignore")
+        auth_hash = hashlib.sha256(challenge).digest()
+        
+        # RPTK: 4 bytes tag + 4 bytes ID + 32 bytes SHA256 digest = 40 bytes
+        packet = b"RPTK" + struct.pack(">I", rep_id) + auth_hash
+        logger.info(f"[HB] Sending RPTK auth hash for ID {rep_id}...")
+        self.send_raw(packet)
+        self.set_state(BMState.AUTHENTICATING, _tr("hb.authenticating", user_id=self.user_id, fallback="Checking password"))
+
+    def send_config(self):
+        rep_id = self.effective_repeater_id
+        callsign_bytes = f"{self.callsign:<8.8}".encode("ascii")
+        
+        # Duplex vs Simplex
+        if self.duplex:
+            slots_bytes = b"3"  # Duplex: Slot 1 and Slot 2
+            tx_f = self.tx_freq if self.tx_freq != self.rx_freq else (self.rx_freq - 7600000)
+        else:
+            slots_bytes = b"4"  # Simplex: Slot 2
+            tx_f = self.rx_freq
+
+        rx_freq_bytes = f"{self.rx_freq:09d}"[:9].encode("ascii")
+        tx_freq_bytes = f"{tx_f:09d}"[:9].encode("ascii")
+        tx_power_bytes = b"01"
+        cc_bytes = f"{self.color_code:02d}"[:2].encode("ascii")
+        lat_bytes = b"0.000000"  # 8 bytes
+        lon_bytes = b"00.000000" # 9 bytes
+        height_bytes = b"000"    # 3 bytes
+        location_bytes = f"{'ProxDMR Hotspot':<20.20}".encode("ascii")
+        desc_bytes = f"{'ProxDMR Gateway':<19.19}".encode("ascii")
+        net_urls = {
+            "bm": "https://brandmeister.network",
+            "tgif": "https://tgif.network",
+            "freedmr": "https://www.freedmr.uk",
+            "dmrplus": "http://www.dmrplus.de",
+            "xlx": "https://xlxbbs.epf.lu",
+            "custom": "https://proxdmr.local",
+            "adn": "https://adn.systems",
+        }
+        url_str = net_urls.get(self.network_type, "https://brandmeister.network")
+        url_bytes = f"{url_str:<124.124}".encode("ascii")
+        soft_id_bytes = f"{'20240101':<40.40}".encode("ascii")
+        pkg_id_bytes = f"{'MMDVM':<40.40}".encode("ascii")
+
+        payload = (
+            callsign_bytes
+            + rx_freq_bytes
+            + tx_freq_bytes
+            + tx_power_bytes
+            + cc_bytes
+            + lat_bytes
+            + lon_bytes
+            + height_bytes
+            + location_bytes
+            + desc_bytes
+            + slots_bytes
+            + url_bytes
+            + soft_id_bytes
+            + pkg_id_bytes
+        )
+        packet = b"RPTC" + struct.pack(">I", rep_id) + payload
+        logger.info(f"[HB] Sending RPTC config ({len(packet)} bytes, Duplex={self.duplex}, Net={self.network_label})...")
+        self.send_raw(packet)
+        self.set_state(BMState.CONFIGURING, _tr("hb.configuring", user_id=self.user_id, fallback="Sending hotspot configuration"))
+
+    def send_options(self, options_str: Optional[str] = None) -> bool:
+        opts = (options_str if options_str is not None else self.rpto_options or "").strip()
+        if options_str is not None:
+            self.rpto_options = opts
+        if not opts or not self.transport or self.transport.is_closing():
+            return False
+        rep_id = self.effective_repeater_id
+        packet = b"RPTO" + struct.pack(">I", rep_id) + opts.encode("ascii", errors="ignore")
+        logger.info(f"[HB] Sending RPTO options ({len(packet)} bytes) to {self.master_host}: {opts}")
+        self.send_raw(packet)
+        return True
+
+    def send_keepalive(self):
+        rep_id = self.effective_repeater_id
+        packet = b"RPTPING" + struct.pack(">I", rep_id)
+        self.send_raw(packet)
+
+    def send_raw(self, data: bytes):
+        if self.transport and not self.transport.is_closing():
+            self.transport.sendto(data)
+
+    def send_dmrd(
+        self,
+        slot: int,
+        call_type: str,
+        frame_type: int,
+        stream_id: int,
+        seq_no: int,
+        payload: bytes,
+        src_id: int,
+        dst_id: int,
+        burst_index: int = 0,
+    ):
+        """
+        Sends a HomeBrew DMRD packet (55 bytes).
+        Compliant with MMDVMHost / BrandMeister HomeBrew protocol specification:
+        - slot: 1 or 2
+        - call_type: 'GROUP' or 'PRIVATE'
+        - frame_type:
+            1 or "HEADER": DT_VOICE_LC_HEADER (DataSync + 0x01 = 0x21)
+            2 or "TERM":   DT_TERMINATOR_WITH_LC (DataSync + 0x02 = 0x22)
+            0 or "BURST":
+              burst_index % 6 == 0: DT_VOICE_SYNC (VoiceSync = 0x10)
+              burst_index % 6 == 1..5: DT_VOICE (N = 1..5)
+        - stream_id: 32-bit unsigned int
+        - seq_no: 8-bit unsigned int (0..255)
+        - payload: 33 bytes DMR burst
+        - src_id: 24-bit DMR ID (e.g. 1234567)
+        - dst_id: 24-bit DMR ID / TG (e.g. 9990 or 2501)
+        - burst_index: 0..5 index within superframe (for voice bursts)
+        """
+        if not self.transport or self.transport.is_closing() or self.state != BMState.ONLINE:
+            return
+
+        rep_id = self.effective_repeater_id
+        slot_bit = 0x80 if slot == 2 else 0x00
+        call_bit = 0x40 if str(call_type).upper() == "PRIVATE" else 0x00
+
+        if frame_type in (1, "HEADER"):
+            # DT_VOICE_LC_HEADER (DataSync flag 0x20 | 0x01)
+            type_byte = 0x20 | 0x01
+        elif frame_type in (2, "TERM"):
+            # DT_TERMINATOR_WITH_LC (DataSync flag 0x20 | 0x02)
+            type_byte = 0x20 | 0x02
+        else:
+            burst_pos = burst_index % 6
+            if burst_pos == 0:
+                # Burst A: DT_VOICE_SYNC (VoiceSync flag 0x10)
+                type_byte = 0x10
+            else:
+                # Bursts B..F: DT_VOICE with burst number N = 1..5
+                type_byte = burst_pos & 0x0F
+
+        slot_byte = slot_bit | call_bit | type_byte
+
+        packet = bytearray(55)
+        packet[0:4] = b"DMRD"
+        packet[4] = seq_no & 0xFF
+        packet[5] = (src_id >> 16) & 0xFF
+        packet[6] = (src_id >> 8) & 0xFF
+        packet[7] = src_id & 0xFF
+        packet[8] = (dst_id >> 16) & 0xFF
+        packet[9] = (dst_id >> 8) & 0xFF
+        packet[10] = dst_id & 0xFF
+        packet[11:15] = struct.pack(">I", rep_id)
+        packet[15] = slot_byte
+        packet[16:20] = struct.pack(">I", stream_id)
+        packet[20:53] = payload[:33]
+        packet[53] = 0x00  # BER
+        packet[54] = 0x00  # RSSI
+
+        self.send_raw(bytes(packet))
+        if frame_type in (1, "HEADER"):
+            logger.info(f"[HB_TX] DMRD Voice Header: Seq={seq_no}, Slot={slot}, SlotByte=0x{slot_byte:02X}, Src={src_id}, Dst={dst_id}")
+        elif frame_type in (2, "TERM"):
+            logger.info(f"[HB_TX] DMRD Voice Terminator: Seq={seq_no}, Slot={slot}, SlotByte=0x{slot_byte:02X}, Src={src_id}, Dst={dst_id}")
+        elif burst_index == 0 or burst_index % 18 == 0:
+            logger.info(f"[HB_TX] DMRD Voice Burst #{burst_index}: Seq={seq_no}, Slot={slot}, SlotByte=0x{slot_byte:02X}")
+
+    def handle_datagram(self, data: bytes):
+        if len(data) < 4:
+            return
+
+        # 1. Master NAK (Auth Failed or Config Rejected or Post-Restart Master DB Desync)
+        if data.startswith(b"MSTNAK") or data.startswith(b"RPTNAK"):
+            logger.error(f"[HB] Received NAK from {self.network_label} ({self.master_host}) in state {self.state.value}!")
+            if self.handshake_timeout_task and not self.handshake_timeout_task.done():
+                self.handshake_timeout_task.cancel()
+            if self.state == BMState.AUTHENTICATING:
+                creds_known_valid = False
+                if self.check_credentials_valid_cb:
+                    try:
+                        creds_known_valid = bool(self.check_credentials_valid_cb())
+                    except Exception:
+                        creds_known_valid = False
+                is_server_fault_nak = (
+                    self._ever_authenticated_ok
+                    or self._was_connected
+                    or self._unhealthy_since > 0.0
+                    or self._failover_active
+                    or creds_known_valid
+                )
+                if is_server_fault_nak:
+                    logger.warning(
+                        f"[HB] Treating AUTHENTICATING NAK on {self.master_host} (ID {self.effective_repeater_id}) "
+                        f"as abnormal server reaction (ever_ok={self._ever_authenticated_ok}, "
+                        f"unhealthy_since={self._unhealthy_since > 0.0}, creds_valid={creds_known_valid})"
+                    )
+                    self._handle_attempt_failure(
+                        _tr(
+                            "hb.server_fault_nak",
+                            user_id=self.user_id,
+                            fallback="Abnormal response from server {host}: RPTK/NAK rejection with valid password",
+                            host=self.master_host,
+                        )
+                    )
+                else:
+                    self.set_state(
+                        BMState.AUTH_FAILED,
+                        _tr(
+                            "hb.auth_failed_nak",
+                            user_id=self.user_id,
+                            fallback="Invalid hotspot password ({network} NAK)",
+                            network=self.network_label,
+                        ),
+                    )
+                    asyncio.create_task(self.disconnect())
+            elif self.state == BMState.CONFIGURING:
+                self._handle_attempt_failure(
+                    _tr(
+                        "hb.config_rejected",
+                        user_id=self.user_id,
+                        fallback="Configuration rejected ({network} {host})",
+                        network=self.network_label,
+                        host=self.master_host,
+                    )
+                )
+            else:
+                self._handle_attempt_failure(
+                    _tr(
+                        "hb.connection_rejected",
+                        user_id=self.user_id,
+                        fallback="Connection rejected ({network} {host})",
+                        network=self.network_label,
+                        host=self.master_host,
+                    )
+                )
+            return
+
+        # 2. Challenge packet received while CONNECTING
+        if self.state == BMState.CONNECTING:
+            if data.startswith(b"RPTACK") and len(data) >= 10:
+                self.salt = data[6:10]
+                logger.info(f"[HB] Received challenge salt (RPTACK): {self.salt.hex()}")
+                self.send_auth_key(self.salt)
+                return
+            elif data.startswith(b"RPTL") and len(data) >= 8:
+                self.salt = data[4:8]
+                logger.info(f"[HB] Received challenge salt (RPTL): {self.salt.hex()}")
+                self.send_auth_key(self.salt)
+                return
+
+        # 3. Auth ACK received while AUTHENTICATING
+        if self.state == BMState.AUTHENTICATING:
+            if data.startswith(b"RPTACK") or data.startswith(b"MSTACK") or data.startswith(b"RPTA"):
+                logger.info("[HB] Authentication OK! Sending repeater configuration (RPTC)...")
+                self._ever_authenticated_ok = True
+                self.send_config()
+                return
+
+        # 4. Config ACK received while CONFIGURING
+        if self.state == BMState.CONFIGURING:
+            if data.startswith(b"RPTACK") or data.startswith(b"MSTACK") or data.startswith(b"RPTA"):
+                logger.info(f"[HB] Configuration accepted! {self.network_label} ONLINE!")
+                if self.handshake_timeout_task and not self.handshake_timeout_task.done():
+                    self.handshake_timeout_task.cancel()
+                if self._retry_task and not self._retry_task.done():
+                    self._retry_task.cancel()
+                    self._retry_task = None
+                self._was_connected = True
+                self._ever_authenticated_ok = True
+                self._is_fast_reconnecting = False
+                self.connect_attempt = 1
+                if self._failover_active:
+                    cand = (
+                        self._failover_candidates[self._failover_index]
+                        if 0 <= self._failover_index < len(self._failover_candidates)
+                        else {"host": self.master_host}
+                    )
+                    idx_num = self._failover_index + 1
+                    total_cands = len(self._failover_candidates)
+                    primary_h = self._failover_primary_host
+                    self._failover_active = False
+                    self._failover_candidates = []
+                    self._failover_index = 0
+                    self._failover_candidate_attempts = 0
+                    self._unhealthy_since = 0.0
+                    self._unhealthy_reason = ""
+                    self._failover_primary_host = self.master_host
+                    self._emit_failover_event({
+                        "event": "failover_succeeded",
+                        "primary_host": primary_h,
+                        "new_host": self.master_host,
+                        "candidate": cand,
+                        "index": idx_num,
+                        "total_candidates": total_cands,
+                    })
+                else:
+                    self._unhealthy_since = 0.0
+                    self._unhealthy_reason = ""
+                    self._failover_primary_host = self.master_host
+                self.set_state(
+                    BMState.ONLINE,
+                    _tr("hb.connected_to", user_id=self.user_id, fallback="Connected to {network}", network=self.network_label),
+                )
+                self.last_keepalive_rx = time.time()
+                self._start_keepalive_task()
+                net_l = (getattr(self, "network_type", "bm") or "bm").strip().lower()
+                opts_up = str(self.rpto_options or "").upper()
+                has_foreign_rpto = any(k in opts_up for k in ("TS1=", "TS2=", "STARTREF=", "RELINKTIME=", "USERLINK=", "DIAL=", "VOICE=", "SINGLE=", "LANG="))
+                allow_rpto = (net_l in ("freedmr", "adn", "dmrplus", "custom")) or (net_l == "bm" and not has_foreign_rpto)
+                if self.rpto_options and allow_rpto:
+                    try:
+                        self.send_options()
+                    except Exception as e:
+                        logger.warning(f"[HB] Failed to send initial RPTO options: {e}")
+                return
+
+        # 4b. RPTACK / MSTACK while already ONLINE (e.g. ACK for RPTO options)
+        if self.state == BMState.ONLINE and (data.startswith(b"RPTACK") or data.startswith(b"MSTACK") or data.startswith(b"RPTA")):
+            self.last_keepalive_rx = time.time()
+            logger.info(f"[HB] Received ACK in ONLINE state from {self.master_host} (RPTO options accepted)")
+            return
+
+        # 5. Keepalive PONG
+        if data.startswith(b"MSTPONG") or data.startswith(b"RPTP") or data.startswith(b"MSTP"):
+            self.last_keepalive_rx = time.time()
+            return
+
+        # 6. Master Closing
+        if data.startswith(b"MSTCL"):
+            logger.warning("[HB] Master closing connection (MSTCL)")
+            if self._was_connected:
+                self._handle_unexpected_disconnect(_tr("hb.master_closed_mstcl", user_id=self.user_id, fallback="Master closed session (MSTCL)"))
+            else:
+                self.set_state(BMState.DISCONNECTED, _tr("hb.master_closed", user_id=self.user_id, fallback="Master closed session"))
+                asyncio.create_task(self.disconnect())
+            return
+
+        # 7. DMRD (Voice / Data frames)
+        if data.startswith(b"DMRD") and len(data) >= 53:
+            if self.on_frame_received:
+                try:
+                    self.on_frame_received(data)
+                except Exception as e:
+                    logger.error(f"[HB] Error in raw frame callback: {e}")
+
+            if self.on_dmr_frame:
+                try:
+                    seq_no = data[4]
+                    src_id = (data[5] << 16) | (data[6] << 8) | data[7]
+                    dst_id = (data[8] << 16) | (data[9] << 8) | data[10]
+                    slot_byte = data[15]
+                    slot = 2 if (slot_byte & 0x80) else 1
+                    call_type = "PRIVATE" if (slot_byte & 0x40) else "GROUP"
+                    frame_type = slot_byte & 0x3F
+                    stream_id = struct.unpack(">I", data[16:20])[0]
+                    payload = data[20:53]
+                    ber = data[53] if len(data) > 53 else 0
+                    rssi = data[54] if len(data) > 54 else 0
+
+                    frame = DMRFrame(
+                        slot=slot,
+                        call_type=call_type,
+                        frame_type=frame_type,
+                        src_id=src_id,
+                        dst_id=dst_id,
+                        stream_id=stream_id,
+                        payload=payload,
+                        seq_no=seq_no,
+                        ber=ber,
+                        rssi=rssi,
+                    )
+                    self.on_dmr_frame(frame)
+                except Exception as e:
+                    logger.error(f"[HB] Error parsing DMRD frame: {e}")
+            return
+
+        logger.debug(f"[HB] Unknown datagram: {data[:10]} ({len(data)} bytes)")
+
+    def handle_error(self, exc: Exception):
+        logger.error(f"[HB] Transport error: {exc}")
+        err_msg = _tr("hb.net_err", user_id=self.user_id, fallback="Network error: {error}", error=exc)
+        if self.state in (BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING):
+            self._handle_attempt_failure(err_msg)
+        elif self.state == BMState.ONLINE:
+            self._handle_unexpected_disconnect(err_msg)
+        else:
+            self.set_state(BMState.ERROR, err_msg)
+
+    def _start_keepalive_task(self):
+        if self.keepalive_task and not self.keepalive_task.done():
+            self.keepalive_task.cancel()
+        self.keepalive_task = asyncio.create_task(self._keepalive_loop())
+
+    async def _keepalive_loop(self):
+        logger.info("[HB] Keepalive loop started (5s)")
+        try:
+            while self.state == BMState.ONLINE:
+                await asyncio.sleep(5.0)
+                if self.state != BMState.ONLINE:
+                    break
+
+                self.send_keepalive()
+
+                if time.time() - self.last_keepalive_rx > 20.0:
+                    logger.warning("[HB] Keepalive timeout: no response from BM master for >20s")
+                    self._handle_unexpected_disconnect(_tr("hb.keepalive_timeout", user_id=self.user_id, fallback="BM connection timeout (>20s)"))
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[HB] Keepalive error: {e}")
+
+    async def _handshake_timeout_watcher(self):
+        my_gen = self._connect_gen
+        try:
+            await asyncio.sleep(6.0)
+            if self._is_manual_disconnect or my_gen != self._connect_gen:
+                return
+            if self.state in (BMState.CONNECTING, BMState.AUTHENTICATING, BMState.CONFIGURING):
+                logger.warning(f"[HB] Handshake timed out (attempt {self.connect_attempt}/5)")
+                self._handle_attempt_failure(_tr("hb.handshake_timeout", user_id=self.user_id, fallback="BM master not responding (timeout)"))
+        except asyncio.CancelledError:
+            pass
+
+    async def disconnect(self, is_retry: bool = False):
+        logger.info(f"[HB] Disconnecting (is_retry={is_retry})...")
+        if not is_retry:
+            self._connect_gen += 1
+            self._is_manual_disconnect = True
+            self._was_connected = False
+            self._is_fast_reconnecting = False
+            self._unhealthy_since = 0.0
+            self._unhealthy_reason = ""
+            self._failover_active = False
+            self._failover_candidates = []
+            self._failover_index = 0
+            self._failover_candidate_attempts = 0
+            if self._retry_task and not self._retry_task.done():
+                self._retry_task.cancel()
+                self._retry_task = None
+            self.connect_attempt = 0
+
+        if self.handshake_timeout_task and not self.handshake_timeout_task.done():
+            self.handshake_timeout_task.cancel()
+            self.handshake_timeout_task = None
+
+        if self.keepalive_task and not self.keepalive_task.done():
+            self.keepalive_task.cancel()
+
+        if self.transport and not self.transport.is_closing():
+            try:
+                rep_id = self.effective_repeater_id
+                self.send_raw(b"RPTCL" + struct.pack(">I", rep_id))
+            except Exception:
+                pass
+            try:
+                self.transport.close()
+            except Exception:
+                pass
+
+        self.transport = None
+        self.protocol = None
+        if not is_retry:
+            if self.state not in (BMState.AUTH_FAILED, BMState.ERROR):
+                self.set_state(BMState.DISCONNECTED, _tr("hb.disconnected_by_user", user_id=self.user_id, fallback="Disconnected by user"))
+        else:
+            if self.state not in (BMState.AUTH_FAILED, BMState.ERROR):
+                self.set_state(BMState.DISCONNECTED, _tr("hb.reconnecting", user_id=self.user_id, fallback="Reconnecting"))

@@ -1,0 +1,1188 @@
+/**
+ * ProxDMR - PTT Transmission Engine & PTT Lock Subsystem
+ * Module: modules/ptt/engine.js
+ */
+
+import { getCountryInfo, updateFlagElement, getHotspotNetworkType } from '../core/formatters.js?v=2.9.787';
+import { updateAllHotspotRecUI } from '../audio/routing.js?v=2.9.792';
+import { initAudio, releaseMicrophone, applyTxDspSettings, syncActiveAudioTxPreset, startVuMeter, stopVuMeter, resetTxDsp, getVuState, ensureVuMeterLoop } from '../audio/dsp.js?v=2.9.783';
+import { resolveHotspotId as _resolveHotspotId, getHotspotSlot as _getHotspotSlot } from '../core/state.js?v=2.9.698';
+import { getHotspotTot, setHotspotTot, getHotspotPttMode, setHotspotPttMode, getHotspotRogerBeep, getHotspotRogerBeepPattern, playLocalRogerBeep, getRogerBeepDurationMs, formatTotDuration, openTotConfigModal, closeTotConfigModal } from './tot.js?v=2.9.542';
+import { triggerHaptic } from '../core/haptic.js?v=2.9.711';
+
+let txStartTime = 0;
+let totCountdownInterval = null;
+let totRemainingSeconds = null;
+let totActiveLimit = 60;
+
+function getTotRemainingSeconds() {
+  return totRemainingSeconds;
+}
+
+let isPttReleasing = false;
+let pttReleaseTimer = null;
+let txSilenceInterval = null;
+let aslPttReadyVibTimer = null;
+const SILENCE_BURST_BYTES = 960; // 60ms @ 8000Hz 16-bit PCM = 480 samples = 960 bytes
+
+export function isCheckMicOnTxEnabled() {
+  return localStorage.getItem("proxdmr_check_mic_on_tx") !== "false";
+}
+
+export function setCheckMicOnTxEnabled(enabled, syncServer = true) {
+  const boolVal = Boolean(enabled);
+  localStorage.setItem("proxdmr_check_mic_on_tx", boolVal ? "true" : "false");
+  const optChk = document.getElementById("optCheckMicOnTx");
+  if (optChk && optChk.checked !== boolVal) {
+    optChk.checked = boolVal;
+  }
+  if (syncServer) {
+    try {
+      fetch("/api/settings/general", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ check_mic_on_tx: boolVal })
+      }).catch(() => {});
+    } catch (_) {}
+    if (typeof window !== "undefined" && window.ws && window.ws.readyState === WebSocket.OPEN) {
+      try {
+        window.ws.send(JSON.stringify({ type: "set_check_mic_on_tx", enabled: boolVal }));
+      } catch (_) {}
+    }
+    if (typeof window !== "undefined" && typeof window.scheduleSyncClientSettings === "function") {
+      window.scheduleSyncClientSettings();
+    }
+  }
+}
+
+export function ensureTxSilenceFallback() {
+  const hasLiveMic = Boolean(window.micStream && window.micStream.getAudioTracks().some(t => t.readyState === "live"));
+  if (!hasLiveMic && !txSilenceInterval) {
+    const silenceChunk = new Uint8Array(SILENCE_BURST_BYTES);
+    txSilenceInterval = setInterval(() => {
+      if (window.isPttPressed && window.ws && window.ws.readyState === WebSocket.OPEN) {
+        window.ws.send(silenceChunk);
+      } else {
+        stopTxSilenceFallback();
+      }
+    }, 60);
+  }
+}
+
+export function stopTxSilenceFallback() {
+  if (txSilenceInterval) {
+    clearInterval(txSilenceInterval);
+    txSilenceInterval = null;
+  }
+}
+
+function _switchActiveHotspot(hid) {
+  if (typeof window !== "undefined" && typeof window.switchActiveHotspot === "function") {
+    window.switchActiveHotspot(hid);
+  }
+}
+
+function _getHotspotLoop(hid) {
+  if (typeof window !== "undefined" && typeof window.getHotspotLoop === "function") {
+    return window.getHotspotLoop(hid);
+  }
+  return false;
+}
+
+function _getHotspotTg(hid, slot = null) {
+  if (typeof window !== "undefined" && typeof window.getHotspotTg === "function") {
+    return window.getHotspotTg(hid, slot);
+  }
+  const id = hid || (typeof window !== "undefined" && window.activeHotspotId) || "default";
+  const unified = localStorage.getItem(`proxdmr_tg_${id}`) || localStorage.getItem("proxdmr_tg");
+  if (unified) return parseInt(unified, 10);
+  const s = parseInt(slot, 10) || 2;
+  const saved = localStorage.getItem(`proxdmr_tg_${id}_ts${s}`) || localStorage.getItem(`proxdmr_tg_ts${s}`);
+  return saved ? parseInt(saved, 10) : 2501;
+}
+
+function _getHotspotPttTarget(hid, slot = null) {
+  if (typeof window !== "undefined" && typeof window.getHotspotPttTarget === "function") {
+    return window.getHotspotPttTarget(hid, slot);
+  }
+  const id = hid || (typeof window !== "undefined" && window.activeHotspotId) || "default";
+  const savedTarget = localStorage.getItem(`proxdmr_ptt_target_${id}`);
+  if (savedTarget) {
+    try {
+      const parsed = JSON.parse(savedTarget);
+      if (parsed && (parsed.type === "CALLER" || parsed.type === "ID") && parsed.id > 0) return parsed;
+    } catch (e) {
+      const val = parseInt(savedTarget, 10);
+      if (!isNaN(val) && val > 999999) return { id: val, type: "CALLER" };
+    }
+  }
+  const fallbackTg = _getHotspotTg(id, slot);
+  return { id: fallbackTg, type: "TG" };
+}
+
+function _isMuteOnPttEnabled() {
+  if (typeof window !== "undefined" && typeof window.isMuteOnPttEnabled === "function") {
+    return window.isMuteOnPttEnabled();
+  }
+  return false;
+}
+
+function _updateAllVolumeAndMuteUI() {
+  if (typeof window !== "undefined" && typeof window.updateAllVolumeAndMuteUI === "function") {
+    window.updateAllVolumeAndMuteUI();
+  }
+}
+
+function _updateCardTgDisplay(card) {
+  if (typeof window !== "undefined" && typeof window.updateCardTgDisplay === "function") {
+    window.updateCardTgDisplay(card);
+  }
+}
+
+function _isVolumeUpPttEnabled() {
+  return false;
+}
+
+function _isVolumeDownPttEnabled() {
+  return false;
+}
+
+  // --- PTT Logic ---
+
+
+  // --- PTT Lock Subsystem ---
+  function triggerTactileVibrate(pattern = [50, 40, 50]) {
+    try {
+      triggerHaptic(pattern);
+    } catch (_) {}
+  }
+
+  function blinkPttLocked(btnEl) {
+    triggerTactileVibrate([60, 50, 60]);
+    if (!btnEl) {
+      const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(window.activeHotspotId)}"]`);
+      btnEl = activeCard ? activeCard.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+    }
+    if (btnEl) {
+      btnEl.classList.remove("ptt-locked-blink");
+      void btnEl.offsetWidth;
+      btnEl.classList.add("ptt-locked-blink");
+      setTimeout(() => {
+        if (btnEl) btnEl.classList.remove("ptt-locked-blink");
+      }, 450);
+    }
+  }
+
+  function isPttLocked(hid) {
+  window.isPttLocked = isPttLocked;
+    const cid = _resolveHotspotId(hid || window.activeHotspotId || "default");
+    const val = localStorage.getItem("proxdmr_ptt_lock_" + cid);
+    if (val !== null) return val === "true";
+    if ((window.currentHotspots || []) && (window.currentHotspots || [])[0] && String((window.currentHotspots || [])[0].id) === String(cid)) {
+      const defVal = localStorage.getItem("proxdmr_ptt_lock_default");
+      if (defVal !== null) return defVal === "true";
+    }
+    return false;
+  }
+
+  function setPttLocked(hid, locked) {
+    const cid = _resolveHotspotId(hid || window.activeHotspotId || "default");
+    localStorage.setItem("proxdmr_ptt_lock_" + cid, locked ? "true" : "false");
+    if ((window.currentHotspots || []) && (window.currentHotspots || [])[0] && String((window.currentHotspots || [])[0].id) === String(cid)) {
+      localStorage.setItem("proxdmr_ptt_lock_default", locked ? "true" : "false");
+    }
+    updatePttLockUI(cid);
+  }
+
+  function togglePttLock(hid) {
+    const cid = _resolveHotspotId(hid || window.activeHotspotId || "default");
+    const nextState = !isPttLocked(cid);
+    setPttLocked(cid, nextState);
+    triggerTactileVibrate(nextState ? [70, 50, 70] : 45);
+  }
+
+  function updatePttLockUI(hid = null) {
+  window.updatePttLockUI = updatePttLockUI;
+    const targetCid = hid ? _resolveHotspotId(hid) : null;
+    const cards = document.querySelectorAll(".radio-container");
+    cards.forEach(card => {
+      const cid = _resolveHotspotId(card.dataset.hotspotId || "default");
+      if (targetCid && cid !== targetCid) return;
+      const icon = card.querySelector(".ptt-lock-icon");
+      if (icon) {
+        if (isPttLocked(cid)) {
+          icon.classList.add("locked");
+        } else {
+          icon.classList.remove("locked");
+        }
+      }
+    });
+  }
+  
+  window.isPttLocked = isPttLocked;
+  window.togglePttLock = togglePttLock;
+  window.updatePttLockUI = updatePttLockUI;
+  window.blinkPttLocked = blinkPttLocked;
+
+  function checkPttConnectionStatus(hid = null) {
+    const cid = _resolveHotspotId(hid || (typeof window !== "undefined" && window.activeHotspotId) || "default");
+
+    // 1. Check GW connection (WebSocket and user disconnect flag)
+    const ws = (typeof window !== "undefined") ? window.ws : null;
+    const isWsOpen = Boolean(ws && ws.readyState === WebSocket.OPEN);
+    const isGwUserDisabled = Boolean(
+      (typeof window !== "undefined" && typeof window.isHotspotGwDisconnected === "function" && window.isHotspotGwDisconnected(cid)) ||
+      (typeof window !== "undefined" && window.isManualGwDisconnect)
+    );
+    const isGwConnected = isWsOpen && !isGwUserDisabled;
+
+    // 2. Check BM connection
+    const currentHotspots = (typeof window !== "undefined" && Array.isArray(window.currentHotspots)) ? window.currentHotspots : [];
+    const hs = currentHotspots.find(h => {
+      const hCid = _resolveHotspotId(h.id);
+      return hCid === cid;
+    }) || currentHotspots.find(h => h.id === cid) || (currentHotspots.length > 0 ? currentHotspots[0] : null);
+
+    const isCol = Boolean(typeof window !== "undefined" && typeof window.isHotspotCollapsed === "function" && window.isHotspotCollapsed(cid));
+    const isLive = Boolean(
+      (typeof window !== "undefined" && typeof window.isHotspotLiveCollapsed === "function" && window.isHotspotLiveCollapsed(cid))
+    );
+    const isCollapsed = isCol && !isLive;
+
+    let bmStatus = "OFFLINE";
+    if (hs && hs.status) {
+      bmStatus = hs.status;
+    } else if (typeof window !== "undefined" && window.currentBmStatus) {
+      bmStatus = window.currentBmStatus;
+    }
+
+    const isBmConnected = !isCollapsed && (bmStatus === "ONLINE");
+
+    return {
+      ok: isGwConnected && isBmConnected,
+      isGwConnected,
+      isBmConnected,
+      cid
+    };
+  }
+
+  function notifyPttConnectionBlocked(status, btnEl = null) {
+    if (typeof blinkPttLocked === "function") {
+      blinkPttLocked(btnEl);
+    }
+    if (typeof window !== "undefined" && typeof window.showToast === "function") {
+      let msg = "";
+      if (!status.isGwConnected && !status.isBmConnected) {
+        msg = (typeof window.t === "function")
+          ? window.t("ptt.no_gw_bm_toast", {}, "⚠️ Нет соединения с GW и BM. Передача заблокирована.")
+          : "⚠️ Нет соединения с GW и BM. Передача заблокирована.";
+      } else if (!status.isGwConnected) {
+        msg = (typeof window.t === "function")
+          ? window.t("ptt.gw_offline_toast", {}, "⚠️ Нет соединения со шлюзом (GW:OFFLINE). Передача заблокирована.")
+          : "⚠️ Нет соединения со шлюзом (GW:OFFLINE). Передача заблокирована.";
+      } else {
+        msg = (typeof window.t === "function")
+          ? window.t("ptt.bm_offline_toast", {}, "⚠️ Нет соединения с BrandMeister (BM:OFFLINE). Передача заблокирована.")
+          : "⚠️ Нет соединения с BrandMeister (BM:OFFLINE). Передача заблокирована.";
+      }
+      window.showToast(msg, 3000);
+    }
+  }
+
+  window.checkPttConnectionStatus = checkPttConnectionStatus;
+  window.notifyPttConnectionBlocked = notifyPttConnectionBlocked;
+
+  let isTransmissionStarting = false;
+  let cancelTransmissionStart = false;
+
+  async function startTransmission(targetHotspotId = null, targetSlotParam = null) {
+    if (window.isSessionPausedByAnotherDevice) {
+      clearTxIndicationUI(targetHotspotId || window.activeHotspotId);
+      return;
+    }
+    if (isPttReleasing) {
+      finalizeTransmissionRelease(targetHotspotId || window.activeTxHotspotId || window.activeHotspotId);
+    }
+  window.startTransmission = startTransmission;
+    if (window.isPttPressed || isTransmissionStarting) return;
+    const checkHid = targetHotspotId || window.activeHotspotId;
+    if (window.isDemoMode) {
+      if (typeof window.showToast === "function") {
+        const msg = window.t
+          ? window.t("ptt.demo_denied_toast", {}, "🎧 Демо-режим: передача отключена (только приём)")
+          : "🎧 Демо-режим: передача отключена (только приём)";
+        window.showToast(msg, 3500);
+      }
+      clearTxIndicationUI(checkHid);
+      return;
+    }
+    if (window.isSwl) {
+      if (typeof window.showToast === "function") {
+        const msg = window.t
+          ? window.t("ptt.swl_denied_toast", {}, "🎧 Режим SWL: передача запрещена (только приём)")
+          : "🎧 Режим SWL: передача запрещена (только приём)";
+        window.showToast(msg, 3500);
+      }
+      clearTxIndicationUI(checkHid);
+      return;
+    }
+    const isAslCheck = (typeof window.isAllStarHotspot === "function")
+      ? window.isAllStarHotspot(checkHid)
+      : (typeof getHotspotNetworkType === "function" && getHotspotNetworkType(checkHid) === "allstar");
+    if (isAslCheck) {
+      const hsObj = (window.currentHotspots || []).find(
+        h => h.id === checkHid || h.id === _resolveHotspotId(checkHid)
+      );
+      const links = (hsObj && Array.isArray(hsObj.asl_links)) ? hsObj.asl_links : [];
+      const hasTxLink = links.length > 0
+        ? links.some(lk => lk && lk.mode === "*3" && !lk.connecting)
+        : (
+            Boolean(hsObj && hsObj.connected_node && hsObj.connected_node !== "0") &&
+            ((typeof window.getHotspotAslMode === "function" ? window.getHotspotAslMode(checkHid) : "*2") === "*3")
+          );
+
+      if (!hasTxLink) {
+        if (typeof window.showToast === "function") {
+          const msg = links.length > 0
+            ? (window.t ? window.t("asl.ptt_all_monitor_warn", {}, "🎧 Все узлы в режиме Монитор (*2). Нажмите на плитку подключённого узла (красный *3) для передачи") : "🎧 Все узлы в режиме Монитор (*2). Нажмите на плитку подключённого узла (красный *3) для передачи")
+            : (window.t ? window.t("asl.ptt_no_tx_links_warn", {}, "⚠️ Нет подключённых узлов на передачу (*3). Подключите узел и включите красный режим (*3)") : "⚠️ Нет подключённых узлов на передачу (*3). Подключите узел и включите красный режим (*3)");
+          window.showToast(msg, "warning", 3200);
+        }
+        triggerTactileVibrate([40, 60, 40]);
+        const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
+        const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+        blinkPttLocked(ptt);
+        clearTxIndicationUI(checkHid);
+        return;
+      }
+    }
+    if (isPttLocked(checkHid)) {
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
+      const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+      blinkPttLocked(ptt);
+      clearTxIndicationUI(checkHid);
+      return;
+    }
+
+    // Protection: PTT is blocked unless both GW and BM are connected!
+    const conn = checkPttConnectionStatus(checkHid);
+    if (!conn.ok) {
+      const card = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(checkHid)}"]`);
+      const ptt = card ? card.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+      notifyPttConnectionBlocked(conn, ptt);
+      clearTxIndicationUI(checkHid);
+      return;
+    }
+
+    const m17HsCheck = (window.currentHotspots || []).find(h => h && h.id === checkHid);
+    if (m17HsCheck && String(m17HsCheck.network_type || "").toLowerCase() === "m17" && (String(m17HsCheck.m17_link_mode || "conn").toLowerCase() === "lstn" || m17HsCheck.m17_rx_only)) {
+      clearTxIndicationUI(checkHid);
+      if (typeof window.showToast === "function") {
+        window.showToast(window.t ? window.t("m17.tx_blocked_lstn", {}, "Передача отключена в режиме Listen-Only (LSTN)") : "Передача отключена в режиме Listen-Only (LSTN)", 2800);
+      }
+      return;
+    }
+
+    if (typeof window !== "undefined" && typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(checkHid)) {
+      clearTxIndicationUI(checkHid);
+      if (typeof window.openYsfTxDgIdModal === "function") {
+        window.openYsfTxDgIdModal(checkHid);
+      }
+      return;
+    }
+
+    isTransmissionStarting = true;
+    window.isTransmissionStarting = true;
+    cancelTransmissionStart = false;
+
+    // Ensure audio pipeline and microphone worklet are active BEFORE activating PTT!
+    // If microphone is disconnected, disabled, or blocked, abort transmission and alert user.
+    let audioReady = false;
+    try {
+      audioReady = await initAudio();
+    } catch (e) {
+      console.warn("[TX] Audio pipeline error:", e);
+    }
+
+    try {
+      if (cancelTransmissionStart) {
+        console.log("[TX] Transmission cancelled before start (user released PTT)");
+        return;
+      }
+
+      const checkMic = isCheckMicOnTxEnabled();
+      const hasLiveMicTrack = Boolean(window.micStream && window.micStream.getAudioTracks().some(t => t.readyState === "live"));
+      if (checkMic && (!audioReady || !window.workletNode || !hasLiveMicTrack)) {
+        console.warn("[TX] Microphone unavailable or inactive. Aborting transmission.");
+        if (typeof window.showToast === "function") {
+          const msg = window.t
+            ? window.t("ptt.mic_unavailable_toast", {}, "⚠️ Микрофон недоступен или отключен! Проверьте подключение и разрешения.")
+            : "⚠️ Микрофон недоступен или отключен! Проверьте подключение и разрешения.";
+          window.showToast(msg, 3500);
+        }
+        return;
+      }
+
+      const hid = targetHotspotId || window.activeHotspotId;
+      if (hid && hid !== window.activeHotspotId) {
+        _switchActiveHotspot(hid);
+      }
+
+      window.isPttPressed = true;
+      window.activeTxHotspotId = hid;
+      txStartTime = Date.now();
+      updateAllHotspotRecUI();
+
+      // Dismiss any active long-press rings if user started transmitting
+      document.querySelectorAll(".long-press-ring").forEach(el => el.remove());
+
+      // Pause recording playback if playing
+      if (window.recordingsManager && typeof window.recordingsManager.isPlaying === "function" && window.recordingsManager.isPlaying()) {
+        window.recordingsManager.pause();
+      }
+
+      if (totCountdownInterval) {
+        clearInterval(totCountdownInterval);
+        totCountdownInterval = null;
+      }
+      totActiveLimit = getHotspotTot(hid);
+      totRemainingSeconds = totActiveLimit;
+
+      // PTT Mute (+1s tail): Mute incoming audio immediately on PTT press if option is enabled
+      if (_isMuteOnPttEnabled()) {
+        if (window.pttMuteReleaseTimer) {
+          clearTimeout(window.pttMuteReleaseTimer);
+          window.pttMuteReleaseTimer = null;
+        }
+        window.isPttMuteActive = true;
+        if (window.audioPlayer && window.audioPlayer.setPttMuted) {
+          window.audioPlayer.setPttMuted(true);
+        }
+        _updateAllVolumeAndMuteUI();
+      }
+
+      if (targetSlotParam === 1 || targetSlotParam === 2) {
+        if (typeof window.setHotspotSlot === "function") {
+          window.setHotspotSlot(hid, targetSlotParam);
+        }
+      }
+      let targetSlot = (targetSlotParam === 1 || targetSlotParam === 2) ? targetSlotParam : _getHotspotSlot(hid);
+      const pttTarget = _getHotspotPttTarget(hid, targetSlot);
+      const isCallerTarget = Boolean(pttTarget && (pttTarget.type === "CALLER" || pttTarget.type === "ID"));
+      let targetTg = isCallerTarget ? pttTarget.id : _getHotspotTg(hid, targetSlot);
+
+      const hs = (window.currentHotspots || []).find(h => h.id === hid);
+      const net = (hs && hs.network_type ? hs.network_type : "").toLowerCase();
+      if (net === "xlx") {
+        targetSlot = 2;
+        if (!isCallerTarget) targetTg = 9;
+      } else if (net === "dmrplus" && targetSlot === 2 && !isCallerTarget) {
+        targetTg = 9;
+      } else if (net === "allstar" || net === "ysf" || net === "m17" || net === "dstar" || net === "svx") {
+        targetSlot = 1;
+      }
+
+      const updateTxBadgeCountdown = (sec) => {
+        const curHid = window.activeTxHotspotId || hid;
+        const c = document.querySelector(`.radio-container[data-hotspot-id="${curHid}"]`);
+        const b = c ? c.querySelector(".mode-badge") : (document.getElementById("modeBadge") || document.querySelector(".mode-badge"));
+        const curSlot = _getHotspotSlot(curHid) || targetSlot || 2;
+        const hsTxNet = getHotspotNetworkType(c || curHid);
+        const netT = (hsTxNet && hsTxNet !== "bm") ? hsTxNet : (c ? (c.dataset.networkType || hsTxNet || "bm") : (hsTxNet || "bm"));
+        const isAsl = Boolean(c && (c.classList.contains("card-net-allstar") || netT === "allstar"));
+        const isYsf = Boolean(c && (c.classList.contains("card-net-ysf") || netT === "ysf"));
+        const isM17 = Boolean(c && (c.classList.contains("card-net-m17") || netT === "m17"));
+        const isDstar = Boolean(c && (c.classList.contains("card-net-dstar") || netT === "dstar"));
+        const isSvx = Boolean(c && (c.classList.contains("card-net-svx") || netT === "svx"));
+        if (b && window.isPttPressed) {
+          const rem = Math.max(0, sec);
+          let extraCls = "";
+          if (rem <= 10) {
+            extraCls = " mode-tx-critical";
+          } else if (rem <= 30) {
+            extraCls = " mode-tx-warn";
+          }
+          b.className = `mode-badge mode-tx${extraCls}`;
+          b.textContent = (isAsl || isYsf || isM17 || isDstar || isSvx) ? `TX ${rem}s` : `TX TS${curSlot} ${rem}s`;
+        }
+      };
+
+      if (window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function") {
+        try {
+          const hs = (window.currentHotspots || []).find(h => h.id === hid);
+          const myCall = hs?.callsign || "ProxDMR";
+          const netBr = ((hs && hs.network_type) || net || "bm").toLowerCase();
+          if (netBr === "m17") {
+            const m17Ref = String((hs && hs.m17_reflector) || "M17").trim();
+            const m17Mod = String((hs && hs.m17_module) || "C").trim();
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall} -> ${m17Ref} ${m17Mod}`);
+          } else if (netBr === "dstar") {
+            const dstarRef = String((hs && hs.dstar_reflector) || "XLX250").trim();
+            const dstarMod = String((hs && hs.dstar_module) || "D").trim();
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall} -> ${dstarRef} ${dstarMod}`);
+          } else if (netBr === "svx") {
+            const svxTg = (hs && hs.svx_tg !== undefined && hs.svx_tg !== null) ? hs.svx_tg : targetTg;
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall} -> TG${svxTg}`);
+          } else if (netBr === "ysf") {
+            const roomBr = String((hs && (hs.ysf_room || hs.ysf_room_id || hs.config?.ysf_room)) || targetTg || "").trim();
+            window.AndroidBridge.updateRadioStatus(roomBr ? `TX: ${myCall} -> #${roomBr}` : `TX: ${myCall}`);
+          } else if (netBr === "allstar") {
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall}`);
+          } else {
+            const isCallerTarget = (pttTarget && (pttTarget.type === "CALLER" || pttTarget.type === "ID"));
+            window.AndroidBridge.updateRadioStatus(`TX: ${myCall} (TS${targetSlot} -> ${isCallerTarget ? 'ID' : 'TG'}${targetTg})`);
+          }
+        } catch (err) {
+          console.warn("[AndroidBridge] updateRadioStatus TX failed:", err);
+        }
+      }
+
+      // Highlight PTT, mode badge and active transmitting TS row strictly on target card
+      const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+      if (targetCard) {
+        const p = targetCard.querySelector(".ptt-button");
+        if (p) {
+          p.classList.add("active");
+          p.classList.remove("tx-slot-1", "tx-slot-2");
+          p.classList.add(`tx-slot-${targetSlot}`);
+        }
+        if (typeof window.updateCardPttHintForSlot === "function") {
+          window.updateCardPttHintForSlot(targetCard, targetSlot);
+        }
+        const hsStartNet = getHotspotNetworkType(targetCard || hid);
+        const netT = (hsStartNet && hsStartNet !== "bm") ? hsStartNet : (targetCard.dataset.networkType || hsStartNet || "bm");
+        const isAsl = Boolean(targetCard && (targetCard.classList.contains("card-net-allstar") || netT === "allstar"));
+        const isYsf = Boolean(targetCard && (targetCard.classList.contains("card-net-ysf") || netT === "ysf"));
+        const isM17 = Boolean(targetCard && (targetCard.classList.contains("card-net-m17") || netT === "m17"));
+        const isDstar = Boolean(targetCard && (targetCard.classList.contains("card-net-dstar") || netT === "dstar"));
+        const isSvx = Boolean(targetCard && (targetCard.classList.contains("card-net-svx") || netT === "svx"));
+        const mb = targetCard.querySelector(".mode-badge");
+        if (mb) {
+          mb.className = "mode-badge mode-tx";
+          mb.textContent = (isAsl || isYsf || isM17 || isDstar || isSvx) ? `TX ${totRemainingSeconds}s` : `TX TS${targetSlot} ${totRemainingSeconds}s`;
+        }
+        if (isAsl) {
+          const aslHsTx = (window.currentHotspots || []).find(h => String(h.id) === String(hid));
+          if (aslHsTx) aslHsTx._aslUserTxActive = true;
+          if (typeof window.renderAslNodeDashboard === "function") {
+            window.renderAslNodeDashboard(hid);
+          }
+        } else if (isYsf) {
+          const ysfRow = targetCard.querySelector(".vfo-ysf-row");
+          if (ysfRow) ysfRow.classList.add("vfo-tx-active");
+          const ysfHsTx = (window.currentHotspots || []).find(h => String(h.id) === String(hid));
+          if (ysfHsTx && typeof window.updateYsfVfoHeader === "function") {
+            window.updateYsfVfoHeader(targetCard, ysfHsTx);
+          }
+        } else {
+          const txRow = targetCard.querySelector(targetSlot === 1 ? ".vfo-ts1-row" : ".vfo-ts2-row");
+          if (txRow) {
+            txRow.classList.add("vfo-tx-active");
+            const callerFlag = txRow.querySelector(".ts-caller-flag");
+            const callerCall = txRow.querySelector(".ts-caller-call");
+            const callerId = txRow.querySelector(".ts-caller-id");
+            const callerCountry = txRow.querySelector(".ts-caller-country");
+            const hs = (window.currentHotspots || []).find(h => h.id === hid);
+            const myCall = hs?.callsign || "N0CALL";
+            const myId = hs?.effective_id || hs?.dmr_id || 0;
+            const myCountry = getCountryInfo(myId, myCall);
+
+            if (callerFlag) updateFlagElement(callerFlag, myCountry);
+            if (callerCall) {
+              delete callerCall.dataset.standby;
+              callerCall.textContent = `${myCall} (TX)`;
+            }
+            if (callerId) callerId.textContent = myId ? `(${myId})` : "";
+            if (callerCountry) callerCountry.textContent = myCountry?.name || myCountry?.name_en || "";
+          }
+          if (targetSlot === 1) {
+            const tx1 = targetCard.querySelector(".vfo-ts1-tx");
+            if (tx1) tx1.classList.add("active");
+          } else {
+            const tx2 = targetCard.querySelector(".vfo-ts2-tx");
+            if (tx2) tx2.classList.add("active");
+          }
+        }
+      }
+
+      triggerTactileVibrate(50);
+
+      if (aslPttReadyVibTimer) {
+        clearTimeout(aslPttReadyVibTimer);
+        aslPttReadyVibTimer = null;
+      }
+
+      totCountdownInterval = setInterval(() => {
+        if (!window.isPttPressed) {
+          if (totCountdownInterval) {
+            clearInterval(totCountdownInterval);
+            totCountdownInterval = null;
+          }
+          totRemainingSeconds = null;
+          return;
+        }
+        totRemainingSeconds--;
+        if (totRemainingSeconds > 0) {
+          updateTxBadgeCountdown(totRemainingSeconds);
+        } else {
+          totRemainingSeconds = 0;
+          updateTxBadgeCountdown(0);
+          if (totCountdownInterval) {
+            clearInterval(totCountdownInterval);
+            totCountdownInterval = null;
+          }
+          const limitToReport = totActiveLimit;
+          stopTransmission();
+          if (typeof window.showToast === "function") {
+            window.showToast(window.t ? window.t("ptt.tot_timeout_toast", { sec: limitToReport }, `⏱️ TOT: передача остановлена (${limitToReport} сек)`) : `⏱️ TOT: передача остановлена (${limitToReport} сек)`, 3500);
+          }
+          triggerTactileVibrate([150, 100, 150]);
+        }
+      }, 1000);
+
+      const isPrivateCall = (pttTarget && (pttTarget.type === "CALLER" || pttTarget.type === "ID")) || (targetTg === 9990 || targetTg > 999999 || !!(window.USER_CALLSIGNS || {})[targetTg]);
+
+      if (typeof syncActiveAudioTxPreset === "function") {
+        try { syncActiveAudioTxPreset(hid); } catch (_) {}
+      }
+      applyTxDspSettings(true);
+      if (window.workletNode && window.workletNode.port) {
+        window.workletNode.port.postMessage({ command: "set_active", active: true });
+      }
+      if (window.micStream) {
+        window.micStream.getAudioTracks().forEach(t => { t.enabled = true; });
+      }
+      startVuMeter();
+
+      // Fallback silence stream if transmitting without live microphone
+      ensureTxSilenceFallback();
+
+      if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+        window.ws.send(JSON.stringify({
+          type: "ptt_press",
+          hotspot_id: hid,
+          slot: targetSlot,
+          tg: targetTg,
+          call_type: isPrivateCall ? "PRIVATE" : "GROUP"
+        }));
+      }
+    } finally {
+      isTransmissionStarting = false;
+      window.isTransmissionStarting = false;
+      if (!window.isPttPressed) {
+        clearTxIndicationUI(checkHid);
+      }
+    }
+  }
+
+  function clearTxIndicationUI(hid = null) {
+    if (aslPttReadyVibTimer) {
+      clearTimeout(aslPttReadyVibTimer);
+      aslPttReadyVibTimer = null;
+    }
+    const targetHid = hid || window.activeTxHotspotId || window.activeHotspotId;
+    window.isPttPressed = false;
+    window.activeTxHotspotId = null;
+    (window.currentHotspots || []).forEach(h => {
+      if (h && h._aslUserTxActive) {
+        h._aslUserTxActive = false;
+        if (typeof window.renderAslNodeDashboard === "function") {
+          window.renderAslNodeDashboard(h.id);
+        }
+      }
+    });
+
+    if (totCountdownInterval) {
+      clearInterval(totCountdownInterval);
+      totCountdownInterval = null;
+    }
+    totRemainingSeconds = null;
+
+    window.isPttHoldLatched = false;
+    document.querySelectorAll(".ptt-slide-lock-guide").forEach(el => el.remove());
+    document.querySelectorAll(".ptt-button").forEach(b => {
+      b._isHoldLatched = false;
+      b._latchedSlot = 0;
+      b.classList.remove(
+        "active", "tx-slot-1", "tx-slot-2", "hover-slot-1", "hover-slot-2",
+        "ptt-hold-latched", "latched-slot-1", "latched-slot-2", "latched-slot-single"
+      );
+      b.querySelectorAll(".ptt-latched-banner").forEach(el => el.remove());
+    });
+    document.querySelectorAll(".vfo-row").forEach(r => r.classList.remove("vfo-tx-active"));
+    document.querySelectorAll(".vfo-tx-tag").forEach(t => t.classList.remove("active"));
+
+    document.querySelectorAll(".radio-container").forEach(card => {
+      if (typeof window.updateCardModeBadge === "function") {
+        window.updateCardModeBadge(card);
+      } else {
+        const b = card.querySelector(".mode-badge");
+        if (b) {
+          b.className = "mode-badge mode-standby";
+          b.textContent = window.t ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
+        }
+      }
+      if (typeof window.updateCardPttHint === "function") {
+        window.updateCardPttHint(card);
+      }
+    });
+
+    const fallbackMb = document.getElementById("modeBadge");
+    if (fallbackMb && !fallbackMb.closest(".radio-container")) {
+      fallbackMb.className = "mode-badge mode-standby";
+      fallbackMb.textContent = window.t ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
+    }
+
+    const activeCard = document.querySelector(`.radio-container[data-hotspot-id="${_resolveHotspotId(targetHid)}"]`) ||
+                       document.querySelector(`.radio-container[data-hotspot-id="${targetHid}"]`);
+    if (activeCard) {
+      _updateCardTgDisplay(activeCard);
+    }
+
+    stopVuMeter();
+
+    const txSlot = _getHotspotSlot(targetHid) || 1;
+    const st = getVuState(targetHid, txSlot);
+    st.mode = "IDLE";
+    st.target = 0;
+    ensureVuMeterLoop();
+
+    updateAllHotspotRecUI();
+
+    if (window.AndroidBridge && typeof window.AndroidBridge.updateRadioStatus === "function") {
+      try {
+        window.AndroidBridge.updateRadioStatus(window.t ? window.t("gw.standby_status", {}, "Дежурный прием (Standby)") : "Дежурный прием (Standby)");
+      } catch (err) {
+        console.warn("[AndroidBridge] updateRadioStatus standby failed:", err);
+      }
+    }
+  }
+
+  function scheduleOrClearPttMuteRelease(delayMs = 1000) {
+    if (!window.isPttMuteActive && !(window.audioPlayer && typeof window.audioPlayer.isPttMuted === "function" && window.audioPlayer.isPttMuted())) {
+      return;
+    }
+    if (window.pttMuteReleaseTimer) {
+      clearTimeout(window.pttMuteReleaseTimer);
+      window.pttMuteReleaseTimer = null;
+    }
+    if (delayMs <= 0 || !_isMuteOnPttEnabled()) {
+      window.isPttMuteActive = false;
+      if (window.audioPlayer && window.audioPlayer.setPttMuted) {
+        window.audioPlayer.setPttMuted(false);
+      }
+      _updateAllVolumeAndMuteUI();
+      return;
+    }
+    window.pttMuteReleaseTimer = setTimeout(() => {
+      window.isPttMuteActive = false;
+      window.pttMuteReleaseTimer = null;
+      if (window.audioPlayer && window.audioPlayer.setPttMuted) {
+        window.audioPlayer.setPttMuted(false);
+      }
+      _updateAllVolumeAndMuteUI();
+    }, delayMs);
+  }
+
+  function finalizeTransmissionRelease(hid = null) {
+    if (pttReleaseTimer) {
+      clearTimeout(pttReleaseTimer);
+      pttReleaseTimer = null;
+    }
+    isPttReleasing = false;
+    window.isPttReleasing = false;
+    clearTxIndicationUI(hid);
+    if (!window.isPttPressed && !isTransmissionStarting && !window.pttMuteReleaseTimer) {
+      scheduleOrClearPttMuteRelease(0);
+    }
+  }
+
+  function stopTransmission(options = {}) {
+    window.stopTransmission = stopTransmission;
+
+window.triggerAslTxReadyHaptic = function(hotspotId) {
+  if (!window.isPttPressed) return;
+  const curHid = window.activeTxHotspotId || window.activeHotspotId;
+  if (hotspotId && curHid && String(hotspotId) !== String(curHid)) return;
+  triggerTactileVibrate(65);
+};
+    if (aslPttReadyVibTimer) {
+      clearTimeout(aslPttReadyVibTimer);
+      aslPttReadyVibTimer = null;
+    }
+    const hid = window.activeTxHotspotId || window.activeHotspotId;
+    const silentCancel = Boolean(options && options.silentCancel);
+
+    if (isTransmissionStarting) {
+      cancelTransmissionStart = true;
+      window.isTransmissionStarting = false;
+      clearTxIndicationUI(hid);
+      scheduleOrClearPttMuteRelease(0);
+    }
+    stopTxSilenceFallback();
+    if (!window.isPttPressed) {
+      clearTxIndicationUI(hid);
+      if (!window.pttMuteReleaseTimer) {
+        scheduleOrClearPttMuteRelease(silentCancel ? 0 : 1000);
+      }
+      return;
+    }
+
+    // 1. FIRST: Instantly turn off all TX visual indicators (red PTT button, red TS row, TX badge, VU meter)
+    clearTxIndicationUI(hid);
+
+    // 2. Immediately stop microphone capture and release OS hardware
+    if (window.workletNode && window.workletNode.port) {
+      window.workletNode.port.postMessage({ command: "set_active", active: false });
+    }
+    if (typeof releaseMicrophone === "function") {
+      releaseMicrophone();
+    } else if (typeof window.releaseMicrophone === "function") {
+      window.releaseMicrophone();
+    }
+
+    // 3. AFTER TX indication is cleared: run post-release actions (mute tail, haptics, Roger Beep, server release)
+    if (window.isPttMuteActive) {
+      scheduleOrClearPttMuteRelease(silentCancel ? 0 : 1000);
+    }
+
+    if (!silentCancel) {
+      triggerTactileVibrate([25, 25, 25]);
+    }
+
+    const rogerBeep = silentCancel ? false : getHotspotRogerBeep(hid);
+    const rogerBeepPattern = (rogerBeep && !silentCancel) ? getHotspotRogerBeepPattern(hid) : "";
+
+    if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+      window.ws.send(JSON.stringify({
+        type: "ptt_release",
+        hotspot_id: hid,
+        roger_beep: rogerBeep,
+        roger_beep_pattern: rogerBeepPattern
+      }));
+    }
+
+    if (rogerBeep && !silentCancel) {
+      isPttReleasing = true;
+      window.isPttReleasing = true;
+      playLocalRogerBeep(rogerBeepPattern);
+      const beepDur = (typeof getRogerBeepDurationMs === "function")
+        ? getRogerBeepDurationMs(rogerBeepPattern)
+        : 160;
+      const totalExtensionMs = beepDur + 1000;
+
+      if (pttReleaseTimer) clearTimeout(pttReleaseTimer);
+      pttReleaseTimer = setTimeout(() => {
+        isPttReleasing = false;
+        window.isPttReleasing = false;
+        pttReleaseTimer = null;
+      }, totalExtensionMs + 150);
+    } else {
+      isPttReleasing = false;
+      window.isPttReleasing = false;
+    }
+  }
+
+  async function triggerQuickUnlink4000(targetHotspotId = null, targetSlotParam = null) {
+    const hid = _resolveHotspotId(targetHotspotId || window.activeHotspotId || "default");
+
+    // Если шла или начиналась передача от первого тапа — тихо отменяем её без Roger Beep
+    if (window.isPttPressed || isTransmissionStarting) {
+      stopTransmission({ silentCancel: true });
+    }
+
+    if (window.isSwl) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          window.t ? window.t("ptt.swl_denied_toast", {}, "Режим SWL: передача запрещена (только приём)") : "Режим SWL: передача запрещена (только приём)",
+          2500
+        );
+      }
+      return false;
+    }
+
+    const targetCard = document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`);
+    const pttBtn = targetCard ? targetCard.querySelector(".ptt-button") : document.querySelector(".ptt-button");
+
+    if (isPttLocked(hid)) {
+      blinkPttLocked(pttBtn);
+      return false;
+    }
+
+    const conn = checkPttConnectionStatus(hid);
+    if (!conn.ok) {
+      notifyPttConnectionBlocked(conn, pttBtn);
+      return false;
+    }
+
+    const hs = (window.currentHotspots || []).find(h => h.id === hid);
+    const netType = (hs?.network_type || "bm").toLowerCase();
+    if (netType === "allstar" || netType === "ysf" || netType === "m17" || netType === "dstar" || netType === "svx") {
+      return false;
+    }
+    const hsName = hs?.name || hs?.callsign || hid;
+    const slot = (netType === "xlx")
+      ? 2
+      : ((targetSlotParam === 1 || targetSlotParam === 2) ? targetSlotParam : (_getHotspotSlot(hid) || 2));
+
+    // 1. Тактильный отклик и короткая визуальная вспышка (350 мс) на кнопке PTT и бейдже режима
+    triggerTactileVibrate([30, 40, 30]);
+    if (pttBtn) {
+      pttBtn.classList.add("active", `tx-slot-${slot}`);
+    }
+    const modeBadge = targetCard ? targetCard.querySelector(".mode-badge") : null;
+    if (modeBadge) {
+      modeBadge.className = "mode-badge mode-tx";
+      modeBadge.textContent = `TX TS${slot} → 4000`;
+    }
+    setTimeout(() => {
+      if (!window.isPttPressed) {
+        if (pttBtn) pttBtn.classList.remove("active", "tx-slot-1", "tx-slot-2");
+        if (targetCard && typeof window.updateCardModeBadge === "function") {
+          window.updateCardModeBadge(targetCard);
+        } else if (modeBadge) {
+          modeBadge.className = "mode-badge mode-standby";
+          modeBadge.textContent = window.t ? window.t("status.standby_mode", {}, "STANDBY") : "STANDBY";
+        }
+      }
+    }, 380);
+
+    // 2. Параллельно сразу выводим короткое сообщение в центре экрана
+    if (typeof window.showToast === "function") {
+      const toastText = (typeof window.t === "function")
+        ? window.t("ptt.quick_unlink_4000_toast", { name: hsName, slot }, `${hsName}: TS${slot} → TG 4000 (Сброс)`)
+        : `${hsName}: TS${slot} → TG 4000 (Сброс)`;
+      window.showToast(toastText, 1000, targetCard || hid);
+    }
+
+    // 3. Отправляем запрос короткого посыла в TG 4000 на бэкенд
+    try {
+      const resp = await fetch("/api/bm/drop-dynamic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hotspot_id: hid,
+          slot: slot,
+          quick_ptt_unlink: true
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data && data.status === "error" && data.detail) {
+        if (typeof window.showToast === "function") {
+          window.showToast(`${hsName}: ${data.detail}`, 2800);
+        }
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn("[PTT] Quick TG 4000 unlink failed:", err);
+      return false;
+    }
+  }
+
+  window.onServerTxEnded = function(msg) {
+    // Ignore delayed server TX-end notifications from a previous Roger Beep tail
+    // if the user has already started or is holding a new local PTT transmission.
+    if (window.isPttPressed || isTransmissionStarting) {
+      return;
+    }
+    if (isPttReleasing || window.isPttMuteActive) {
+      const hid = (msg && msg.hotspot_id) || window.activeTxHotspotId || window.activeHotspotId;
+      finalizeTransmissionRelease(hid);
+    }
+  };
+
+  window.startTransmission = startTransmission;
+  window.stopTransmission = stopTransmission;
+  window.triggerHardwarePtt = function(isDown) {
+    if (window.isSessionPausedByAnotherDevice) return;
+    const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+    const mode = getHotspotPttMode(hid);
+    if (mode === "toggle") {
+      if (isDown) {
+        if (window.isPttPressed || isTransmissionStarting) {
+          stopTransmission();
+          return;
+        }
+        if (isPttLocked(hid)) {
+          blinkPttLocked();
+          return;
+        }
+        if (isPttReleasing) finalizeTransmissionRelease(hid);
+        const conn = checkPttConnectionStatus(hid);
+        if (!conn.ok) {
+          notifyPttConnectionBlocked(conn);
+          return;
+        }
+        if (typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(hid)) {
+          if (typeof window.openYsfTxDgIdModal === "function") window.openYsfTxDgIdModal(hid);
+          return;
+        }
+        startTransmission(hid);
+      }
+      return;
+    }
+    if (isDown) {
+      if (isPttLocked(hid)) {
+        blinkPttLocked();
+        return;
+      }
+      if (isPttReleasing) finalizeTransmissionRelease(hid);
+      const conn = checkPttConnectionStatus(hid);
+      if (!conn.ok) {
+        notifyPttConnectionBlocked(conn);
+        return;
+      }
+      if (typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(hid)) {
+        if (typeof window.openYsfTxDgIdModal === "function") window.openYsfTxDgIdModal(hid);
+        return;
+      }
+      if (!window.isPttPressed) {
+        startTransmission(hid);
+      }
+    } else {
+      if (window.isPttPressed || isTransmissionStarting) {
+        stopTransmission();
+      }
+    }
+  };
+  window.__proxdmr = window.__proxdmr || {};
+  window.__proxdmr.startTransmission = startTransmission;
+  window.__proxdmr.stopTransmission = stopTransmission;
+  window.__proxdmr.triggerHardwarePtt = window.triggerHardwarePtt;
+  window.__proxdmr.checkPttConnectionStatus = checkPttConnectionStatus;
+  window.__proxdmr.notifyPttConnectionBlocked = notifyPttConnectionBlocked;
+
+
+
+export function initPttEngine() {
+  // Keyboard Spacebar & Hardware/Headset Volume Up PTT (acts on active hotspot)
+  window.addEventListener("keydown", (e) => {
+    if (window.isSessionPausedByAnotherDevice) return;
+    if (e.code === "Space" && !e.repeat && e.target.tagName !== "INPUT" && !document.querySelector(".modal.active")) {
+      e.preventDefault();
+      const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+      const mode = getHotspotPttMode(hid);
+      if (mode === "toggle") {
+        if (window.isPttPressed || isTransmissionStarting) {
+          stopTransmission();
+          return;
+        }
+      }
+      if (isPttLocked(hid)) {
+        blinkPttLocked();
+        return;
+      }
+      const conn = checkPttConnectionStatus(hid);
+      if (!conn.ok) {
+        notifyPttConnectionBlocked(conn);
+        return;
+      }
+      if (typeof window.isYsfTxDgIdPromptRequired === "function" && window.isYsfTxDgIdPromptRequired(hid)) {
+        if (typeof window.openYsfTxDgIdModal === "function") window.openYsfTxDgIdModal(hid);
+        return;
+      }
+      startTransmission(hid);
+      return;
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "Space" && e.target.tagName !== "INPUT") {
+      const hid = (typeof window !== "undefined" && window.activeHotspotId) || "default";
+      const mode = getHotspotPttMode(hid);
+      if (mode === "toggle") {
+        e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      stopTransmission();
+      return;
+    }
+  });
+}
+
+export {
+  triggerTactileVibrate,
+  blinkPttLocked,
+  isPttLocked,
+  setPttLocked,
+  togglePttLock,
+  updatePttLockUI,
+  getHotspotTot,
+  setHotspotTot,
+  getHotspotPttMode,
+  setHotspotPttMode,
+  formatTotDuration,
+  getTotRemainingSeconds,
+  openTotConfigModal,
+  closeTotConfigModal,
+  startTransmission,
+  stopTransmission,
+  triggerQuickUnlink4000,
+  checkPttConnectionStatus,
+  notifyPttConnectionBlocked
+};
+
+if (typeof window !== "undefined") {
+  window.triggerTactileVibrate = triggerTactileVibrate;
+  window.blinkPttLocked = blinkPttLocked;
+  window.isPttLocked = isPttLocked;
+  window.setPttLocked = setPttLocked;
+  window.togglePttLock = togglePttLock;
+  window.updatePttLockUI = updatePttLockUI;
+  window.getHotspotTot = getHotspotTot;
+  window.setHotspotTot = setHotspotTot;
+  window.getHotspotPttMode = getHotspotPttMode;
+  window.setHotspotPttMode = setHotspotPttMode;
+  window.formatTotDuration = formatTotDuration;
+  window.getTotRemainingSeconds = getTotRemainingSeconds;
+  window.openTotConfigModal = openTotConfigModal;
+  window.closeTotConfigModal = closeTotConfigModal;
+  window.startTransmission = startTransmission;
+  window.stopTransmission = stopTransmission;
+  window.triggerQuickUnlink4000 = triggerQuickUnlink4000;
+  window.isCheckMicOnTxEnabled = isCheckMicOnTxEnabled;
+  window.setCheckMicOnTxEnabled = setCheckMicOnTxEnabled;
+  window.ensureTxSilenceFallback = ensureTxSilenceFallback;
+  window.stopTxSilenceFallback = stopTxSilenceFallback;
+  window.initPttEngine = initPttEngine;
+
+  window.__proxdmr = window.__proxdmr || {};
+  window.__proxdmr.startTransmission = startTransmission;
+  window.__proxdmr.stopTransmission = stopTransmission;
+  window.__proxdmr.triggerQuickUnlink4000 = triggerQuickUnlink4000;
+  window.__proxdmr.isCheckMicOnTxEnabled = isCheckMicOnTxEnabled;
+  window.__proxdmr.setCheckMicOnTxEnabled = setCheckMicOnTxEnabled;
+  window.__proxdmr.triggerHardwarePtt = window.triggerHardwarePtt;
+  window.__proxdmr.getHotspotTot = getHotspotTot;
+  window.__proxdmr.setHotspotTot = setHotspotTot;
+  window.__proxdmr.getHotspotPttMode = getHotspotPttMode;
+  window.__proxdmr.setHotspotPttMode = setHotspotPttMode;
+  window.__proxdmr.formatTotDuration = formatTotDuration;
+  window.__proxdmr.openTotConfigModal = openTotConfigModal;
+  window.__proxdmr.ptt = {
+    triggerTactileVibrate,
+    blinkPttLocked,
+    isPttLocked,
+    setPttLocked,
+    togglePttLock,
+    updatePttLockUI,
+    getHotspotTot,
+    setHotspotTot,
+    getHotspotPttMode,
+    setHotspotPttMode,
+    formatTotDuration,
+    getTotRemainingSeconds,
+    openTotConfigModal,
+    closeTotConfigModal,
+    startTransmission,
+    stopTransmission,
+    triggerQuickUnlink4000,
+    checkPttConnectionStatus,
+    notifyPttConnectionBlocked,
+    initPttEngine
+  };
+  window.checkPttConnectionStatus = checkPttConnectionStatus;
+  window.notifyPttConnectionBlocked = notifyPttConnectionBlocked;
+}

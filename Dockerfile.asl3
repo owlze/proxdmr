@@ -1,0 +1,46 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Установка базовых утилит и подключение официального репозитория AllStarLink v3
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    procps \
+    net-tools \
+    iproute2 \
+    sox \
+    libncurses6 \
+    && curl -fsSL https://repo.allstarlink.org/public/asl-apt-repos.deb12_all.deb -o /tmp/asl.deb \
+    && dpkg -i /tmp/asl.deb \
+    && rm -f /tmp/asl.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    asl3-asterisk \
+    asl3-asterisk-modules \
+    asl3-asterisk-config \
+    asl3-update-nodelist \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# 2. Настройка каталогов для работы Asterisk под пользователем asterisk
+RUN mkdir -p /etc/asterisk \
+             /var/log/asterisk \
+             /var/spool/asterisk \
+             /var/lib/asterisk \
+             /var/run/asterisk \
+    && chown -R asterisk:asterisk /etc/asterisk \
+                                 /var/log/asterisk \
+                                 /var/spool/asterisk \
+                                 /var/lib/asterisk \
+                                 /var/run/asterisk
+
+# 3. Порты IAX2 и AMI
+EXPOSE 4569/udp 5038/tcp
+
+# 4. Скрипт запуска для проверки прав и монтируемых томов
+COPY docker-entrypoint-asl3.sh /usr/local/bin/docker-entrypoint-asl3.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint-asl3.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint-asl3.sh"]
+CMD ["asterisk", "-f", "-U", "asterisk", "-G", "asterisk"]
