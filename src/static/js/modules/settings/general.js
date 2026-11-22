@@ -20,7 +20,7 @@ import {
   setSystemVolumeSyncEnabled,
   isSingleHotspotAudioEnabled,
   setSingleHotspotAudioEnabled
-} from "../audio/volume-mute.js?v=2.9.799";
+} from "../audio/volume-mute.js?v=2.9.801";
 import {
   isCheckMicOnTxEnabled,
   setCheckMicOnTxEnabled

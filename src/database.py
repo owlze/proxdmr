@@ -144,11 +144,27 @@ async def _ensure_default_admin():
             try:
                 with open(settings_file, "r", encoding="utf-8-sig") as f:
                     settings = json.load(f)
-                await save_user_settings(user_id, settings)
-                migrated_path = settings_file.with_suffix(".json.migrated")
-                if not migrated_path.exists():
-                    settings_file.rename(migrated_path)
-                logger.info(f"[DB] Migrated settings.json → admin user '{login}' (id={user_id})")
+                hs_list = settings.get("hotspots") or []
+                is_bare_unconfigured = (
+                    len(hs_list) <= 1
+                    and (
+                        not hs_list
+                        or (
+                            str(hs_list[0].get("callsign", "")).strip().upper() in ("", "N0CALL")
+                            and int(hs_list[0].get("dmr_id", 0) or 0) == 0
+                        )
+                    )
+                    and not settings.get("client_settings")
+                )
+                if is_bare_unconfigured:
+                    settings_file.unlink(missing_ok=True)
+                    logger.info(f"[DB] Ignored bare unconfigured settings.json; kept default_settings.json for admin '{login}' (id={user_id})")
+                else:
+                    await save_user_settings(user_id, settings)
+                    migrated_path = settings_file.with_suffix(".json.migrated")
+                    if not migrated_path.exists():
+                        settings_file.rename(migrated_path)
+                    logger.info(f"[DB] Migrated settings.json → admin user '{login}' (id={user_id})")
             except Exception as e:
                 logger.warning(f"[DB] Could not migrate settings.json: {e}")
         else:

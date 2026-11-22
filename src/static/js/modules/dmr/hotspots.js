@@ -54,7 +54,7 @@ const isYsfOnlineStatus = (status) => {
   const u = String(status || "").trim().toUpperCase();
   return Boolean(u && u !== "STANDBY" && u !== "DISCONNECTED" && u !== "OFFLINE" && u !== "ERROR" && u !== "AUTH_FAILED");
 };
-import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, refreshM17Servers, refreshDstarServers, refreshSvxServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.799';
+import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, refreshM17Servers, refreshDstarServers, refreshSvxServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.801';
 import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.788';
 import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.711';
 import { showLongPressEffect } from '../ui/long-press.js?v=2.9.711';
@@ -12604,12 +12604,13 @@ export function renderRadiosGrid() {
               return;
             }
             if (/^[A-Z]$/.test(rawVal)) {
+              const modHint = window.t ? window.t("dstar.quick_change_mod_hint", {}, "Сменить модуль на текущем рефлекторе (Enter ⏎)") : "Сменить модуль на текущем рефлекторе (Enter ⏎)";
               previewPopup.innerHTML = `
                 <div class="quick-tg-preview-inner" style="display:flex;align-items:center;gap:8px;">
                   <span style="font-size:1.1rem;">🔄</span>
                   <div style="display:flex;flex-direction:column;">
                     <div style="font-weight:700;color:#38bdf8;">Module ${rawVal}</div>
-                    <div style="font-size:0.75rem;color:#8b949e;">Сменить модуль на текущем рефлекторе (Enter ⏎)</div>
+                    <div style="font-size:0.75rem;color:#8b949e;">${safeEscapeHtml(modHint)}</div>
                   </div>
                 </div>
               `;
@@ -12626,20 +12627,22 @@ export function renderRadiosGrid() {
             });
             if (found) {
               const des = String(found.designator || found.id);
+              const connHint = window.t ? window.t("dstar.quick_connect_hint", { ref: des, mod: modQuery }, `Подключиться к ${des} модуль ${modQuery} (Enter ⏎)`) : `Подключиться к ${des} модуль ${modQuery} (Enter ⏎)`;
               previewPopup.innerHTML = `
                 <div class="quick-tg-preview-inner" style="display:flex;align-items:center;gap:8px;">
                   <span style="font-size:1.1rem;">🌐</span>
                   <div style="display:flex;flex-direction:column;">
                     <div style="font-weight:700;color:#38bdf8;">${des} ${modQuery} · ${safeEscapeHtml(found.name || des)}</div>
-                    <div style="font-size:0.75rem;color:#8b949e;">Подключиться к ${des} модуль ${modQuery} (Enter ⏎)</div>
+                    <div style="font-size:0.75rem;color:#8b949e;">${safeEscapeHtml(connHint)}</div>
                   </div>
                 </div>
               `;
             } else {
+              const notFoundTxt = window.t ? window.t("dstar.quick_not_found", { ref: refQuery }, `Рефлектор ${refQuery} не найден в D-STAR`) : `Рефлектор ${refQuery} не найден в D-STAR`;
               previewPopup.innerHTML = `
                 <div class="quick-tg-preview-inner" style="display:flex;align-items:center;gap:6px;color:#ff7b72;">
                   <span>⚠️</span>
-                  <span style="font-size:0.8rem;font-weight:600;">Рефлектор ${safeEscapeHtml(refQuery)} не найден в D-STAR</span>
+                  <span style="font-size:0.8rem;font-weight:600;">${safeEscapeHtml(notFoundTxt)}</span>
                 </div>
               `;
             }
@@ -12656,12 +12659,13 @@ export function renderRadiosGrid() {
             }
             const tgNum = parseInt(cleanDigits, 10);
             const tgLabel = (tgNum === 0) ? "TG 0 (Standby)" : `TG ${tgNum}`;
+            const svxHint = window.t ? window.t("svx.quick_select_tg_hint", {}, "Выбрать разговорную группу SVX (Enter ⏎)") : "Выбрать разговорную группу SVX (Enter ⏎)";
             previewPopup.innerHTML = `
               <div class="quick-tg-preview-inner" style="display:flex;align-items:center;gap:8px;">
                 <span style="font-size:1.1rem;">📻</span>
                 <div style="display:flex;flex-direction:column;">
                   <div style="font-weight:700;color:#10b981;">${tgLabel}</div>
-                  <div style="font-size:0.75rem;color:#8b949e;">Выбрать разговорную группу SVX (Enter ⏎)</div>
+                  <div style="font-size:0.75rem;color:#8b949e;">${safeEscapeHtml(svxHint)}</div>
                 </div>
               </div>
             `;
@@ -12874,8 +12878,9 @@ export function renderRadiosGrid() {
                 (cached.prefixUser ? formatUserPrefixHint(cached.prefixUser) : "");
             } else {
               const customTxt = window.t ? window.t("tgtx.custom_group_hint", { tg: num }, `Группа TG ${num} (вне справочника)`) : `Группа TG ${num} (вне справочника)`;
+              const exPfx = window.t ? window.t("tgtx.example_prefix", {}, "↳ Напр.:") : "↳ Напр.:";
               quoteHtml = `<span class="quick-tg-pop-main">${safeEscapeHtml(customTxt)}</span>` +
-                (cached.prefix ? `<span class="quick-tg-pop-sub">↳ Напр.: <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "") +
+                (cached.prefix ? `<span class="quick-tg-pop-sub">${safeEscapeHtml(exPfx)} <b>TG ${safeEscapeHtml(String(cached.prefix.tg))}</b> — ${safeEscapeHtml(cached.prefix.desc)}</span>` : "") +
                 (cached.prefixUser ? formatUserPrefixHint(cached.prefixUser) : "");
             }
           } else {
@@ -13836,6 +13841,16 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_svx", {}, "🔒 Сеть HS • SVXReflector (Opus)") : "🔒 Сеть HS • SVXReflector (Opus)";
       } else {
         existingDescEl.textContent = window.t ? window.t("hs_edit.net_desc_custom", {}, "🔒 Сеть HS • Custom MMDVM") : "🔒 Сеть HS • Custom MMDVM";
+      }
+    }
+    const untestedProtoEl = document.getElementById("editHsUntestedProtoNotice");
+    if (untestedProtoEl) {
+      const isUntested = (cleanType === "dstar" || cleanType === "svx");
+      untestedProtoEl.style.display = isUntested ? "block" : "none";
+      if (isUntested) {
+        untestedProtoEl.textContent = window.t
+          ? window.t("hs_edit.untested_proto_notice", {}, "Данные протоколы пока не были проверены реальным подключением")
+          : "Данные протоколы пока не были проверены реальным подключением";
       }
     }
 
@@ -18604,7 +18619,9 @@ export function updateCardM17Panel(card, hs) {
                     : `Echo-тест: переключено на Module ${targetEchoMod} (повторный клик ECHO вернёт Module ${curMod})`;
                   showToast(msg, "info", 2800);
                 } else {
-                  const warnMsg = `Переключено на Module ${targetEchoMod} — у ${refLabel} нет подтверждённого Echo-модуля (для гарантированного эха выберите URF345 E / URF218 E / URF363 Z)`;
+                  const warnMsg = window.t
+                    ? window.t("m17.echo_unconfirmed_warn", { mod: targetEchoMod, ref: refLabel }, `Переключено на Module ${targetEchoMod} — у ${refLabel} нет подтверждённого Echo-модуля (для гарантированного эха выберите URF345 E / URF218 E / URF363 Z)`)
+                    : `Переключено на Module ${targetEchoMod} — у ${refLabel} нет подтверждённого Echo-модуля (для гарантированного эха выберите URF345 E / URF218 E / URF363 Z)`;
                   showToast(warnMsg, "warning", 4500);
                 }
               }
@@ -18878,7 +18895,7 @@ export async function renderDstarReflectorDashboard(card, cid, force = false) {
         const txt = safeEscapeHtml(String(item.text || item.slow_data || ""));
         return `<div class="dstar-dash-lh-row"><span class="dstar-dash-lh-cs">${cs}</span>${txt ? `<span class="dstar-dash-lh-txt">${txt}</span>` : ""}<span class="dstar-dash-lh-tm">${tm}</span></div>`;
       }).join("")
-      : `<div class="dstar-dash-empty">Нет недавних вызовов</div>`;
+      : `<div class="dstar-dash-empty">${safeEscapeHtml(window.t ? window.t("dstar.dash_empty", {}, "Нет недавних вызовов") : "Нет недавних вызовов")}</div>`;
 
     drawer.innerHTML = `
       <div class="dstar-dash-head">
@@ -18978,13 +18995,16 @@ export function updateCardDstarPanel(card, hs) {
   if (!dstarDashPair && audioRxPair && audioRxPair.parentElement) {
     dstarDashPair = document.createElement("div");
     dstarDashPair.className = "control-pair-btn dstar-dash-pair";
+    const dstarDashBtnTitle = window.t ? window.t("dstar.dash_btn_title", {}, "Открыть / закрыть живой дашборд рефлектора D-STAR") : "Открыть / закрыть живой дашборд рефлектора D-STAR";
+    const dstarDashBtnLabel = window.t ? window.t("dstar.dash_btn_label", {}, "Дашборд") : "Дашборд";
+    const dstarDashAutoTitle = window.t ? window.t("dstar.dash_auto_title", {}, "Автооткрытие дашборда D-STAR при подключении") : "Автооткрытие дашборда D-STAR при подключении";
     dstarDashPair.innerHTML = `
-      <button type="button" class="btn-action-trigger btn-dstar-dash-trigger" title="Открыть / закрыть живой дашборд D-STAR" data-i18n-title="dstar.dash_btn_title">
-        <span class="btn-action-label" data-i18n="dstar.dash_btn_label">Dashboard</span>
+      <button type="button" class="btn-action-trigger btn-dstar-dash-trigger" title="${safeEscapeHtml(dstarDashBtnTitle)}" data-i18n-title="dstar.dash_btn_title">
+        <span class="btn-action-label" data-i18n="dstar.dash_btn_label">${safeEscapeHtml(dstarDashBtnLabel)}</span>
       </button>
-      <div class="preset-dropdown-wrapper dstar-dash-auto-wrap" title="Автооткрытие дашборда D-STAR при подключении" data-i18n-title="dstar.dash_auto_title">
+      <div class="preset-dropdown-wrapper dstar-dash-auto-wrap" title="${safeEscapeHtml(dstarDashAutoTitle)}" data-i18n-title="dstar.dash_auto_title">
         <label class="dstar-dash-auto-label">
-          <input type="checkbox" class="chk-dstar-dash-auto" aria-label="Автооткрытие дашборда D-STAR" />
+          <input type="checkbox" class="chk-dstar-dash-auto" aria-label="${safeEscapeHtml(dstarDashAutoTitle)}" data-i18n-aria-label="dstar.dash_auto_title" />
         </label>
       </div>
     `;
@@ -19066,10 +19086,13 @@ export function updateCardDstarPanel(card, hs) {
     if (pttSideCluster) {
       tripleBtn = document.createElement("div");
       tripleBtn.className = "btn-srch-tg-id btn-dstar-triple";
+      const tRef = window.t ? window.t("dstar.triple_ref_title", {}, "Каталог рефлекторов D-STAR") : "Каталог рефлекторов D-STAR";
+      const tMod = window.t ? window.t("dstar.triple_mod_title", {}, "Выбор модуля A–Z") : "Выбор модуля A–Z";
+      const tEcho = window.t ? window.t("dstar.triple_echo_title", {}, "Echo Test (переключить на модуль эха)") : "Echo Test (переключить на модуль эха)";
       tripleBtn.innerHTML = `
-        <span class="m17-seg m17-seg-ref" data-action="ref" title="Каталог рефлекторов D-STAR">REF</span>
-        <span class="m17-seg m17-seg-mod" data-action="modules" title="Выбор модуля A-Z">Mod</span>
-        <span class="m17-seg m17-seg-echo" data-action="echo" title="Echo Test (переключить на модуль эха)">ECHO</span>
+        <span class="m17-seg m17-seg-ref" data-action="ref" title="${safeEscapeHtml(tRef)}" data-i18n-title="dstar.triple_ref_title">REF</span>
+        <span class="m17-seg m17-seg-mod" data-action="modules" title="${safeEscapeHtml(tMod)}" data-i18n-title="dstar.triple_mod_title">Mod</span>
+        <span class="m17-seg m17-seg-echo" data-action="echo" title="${safeEscapeHtml(tEcho)}" data-i18n-title="dstar.triple_echo_title">ECHO</span>
       `;
       pttSideCluster.appendChild(tripleBtn);
     }
@@ -19102,13 +19125,19 @@ export function updateCardDstarPanel(card, hs) {
             if (curHs) curHs._dstarPrevModuleBeforeEcho = curMod;
             await _sendDstarModuleUpdate(card, curCid, { module: targetEchoMod });
             if (typeof showToast === "function") {
-              showToast(`Echo-тест: переключено на Module ${targetEchoMod} (повторный клик вернёт Module ${curMod})`, "info", 2800);
+              const echoOnMsg = window.t
+                ? window.t("dstar.echo_on_toast", { mod: targetEchoMod, prev: curMod }, `Echo-тест: переключено на Module ${targetEchoMod} (повторный клик вернёт Module ${curMod})`)
+                : `Echo-тест: переключено на Module ${targetEchoMod} (повторный клик вернёт Module ${curMod})`;
+              showToast(echoOnMsg, "info", 2800);
             }
           } else {
             const prevMod = (curHs && curHs._dstarPrevModuleBeforeEcho) || "B";
             await _sendDstarModuleUpdate(card, curCid, { module: prevMod });
             if (typeof showToast === "function") {
-              showToast(`Возврат на рабочий Module ${prevMod}`, "success", 2000);
+              const echoOffMsg = window.t
+                ? window.t("dstar.echo_off_toast", { mod: prevMod }, `Возврат на рабочий Module ${prevMod}`)
+                : `Возврат на рабочий Module ${prevMod}`;
+              showToast(echoOffMsg, "success", 2000);
             }
           }
           return;
@@ -19124,17 +19153,21 @@ export function updateCardDstarPanel(card, hs) {
     const parent = card.querySelector(".radio-header") || card;
     dstarBar = document.createElement("div");
     dstarBar.className = "dstar-control-bar";
+    const barRefT = window.t ? window.t("dstar.bar_ref_title", {}, "Рефлектор D-STAR") : "Рефлектор D-STAR";
+    const barModT = window.t ? window.t("dstar.triple_mod_title", {}, "Выбор модуля A–Z") : "Выбор модуля A–Z";
+    const barProtoT = window.t ? window.t("dstar.bar_proto_title", {}, "Протокол D-STAR (DExtra / DCS / DPlus)") : "Протокол D-STAR (DExtra / DCS / DPlus)";
+    const barDashT = window.t ? window.t("dstar.ref_dashboard_title", {}, "Открыть дашборд") : "Открыть дашборд";
     dstarBar.innerHTML = `
-      <button type="button" class="dstar-bar-chip btn-dstar-bar-ref" title="Рефлектор D-STAR">
+      <button type="button" class="dstar-bar-chip btn-dstar-bar-ref" title="${safeEscapeHtml(barRefT)}" data-i18n-title="dstar.bar_ref_title">
         <span class="dstar-bar-label">REF:</span> <span class="dstar-ref-val">${safeEscapeHtml(refName)} ${safeEscapeHtml(modVal)}</span>
       </button>
-      <button type="button" class="dstar-bar-chip btn-dstar-bar-mod" title="Выбор модуля A-Z">
+      <button type="button" class="dstar-bar-chip btn-dstar-bar-mod" title="${safeEscapeHtml(barModT)}" data-i18n-title="dstar.triple_mod_title">
         <span class="dstar-bar-label">MOD:</span> <span class="dstar-mod-val">${safeEscapeHtml(modVal)}</span>
       </button>
-      <button type="button" class="dstar-bar-chip btn-dstar-bar-proto" title="Протокол D-STAR (DExtra / DCS / DPlus)">
+      <button type="button" class="dstar-bar-chip btn-dstar-bar-proto" title="${safeEscapeHtml(barProtoT)}" data-i18n-title="dstar.bar_proto_title">
         <span class="dstar-bar-label">PROTO:</span> <span class="dstar-proto-val">${safeEscapeHtml(protoVal)}</span>
       </button>
-      <button type="button" class="dstar-bar-chip btn-dstar-bar-dash" title="Открыть дашборд">
+      <button type="button" class="dstar-bar-chip btn-dstar-bar-dash" title="${safeEscapeHtml(barDashT)}" data-i18n-title="dstar.ref_dashboard_title">
         <span class="dstar-bar-label">DASH:</span> <span class="dstar-dash-val">LIVE</span>
       </button>
     `;
@@ -19266,7 +19299,8 @@ export async function selectSvxTg(card, cid, tgNumber) {
   }
   if (typeof showToast === "function") {
     const label = Number(tgNumber) === 0 ? "TG 0 (Standby)" : `TG ${tgNumber}`;
-    showToast(`Выбрана группа ${label}`, "success", 2000);
+    const selMsg = window.t ? window.t("svx.tg_selected_toast", { label }, `Выбрана группа ${label}`) : `Выбрана группа ${label}`;
+    showToast(selMsg, "success", 2000);
   }
   return data;
 }
@@ -19312,9 +19346,13 @@ export async function openSvxMonitorPopover(card, cid, anchorEl) {
 
   const popover = document.createElement("div");
   popover.className = "svx-monitor-popover";
+  const monPopTitle = window.t ? window.t("svx.mon_popover_title", {}, "Мониторинг TG (SVX)") : "Мониторинг TG (SVX)";
+  const monPopEmpty = window.t ? window.t("svx.mon_popover_empty", {}, "Нет групп в мониторинге") : "Нет групп в мониторинге";
+  const monPopPh = window.t ? window.t("svx.quick_tg_placeholder", {}, "Номер TG") : "Номер TG";
+  const monPopAdd = window.t ? window.t("svx.mon_popover_add_btn", {}, "+ Добавить") : "+ Добавить";
   popover.innerHTML = `
     <div class="svx-monitor-popover-head">
-      <span class="svx-monitor-popover-title">Мониторинг TG (SVX)</span>
+      <span class="svx-monitor-popover-title">${safeEscapeHtml(monPopTitle)}</span>
       <button type="button" class="svx-monitor-popover-close">✕</button>
     </div>
     <div class="svx-monitor-tgs-chips">
@@ -19322,11 +19360,11 @@ export async function openSvxMonitorPopover(card, cid, anchorEl) {
         <span class="svx-mon-chip" data-tg="${tg}">
           TG ${tg} <button type="button" class="btn-del-mon" data-tg="${tg}">✕</button>
         </span>
-      `).join("") : `<span class="svx-mon-empty">Нет групп в мониторинге</span>`}
+      `).join("") : `<span class="svx-mon-empty">${safeEscapeHtml(monPopEmpty)}</span>`}
     </div>
     <div class="svx-monitor-add-row" style="display:flex;gap:6px;margin-top:8px;">
-      <input type="number" class="form-input inp-new-mon-tg" placeholder="Номер TG" style="width:110px;height:28px;padding:2px 6px;font-size:0.8rem;" />
-      <button type="button" class="btn-primary btn-sm btn-add-mon-tg">+ Добавить</button>
+      <input type="number" class="form-input inp-new-mon-tg" placeholder="${safeEscapeHtml(monPopPh)}" style="width:110px;height:28px;padding:2px 6px;font-size:0.8rem;" />
+      <button type="button" class="btn-primary btn-sm btn-add-mon-tg">${safeEscapeHtml(monPopAdd)}</button>
     </div>
   `;
 
@@ -19406,9 +19444,12 @@ export async function renderSvxReflectorDashboard(card, cid, force = false) {
     const lastHeard = Array.isArray(data.last_heard) ? data.last_heard : [];
     const protoVer = String(data.proto_version || "2.0");
 
+    const tgDisp = activeTg === 0 ? "0 (Standby)" : String(activeTg);
+    const talkerActiveTxt = window.t ? window.t("svx.dash_talker_active", { talker: String(talker || ""), tg: activeTg }, `🎙️ Говорит: ${talker} на TG ${activeTg}`) : `🎙️ Говорит: ${talker} на TG ${activeTg}`;
+    const talkerIdleTxt = window.t ? window.t("svx.dash_talker_idle", { tg: tgDisp }, `Эфир свободен · Активная TG ${tgDisp}`) : `Эфир свободен · Активная TG ${tgDisp}`;
     const talkerHtml = talker
-      ? `<div class="svx-dash-talker-active">🎙️ Говорит: <strong>${safeEscapeHtml(talker)}</strong> на TG ${activeTg}</div>`
-      : `<div class="svx-dash-talker-idle">Эфир свободен · Активная TG ${activeTg === 0 ? "0 (Standby)" : activeTg}</div>`;
+      ? `<div class="svx-dash-talker-active">${safeEscapeHtml(talkerActiveTxt)}</div>`
+      : `<div class="svx-dash-talker-idle">${safeEscapeHtml(talkerIdleTxt)}</div>`;
 
     const monChipsHtml = monTgs.length > 0
       ? monTgs.map(t => `<button type="button" class="svx-dash-mon-chip${t === activeTg ? " is-active" : ""}" data-tg="${t}">TG ${t}</button>`).join("")
@@ -19418,6 +19459,7 @@ export async function renderSvxReflectorDashboard(card, cid, force = false) {
       ? nodes.map(n => `<span class="svx-dash-node">${safeEscapeHtml(String(n.callsign || n.name || n))}</span>`).join("")
       : `<span class="svx-dash-muted">—</span>`;
 
+    const svxEmptyTxt = window.t ? window.t("svx.dash_empty", {}, "Нет недавних вызовов") : "Нет недавних вызовов";
     const lhHtml = lastHeard.length > 0
       ? lastHeard.map(item => {
         const cs = safeEscapeHtml(String(item.callsign || item.src || "—"));
@@ -19425,7 +19467,7 @@ export async function renderSvxReflectorDashboard(card, cid, force = false) {
         const tm = safeEscapeHtml(String(item.time || item.ago || ""));
         return `<div class="svx-dash-lh-row"><span class="svx-dash-lh-cs">${cs}</span>${tg ? `<span class="svx-dash-lh-tg">TG ${tg}</span>` : ""}<span class="svx-dash-lh-tm">${tm}</span></div>`;
       }).join("")
-      : `<div class="svx-dash-empty">Нет недавних вызовов</div>`;
+      : `<div class="svx-dash-empty">${safeEscapeHtml(svxEmptyTxt)}</div>`;
 
     drawer.innerHTML = `
       <div class="svx-dash-head">
@@ -19539,13 +19581,16 @@ export function updateCardSvxPanel(card, hs) {
   if (!svxDashPair && audioRxPair && audioRxPair.parentElement) {
     svxDashPair = document.createElement("div");
     svxDashPair.className = "control-pair-btn svx-dash-pair";
+    const svxDashBtnTitle = window.t ? window.t("svx.dash_btn_title", {}, "Открыть / закрыть живой дашборд SVXReflector") : "Открыть / закрыть живой дашборд SVXReflector";
+    const svxDashBtnLabel = window.t ? window.t("svx.dash_btn_label", {}, "Дашборд") : "Дашборд";
+    const svxDashAutoTitle = window.t ? window.t("svx.dash_auto_title", {}, "Автооткрытие дашборда SVXReflector при активности") : "Автооткрытие дашборда SVXReflector при активности";
     svxDashPair.innerHTML = `
-      <button type="button" class="btn-action-trigger btn-svx-dash-trigger" title="Открыть / закрыть живой дашборд SVXReflector" data-i18n-title="svx.dash_btn_title">
-        <span class="btn-action-label" data-i18n="svx.dash_btn_label">Dashboard</span>
+      <button type="button" class="btn-action-trigger btn-svx-dash-trigger" title="${safeEscapeHtml(svxDashBtnTitle)}" data-i18n-title="svx.dash_btn_title">
+        <span class="btn-action-label" data-i18n="svx.dash_btn_label">${safeEscapeHtml(svxDashBtnLabel)}</span>
       </button>
-      <div class="preset-dropdown-wrapper svx-dash-auto-wrap" title="Автооткрытие дашборда SVX при подключении" data-i18n-title="svx.dash_auto_title">
+      <div class="preset-dropdown-wrapper svx-dash-auto-wrap" title="${safeEscapeHtml(svxDashAutoTitle)}" data-i18n-title="svx.dash_auto_title">
         <label class="svx-dash-auto-label">
-          <input type="checkbox" class="chk-svx-dash-auto" aria-label="Автооткрытие дашборда SVX" />
+          <input type="checkbox" class="chk-svx-dash-auto" aria-label="${safeEscapeHtml(svxDashAutoTitle)}" data-i18n-aria-label="svx.dash_auto_title" />
         </label>
       </div>
     `;
@@ -19627,10 +19672,13 @@ export function updateCardSvxPanel(card, hs) {
     if (pttSideCluster) {
       tripleBtn = document.createElement("div");
       tripleBtn.className = "btn-srch-tg-id btn-svx-triple";
+      const tSvxTg = window.t ? window.t("svx.triple_tg_title", {}, "Каталог разговорных групп SVX") : "Каталог разговорных групп SVX";
+      const tSvxMon = window.t ? window.t("svx.triple_mon_title", {}, "Мониторинг групп SVX") : "Мониторинг групп SVX";
+      const tSvxTg0 = window.t ? window.t("svx.triple_tg0_title", {}, "Standby / TG 0 (повторный клик вернёт группу)") : "Standby / TG 0 (повторный клик вернёт группу)";
       tripleBtn.innerHTML = `
-        <span class="m17-seg svx-seg-tg" data-action="tg" title="Каталог разговорных групп SVX">TG</span>
-        <span class="m17-seg svx-seg-mon" data-action="monitor" title="Мониторинг групп SVX">Mon</span>
-        <span class="m17-seg svx-seg-tg0" data-action="tg0" title="Standby / TG 0 (повторный клик вернет группу)">TG0</span>
+        <span class="m17-seg svx-seg-tg" data-action="tg" title="${safeEscapeHtml(tSvxTg)}" data-i18n-title="svx.triple_tg_title">TG</span>
+        <span class="m17-seg svx-seg-mon" data-action="monitor" title="${safeEscapeHtml(tSvxMon)}" data-i18n-title="svx.triple_mon_title">Mon</span>
+        <span class="m17-seg svx-seg-tg0" data-action="tg0" title="${safeEscapeHtml(tSvxTg0)}" data-i18n-title="svx.triple_tg0_title">TG0</span>
       `;
       pttSideCluster.appendChild(tripleBtn);
     }
@@ -19680,17 +19728,21 @@ export function updateCardSvxPanel(card, hs) {
     const parent = card.querySelector(".radio-header") || card;
     svxBar = document.createElement("div");
     svxBar.className = "svx-control-bar";
+    const sBarTg = window.t ? window.t("svx.bar_tg_title", {}, "Выбор TG") : "Выбор TG";
+    const sBarMon = window.t ? window.t("svx.bar_mon_title", {}, "Мониторинг TG") : "Мониторинг TG";
+    const sBarNodes = window.t ? window.t("svx.bar_nodes_title", {}, "Подключённые узлы") : "Подключённые узлы";
+    const sBarCodec = window.t ? window.t("svx.bar_codec_title", {}, "Кодек SVX") : "Кодек SVX";
     svxBar.innerHTML = `
-      <button type="button" class="svx-bar-chip btn-svx-bar-tg" title="Выбор TG">
+      <button type="button" class="svx-bar-chip btn-svx-bar-tg" title="${safeEscapeHtml(sBarTg)}" data-i18n-title="svx.bar_tg_title">
         <span class="svx-bar-label">TG:</span> <span class="svx-tg-val">${curTg}</span>
       </button>
-      <button type="button" class="svx-bar-chip btn-svx-bar-mon" title="Мониторинг TG">
+      <button type="button" class="svx-bar-chip btn-svx-bar-mon" title="${safeEscapeHtml(sBarMon)}" data-i18n-title="svx.bar_mon_title">
         <span class="svx-bar-label">MON:</span> <span class="svx-mon-val">${monCount}</span>
       </button>
-      <button type="button" class="svx-bar-chip btn-svx-bar-nodes" title="Подключенные узлы">
+      <button type="button" class="svx-bar-chip btn-svx-bar-nodes" title="${safeEscapeHtml(sBarNodes)}" data-i18n-title="svx.bar_nodes_title">
         <span class="svx-bar-label">NODES:</span> <span class="svx-nodes-val">${nodesCount}</span>
       </button>
-      <button type="button" class="svx-bar-chip btn-svx-bar-codec" title="Кодек SVX">
+      <button type="button" class="svx-bar-chip btn-svx-bar-codec" title="${safeEscapeHtml(sBarCodec)}" data-i18n-title="svx.bar_codec_title">
         <span class="svx-bar-label">OPUS</span>
       </button>
     `;

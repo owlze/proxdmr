@@ -1,6 +1,6 @@
 import './modules/ui/icons.js?v=2.9.770';
 import './modules/ui/pxi-select.js?v=2.9.789';
-import './modules/ui/marquee.js?v=2.9.780';
+import './modules/ui/marquee.js?v=2.9.800';
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.787';
 import { RecordingsManager } from './modules/audio/player.js?v=2.9.797';
 import './modules/ui/theme.js?v=2.9.799';
@@ -36,9 +36,9 @@ import { blePtt } from './modules/ptt/ble.js?v=2.9.699';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.711';
 import { initAndroidBridge } from './modules/core/android.js?v=2.9.782';
 import { initAuth, initAccountManager } from './modules/settings/account.js?v=2.9.699';
-import { initLanguageManager } from './modules/settings/language.js?v=2.9.799';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.801';
 import { initHamQthSettings } from './modules/settings/hamqth.js?v=2.9.734';
-import { initGeneralSettings } from './modules/settings/general.js?v=2.9.799';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.801';
 import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.711';
 import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.773';
 import { initOrientationLock } from './modules/ui/orientation.js?v=2.9.799';
@@ -63,7 +63,7 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.787';
+} from './modules/dmr/contacts.js?v=2.9.801';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
@@ -80,7 +80,7 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.799';
+} from './modules/dmr/hotspots.js?v=2.9.801';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.798';
@@ -200,7 +200,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.799';
+} from './modules/audio/volume-mute.js?v=2.9.801';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -212,13 +212,13 @@ import {
   updateRxBannerFreshness,
   updateCardRxLiveBanner,
   updateRxLiveBanner
-} from './modules/dmr/bm-banner.js?v=2.9.799';
+} from './modules/dmr/bm-banner.js?v=2.9.801';
 import {
   currentBmStatus,
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js?v=2.9.799';
+} from './modules/dmr/bm-status.js?v=2.9.801';
 import {
   connectWebSocket,
   handleServerMessage,

@@ -2,7 +2,7 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Установка базовых утилит и подключение официального репозитория AllStarLink v3
+# 1. Install base utilities and configure official AllStarLink v3 apt repository
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# 2. Настройка каталогов для работы Asterisk под пользователем asterisk
+# 2. Prepare runtime directories for Asterisk under the asterisk user
 RUN mkdir -p /etc/asterisk \
              /var/log/asterisk \
              /var/spool/asterisk \
@@ -35,10 +35,10 @@ RUN mkdir -p /etc/asterisk \
                                  /var/lib/asterisk \
                                  /var/run/asterisk
 
-# 3. Порты IAX2 и AMI
+# 3. IAX2 and AMI ports
 EXPOSE 4569/udp 5038/tcp
 
-# 4. Скрипт запуска для проверки прав и монтируемых томов
+# 4. Entrypoint script to validate volume permissions before launch
 COPY docker-entrypoint-asl3.sh /usr/local/bin/docker-entrypoint-asl3.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint-asl3.sh
 

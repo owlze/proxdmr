@@ -7,7 +7,7 @@
 import { showCenterHudToast, showToast } from "../core/toast.js?v=2.9.699";
 import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.788";
 import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js?v=2.9.792";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.799";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.801";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;

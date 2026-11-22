@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: docker-publish-${{ github.ref }}
+  group: docker-publish-proxdmr
   cancel-in-progress: false
 
 env:
@@ -120,7 +120,7 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           TAGS=("sha-${SHORT_SHA}")
 
-          if [ "${GITHUB_REF}" = "refs/heads/main" ] || [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+          if [ "${GITHUB_REF}" = "refs/heads/main" ] || [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] || { [ "${GITHUB_REF_TYPE}" = "tag" ] && [[ "${GITHUB_REF_NAME}" != *-* ]]; }; then
             TAGS+=("latest")
           fi
 

@@ -28,6 +28,9 @@ RUN make -C src/c_vocoder clean && \
     cp src/c_vocoder/libmbe_neo_bridge.so /usr/local/lib/ && \
     ldconfig
 
+# Preserve bundled seed data outside /app/src/data so bind-mounting ./data:/app/src/data never hides it
+RUN mkdir -p /app/seed_data && cp -a src/data/. /app/seed_data/
+
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 

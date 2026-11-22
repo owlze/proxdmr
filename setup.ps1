@@ -118,7 +118,7 @@ function Set-EnvVar($key, $val) {
     if (-not $found) {
         $newLines += "$key=$val"
     }
-    [IO.File]::WriteAllLines((Join-Path $scriptDir ".env"), $newLines, [System.Text.Encoding]::UTF8)
+    [IO.File]::WriteAllLines((Join-Path $scriptDir ".env"), $newLines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 Set-EnvVar "HOST_IP" $finalIp

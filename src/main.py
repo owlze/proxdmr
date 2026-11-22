@@ -502,10 +502,45 @@ async def periodic_directory_sync():
         except Exception as e:
             logger.error(f"[SYNC] Periodic check error: {e}")
 
+def _sync_bundled_seed_data() -> None:
+    """Ensure bundled seed files from /app/seed_data exist in ./src/data even when ./data volume is bind-mounted."""
+    seed_dir = PROJECT_ROOT / "seed_data"
+    data_dir = BASE_DIR / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    if not seed_dir.is_dir():
+        return
+
+    always_refresh = {"latest_release_notes.md", "piper_voices.json"}
+    copied = 0
+    try:
+        for item in seed_dir.iterdir():
+            if not item.is_file():
+                continue
+            if item.name.endswith((".db", ".db-wal", ".db-shm")):
+                continue
+            dst = data_dir / item.name
+            if item.name in always_refresh:
+                if (
+                    not dst.exists()
+                    or dst.stat().st_size == 0
+                    or item.stat().st_mtime > dst.stat().st_mtime + 1.0
+                ):
+                    shutil.copy2(item, dst)
+                    copied += 1
+            elif not dst.exists() or dst.stat().st_size == 0:
+                shutil.copy2(item, dst)
+                copied += 1
+        if copied:
+            logger.info(f"[SEED] Synchronized {copied} bundled file(s) from {seed_dir} -> {data_dir}")
+    except Exception as e:
+        logger.warning(f"[SEED] Failed to synchronize bundled seed data: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("[MAIN] Starting ProxDMR Gateway...")
     preload_locales()
+    _sync_bundled_seed_data()
     await init_db()
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
         transcriber_service.disable_all_slots()

@@ -11,6 +11,7 @@ src/c_vocoder/*.o
 src/c_vocoder/*.so
 src/c_vocoder/imbe_vocoder/*.o
 src/c_vocoder/mbe/*.o
+src/c_vocoder/mbelib-neo/build/
 
 # Python caches
 __pycache__/
@@ -34,6 +35,7 @@ src/data/*.json
 !src/data/ysf_top_active_cache.json
 !src/data/m17_hosts_cache.json
 !src/data/dstar_hosts_cache.json
+!src/data/latest_release_notes.md
 
 # Logs
 *.log

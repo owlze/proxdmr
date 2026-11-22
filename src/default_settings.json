@@ -382,17 +382,17 @@
     "seam_beep": true,
     "seam_beep_pattern": "600 120, 877 80",
     "min_duration_sec": 2.0,
-    "max_storage_mb": 5120,
-    "max_storage_gb": 5.0,
+    "max_storage_mb": 1024,
+    "max_storage_gb": 1.0,
     "auto_cleanup": true,
     "gap_threshold_sec": 1.2
   },
   "hotspots": [
     {
       "id": "default",
-      "name": "Основной хотспот",
+      "name": "Main Hotspot",
       "callsign": "N0CALL",
-      "dmr_id": 1234567,
+      "dmr_id": 0,
       "bm_ssid": 1,
       "bm_master_host": "2322.master.brandmeister.network",
       "bm_master_port": 62031,

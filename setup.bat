@@ -80,7 +80,7 @@ powershell -NoProfile -Command ^
   "  if (-not $matched) { $res += $line }" ^
   "};" ^
   "foreach ($k in @($h.Keys)) { $res += ($k + '=' + $h[$k]) };" ^
-  "[IO.File]::WriteAllLines($path, $res, [System.Text.Encoding]::UTF8)"
+  "[IO.File]::WriteAllLines($path, $res, (New-Object System.Text.UTF8Encoding($false)))"
 
 echo.
 echo [+] Configuration saved to .env

@@ -838,58 +838,60 @@ class ASLContainerManager:
         # Ensure image is present or built
         self.docker.ensure_asl_image()
 
-        # 3. Проверка существующего контейнера
-        existing = self.docker.inspect_container(name)
-        if existing:
-            self.docker.update_container_resources(name, nano_cpus=800000000)
-            if existing.get("State", {}).get("Running"):
-                logger.info(f"Container {name} is already running. Restarting on server startup/connect to clear stale sessions...")
-                try:
-                    restarted = self.docker.restart_container(name, timeout=2)
-                    if not restarted:
-                        self.docker.stop_container(name, timeout=2)
-                        self.docker.start_container(name)
-                    logger.info(f"Container {name} restarted successfully on server startup/connect")
-                    self.wait_until_ready(user_id, node_number, timeout=8.0)
-                    return self.get_instance_status(user_id, node_number)
-                except Exception as e:
-                    logger.warning(f"Error restarting existing running container {name}: {e}")
-            else:
-                logger.info(f"Attempting to start existing stopped container {name}")
-                if self.docker.start_container(name):
-                    logger.info(f"Existing container {name} started successfully")
-                    self.wait_until_ready(user_id, node_number, timeout=8.0)
-                    return self.get_instance_status(user_id, node_number)
-                logger.info(f"Removing stopped container {name} before recreation")
-                self.docker.remove_container(name, force=True)
+        with self._get_proc_lock(user_id, node_number):
+            # 3. Проверка существующего контейнера
+            existing = self.docker.inspect_container(name)
+            if existing:
+                self.docker.update_container_resources(name, nano_cpus=800000000)
+                if existing.get("State", {}).get("Running"):
+                    logger.info(f"Container {name} is already running. Restarting on server startup/connect to clear stale sessions...")
+                    try:
+                        restarted = self.docker.restart_container(name, timeout=2)
+                        if not restarted:
+                            self.docker.stop_container(name, timeout=2)
+                            self.docker.start_container(name)
+                        logger.info(f"Container {name} restarted successfully on server startup/connect")
+                        self.wait_until_ready(user_id, node_number, timeout=8.0)
+                        return self.get_instance_status(user_id, node_number)
+                    except Exception as e:
+                        logger.warning(f"Error restarting existing running container {name}: {e}")
+                else:
+                    logger.info(f"Attempting to start existing stopped container {name}")
+                    if self.docker.start_container(name):
+                        logger.info(f"Existing container {name} started successfully")
+                        self.wait_until_ready(user_id, node_number, timeout=8.0)
+                        return self.get_instance_status(user_id, node_number)
+                    logger.info(f"Removing stopped container {name} before recreation")
+                    self.docker.remove_container(name, force=True)
 
-        # 4. Создание контейнера
-        binds = [
-            f"{host_inst_dir}/rpt.conf:/etc/asterisk/rpt.conf:ro",
-            f"{host_inst_dir}/iax.conf:/etc/asterisk/iax.conf:ro",
-            f"{host_inst_dir}/extensions.conf:/etc/asterisk/extensions.conf:ro",
-            f"{host_inst_dir}/manager.conf:/etc/asterisk/manager.conf:ro"
-        ]
-        port_bindings = {
-            "4569/udp": [{"HostPort": str(iax_port)}],
-            "5038/tcp": [{"HostPort": str(ami_port)}]
-        }
+            # 4. Создание контейнера
+            binds = [
+                f"{host_inst_dir}/rpt.conf:/etc/asterisk/rpt.conf:ro",
+                f"{host_inst_dir}/iax.conf:/etc/asterisk/iax.conf:ro",
+                f"{host_inst_dir}/extensions.conf:/etc/asterisk/extensions.conf:ro",
+                f"{host_inst_dir}/manager.conf:/etc/asterisk/manager.conf:ro"
+            ]
+            port_bindings = {
+                "4569/udp": [{"HostPort": str(iax_port)}],
+                "5038/tcp": [{"HostPort": str(ami_port)}]
+            }
 
-        container_id = self.docker.create_container(
-            name=name,
-            image=ASL_IMAGE,
-            binds=binds,
-            port_bindings=port_bindings,
-            memory_bytes=134217728,  # 128 MB RAM max
-            nano_cpus=800000000,      # 0.8 CPU max
-            network_name=network_name
-        )
+            container_id = self.docker.create_container(
+                name=name,
+                image=ASL_IMAGE,
+                binds=binds,
+                port_bindings=port_bindings,
+                memory_bytes=134217728,  # 128 MB RAM max
+                nano_cpus=800000000,      # 0.8 CPU max
+                network_name=network_name
+            )
 
-        # 5. Запуск
-        self.docker.start_container(container_id)
-        logger.info(f"Container {name} ({container_id[:12]}) successfully started on UDP:{iax_port}, AMI:{ami_port}")
+            # 5. Запуск и ожидание инициализации app_rpt
+            self.docker.start_container(container_id)
+            logger.info(f"Container {name} ({container_id[:12]}) successfully started on UDP:{iax_port}, AMI:{ami_port}")
+            self.wait_until_ready(user_id, node_number, timeout=8.0)
 
-        return self.get_instance_status(user_id, node_number)
+            return self.get_instance_status(user_id, node_number)
 
     def stop_instance(self, user_id: str, node_number: str) -> bool:
         key = self._instance_key(user_id, node_number)

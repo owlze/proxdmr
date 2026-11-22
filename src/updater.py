@@ -63,9 +63,13 @@ def parse_multilingual_notes(raw_body: str) -> Dict[str, str]:
     if not raw_body:
         return {l: "" for l in SUPPORTED_LANGUAGES}
 
+    # Strip collapsible GitHub Release <details>/<summary> spoilers before parsing sections
+    clean_body = re.sub(r'<summary\b[^>]*>[\s\S]*?</summary>', '', raw_body, flags=re.IGNORECASE)
+    clean_body = re.sub(r'</?details\b[^>]*>', '', clean_body, flags=re.IGNORECASE).strip()
+
     # 1. Look for <!-- lang:xx --> or <!-- xx --> blocks
     pattern = r'<!--\s*(?:lang:)?([a-z]{2})\s*-->([\s\S]*?)(?=<!--\s*(?:lang:)?[a-z]{2}\s*-->|$)'
-    matches = list(re.finditer(pattern, raw_body, re.IGNORECASE))
+    matches = list(re.finditer(pattern, clean_body, re.IGNORECASE))
     if matches:
         for m in matches:
             l = m.group(1).lower()
@@ -85,7 +89,7 @@ def parse_multilingual_notes(raw_body: str) -> Dict[str, str]:
             "it": [r"##\s*\[?it\]?", r"##.*🇮🇹.*", r"##.*italiano.*"],
         }
         header_pattern = r'(?m)^##\s+([^\n]+)'
-        sections = re.split(header_pattern, raw_body)
+        sections = re.split(header_pattern, clean_body)
         if len(sections) > 1:
             for i in range(1, len(sections), 2):
                 hdr = sections[i].lower()
@@ -101,9 +105,9 @@ def parse_multilingual_notes(raw_body: str) -> Dict[str, str]:
     # Fallback to full body if no language segments parsed
     if not notes:
         for l in SUPPORTED_LANGUAGES:
-            notes[l] = raw_body.strip()
+            notes[l] = clean_body
     else:
-        fallback = notes.get("en") or notes.get("ru") or next(iter(notes.values()), raw_body)
+        fallback = notes.get("en") or notes.get("ru") or next(iter(notes.values()), clean_body)
         for l in SUPPORTED_LANGUAGES:
             if not notes.get(l):
                 notes[l] = fallback
@@ -344,11 +348,28 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
         if not new_src.exists():
             return False, _tr("updater.missing_src_dir", fallback="Downloaded update is missing the src directory")
 
-        # 4. Copy updated files to /app/src, skipping data/ directory
+        # 4. Copy updated files to /app/src, preserving runtime DBs in data/ while refreshing release seed files
         for item in new_src.iterdir():
             target_item = src_dir / item.name
             if item.name == "data":
-                continue  # Never touch data directory
+                target_item.mkdir(parents=True, exist_ok=True)
+                seed_dir = app_root / "seed_data"
+                seed_dir.mkdir(parents=True, exist_ok=True)
+                always_update_seed = {"piper_voices.json", "latest_release_notes.md"}
+                protected_prefixes = ("proxdmr.db", "radioid_users.db")
+                for data_item in item.iterdir():
+                    if not data_item.is_file():
+                        continue
+                    if data_item.name.startswith(protected_prefixes) or data_item.name.endswith((".db", ".db-wal", ".db-shm")):
+                        continue
+                    dst_data = target_item / data_item.name
+                    if data_item.name in always_update_seed or not dst_data.exists() or dst_data.stat().st_size == 0:
+                        shutil.copy2(data_item, dst_data)
+                    try:
+                        shutil.copy2(data_item, seed_dir / data_item.name)
+                    except Exception:
+                        pass
+                continue
             if item.is_dir():
                 shutil.copytree(item, target_item, dirs_exist_ok=True)
             else:
@@ -360,9 +381,11 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
             "README.md",
             "proxdmr-ai-guide.txt",
             "Dockerfile",
+            ".dockerignore",
             "Dockerfile.asl3",
             "docker-entrypoint-asl3.sh",
             "docker-compose.yml",
+            ".env.example",
             "setup.sh",
             "setup.ps1",
             "setup.bat",
@@ -374,6 +397,32 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
                     shutil.copy2(src_f, app_root / root_item)
                 except Exception:
                     pass
+
+        if os.name != "nt":
+            import ctypes.util
+            import subprocess
+            missing_pkgs = []
+            if not shutil.which("cmake"):
+                missing_pkgs.append("cmake")
+            if not Path("/usr/include/codec2/codec2.h").exists() and not ctypes.util.find_library("codec2"):
+                missing_pkgs.append("libcodec2-dev")
+            if not ctypes.util.find_library("opus"):
+                missing_pkgs.append("libopus0")
+            if missing_pkgs and shutil.which("apt-get"):
+                try:
+                    logger.info(f"[UPDATER] Installing missing system packages: {missing_pkgs}")
+                    apt_env = os.environ.copy()
+                    apt_env["DEBIAN_FRONTEND"] = "noninteractive"
+                    subprocess.run(["apt-get", "update", "-qq"], check=False, timeout=120, env=apt_env)
+                    subprocess.run(
+                        ["apt-get", "install", "-y", "--no-install-recommends", *missing_pkgs],
+                        check=True,
+                        timeout=180,
+                        env=apt_env,
+                    )
+                    subprocess.run(["rm", "-rf", "/var/lib/apt/lists/*"], check=False, timeout=30)
+                except Exception as apt_err:
+                    logger.warning(f"[UPDATER] System packages auto-install failed ({missing_pkgs}): {apt_err}")
 
         c_vocoder_makefile = app_root / "src" / "c_vocoder" / "Makefile"
         if os.name != "nt" and c_vocoder_makefile.exists():

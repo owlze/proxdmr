@@ -13,7 +13,7 @@ LOCALES_DIR = os.path.join(ROOT_DIR, "src", "static", "locales")
 FLAGS_DIR = os.path.join(ROOT_DIR, "src", "static", "flags")
 I18N_JS_PATH = os.path.join(ROOT_DIR, "src", "static", "js", "i18n.js")
 
-EXPECTED_LANGUAGES = ["ru", "en", "es", "uk", "de", "fr", "it"]
+EXPECTED_LANGUAGES = ["ru", "en", "es", "uk", "de", "fr", "it", "nl"]
 
 
 class TestI18nLocales(unittest.TestCase):
@@ -94,7 +94,8 @@ class TestI18nLocales(unittest.TestCase):
             "uk": "ua",
             "de": "de",
             "fr": "fr",
-            "it": "it"
+            "it": "it",
+            "nl": "nl"
         }
         for lang in EXPECTED_LANGUAGES:
             cc = lang_to_country[lang]

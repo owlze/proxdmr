@@ -24,9 +24,6 @@ const MARQUEE_SELECTOR = [
   ".status-comment",
   ".bm-detail-text",
   ".live-player-name",
-  ".station-name-line",
-  ".station-sub-line",
-  ".tg-desc-text",
   ".m17-ref-name",
   ".dstar-ref-name",
   ".svx-dir-name",
@@ -68,7 +65,7 @@ function _isElementInViewport(el) {
 function _isMarqueeCandidate(el) {
   if (!el || el.nodeType !== 1 || !el.isConnected) return false;
   if (IGNORED_TAGS.has(el.tagName)) return false;
-  if (el.closest(".asl-vfo-marquee-track, .pxi-mq-track, .pxi-inertial-loader, .bm-server-label-wrap, .pxi-select-trigger, .pxi-select-menu, .srv-combo-panel, .hs-custom-dropdown, select, [role='listbox'], [role='combobox'], script, style")) {
+  if (el.closest("#logList, .live-activity-list, .live-call-row, .asl-vfo-marquee-track, .pxi-mq-track, .pxi-inertial-loader, .bm-server-label-wrap, .pxi-select-trigger, .pxi-select-menu, .srv-combo-panel, .hs-custom-dropdown, select, [role='listbox'], [role='combobox'], script, style")) {
     return false;
   }
   if (!el.matches || !el.matches(MARQUEE_SELECTOR)) return false;

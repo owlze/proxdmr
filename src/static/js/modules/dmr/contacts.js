@@ -2046,7 +2046,7 @@ function _updateM17RefsStatusUI(count) {
   } else if (_m17ActiveLoading) {
     statusEl.textContent = window.t ? window.t("m17.ref_status_loading", {}, "Загрузка активности…") : "Загрузка активности…";
   } else {
-    statusEl.textContent = `${count} рефлекторов`;
+    statusEl.textContent = window.t ? window.t("m17.ref_count_simple", { count }, `${count} рефлекторов`) : `${count} рефлекторов`;
   }
 }
 
@@ -2112,7 +2112,8 @@ function _renderM17RefCardHtml(ref) {
       const incTitle = window.t ? window.t("m17.ref_module_incompatible_title", {}, "Модуль не совместим с M17 (транскодер)") : "Модуль не совместим с M17 (транскодер)";
       titleParts.push(incTitle);
     }
-    const fullTitle = titleParts.join(" · ") || `Модуль ${modLetter}`;
+    const modFallbackTitle = window.t ? window.t("m17.ref_module_title", { mod: modLetter }, `Модуль ${modLetter}`) : `Модуль ${modLetter}`;
+    const fullTitle = titleParts.join(" · ") || modFallbackTitle;
 
     let label = modLetter;
     if (isBusiest) label += " 🔥";
@@ -2813,7 +2814,7 @@ function _updateDstarRefsStatusUI(count) {
   } else if (_dstarActiveLoading) {
     statusEl.textContent = window.t ? window.t("dstar.ref_status_loading", {}, "Загрузка активности…") : "Загрузка активности…";
   } else {
-    statusEl.textContent = `${count} рефлекторов`;
+    statusEl.textContent = window.t ? window.t("dstar.ref_count_simple", { count }, `${count} рефлекторов`) : `${count} рефлекторов`;
   }
 }
 
@@ -2872,7 +2873,8 @@ function _renderDstarRefCardHtml(ref) {
     let label = modLetter;
     if (isBusiest) label += " 🔥";
 
-    return `<button type="button" class="${chipCls}" data-ref="${escapeHtml(ref.designator)}" data-mod="${escapeHtml(modLetter)}" title="Модуль ${escapeHtml(modLetter)}">${escapeHtml(label)}</button>`;
+    const modTitle = window.t ? window.t("dstar.ref_module_title", { mod: modLetter }, `Модуль ${modLetter}`) : `Модуль ${modLetter}`;
+    return `<button type="button" class="${chipCls}" data-ref="${escapeHtml(ref.designator)}" data-mod="${escapeHtml(modLetter)}" title="${escapeHtml(modTitle)}">${escapeHtml(label)}</button>`;
   }).join("");
 
   const isFav = _isDstarRefFavorited(ref.designator);
@@ -3391,9 +3393,9 @@ function _updateSvxDirStatusUI(count) {
   const statusEl = document.getElementById("svxDirStatus");
   if (!statusEl) return;
   if (_svxFilter === "servers") {
-    statusEl.textContent = `${count} серверов`;
+    statusEl.textContent = window.t ? window.t("svx.servers_count", { count }, `${count} серверов`) : `${count} серверов`;
   } else {
-    statusEl.textContent = `${count} групп`;
+    statusEl.textContent = window.t ? window.t("svx.tgs_count", { count }, `${count} групп`) : `${count} групп`;
   }
 }
 
@@ -3411,13 +3413,15 @@ function _renderSvxServerCardHtml(s) {
 
   let webBtnHtml = "";
   const wUrl = s.web_url || s.status_url || "";
+  const dashTitle = window.t ? window.t("svx.open_dashboard_title", {}, "Открыть дашборд") : "Открыть дашборд";
   if (wUrl && (wUrl.startsWith("http://") || wUrl.startsWith("https://"))) {
-    webBtnHtml = `<a href="${escapeHtml(wUrl)}" target="_blank" rel="noopener noreferrer" class="btn-svx-action btn-svx-web" title="Открыть дашборд">🌐</a>`;
+    webBtnHtml = `<a href="${escapeHtml(wUrl)}" target="_blank" rel="noopener noreferrer" class="btn-svx-action btn-svx-web" title="${escapeHtml(dashTitle)}">🌐</a>`;
   }
 
   const connBtnText = isCur
     ? (window.t ? window.t("svx.server_connected_btn", {}, "Подключено") : "Подключено")
     : (window.t ? window.t("svx.server_connect_btn", {}, "🔗 Подключиться") : "🔗 Подключиться");
+  const curBadgeText = window.t ? window.t("svx.badge_current", {}, "● Текущий") : "● Текущий";
 
   return `
     <div class="${cardCls}" data-host="${escapeHtml(s.host || "")}">
@@ -3426,7 +3430,7 @@ function _renderSvxServerCardHtml(s) {
         <div class="svx-dir-details">
           <div class="svx-dir-title-line">
             <span class="svx-dir-id-tag">${escapeHtml(s.name || s.host)}</span>
-            ${isCur ? '<span class="svx-cur-badge">● Текущий</span>' : ''}
+            ${isCur ? `<span class="svx-cur-badge">${escapeHtml(curBadgeText)}</span>` : ''}
           </div>
           <div class="svx-dir-sub-line">${escapeHtml(hostPort)}${s.description ? ' · ' + escapeHtml(s.description) : ''}</div>
         </div>
@@ -3455,12 +3459,23 @@ function _renderSvxTgCardHtml(item) {
   if (isLive) cardCls += " is-live";
 
   let badges = [];
-  if (isSelected) badges.push('<span class="svx-cur-badge">● Выбрана</span>');
-  if (isMonitored) badges.push('<span class="svx-mon-badge">👁 В мониторинге</span>');
-  if (isLive) badges.push('<span class="svx-live-badge">🔥 В эфире</span>');
+  if (isSelected) {
+    const tSel = window.t ? window.t("svx.badge_selected", {}, "● Выбрана") : "● Выбрана";
+    badges.push(`<span class="svx-cur-badge">${escapeHtml(tSel)}</span>`);
+  }
+  if (isMonitored) {
+    const tMon = window.t ? window.t("svx.badge_monitored", {}, "👁 В мониторинге") : "👁 В мониторинге";
+    badges.push(`<span class="svx-mon-badge">${escapeHtml(tMon)}</span>`);
+  }
+  if (isLive) {
+    const tLive = window.t ? window.t("svx.badge_live", {}, "🔥 В эфире") : "🔥 В эфире";
+    badges.push(`<span class="svx-live-badge">${escapeHtml(tLive)}</span>`);
+  }
 
   const isFav = _isSvxTgFavorited(tgNum);
-  const favTitle = isFav ? "Удалить из избранного" : "Добавить в избранное";
+  const favTitle = isFav
+    ? (window.t ? window.t("svx.tg_fav_remove_title", {}, "Удалить из избранного") : "Удалить из избранного")
+    : (window.t ? window.t("svx.tg_fav_add_title", {}, "Добавить в избранное") : "Добавить в избранное");
 
   const monBtnText = isMonitored
     ? (window.t ? window.t("svx.tg_unmonitor_btn", {}, "👁 Отключить") : "👁 Отключить")
@@ -3525,7 +3540,8 @@ export function renderSvxDirList(filterText = "") {
     _updateSvxDirStatusUI(filteredServers.length);
 
     if (!filteredServers.length) {
-      container.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#94a3b8; font-size:0.88rem;">Серверы не найдены</div>`;
+      const notFoundServers = window.t ? window.t("svx.servers_not_found", {}, "Серверы не найдены") : "Серверы не найдены";
+      container.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#94a3b8; font-size:0.88rem;">${escapeHtml(notFoundServers)}</div>`;
       return;
     }
 
@@ -3562,7 +3578,8 @@ export function renderSvxDirList(filterText = "") {
   monitorTgs.forEach(t => {
     const n = Number(t);
     if (!isNaN(n) && !tgMap.has(n)) {
-      tgMap.set(n, { tg: n, name: `TG ${n}`, desc: "В мониторинге", ccode: "GLOBAL" });
+      const monDesc = window.t ? window.t("svx.desc_monitored", {}, "В мониторинге") : "В мониторинге";
+      tgMap.set(n, { tg: n, name: `TG ${n}`, desc: monDesc, ccode: "GLOBAL" });
     }
   });
 
@@ -3570,7 +3587,8 @@ export function renderSvxDirList(filterText = "") {
   Object.keys(activeTalkers).forEach(t => {
     const n = Number(t);
     if (!isNaN(n) && !tgMap.has(n)) {
-      tgMap.set(n, { tg: n, name: `TG ${n}`, desc: "Активная передача", ccode: "GLOBAL" });
+      const txDesc = window.t ? window.t("svx.desc_active_tx", {}, "Активная передача") : "Активная передача";
+      tgMap.set(n, { tg: n, name: `TG ${n}`, desc: txDesc, ccode: "GLOBAL" });
     }
   });
 
@@ -3602,15 +3620,15 @@ export function renderSvxDirList(filterText = "") {
   _updateSvxDirStatusUI(tgList.length);
 
   if (!tgList.length) {
-    let emptyMsg = "Разговорные группы не найдены";
+    let emptyMsg = window.t ? window.t("svx.tgs_not_found", {}, "Разговорные группы не найдены") : "Разговорные группы не найдены";
     if (_svxFilter === "fav" && !query) {
-      emptyMsg = "Избранное пусто. Нажмите ☆ у нужных групп";
+      emptyMsg = window.t ? window.t("svx.fav_empty", {}, "Избранное пусто. Нажмите ☆ у нужных групп") : "Избранное пусто. Нажмите ☆ у нужных групп";
     } else if (_svxFilter === "live" && !query) {
-      emptyMsg = "Сейчас нет активных передач в группах";
+      emptyMsg = window.t ? window.t("svx.live_empty", {}, "Сейчас нет активных передач в группах") : "Сейчас нет активных передач в группах";
     } else if (_svxFilter === "monitored" && !query) {
-      emptyMsg = "Список мониторинга пуст. Нажмите «👁 Монитор» у нужных групп";
+      emptyMsg = window.t ? window.t("svx.monitored_empty", {}, "Список мониторинга пуст. Нажмите «👁 Монитор» у нужных групп") : "Список мониторинга пуст. Нажмите «👁 Монитор» у нужных групп";
     }
-    container.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#94a3b8; font-size:0.88rem;">${emptyMsg}</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#94a3b8; font-size:0.88rem;">${escapeHtml(emptyMsg)}</div>`;
     return;
   }
 
@@ -3731,19 +3749,22 @@ export async function selectSvxTg(tgNumber, btnEl = null) {
         myContactsModal.classList.remove("active");
       }
     } else {
-      const errMsg = window.t ? window.t("svx.tg_select_err_toast", {}, "Не удалось выбрать группу TG") : "Не удалось выбрать группу TG";
+      const errMsg = window.t ? window.t("svx.tg_select_err_generic", {}, "Не удалось выбрать группу TG") : "Не удалось выбрать группу TG";
+      const fallbackSelBtn = window.t ? window.t("svx.tg_select_btn", {}, "✓ Выбрать") : "✓ Выбрать";
       if (typeof showToast === "function") showToast(errMsg, "error", 3500);
       if (btnEl) {
         btnEl.disabled = false;
-        btnEl.textContent = prevText || "🔗 Выбрать TG";
+        btnEl.textContent = prevText || fallbackSelBtn;
       }
     }
   } catch (err) {
     console.error("[SVX] Select TG error:", err);
-    if (typeof showToast === "function") showToast("Не удалось выбрать группу TG", "error", 3500);
+    const errMsg = window.t ? window.t("svx.tg_select_err_generic", {}, "Не удалось выбрать группу TG") : "Не удалось выбрать группу TG";
+    const fallbackSelBtn = window.t ? window.t("svx.tg_select_btn", {}, "✓ Выбрать") : "✓ Выбрать";
+    if (typeof showToast === "function") showToast(errMsg, "error", 3500);
     if (btnEl) {
       btnEl.disabled = false;
-      btnEl.textContent = prevText || "🔗 Выбрать TG";
+      btnEl.textContent = prevText || fallbackSelBtn;
     }
   }
 }
@@ -3817,7 +3838,8 @@ export async function toggleSvxMonitorTg(tgNumber, btnEl = null) {
         renderSvxDirList(inp ? inp.value : "");
       }
     } else {
-      if (typeof showToast === "function") showToast("Не удалось обновить список мониторинга", "error", 3000);
+      const monErrMsg = window.t ? window.t("svx.monitor_update_err_toast", {}, "Не удалось обновить список мониторинга") : "Не удалось обновить список мониторинга";
+      if (typeof showToast === "function") showToast(monErrMsg, "error", 3000);
       if (btnEl) {
         btnEl.disabled = false;
         btnEl.textContent = prevText;
@@ -3902,16 +3924,18 @@ export async function connectSvxServer(srv, btnEl = null) {
     } else {
       const errMsg = window.t ? window.t("svx.server_connect_err_toast", {}, "Не удалось подключиться к серверу SVX") : "Не удалось подключиться к серверу SVX";
       if (typeof showToast === "function") showToast(errMsg, "error", 3500);
+      const fallbackConnBtn = window.t ? window.t("svx.server_connect_btn", {}, "🔗 Подключить") : "🔗 Подключить";
       if (btnEl) {
         btnEl.disabled = false;
-        btnEl.textContent = prevText || "🔗 Подключиться";
+        btnEl.textContent = prevText || fallbackConnBtn;
       }
     }
   } catch (err) {
     console.error("[SVX] Connect server error:", err);
+    const fallbackConnBtn = window.t ? window.t("svx.server_connect_btn", {}, "🔗 Подключить") : "🔗 Подключить";
     if (btnEl) {
       btnEl.disabled = false;
-      btnEl.textContent = prevText || "🔗 Подключиться";
+      btnEl.textContent = prevText || fallbackConnBtn;
     }
   }
 }

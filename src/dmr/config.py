@@ -151,7 +151,7 @@ class HotspotConfig(BaseModel):
     @classmethod
     def validate_network_type(cls, v: Any) -> str:
         val = str(v or "bm").strip().lower()
-        if val in ("bm", "tgif", "freedmr", "dmrplus", "xlx", "allstar", "custom", "adn", "ysf", "m17"):
+        if val in ("bm", "tgif", "freedmr", "dmrplus", "xlx", "allstar", "custom", "adn", "ysf", "m17", "dstar", "svx"):
             return val
         return "bm"
 
@@ -273,10 +273,19 @@ class AppSettings(BaseModel):
 def load_app_settings() -> AppSettings:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not SETTINGS_FILE.exists():
-        default_hs = HotspotConfig(id="default", name="Main Hotspot")
-        app_settings = AppSettings(active_hotspot_id="default", hotspots=[default_hs])
-        save_app_settings(app_settings)
-        return app_settings
+        for def_path in (
+            CONFIG_DIR / "default_settings.json",
+            Path(__file__).resolve().parent.parent / "default_settings.json",
+        ):
+            if def_path.exists():
+                try:
+                    with open(def_path, "r", encoding="utf-8-sig") as f:
+                        raw_def = json.load(f)
+                    return AppSettings(**raw_def)
+                except Exception as e:
+                    print(f"[CONFIG] Error loading {def_path}: {e}")
+        default_hs = HotspotConfig(id="default", name="Main Hotspot", autoconnect=False)
+        return AppSettings(active_hotspot_id="default", hotspots=[default_hs])
 
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:

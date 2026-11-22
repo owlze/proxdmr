@@ -21,15 +21,30 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Function to set key=value in .env
+# Function to set key=value in .env safely without sed delimiter/metacharacter expansion
 set_env_val() {
     local key="$1"
     local val="$2"
-    if grep -q "^${key}=" .env; then
-        sed -i "s|^${key}=.*|${key}=${val}|" .env
-    else
-        echo "${key}=${val}" >> .env
+    local tmp_env
+    tmp_env=$(mktemp "${PWD}/.env.tmp.XXXXXX")
+    local found=0
+    if [ -f ".env" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                "${key}="*)
+                    printf '%s=%s\n' "$key" "$val" >> "$tmp_env"
+                    found=1
+                    ;;
+                *)
+                    printf '%s\n' "$line" >> "$tmp_env"
+                    ;;
+            esac
+        done < ".env"
     fi
+    if [ "$found" -eq 0 ]; then
+        printf '%s=%s\n' "$key" "$val" >> "$tmp_env"
+    fi
+    mv -f "$tmp_env" ".env"
 }
 
 # 3. Detect Host IP for SSL

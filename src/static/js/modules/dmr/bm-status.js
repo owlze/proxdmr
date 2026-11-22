@@ -4,9 +4,9 @@
  * and user-triggered manual connect / disconnect actions per hotspot.
  */
 
-import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.799";
-import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.799";
-import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.799";
+import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.801";
+import { isHotspotFullyOnline, updateCardBmBanner, getDmrNetworkProfile, updateCardNetworkBadge } from "./bm-banner.js?v=2.9.801";
+import { renderHotspotsList, renderHotspotSelect } from "./hotspots.js?v=2.9.801";
 
 export let currentBmStatus = "OFFLINE";
 export let isTogglingConnection = false;

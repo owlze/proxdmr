@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.799">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.801">
   <script>
     window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
@@ -2149,6 +2149,7 @@
             </div>
             <span id="editHsExistingNetDesc" class="hs-existing-net-desc" data-i18n="hs_edit.existing_net_desc">🔒 Сеть HS • MMDVM + API v2</span>
           </div>
+          <div id="editHsUntestedProtoNotice" class="hs-untested-proto-notice" style="display: none;" data-i18n="hs_edit.untested_proto_notice">Данные протоколы пока не были проверены реальным подключением</div>
           <div class="form-group-row">
             <div class="form-group" style="flex: 1;">
               <label for="editHsName" data-i18n="hs_edit.name">Название профиля</label>
@@ -2860,7 +2861,7 @@
         <!-- Check Mic on TX Option -->
         <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
           <label style="cursor: pointer;">
-            <input type="checkbox" id="optCheckMicOnTx" {% if check_mic_on_tx is not defined or check_mic_on_tx %}checked{% endif %}> <strong data-i18n="general.check_mic_on_tx">Контроль наличия микрофона при передаче (TX)</strong>
+            <input type="checkbox" id="optCheckMicOnTx" {% if check_mic_on_tx %}checked{% endif %}> <strong data-i18n="general.check_mic_on_tx">Контроль наличия микрофона при передаче (TX)</strong>
           </label>
           <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="general.check_mic_on_tx_hint">
             Блокирует передачу при отсутствии или отключении микрофона. Если выключено — разрешает выход в эфир без микрофона (тишина/несущая)
@@ -2972,7 +2973,7 @@
                   <span id="hwPttCustomKeyLabel" style="font-weight: 700; color: #58a6ff; font-family: monospace; text-align: right; word-break: break-word;">—</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                  <button type="button" id="btnHwPttCapture" class="btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                  <button type="button" id="btnHwPttCapture" class="btn-secondary" data-i18n="android.hw_ptt_capture_btn" style="flex: 1; padding: 6px 10px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
                     🎯 Назначить кнопку
                   </button>
                   <button type="button" id="btnHwPttClear" class="btn-secondary" title="Сбросить назначенную кнопку" data-i18n-title="android.hw_ptt_clear_title" style="display: none; padding: 6px 10px; font-size: 0.82rem; color: #f85149; border-color: rgba(248, 81, 73, 0.35); cursor: pointer;">
@@ -3378,11 +3379,11 @@
                 <span class="toolbar-bg-theme-title" id="toolbarBgEditingLabel">
                   <span>🌙</span> <span data-i18n="general.bg_tab_dark">Тёмная тема</span>
                 </span>
-                <button type="button" class="btn-toolbar-bg-reset" id="btnResetToolbarBg" title="Сбросить цвета выбранной темы">
+                <button type="button" class="btn-toolbar-bg-reset" id="btnResetToolbarBg" title="Сбросить цвета выбранной темы" data-i18n-title="appearance.reset_theme_colors_title">
                   <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
                 </button>
               </div>
-              <div class="toolbar-bg-preview-bar" id="toolbarBgPreviewBar" title="Нажмите для выбора обоих цветов растяжки в одном диалоге" aria-hidden="true"></div>
+              <div class="toolbar-bg-preview-bar" id="toolbarBgPreviewBar" title="Нажмите для выбора обоих цветов растяжки в одном диалоге" data-i18n-title="appearance.toolbar_bg_preview_title" aria-hidden="true"></div>
               <div class="toolbar-bg-pickers-grid">
                 <label class="toolbar-bg-picker-item" for="optToolbarBgTopPicker">
                   <span class="toolbar-bg-swatch" id="toolbarBgTopSwatch">
@@ -3440,7 +3441,7 @@
                   <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
                 </button>
               </div>
-              <div class="dual-gradient-preview" id="tsActivePreviewBar" title="Нажмите для выбора пары цветов активного TS" aria-hidden="true"></div>
+              <div class="dual-gradient-preview" id="tsActivePreviewBar" title="Нажмите для выбора пары цветов активного TS" data-i18n-title="appearance.ts_active_preview_title" aria-hidden="true"></div>
               <div class="toolbar-bg-pickers-grid">
                 <label class="toolbar-bg-picker-item" for="optTsActiveTopPicker">
                   <span class="toolbar-bg-swatch" id="tsActiveTopSwatch">
@@ -3473,7 +3474,7 @@
                   <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
                 </button>
               </div>
-              <div class="dual-gradient-preview" id="tsMutedPreviewBar" title="Нажмите для выбора пары цветов принимающего беззвучного TS" aria-hidden="true"></div>
+              <div class="dual-gradient-preview" id="tsMutedPreviewBar" title="Нажмите для выбора пары цветов принимающего беззвучного TS" data-i18n-title="appearance.ts_muted_preview_title" aria-hidden="true"></div>
               <div class="toolbar-bg-pickers-grid">
                 <label class="toolbar-bg-picker-item" for="optTsMutedTopPicker">
                   <span class="toolbar-bg-swatch" id="tsMutedTopSwatch">
@@ -3506,7 +3507,7 @@
                   <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
                 </button>
               </div>
-              <div class="dual-gradient-preview" id="tsStandbyPreviewBar" title="Нажмите для выбора пары цветов пассивного TS" aria-hidden="true"></div>
+              <div class="dual-gradient-preview" id="tsStandbyPreviewBar" title="Нажмите для выбора пары цветов пассивного TS" data-i18n-title="appearance.ts_standby_preview_title" aria-hidden="true"></div>
               <div class="toolbar-bg-pickers-grid">
                 <label class="toolbar-bg-picker-item" for="optTsStandbyTopPicker">
                   <span class="toolbar-bg-swatch" id="tsStandbyTopSwatch">
@@ -3540,7 +3541,7 @@
                   <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
                 </button>
               </div>
-              <div class="dual-gradient-preview" id="tsTxPreviewBar" title="Нажмите для выбора пары цветов режима TX" aria-hidden="true"></div>
+              <div class="dual-gradient-preview" id="tsTxPreviewBar" title="Нажмите для выбора пары цветов режима TX" data-i18n-title="appearance.ts_tx_preview_title" aria-hidden="true"></div>
               <div class="toolbar-bg-pickers-grid">
                 <label class="toolbar-bg-picker-item" for="optTsTxTopPicker">
                   <span class="toolbar-bg-swatch" id="tsTxTopSwatch">
@@ -3659,7 +3660,7 @@
                   🏠 Rumble-2-Flash (Локальная модель ASR, Apache 2.0):
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                  <span id="rumbleAsrStatusText" style="flex: 1; min-width: 180px; font-size: 0.8rem; color: var(--text-secondary);">⏳ Проверка статуса...</span>
+                  <span id="rumbleAsrStatusText" style="flex: 1; min-width: 180px; font-size: 0.8rem; color: var(--text-secondary);" data-i18n="transcriber.rumble_status_checking">⏳ Проверка статуса...</span>
                   <button type="button" id="btnDownloadRumbleModel" class="btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; display: none;" data-i18n="transcriber.rumble_btn_download">
                     📥 Скачать модель (~970 МБ)
                   </button>
@@ -3894,6 +3895,7 @@
       </div>
       <div class="modal-body hs-type-modal-body" style="padding: 12px 14px 16px 14px; display: flex; flex-direction: column; gap: 10px;">
         <!-- Single Frame: All DMR Networks -->
+        <div class="hs-type-section-title" style="margin-bottom: 2px;" data-i18n="hs_edit.type_dmr_group">DMR сети</div>
         <div class="hs-type-frame">
           <button type="button" class="hs-type-item hs-type-bm" data-net-type="bm">
             <span class="hs-type-card-badge" style="background: #ea580c;">BM</span>
@@ -4636,7 +4638,7 @@
             </div>
             <div class="svx-quick-tg-bar" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:4px 8px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius: var(--app-border-radius, 4px);">
               <span style="font-size:0.75rem; color:#10b981; font-weight:600;" data-i18n="svx.quick_tg_label">Быстрый переход TG:</span>
-              <input type="number" id="svxQuickTgInput" class="form-input" min="0" max="99999999" placeholder="Номер TG" style="width:110px; height:28px; padding:2px 6px; font-size:0.8rem;">
+              <input type="number" id="svxQuickTgInput" class="form-input" min="0" max="99999999" placeholder="Номер TG" data-i18n-placeholder="svx.quick_tg_placeholder" style="width:110px; height:28px; padding:2px 6px; font-size:0.8rem;">
               <button type="button" id="btnSvxQuickSelect" class="btn-primary btn-sm" style="padding:2px 8px; font-size:0.75rem;" data-i18n="svx.quick_select">🔗 Выбрать TG</button>
               <button type="button" id="btnSvxQuickMonitor" class="btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" data-i18n="svx.quick_monitor">+ Монитор</button>
             </div>
@@ -5521,11 +5523,11 @@
         <div class="audio-section">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.sec_jitter">3. Буфер приёма (Jitter Buffer)</span>
-            <span id="valJitterBuffer" class="audio-val-badge">1000 ms</span>
+            <span id="valJitterBuffer" class="audio-val-badge">1040 ms</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">40 ms</span>
-            <input type="range" id="sliderJitterBuffer" class="form-slider" min="40" max="2000" step="10" value="120" style="flex: 1;">
+            <input type="range" id="sliderJitterBuffer" class="form-slider" min="40" max="2000" step="10" value="1040" style="flex: 1;">
             <span class="slider-limit-label">2000 ms</span>
           </div>
         </div>
@@ -5572,11 +5574,11 @@
         <div class="audio-section">
           <div class="audio-section-header">
             <span class="audio-section-title" data-i18n="audio.tx_sec_mic_gain">1. Чувствительность микрофона (TX Mic Gain)</span>
-            <span id="valTxMicGain" class="audio-val-badge">-11 dB</span>
+            <span id="valTxMicGain" class="audio-val-badge">+3 dB</span>
           </div>
           <div class="slider-container" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
             <span class="slider-limit-label">-15 dB</span>
-            <input type="range" id="sliderTxMicGain" class="form-slider" min="-15" max="15" step="1" value="-11" style="flex: 1; cursor: pointer;">
+            <input type="range" id="sliderTxMicGain" class="form-slider" min="-15" max="15" step="1" value="3" style="flex: 1; cursor: pointer;">
             <span class="slider-limit-label">+15 dB</span>
           </div>
 
@@ -5657,7 +5659,7 @@
           </div>
           <div class="form-group-checkbox audio-field-check" style="margin-top: 8px; margin-bottom: 6px;">
             <label class="audio-checkbox-label">
-              <input type="checkbox" id="chkTxGate">
+              <input type="checkbox" id="chkTxGate" checked>
               <strong data-i18n="audio_tx.gate_enable">Включить Noise Gate в паузах речи</strong>
             </label>
           </div>
@@ -6477,7 +6479,7 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.797"></script>
+  <script src="/static/js/i18n.js?v=2.9.801"></script>
   <script src="/static/js/audio-player.js?v=2.9.792"></script>
   <script src="/static/js/dialog.js?v=2.9.711"></script>
   <script src="/static/js/auth.js?v=2.9.760"></script>
@@ -6736,7 +6738,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.711"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.799"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.801"></script>
 </body>
 </html>
 
