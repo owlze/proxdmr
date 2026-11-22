@@ -5,9 +5,9 @@
  */
 
 import { showCenterHudToast, showToast } from "../core/toast.js?v=2.9.699";
-import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.788";
+import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.807";
 import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js?v=2.9.792";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.801";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.809";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;
@@ -114,6 +114,10 @@ export function setSingleHotspotAudioEnabled(enabled, syncServer = true) {
   if (typeof window !== "undefined") {
     window.isSingleHotspotAudioEnabled = () => boolVal;
   }
+  const ap = getAudioPlayer();
+  if (ap && typeof ap.syncSingleHotspotAudioMute === "function") {
+    ap.syncSingleHotspotAudioMute();
+  }
   if (syncServer) {
     const ws = (typeof window !== "undefined" && window.ws) || null;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -130,6 +134,98 @@ export function setSingleHotspotAudioEnabled(enabled, syncServer = true) {
 }
 window.isSingleHotspotAudioEnabled = isSingleHotspotAudioEnabled;
 window.setSingleHotspotAudioEnabled = setSingleHotspotAudioEnabled;
+
+export function normalizeMuteFadeDuration(val) {
+  const parsed = parseFloat(String(val ?? "").replace(",", "."));
+  if (isNaN(parsed)) return 0.3;
+  return Math.round(Math.max(0.1, Math.min(2.0, parsed)) * 10) / 10;
+}
+
+export function isMuteFadeEnabled() {
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid) {
+    const uVal = localStorage.getItem(`proxdmr_u${uid}_mute_fade_enabled`);
+    if (uVal !== null) return uVal !== "false";
+  }
+  const v = localStorage.getItem("proxdmr_mute_fade_enabled");
+  if (v !== null) return v !== "false";
+  return true;
+}
+
+export function getMuteFadeDuration() {
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid) {
+    const uVal = localStorage.getItem(`proxdmr_u${uid}_mute_fade_duration`);
+    if (uVal !== null) return normalizeMuteFadeDuration(uVal);
+  }
+  const v = localStorage.getItem("proxdmr_mute_fade_duration");
+  if (v !== null) return normalizeMuteFadeDuration(v);
+  return 0.3;
+}
+
+export function applyMuteFadeUIAndEngine() {
+  const enabled = isMuteFadeEnabled();
+  const dur = getMuteFadeDuration();
+  const chk = document.getElementById("optMuteFadeEnabled");
+  if (chk) chk.checked = enabled;
+  const inp = document.getElementById("optMuteFadeDuration");
+  if (inp) {
+    if (document.activeElement !== inp) {
+      inp.value = dur.toFixed(1);
+    }
+    inp.disabled = !enabled;
+  }
+  const row = document.getElementById("muteFadeDurationRow");
+  if (row) {
+    row.style.opacity = enabled ? "1" : "0.45";
+  }
+  const ap = getAudioPlayer();
+  if (ap && typeof ap.setMuteFadeConfig === "function") {
+    ap.setMuteFadeConfig(enabled, dur);
+  }
+}
+
+export function setMuteFadeEnabled(enabled, syncServer = true) {
+  const boolVal = Boolean(enabled);
+  localStorage.setItem("proxdmr_mute_fade_enabled", boolVal ? "true" : "false");
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid) localStorage.setItem(`proxdmr_u${uid}_mute_fade_enabled`, boolVal ? "true" : "false");
+  applyMuteFadeUIAndEngine();
+  if (syncServer) {
+    const ws = (typeof window !== "undefined" && window.ws) || null;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_mute_fade_enabled", enabled: boolVal }));
+      } catch (_) {}
+    }
+    fetch("/api/settings/general", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mute_fade_enabled: boolVal })
+    }).catch(() => {});
+  }
+}
+
+export function setMuteFadeDuration(duration, syncServer = true) {
+  const durVal = normalizeMuteFadeDuration(duration);
+  localStorage.setItem("proxdmr_mute_fade_duration", durVal.toFixed(1));
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid) localStorage.setItem(`proxdmr_u${uid}_mute_fade_duration`, durVal.toFixed(1));
+  applyMuteFadeUIAndEngine();
+  if (syncServer) {
+    const ws = (typeof window !== "undefined" && window.ws) || null;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_mute_fade_duration", duration: durVal }));
+      } catch (_) {}
+    }
+    fetch("/api/settings/general", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mute_fade_duration: durVal })
+    }).catch(() => {});
+  }
+}
 
 export function isPttAudioMuted() {
   return isPttMuteActive;
@@ -1534,6 +1630,7 @@ export function initVolumeMute() {
     });
   }
 
+  applyMuteFadeUIAndEngine();
   if (isSystemVolumeSyncEnabled() && typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.getSystemVolume === "function") {
     try {
       const sysVol = window.AndroidBridge.getSystemVolume();
@@ -1550,6 +1647,11 @@ export function initVolumeMute() {
 if (typeof window !== "undefined") {
   window.isMuteOnPttEnabled = isMuteOnPttEnabled;
   window.setMuteOnPttEnabled = setMuteOnPttEnabled;
+  window.isMuteFadeEnabled = isMuteFadeEnabled;
+  window.setMuteFadeEnabled = setMuteFadeEnabled;
+  window.getMuteFadeDuration = getMuteFadeDuration;
+  window.setMuteFadeDuration = setMuteFadeDuration;
+  window.applyMuteFadeUIAndEngine = applyMuteFadeUIAndEngine;
   window.isPttAudioMuted = isPttAudioMuted;
   window.isSimultaneousSlotsEnabled = isSimultaneousSlotsEnabled;
   window.setSimultaneousSlotsEnabled = setSimultaneousSlotsEnabled;
@@ -1597,6 +1699,11 @@ if (typeof window !== "undefined") {
   Object.assign(window.__proxdmr, {
     isMuteOnPttEnabled,
     setMuteOnPttEnabled,
+    isMuteFadeEnabled,
+    setMuteFadeEnabled,
+    getMuteFadeDuration,
+    setMuteFadeDuration,
+    applyMuteFadeUIAndEngine,
     isPttAudioMuted,
     isSimultaneousSlotsEnabled,
     setSimultaneousSlotsEnabled,

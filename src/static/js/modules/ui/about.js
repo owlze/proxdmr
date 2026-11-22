@@ -16,9 +16,10 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } fr
   const aboutTimerVal = document.getElementById("aboutTimerVal");
   const aboutTimerProgressBar = document.getElementById("aboutTimerProgressBar");
 
+  const ABOUT_AUTO_CLOSE_SEC = 70;
   let aboutAutoCloseTimer = null;
   let aboutCountdownInterval = null;
-  let aboutSecondsLeft = 40;
+  let aboutSecondsLeft = ABOUT_AUTO_CLOSE_SEC;
   let aboutScrollStartTimeout = null;
   let aboutScrollAnimId = null;
   let aboutUserInteractedScroll = false;
@@ -56,7 +57,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } fr
       const maxScroll = list.scrollHeight - list.clientHeight;
       if (maxScroll <= 0) return;
 
-      const durationMs = 30000; // Reach end in 30 seconds
+      const durationMs = 60000; // Reach end in 60 seconds (2x slower)
       const startTime = performance.now();
 
       function step(now) {
@@ -134,9 +135,9 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } fr
     // Reset email display: button visible, image hidden, copied state cleared
     resetEmailBtn();
 
-    // Reset countdown to 40 seconds
-    aboutSecondsLeft = 40;
-    if (aboutTimerVal) aboutTimerVal.textContent = "40";
+    // Reset countdown to 70 seconds (5s delay + 60s scroll + 5s hold)
+    aboutSecondsLeft = ABOUT_AUTO_CLOSE_SEC;
+    if (aboutTimerVal) aboutTimerVal.textContent = String(ABOUT_AUTO_CLOSE_SEC);
     if (aboutTimerProgressBar) aboutTimerProgressBar.style.width = "100%";
 
     // Clear any active timers
@@ -153,7 +154,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } fr
       resetAboutScrollToTop();
     });
 
-    // Start smooth autoscroll of credits (starts after 5s, ends at 30s)
+    // Start smooth autoscroll of credits (starts after 5s, lasts 60s)
     startCreditsAutoScroll();
 
     _pushNavState("modal", "aboutModal");
@@ -197,7 +198,7 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } fr
       aboutSecondsLeft--;
       if (aboutTimerVal) aboutTimerVal.textContent = String(Math.max(0, aboutSecondsLeft));
       if (aboutTimerProgressBar) {
-        const pct = Math.max(0, (aboutSecondsLeft / 40) * 100);
+        const pct = Math.max(0, (aboutSecondsLeft / ABOUT_AUTO_CLOSE_SEC) * 100);
         aboutTimerProgressBar.style.width = `${pct}%`;
       }
       if (aboutSecondsLeft <= 0) {
@@ -205,10 +206,10 @@ import { pushNavState as _pushNavState, notifyNavClosed as _notifyNavClosed } fr
       }
     }, 1000);
 
-    // Auto-close timeout at 40s
+    // Auto-close timeout at 70s
     aboutAutoCloseTimer = setTimeout(() => {
       closeAboutModal();
-    }, 40000);
+    }, ABOUT_AUTO_CLOSE_SEC * 1000);
   }
 
   function closeAboutModal() {

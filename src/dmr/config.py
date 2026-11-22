@@ -185,6 +185,8 @@ class AppSettings(BaseModel):
     haptic_duration: int = 45
     simultaneous_slots: bool = False
     check_mic_on_tx: bool = True
+    mute_fade_enabled: bool = True
+    mute_fade_duration: float = 0.3
     theme: str = "dark"
     bg_type: str = "color"
     bg_color: str = "#04170c"
@@ -219,6 +221,7 @@ class AppSettings(BaseModel):
     tts_mute_others: bool = True
     tts_announce_callsign: bool = False
     tts_skip_short_callsign: bool = True
+    tts_piper_use_stress: bool = True
     tts_style: str = "radio"
     quick_mem: Dict[str, Any] = Field(default_factory=dict)
     client_settings: Dict[str, Any] = Field(default_factory=dict)

@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 import socket
 import wave
@@ -426,6 +427,7 @@ transcriber_service.configure(
     tts_mute_others=getattr(app_settings, "tts_mute_others", True),
     tts_announce_callsign=getattr(app_settings, "tts_announce_callsign", False),
     tts_skip_short_callsign=getattr(app_settings, "tts_skip_short_callsign", True),
+    tts_piper_use_stress=getattr(app_settings, "tts_piper_use_stress", True),
     tts_style=getattr(app_settings, "tts_style", "radio"),
     transcriber_engine=getattr(app_settings, "transcriber_engine", "gemini"),
     translation_engine=getattr(app_settings, "translation_engine", "gemini"),
@@ -488,6 +490,112 @@ bm_ping_service = BMPingService(
     interval=5.0
 )
 client_ping_service = ClientPingService()
+
+_cpu_metrics_lock = threading.Lock()
+_cpu_prev_stat: Optional[Tuple[int, int]] = None
+_cpu_cached_metrics: Dict[str, Any] = {
+    "cpu_percent": 0.0,
+    "cpu_cores": os.cpu_count() or 1,
+    "ram_percent": 0.0,
+    "ts": 0.0,
+}
+
+
+def _read_proc_stat_totals() -> Optional[Tuple[int, int]]:
+    try:
+        with open("/proc/stat", "r", encoding="utf-8") as f:
+            first = f.readline()
+        if not first.startswith("cpu "):
+            return None
+        parts = [int(x) for x in first.split()[1:]]
+        if len(parts) < 4:
+            return None
+        idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+        total = sum(parts)
+        return (idle, total)
+    except Exception:
+        return None
+
+
+def _read_proc_mem_percent() -> Optional[float]:
+    try:
+        mem_total = 0
+        mem_avail = 0
+        mem_free = 0
+        buffers = 0
+        cached = 0
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mem_total = int(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    mem_avail = int(line.split()[1])
+                elif line.startswith("MemFree:"):
+                    mem_free = int(line.split()[1])
+                elif line.startswith("Buffers:"):
+                    buffers = int(line.split()[1])
+                elif line.startswith("Cached:"):
+                    cached = int(line.split()[1])
+        if mem_total <= 0:
+            return None
+        avail = mem_avail if mem_avail > 0 else (mem_free + buffers + cached)
+        used_pct = (1.0 - (avail / float(mem_total))) * 100.0
+        return round(max(0.0, min(100.0, used_pct)), 1)
+    except Exception:
+        return None
+
+
+# Warm initial /proc/stat baseline at module load
+_cpu_prev_stat = _read_proc_stat_totals()
+
+
+def _get_server_cpu_metrics(force: bool = False) -> Dict[str, Any]:
+    global _cpu_prev_stat
+    now = time.monotonic()
+    min_ttl = 0.3 if force else 1.0
+    with _cpu_metrics_lock:
+        if (now - _cpu_cached_metrics["ts"]) < min_ttl and _cpu_cached_metrics["ts"] > 0.0:
+            return {
+                "cpu_percent": _cpu_cached_metrics["cpu_percent"],
+                "cpu_cores": _cpu_cached_metrics["cpu_cores"],
+                "ram_percent": _cpu_cached_metrics["ram_percent"],
+            }
+
+        cores = os.cpu_count() or 1
+        cpu_pct: Optional[float] = None
+        ram_pct: Optional[float] = _read_proc_mem_percent()
+
+        cur_stat = _read_proc_stat_totals()
+        if cur_stat is not None:
+            if _cpu_prev_stat is not None:
+                d_idle = cur_stat[0] - _cpu_prev_stat[0]
+                d_total = cur_stat[1] - _cpu_prev_stat[1]
+                if d_total > 0:
+                    cpu_pct = round(max(0.0, min(100.0, (1.0 - (d_idle / float(d_total))) * 100.0)), 1)
+            _cpu_prev_stat = cur_stat
+
+        if cpu_pct is None:
+            try:
+                import psutil  # type: ignore
+                cpu_pct = round(max(0.0, min(100.0, float(psutil.cpu_percent(interval=None)))), 1)
+                if ram_pct is None:
+                    ram_pct = round(max(0.0, min(100.0, float(psutil.virtual_memory().percent))), 1)
+            except Exception:
+                try:
+                    load1 = os.getloadavg()[0]
+                    cpu_pct = round(max(0.0, min(100.0, (load1 / float(cores)) * 100.0)), 1)
+                except Exception:
+                    cpu_pct = _cpu_cached_metrics["cpu_percent"]
+
+        _cpu_cached_metrics["cpu_percent"] = float(cpu_pct if cpu_pct is not None else 0.0)
+        _cpu_cached_metrics["cpu_cores"] = int(cores)
+        _cpu_cached_metrics["ram_percent"] = float(ram_pct if ram_pct is not None else 0.0)
+        _cpu_cached_metrics["ts"] = now
+        return {
+            "cpu_percent": _cpu_cached_metrics["cpu_percent"],
+            "cpu_cores": _cpu_cached_metrics["cpu_cores"],
+            "ram_percent": _cpu_cached_metrics["ram_percent"],
+        }
 
 async def periodic_directory_sync():
     """Checks and updates BrandMeister and RadioID databases every 3 hours."""
@@ -720,6 +828,7 @@ async def _revert_demo_runtime_state():
                     "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
                     "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
                     "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
+                    "tts_piper_use_stress": getattr(transcriber_service, "tts_piper_use_stress", True),
                 })
             except Exception as e:
                 logger.warning(f"[DEMO] Failed to broadcast restored transcriber settings: {e}")
@@ -897,6 +1006,7 @@ def _configure_transcriber_from_settings(user_app_settings: AppSettings):
         tts_mute_others=getattr(user_app_settings, "tts_mute_others", True),
         tts_announce_callsign=getattr(user_app_settings, "tts_announce_callsign", False),
         tts_skip_short_callsign=getattr(user_app_settings, "tts_skip_short_callsign", True),
+        tts_piper_use_stress=getattr(user_app_settings, "tts_piper_use_stress", True),
         tts_style=getattr(user_app_settings, "tts_style", "radio"),
         transcriber_engine=getattr(user_app_settings, "transcriber_engine", "groq"),
         translation_engine=getattr(user_app_settings, "translation_engine", "groq"),
@@ -2460,6 +2570,11 @@ async def get_index(request: Request):
         simultaneous_slots = getattr(s, "simultaneous_slots", False)
         check_mic_on_tx = getattr(s, "check_mic_on_tx", True)
         single_hotspot_audio = getattr(s, "single_hotspot_audio", False)
+        mute_fade_enabled = bool(getattr(s, "mute_fade_enabled", True))
+        try:
+            mute_fade_duration = round(max(0.1, min(2.0, float(getattr(s, "mute_fade_duration", 0.3)))), 1)
+        except Exception:
+            mute_fade_duration = 0.3
         qrz_com_username = getattr(s, "qrz_com_username", "") or ""
         qrz_com_password = getattr(s, "qrz_com_password", "") or ""
         hamqth_username = getattr(s, "hamqth_username", "") or ""
@@ -2537,6 +2652,8 @@ async def get_index(request: Request):
         simultaneous_slots = False
         check_mic_on_tx = True
         single_hotspot_audio = False
+        mute_fade_enabled = True
+        mute_fade_duration = 0.3
         qrz_com_username = ""
         qrz_com_password = ""
         hamqth_username = ""
@@ -2583,6 +2700,8 @@ async def get_index(request: Request):
             "simultaneous_slots": simultaneous_slots,
             "check_mic_on_tx": check_mic_on_tx,
             "single_hotspot_audio": single_hotspot_audio,
+            "mute_fade_enabled": mute_fade_enabled,
+            "mute_fade_duration": mute_fade_duration,
             "qrz_com_username": qrz_com_username,
             "qrz_com_password": qrz_com_password,
             "hamqth_username": hamqth_username,
@@ -2850,6 +2969,8 @@ class GeneralSettingsUpdate(BaseModel):
     simultaneous_slots: Optional[bool] = None
     check_mic_on_tx: Optional[bool] = None
     single_hotspot_audio: Optional[bool] = None
+    mute_fade_enabled: Optional[bool] = None
+    mute_fade_duration: Optional[float] = None
     mute_on_ptt: Optional[bool] = None
     volume_down_ptt: Optional[bool] = None
     volume_up_ptt: Optional[bool] = None
@@ -2888,6 +3009,8 @@ async def get_general_settings(request: Request):
             "simultaneous_slots": s.simultaneous_slots,
             "check_mic_on_tx": getattr(s, "check_mic_on_tx", True),
             "single_hotspot_audio": getattr(s, "single_hotspot_audio", False),
+            "mute_fade_enabled": bool(getattr(s, "mute_fade_enabled", True)),
+            "mute_fade_duration": round(max(0.1, min(2.0, float(getattr(s, "mute_fade_duration", 0.3)))), 1),
             "mute_on_ptt": s.mute_on_ptt,
             "volume_down_ptt": v_ptt,
             "volume_up_ptt": v_ptt,
@@ -2980,6 +3103,19 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
         s.single_hotspot_audio = update.single_hotspot_audio
         changed = True
         await broadcast_user_json(uid, {"type": "single_hotspot_audio_change", "enabled": s.single_hotspot_audio})
+    if update.mute_fade_enabled is not None and bool(update.mute_fade_enabled) != bool(getattr(s, "mute_fade_enabled", True)):
+        s.mute_fade_enabled = bool(update.mute_fade_enabled)
+        changed = True
+        await broadcast_user_json(uid, {"type": "mute_fade_enabled_change", "enabled": s.mute_fade_enabled})
+    if update.mute_fade_duration is not None:
+        try:
+            clamped_fade = round(max(0.1, min(2.0, float(update.mute_fade_duration))), 1)
+        except Exception:
+            clamped_fade = 0.3
+        if clamped_fade != round(float(getattr(s, "mute_fade_duration", 0.3)), 1):
+            s.mute_fade_duration = clamped_fade
+            changed = True
+            await broadcast_user_json(uid, {"type": "mute_fade_duration_change", "duration": s.mute_fade_duration})
     if update.mute_on_ptt is not None and update.mute_on_ptt != s.mute_on_ptt:
         s.mute_on_ptt = update.mute_on_ptt
         changed = True
@@ -3561,6 +3697,7 @@ class TranscriberSettingsUpdate(BaseModel):
     tts_mute_others: Optional[bool] = None
     tts_announce_callsign: Optional[bool] = None
     tts_skip_short_callsign: Optional[bool] = None
+    tts_piper_use_stress: Optional[bool] = None
     tts_style: Optional[str] = None
 
 class TestKeysRequest(BaseModel):
@@ -3579,6 +3716,7 @@ class TtsTestRequest(BaseModel):
     announce_callsign: Optional[bool] = False
     callsign: Optional[str] = None
     tts_style: Optional[str] = None
+    piper_use_stress: Optional[bool] = None
 
 class RecordingTtsTranslateRequest(BaseModel):
     target_lang: Optional[str] = None
@@ -3627,6 +3765,7 @@ async def get_transcriber_settings(request: Request):
             "tts_mute_others": getattr(live_ts, "tts_mute_others", getattr(s, "tts_mute_others", True)),
             "tts_announce_callsign": getattr(live_ts, "tts_announce_callsign", getattr(s, "tts_announce_callsign", False)),
             "tts_skip_short_callsign": getattr(live_ts, "tts_skip_short_callsign", getattr(s, "tts_skip_short_callsign", True)),
+            "tts_piper_use_stress": getattr(live_ts, "tts_piper_use_stress", getattr(s, "tts_piper_use_stress", True)),
             "tts_style": getattr(live_ts, "tts_style", None) or getattr(s, "tts_style", "radio")
         }
     }
@@ -3662,6 +3801,8 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             transcriber_service.tts_announce_callsign = bool(update.tts_announce_callsign)
         if update.tts_skip_short_callsign is not None:
             transcriber_service.tts_skip_short_callsign = bool(update.tts_skip_short_callsign)
+        if update.tts_piper_use_stress is not None:
+            transcriber_service.tts_piper_use_stress = bool(update.tts_piper_use_stress)
         if update.tts_style is not None:
             transcriber_service.tts_style = update.tts_style
 
@@ -3707,6 +3848,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
             "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
             "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
+            "tts_piper_use_stress": getattr(transcriber_service, "tts_piper_use_stress", True),
             "tts_style": getattr(transcriber_service, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
             "translation_engine": getattr(s, "translation_engine", "groq"),
@@ -3744,6 +3886,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
                 "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
                 "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
                 "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
+                "tts_piper_use_stress": getattr(transcriber_service, "tts_piper_use_stress", True),
                 "tts_style": getattr(transcriber_service, "tts_style", "radio"),
             }
         }
@@ -3882,6 +4025,9 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
     if update.tts_skip_short_callsign is not None and update.tts_skip_short_callsign != getattr(s, "tts_skip_short_callsign", True):
         s.tts_skip_short_callsign = update.tts_skip_short_callsign
         changed = True
+    if update.tts_piper_use_stress is not None and update.tts_piper_use_stress != getattr(s, "tts_piper_use_stress", True):
+        s.tts_piper_use_stress = update.tts_piper_use_stress
+        changed = True
     if update.tts_style is not None and update.tts_style != getattr(s, "tts_style", "radio"):
         s.tts_style = update.tts_style
         changed = True
@@ -3924,6 +4070,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_mute_others": getattr(s, "tts_mute_others", True),
             "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
             "tts_skip_short_callsign": getattr(s, "tts_skip_short_callsign", True),
+            "tts_piper_use_stress": getattr(s, "tts_piper_use_stress", True),
             "tts_style": getattr(s, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
             "translation_engine": getattr(s, "translation_engine", "gemini"),
@@ -3965,6 +4112,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_mute_others": getattr(s, "tts_mute_others", True),
             "tts_announce_callsign": getattr(s, "tts_announce_callsign", False),
             "tts_skip_short_callsign": getattr(s, "tts_skip_short_callsign", True),
+            "tts_piper_use_stress": getattr(s, "tts_piper_use_stress", True),
             "tts_style": getattr(s, "tts_style", "radio"),
         }
     }
@@ -4067,7 +4215,8 @@ async def test_transcriber_tts(req: TtsTestRequest, request: Request):
         speed=req.speed or 1.0,
         callsign="DEMO" if (user and user.get("is_demo")) else (req.callsign or "RX6AWG"),
         announce_callsign=bool(req.announce_callsign),
-        style=req.tts_style
+        style=req.tts_style,
+        piper_use_stress=req.piper_use_stress
     )
     if err or not wav_bytes:
         return JSONResponse({"status": "error", "message": err or _tr("transcriber.tts_synth_error", fallback="Speech synthesis error")}, status_code=400)
@@ -4154,6 +4303,83 @@ async def api_silero_voices(lang: Optional[str] = None):
         "voices": voices,
         "lang": clean_lang
     }
+
+
+class SupertonicDownloadRequest(BaseModel):
+    voice_id: str = "M1"
+
+
+@app.get("/api/transcriber/supertonic/voices")
+async def api_supertonic_voices(lang: Optional[str] = None):
+    from supertonic_service import SupertonicService, SUPERTONIC_SUPPORTED_LANGUAGES, CORE_TOTAL_SIZE_MB
+    from stress_service import StressService
+    srv = SupertonicService.get_instance()
+    stress_srv = StressService.get_instance()
+    clean_lang = srv.normalize_lang(lang or "ru")
+    available_voices = srv.get_voices_for_lang(clean_lang)
+    installed = [v for v in available_voices if v.get("installed")]
+    return {
+        "status": "ok",
+        "available": srv.is_sdk_available(),
+        "core_installed": srv.is_core_installed(),
+        "core_size_mb": CORE_TOTAL_SIZE_MB,
+        "supported": srv.is_lang_supported(clean_lang),
+        "supported_languages": list(SUPERTONIC_SUPPORTED_LANGUAGES),
+        "stress_supported": stress_srv.is_lang_supported(clean_lang),
+        "stress_available": stress_srv.is_available(),
+        "installed": installed,
+        "available_voices": available_voices,
+        "lang": clean_lang
+    }
+
+
+@app.get("/api/transcriber/supertonic/check-lang")
+async def api_supertonic_check_lang(lang: str = "ru"):
+    from supertonic_service import SupertonicService, CORE_TOTAL_SIZE_MB
+    from stress_service import StressService
+    srv = SupertonicService.get_instance()
+    stress_srv = StressService.get_instance()
+    clean_lang = srv.normalize_lang(lang or "ru")
+    supported = srv.is_lang_supported(clean_lang)
+    core_installed = srv.is_core_installed()
+    available_voices = srv.get_voices_for_lang(clean_lang)
+    installed_voices = [v for v in available_voices if v.get("installed")]
+    return {
+        "status": "ok",
+        "lang": clean_lang,
+        "supported": supported,
+        "available": srv.is_sdk_available(),
+        "core_installed": core_installed,
+        "core_size_mb": CORE_TOTAL_SIZE_MB,
+        "has_installed": len(installed_voices) > 0,
+        "default_voice": srv.get_default_voice(),
+        "installed_voices": installed_voices,
+        "available_voices": available_voices,
+        "stress_supported": stress_srv.is_lang_supported(clean_lang),
+        "stress_available": stress_srv.is_available()
+    }
+
+
+@app.post("/api/transcriber/supertonic/download")
+async def api_supertonic_download(req: SupertonicDownloadRequest, request: Request):
+    user = _get_user_from_request(request)
+    if user and (user.get("role") == "demo" or user.get("is_demo")):
+        return JSONResponse({"status": "error", "message": "Demo mode: download disabled"}, status_code=403)
+    from supertonic_service import SupertonicService
+    srv = SupertonicService.get_instance()
+    status = srv.start_download(req.voice_id or "M1")
+    return {"status": "ok", "download": status}
+
+
+@app.get("/api/transcriber/supertonic/download/status")
+async def api_supertonic_download_status(voice_id: Optional[str] = None):
+    from supertonic_service import SupertonicService
+    srv = SupertonicService.get_instance()
+    if voice_id:
+        status = srv.get_download_status(voice_id)
+    else:
+        status = srv.get_any_active_download_status()
+    return {"status": "ok", "download": status}
 
 @app.get("/api/transcriber/translation/status")
 async def api_translation_status():
@@ -9629,6 +9855,11 @@ async def get_bm_info(
 
 # --- General Status & Backward Compatibility API ---
 
+@app.get("/api/system/cpu")
+async def get_system_cpu():
+    metrics = _get_server_cpu_metrics(force=True)
+    return {"status": "ok", **metrics}
+
 @app.get("/api/health")
 async def get_health():
     _prune_dead_ws_clients()
@@ -11658,6 +11889,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             "client_ping_history": client_ping_service.get_history_list(hours=6.0),
             "client_rtt": client_ping_service.current_rtt,
             "client_packet_loss": client_ping_service.get_packet_loss(),
+            "system_metrics": _get_server_cpu_metrics(),
             "calls": [mask_call_entry_for_demo(e.to_dict()) if ws_is_demo else e.to_dict() for e in hotspot_manager.get_calls_history(user_id=ws_user_id)],
             "active_call_ids": [
                 str(c.id)
@@ -11692,6 +11924,9 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 "custom_wallpaper_light": custom_wp_light,
                 "language": user_settings.language,
                 "simultaneous_slots": user_settings.simultaneous_slots,
+                "single_hotspot_audio": getattr(user_settings, "single_hotspot_audio", False),
+                "mute_fade_enabled": bool(getattr(user_settings, "mute_fade_enabled", True)),
+                "mute_fade_duration": round(max(0.1, min(2.0, float(getattr(user_settings, "mute_fade_duration", 0.3)))), 1),
                 "mute_on_ptt": user_settings.mute_on_ptt,
                 "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
                 "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
@@ -11743,6 +11978,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 "is_rx": u_radio_state.is_rx,
                 "loopback_mode": user_settings.loopback_mode,
                 "mute_on_ptt": user_settings.mute_on_ptt,
+                "mute_fade_enabled": bool(getattr(user_settings, "mute_fade_enabled", True)),
+                "mute_fade_duration": round(max(0.1, min(2.0, float(getattr(user_settings, "mute_fade_duration", 0.3)))), 1),
                 "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
                 "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
                 "haptic_feedback": getattr(user_settings, "haptic_feedback", True),
@@ -12271,6 +12508,33 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     await broadcast_user_json(ws_user_id, {
                         "type": "single_hotspot_audio_change",
                         "enabled": enabled
+                    }, exclude=websocket)
+
+                elif msg_type == "set_mute_fade_enabled":
+                    enabled = bool(data.get("enabled", True))
+                    user_settings.mute_fade_enabled = enabled
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    logger.info(f"[SETTINGS] Mute fade enabled set to {enabled}")
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "mute_fade_enabled_change",
+                        "enabled": enabled
+                    }, exclude=websocket)
+
+                elif msg_type == "set_mute_fade_duration":
+                    try:
+                        dur = round(max(0.1, min(2.0, float(data.get("duration", 0.3)))), 1)
+                    except Exception:
+                        dur = 0.3
+                    user_settings.mute_fade_duration = dur
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    logger.info(f"[SETTINGS] Mute fade duration set to {dur}s")
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "mute_fade_duration_change",
+                        "duration": dur
                     }, exclude=websocket)
 
                 elif msg_type == "set_quick_mem":
@@ -12840,7 +13104,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                         "server_ts": time.time() * 1000,
                         "rtt": current_rtt,
                         "loss": loss_pct,
-                        "point": [now_ts, current_rtt] if current_rtt is not None else [now_ts, None]
+                        "point": [now_ts, current_rtt] if current_rtt is not None else [now_ts, None],
+                        "system_metrics": _get_server_cpu_metrics()
                     }
                     if seq is not None:
                         resp_dict["seq"] = seq

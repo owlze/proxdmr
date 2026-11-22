@@ -1,7 +1,7 @@
 {
   "status": "ok",
-  "generated_at": 1794959181,
-  "count": 32,
+  "generated_at": 1792341869,
+  "count": 33,
   "servers": [
     {
       "id": "FDMR-5052",
@@ -288,6 +288,15 @@
       "country_name": "USA-Florida",
       "name": "FreeDMR USA-Florida (3109)",
       "host": "freedmr.dvswitch.org",
+      "port": 62031,
+      "password": "passw0rd"
+    },
+    {
+      "id": "ADN-GL",
+      "country": "GLOBAL",
+      "country_name": "ADN Systems",
+      "name": "ADN Global Router",
+      "host": "master.adn.systems",
       "port": 62031,
       "password": "passw0rd"
     }

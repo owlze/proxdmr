@@ -28,10 +28,10 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.787';
+} from '../dmr/transcriber.js?v=2.9.807';
 import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.787';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.787';
-import { hydrateServerCollections } from '../settings/sync.js?v=2.9.788';
+import { hydrateServerCollections } from '../settings/sync.js?v=2.9.807';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.711';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js?v=2.9.711';
 
@@ -1355,6 +1355,9 @@ export function handleServerMessage(msg) {
       renderHotspotsList();
       applyActiveHotspotToUI();
       refreshAllCardsBmBanner();
+      if (msg.system_metrics) {
+        updateServerCpuIndicator(msg.system_metrics);
+      }
       // Verify BrandMeister API connection on initial load
       if (typeof checkBmApiStatus === "function") {
         checkBmApiStatus(true);
@@ -1519,6 +1522,22 @@ export function handleServerMessage(msg) {
           localStorage.setItem("proxdmr_single_hotspot_audio", msg.app_settings.single_hotspot_audio ? "true" : "false");
           if (typeof window.setSingleHotspotAudioEnabled === "function") {
             window.setSingleHotspotAudioEnabled(msg.app_settings.single_hotspot_audio, false);
+          }
+        }
+        if (msg.app_settings.mute_fade_enabled !== undefined) {
+          if (uid) localStorage.setItem(`proxdmr_u${uid}_mute_fade_enabled`, msg.app_settings.mute_fade_enabled ? "true" : "false");
+          localStorage.setItem("proxdmr_mute_fade_enabled", msg.app_settings.mute_fade_enabled ? "true" : "false");
+          if (typeof window.setMuteFadeEnabled === "function") {
+            window.setMuteFadeEnabled(msg.app_settings.mute_fade_enabled, false);
+          }
+        }
+        if (msg.app_settings.mute_fade_duration !== undefined) {
+          const parsedFd = parseFloat(msg.app_settings.mute_fade_duration);
+          const safeFd = !isNaN(parsedFd) ? (Math.round(Math.max(0.1, Math.min(2.0, parsedFd)) * 10) / 10) : 0.3;
+          if (uid) localStorage.setItem(`proxdmr_u${uid}_mute_fade_duration`, safeFd.toFixed(1));
+          localStorage.setItem("proxdmr_mute_fade_duration", safeFd.toFixed(1));
+          if (typeof window.setMuteFadeDuration === "function") {
+            window.setMuteFadeDuration(safeFd, false);
           }
         }
         if (msg.app_settings.mute_on_ptt !== undefined) {
@@ -1956,6 +1975,14 @@ export function handleServerMessage(msg) {
       if (chk) chk.checked = Boolean(msg.enabled);
       if (typeof window.setSingleHotspotAudioEnabled === "function") {
         window.setSingleHotspotAudioEnabled(msg.enabled, false);
+      }
+    } else if (msg.type === "mute_fade_enabled_change") {
+      if (typeof window.setMuteFadeEnabled === "function") {
+        window.setMuteFadeEnabled(Boolean(msg.enabled), false);
+      }
+    } else if (msg.type === "mute_fade_duration_change") {
+      if (typeof window.setMuteFadeDuration === "function") {
+        window.setMuteFadeDuration(Number(msg.duration), false);
       }
     } else if (msg.type === "vocoder_settings_change") {
       if (window.updateVocoderUI) {
@@ -3583,6 +3610,13 @@ export function handleServerMessage(msg) {
           const qSkipShort = document.getElementById("ttsQuickSkipShortCallsign");
           if (qSkipShort) qSkipShort.checked = Boolean(msg.tts_skip_short_callsign);
         }
+        if (msg.tts_piper_use_stress !== undefined) {
+          window.transcriberSettings.tts_piper_use_stress = msg.tts_piper_use_stress;
+          const optPiperStress = document.getElementById("optTtsPiperUseStress");
+          if (optPiperStress) optPiperStress.checked = Boolean(msg.tts_piper_use_stress);
+          const qPiperStress = document.getElementById("ttsQuickPiperStress");
+          if (qPiperStress) qPiperStress.checked = Boolean(msg.tts_piper_use_stress);
+        }
       }
       if (msg.source_lang !== undefined) {
         if (window.transcriberSettings) window.transcriberSettings.source_lang = msg.source_lang;
@@ -3634,6 +3668,9 @@ export function handleServerMessage(msg) {
       cachedClientRtt = (msg.rtt !== undefined && msg.rtt !== null) ? msg.rtt : rtt;
       if (msg.loss !== undefined && msg.loss !== null) {
         cachedClientLoss = msg.loss;
+      }
+      if (msg.system_metrics) {
+        updateServerCpuIndicator(msg.system_metrics);
       }
 
       const nowSec = now / 1000;
@@ -3974,6 +4011,72 @@ if (typeof window !== "undefined") {
   });
 }
 
+const CPU_GAUGE_ARC_LEN = 52.78;
+
+export function updateServerCpuIndicator(metrics) {
+  if (!metrics || typeof metrics !== "object") return;
+  const rawCpu = Number(metrics.cpu_percent);
+  const cpu = Number.isFinite(rawCpu) ? Math.max(0, Math.min(100, rawCpu)) : 0;
+  const cpuRounded = Math.round(cpu);
+  const cores = Math.max(1, parseInt(metrics.cpu_cores, 10) || 1);
+  const rawRam = Number(metrics.ram_percent);
+  const ramRounded = Number.isFinite(rawRam) ? Math.max(0, Math.min(100, Math.round(rawRam))) : 0;
+
+  if (typeof window !== "undefined") {
+    window._lastServerCpuMetrics = { cpu_percent: cpu, cpu_cores: cores, ram_percent: ramRounded };
+  }
+
+  // Color thresholds: <=75 green, 76-90 yellow, 91+ red
+  const zoneClass = (cpuRounded >= 91) ? "cpu-crit" : ((cpuRounded >= 76) ? "cpu-warn" : "cpu-low");
+  const visPct = (cpu > 0) ? Math.max(2, Math.min(100, cpu)) : 0;
+  const dashOffset = (CPU_GAUGE_ARC_LEN * (1 - visPct / 100)).toFixed(2);
+  const tip = (typeof window !== "undefined" && typeof window.t === "function")
+    ? window.t("header.cpu_indicator_title", { cpu: cpuRounded, cores, ram: ramRounded }, `Загрузка CPU сервера: ${cpuRounded}% (${cores} ядер) | RAM: ${ramRounded}%`)
+    : `Загрузка CPU сервера: ${cpuRounded}% (${cores} ядер) | RAM: ${ramRounded}%`;
+
+  if (typeof document === "undefined") return;
+  document.querySelectorAll(".header-cpu-btn").forEach((btn) => {
+    btn.classList.remove("cpu-low", "cpu-warn", "cpu-crit");
+    btn.classList.add(zoneClass);
+    btn.title = tip;
+    btn.setAttribute("aria-label", tip);
+    btn.dataset.cpu = String(cpuRounded);
+    const arc = btn.querySelector(".cpu-gauge-arc");
+    if (arc) {
+      arc.setAttribute("stroke-dashoffset", dashOffset);
+    }
+  });
+}
+
+if (typeof document !== "undefined" && !document._cpuGaugeClickWired) {
+  document._cpuGaugeClickWired = true;
+  document.addEventListener("click", async (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest(".header-cpu-btn") : null;
+    if (!btn) return;
+    e.stopPropagation();
+    let m = (typeof window !== "undefined" && window._lastServerCpuMetrics) ? window._lastServerCpuMetrics : null;
+    try {
+      const resp = await fetch("/api/system/cpu", { credentials: "same-origin" });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.status === "ok") {
+          m = data;
+          updateServerCpuIndicator(data);
+        }
+      }
+    } catch (_) {}
+    if (m) {
+      const cpuRounded = Math.round(Number(m.cpu_percent) || 0);
+      const cores = Math.max(1, parseInt(m.cpu_cores, 10) || 1);
+      const ramRounded = Math.round(Number(m.ram_percent) || 0);
+      const toastMsg = (typeof window !== "undefined" && typeof window.t === "function")
+        ? window.t("header.cpu_toast", { cpu: cpuRounded, cores, ram: ramRounded }, `🖥️ CPU: ${cpuRounded}% (${cores} ядер) • RAM: ${ramRounded}%`)
+        : `🖥️ CPU: ${cpuRounded}% (${cores} ядер) • RAM: ${ramRounded}%`;
+      showToast(toastMsg, 2600);
+    }
+  });
+}
+
 // Global attachments
 window.connectWebSocket = connectWebSocket;
 window.handleGwDisconnectFailure = handleGwDisconnectFailure;
@@ -3983,6 +4086,7 @@ window.stopPing = stopPing;
 window.enterSessionPausedState = enterSessionPausedState;
 window.restorePausedSession = restorePausedSession;
 window.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;
+window.updateServerCpuIndicator = updateServerCpuIndicator;
 
 window.__proxdmr = window.__proxdmr || {};
 window.__proxdmr.connectWebSocket = connectWebSocket;
@@ -3993,3 +4097,4 @@ window.__proxdmr.stopPing = stopPing;
 window.__proxdmr.enterSessionPausedState = enterSessionPausedState;
 window.__proxdmr.restorePausedSession = restorePausedSession;
 window.__proxdmr.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;
+window.__proxdmr.updateServerCpuIndicator = updateServerCpuIndicator;

@@ -280,7 +280,7 @@ function _buildMenuOptionButton(sel, opt, optIndex) {
   btn.setAttribute("role", "option");
   btn.dataset.optIndex = String(optIndex);
 
-  const isActionOpt = (opt.value === "__TEST_SERVERS__" || opt.value === "__OPEN_YSF_CATALOG__");
+  const isActionOpt = (opt.value === "__TEST_SERVERS__" || opt.value === "__OPEN_YSF_CATALOG__" || opt.value === "__REFRESH_TTS_MODELS__");
   const isSelected = !isActionOpt && (optIndex === sel.selectedIndex);
   const isDisabled = Boolean(opt.disabled || (opt.parentElement && opt.parentElement.tagName === "OPTGROUP" && opt.parentElement.disabled));
   if (isActionOpt) {
@@ -331,7 +331,7 @@ function _commitSelection(sel, optIndex) {
     return;
   }
 
-  const isActionOpt = (opt.value === "__TEST_SERVERS__" || opt.value === "__OPEN_YSF_CATALOG__");
+  const isActionOpt = (opt.value === "__TEST_SERVERS__" || opt.value === "__OPEN_YSF_CATALOG__" || opt.value === "__REFRESH_TTS_MODELS__");
 
   if (_nativeIndexDesc && _nativeIndexDesc.set) {
     _nativeIndexDesc.set.call(sel, optIndex);
@@ -393,7 +393,7 @@ function _openMenuForSelect(sel, initialSearchQuery = "", focusSearchInput = fal
       if (isHiddenOpt) return;
       const val = String(optEl.value || "");
       const text = String(optEl.textContent || "").trim();
-      const isActionOpt = (val === "__TEST_SERVERS__" || val === "__OPEN_YSF_CATALOG__");
+      const isActionOpt = (val === "__TEST_SERVERS__" || val === "__OPEN_YSF_CATALOG__" || val === "__REFRESH_TTS_MODELS__");
       if (isActionOpt) {
         actionEntries.push({ optEl, flatIndex: idx });
         return;

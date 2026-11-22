@@ -196,7 +196,8 @@ window.transcriberSettings = {
   tts_ducking_level: 0.80,
   tts_mute_others: true,
   tts_announce_callsign: false,
-  tts_skip_short_callsign: true
+  tts_skip_short_callsign: true,
+  tts_piper_use_stress: true
 };
 
 try {
@@ -988,7 +989,7 @@ function isStageLocalEngine(stage, engineOverride = null) {
     else if (stage === "tts") eng = s.tts_engine || "piper";
   }
   eng = (eng || "").toLowerCase().trim();
-  const LOCAL_ENGINES = ["whisper", "whisper_local", "vosk", "sherpa", "rumble", "qwen", "marian", "piper", "silero", "browser", "system", "local"];
+  const LOCAL_ENGINES = ["whisper", "whisper_local", "vosk", "sherpa", "rumble", "qwen", "marian", "piper", "silero", "supertonic", "browser", "system", "local"];
   return LOCAL_ENGINES.includes(eng);
 }
 
@@ -1655,6 +1656,118 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
     return;
   }
 
+  if (eng === "supertonic") {
+    selectEl.innerHTML = "";
+    const rawLang = (lang || "ru").toLowerCase().trim().split(/[-_]/)[0];
+    const cleanLang = (rawLang === "ua") ? "uk" : rawLang;
+    const isSupported = SUPERTONIC_SUPPORTED_LANGUAGES.includes(cleanLang);
+
+    if (!isSupported) {
+      selectEl.disabled = true;
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.disabled = true;
+      opt.selected = true;
+      const unsupMsg = window.t
+        ? window.t("transcriber.supertonic_lang_unsupported", { lang: cleanLang.toUpperCase() }, `⚠️ Язык [${cleanLang.toUpperCase()}] не поддерживается в Supertonic 3 TTS`)
+        : `⚠️ Язык [${cleanLang.toUpperCase()}] не поддерживается в Supertonic 3 TTS`;
+      opt.textContent = unsupMsg;
+      selectEl.appendChild(opt);
+      if (hintEl) {
+        hintEl.style.display = "block";
+        hintEl.innerHTML = `<span style="color:#ff4d4f;font-weight:600;">${unsupMsg}.</span>`;
+      }
+      return;
+    }
+
+    const loadingOpt = document.createElement("option");
+    loadingOpt.value = "";
+    loadingOpt.textContent = window.t ? window.t("transcriber.piper_loading", {}, "⏳ Загрузка списка моделей...") : "⏳ Загрузка списка моделей...";
+    selectEl.appendChild(loadingOpt);
+    selectEl.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/transcriber/supertonic/voices?lang=${encodeURIComponent(cleanLang)}`);
+      const data = await resp.json();
+      selectEl.innerHTML = "";
+      selectEl.disabled = false;
+
+      if (data && data.status === "ok" && Array.isArray(data.available_voices)) {
+        const coreInstalled = Boolean(data.core_installed);
+        const installedVoices = data.available_voices.filter(v => v.installed);
+        const uninstalledVoices = data.available_voices.filter(v => !v.installed);
+
+        if (installedVoices.length > 0) {
+          const autoOpt = document.createElement("option");
+          autoOpt.value = "auto";
+          autoOpt.textContent = window.t
+            ? window.t("transcriber.voice_auto", {}, "✨ Авто (по полу оператора)")
+            : "✨ Авто (по полу оператора)";
+          selectEl.appendChild(autoOpt);
+
+          installedVoices.forEach(v => {
+            const opt = document.createElement("option");
+            opt.value = v.id;
+            const vLabel = getSupertonicVoiceLabel(v.id, v.name);
+            opt.textContent = `✅ ${vLabel}`;
+            selectEl.appendChild(opt);
+          });
+        }
+
+        uninstalledVoices.forEach(v => {
+          const opt = document.createElement("option");
+          opt.value = `__download__:${v.id}`;
+          const vLabel = getSupertonicVoiceLabel(v.id, v.name);
+          const sz = v.download_size_mb || (coreInstalled ? 0.3 : (data.core_size_mb || 380));
+          opt.textContent = coreInstalled
+            ? `⬇ ${vLabel} (~${sz} MB)`
+            : (window.t
+              ? window.t("transcriber.supertonic_download_voice_core_opt", { name: vLabel, size: sz }, `⬇ ${vLabel} (~${sz} MB, core + voice)`)
+              : `⬇ ${vLabel} (~${sz} MB, core + voice)`);
+          selectEl.appendChild(opt);
+        });
+
+        if (currentVoiceValue && !String(currentVoiceValue).startsWith("__download__") && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
+          selectEl.value = currentVoiceValue;
+        } else if (installedVoices.length > 0) {
+          selectEl.value = "auto";
+        } else if (selectEl.options.length > 0) {
+          selectEl.value = selectEl.options[0].value;
+        }
+
+        if (hintEl) {
+          hintEl.style.display = "block";
+          const baseHint = window.t
+            ? window.t("transcriber.supertonic_hint", {}, "Локальный ONNX-синтез (31 язык, 44.1 кГц).")
+            : "Локальный ONNX-синтез (31 язык, 44.1 кГц).";
+          if (data.stress_supported) {
+            const stressTag = window.t
+              ? window.t("transcriber.supertonic_stress_active", {}, "✓ Автоударения Silero Stress активны")
+              : "✓ Автоударения Silero Stress активны";
+            hintEl.innerHTML = `${safeEscapeHtml(baseHint)} <span style="color:#3fb950;font-weight:600;margin-left:4px;">${safeEscapeHtml(stressTag)}</span>`;
+          } else {
+            hintEl.textContent = baseHint;
+          }
+        }
+      } else {
+        selectEl.disabled = true;
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = window.t ? window.t("transcriber.piper_load_failed", {}, "— Не удалось загрузить голоса —") : "— Не удалось загрузить голоса —";
+        selectEl.appendChild(opt);
+      }
+    } catch (err) {
+      console.error("[SUPERTONIC] Failed to fetch voices:", err);
+      selectEl.innerHTML = "";
+      selectEl.disabled = true;
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = window.t ? window.t("transcriber.piper_net_error", {}, "— Ошибка связи с сервером —") : "— Ошибка связи с сервером —";
+      selectEl.appendChild(opt);
+    }
+    return;
+  }
+
   if (eng === "browser") {
     selectEl.innerHTML = "";
     selectEl.disabled = true;
@@ -2070,6 +2183,211 @@ async function checkAndPromptSileroModel(lang, onFallbackRequested) {
 window.checkAndPromptSileroModel = checkAndPromptSileroModel;
 window.SILERO_SUPPORTED_LANGUAGES = SILERO_SUPPORTED_LANGUAGES;
 
+const SUPERTONIC_SUPPORTED_LANGUAGES = [
+  "ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi",
+  "fr", "hi", "hr", "hu", "id", "it", "ja", "ko", "lt", "lv",
+  "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi"
+];
+
+const SILERO_STRESS_SUPPORTED_LANGUAGES = [
+  "ru", "uk", "be", "kk", "tt", "uz", "az", "hy", "ka", "ky", "tg"
+];
+
+function isSileroStressSupportedLang(lang) {
+  if (!lang || lang === "none") return false;
+  let clean = String(lang).toLowerCase().trim().split(/[-_]/)[0];
+  if (clean === "ua") clean = "uk";
+  return SILERO_STRESS_SUPPORTED_LANGUAGES.includes(clean);
+}
+
+function getSupertonicVoiceLabel(voiceId, fallbackName = "") {
+  const id = String(voiceId || "").toUpperCase();
+  const defFallback = fallbackName || id;
+  if (window.t && id) {
+    return window.t(`supertonic.voice.${id}`, {}, defFallback);
+  }
+  return defFallback;
+}
+
+function updatePiperStressVisibility(engine, lang) {
+  const grp = document.getElementById("groupTtsPiperStress");
+  if (!grp) return;
+  const effEng = (engine || "").toLowerCase().trim();
+  const show = (effEng === "piper") && isSileroStressSupportedLang(lang);
+  grp.style.display = show ? "block" : "none";
+}
+
+/**
+ * Checks if target language is supported by Supertonic 3 TTS and if the ONNX core + voice are installed.
+ * If language is unsupported, offers switching to Piper TTS or Gemini API.
+ * If supported but core/voice not downloaded, prompts to download on-demand with live progress.
+ */
+async function checkAndPromptSupertonicModel(lang, onModelDownloaded, onFallbackRequested, targetVoiceId = null) {
+  const rawLang = (lang || resolveCurrentTargetLang() || "ru").toLowerCase().trim().split(/[-_]/)[0];
+  const cleanLang = (rawLang === "ua") ? "uk" : rawLang;
+  const langUpper = cleanLang.toUpperCase();
+
+  try {
+    const resp = await fetch(`/api/transcriber/supertonic/check-lang?lang=${encodeURIComponent(cleanLang)}`);
+    const data = await resp.json();
+    if (!data || data.status !== "ok") {
+      return { ok: false, error: "bad_response" };
+    }
+
+    if (!data.supported) {
+      const msg = window.t
+        ? window.t(
+            "transcriber.supertonic_unsupported_confirm",
+            { lang: langUpper },
+            `Язык «<b>${langUpper}</b>» отсутствует в Supertonic 3 (поддерживается 31 язык).<br><br>Переключить синтез речи на <b>Piper TTS</b> или <b>Gemini API</b>?`
+          )
+        : `Язык «<b>${langUpper}</b>» отсутствует в Supertonic 3 (поддерживается 31 язык).<br><br>Переключить синтез речи на <b>Piper TTS</b> или <b>Gemini API</b>?`;
+
+      let fallback = "piper";
+      if (typeof window.showAppConfirm === "function") {
+        const res = await window.showAppConfirm({
+          title: window.t
+            ? window.t("transcriber.supertonic_unsupported_title", {}, "Язык не поддерживается в Supertonic 3 TTS")
+            : "Язык не поддерживается в Supertonic 3 TTS",
+          message: msg,
+          confirmText: window.t ? window.t("transcriber.switch_to_piper", {}, "Переключить на Piper TTS") : "Переключить на Piper TTS",
+          cancelText: window.t ? window.t("transcriber.switch_to_gemini", {}, "Использовать Gemini API") : "Использовать Gemini API"
+        });
+        fallback = res ? "piper" : "gemini";
+      } else {
+        const res = window.confirm(msg.replace(/<[^>]+>/g, ""));
+        fallback = res ? "piper" : "gemini";
+      }
+
+      if (typeof onFallbackRequested === "function") {
+        onFallbackRequested(fallback);
+      }
+      return { ok: false, reason: "unsupported", fallback };
+    }
+
+    let normVoiceId = targetVoiceId;
+    if (normVoiceId && String(normVoiceId).startsWith("__download__:")) {
+      normVoiceId = String(normVoiceId).split(":")[1];
+    }
+    if (normVoiceId === "auto" || normVoiceId === "__download__") {
+      normVoiceId = null;
+    }
+
+    if (normVoiceId) {
+      const isInstalled = Boolean(data.core_installed) && (data.installed_voices || []).some(v => v.id === normVoiceId);
+      if (isInstalled) {
+        return { ok: true, installed_voices: data.installed_voices, default_voice: data.default_voice, voice_id: normVoiceId };
+      }
+    } else if (data.core_installed && data.has_installed) {
+      return { ok: true, installed_voices: data.installed_voices, default_voice: data.default_voice };
+    }
+
+    const voiceToDownload = normVoiceId || data.default_voice || "M1";
+    const vObj = (data.available_voices || []).find(v => v.id === voiceToDownload) || { id: voiceToDownload, name: voiceToDownload };
+    const vLabel = getSupertonicVoiceLabel(voiceToDownload, vObj.name);
+    const coreInstalled = Boolean(data.core_installed);
+    const coreSizeMb = data.core_size_mb || 380;
+
+    const confirmMsg = !coreInstalled
+      ? (window.t
+        ? window.t(
+            "transcriber.supertonic_dl_confirm_core",
+            { name: vLabel, size: coreSizeMb },
+            `Для работы Supertonic 3 необходимо скачать базовую модель (~${coreSizeMb} МБ) и голос <b>${vLabel}</b>. Скачать сейчас?`
+          )
+        : `Для работы Supertonic 3 необходимо скачать базовую модель (~${coreSizeMb} МБ) и голос <b>${vLabel}</b>. Скачать сейчас?`)
+      : (window.t
+        ? window.t(
+            "transcriber.supertonic_dl_confirm_voice",
+            { name: vLabel, size: "0.3" },
+            `Скачать стиль голоса <b>${vLabel}</b> (~0.3 МБ)?`
+          )
+        : `Скачать стиль голоса <b>${vLabel}</b> (~0.3 МБ)?`);
+
+    const confirmTitle = window.t ? window.t("transcriber.supertonic_dl_title", {}, "Загрузка модели Supertonic 3 TTS") : "Загрузка модели Supertonic 3 TTS";
+    const confirmBtn = window.t ? window.t("transcriber.supertonic_dl_btn", {}, "Скачать модель") : "Скачать модель";
+    const cancelBtn = window.t ? window.t("common.cancel", {}, "Отмена") : "Отмена";
+
+    let shouldDownload = false;
+    if (typeof window.showAppConfirm === "function") {
+      shouldDownload = await window.showAppConfirm({
+        title: confirmTitle,
+        message: confirmMsg,
+        confirmText: confirmBtn,
+        cancelText: cancelBtn
+      });
+    } else {
+      shouldDownload = window.confirm(confirmMsg.replace(/<[^>]+>/g, ""));
+    }
+
+    if (!shouldDownload) {
+      return { ok: false, reason: "cancelled" };
+    }
+
+    updateTtsUploadIndicator(0, "running", `Supertonic 3 (${vLabel})`);
+    const dlResp = await fetch("/api/transcriber/supertonic/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voice_id: voiceToDownload })
+    });
+    const dlData = await dlResp.json();
+    if (!dlResp.ok || !dlData || dlData.status !== "ok") {
+      const errTxt = (dlData && (dlData.message || dlData.detail)) || (window.t ? window.t("transcriber.err_start", {}, "Start error") : "Start error");
+      updateTtsUploadIndicator(0, "error", errTxt);
+      showToast(
+        window.t ? window.t("transcriber.toast_tts_supertonic_err", { error: errTxt }, `⚠️ Supertonic 3: ${errTxt}`) : `⚠️ Supertonic 3: ${errTxt}`,
+        3500
+      );
+      return { ok: false, reason: "download_start_failed", error: errTxt };
+    }
+
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const pollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const stResp = await fetch(`/api/transcriber/supertonic/download/status?voice_id=${encodeURIComponent(voiceToDownload)}`);
+          const stData = await stResp.json();
+          if (stData && stData.status === "ok" && stData.download) {
+            const d = stData.download;
+            if (d.status === "completed") {
+              clearInterval(pollTimer);
+              updateTtsUploadIndicator(100, "completed", `Supertonic 3 (${vLabel})`);
+              if (typeof onModelDownloaded === "function") {
+                onModelDownloaded(voiceToDownload);
+              }
+              resolve({ ok: true, downloaded: true, voice_id: voiceToDownload });
+            } else if (d.status === "error") {
+              clearInterval(pollTimer);
+              updateTtsUploadIndicator(0, "error", d.error || (window.t ? window.t("common.error", {}, "Error") : "Error"));
+              showToast(
+                window.t ? window.t("transcriber.toast_tts_supertonic_err", { error: d.error || "Error" }, `⚠️ Supertonic 3: ${d.error || "Error"}`) : `⚠️ Supertonic 3: ${d.error || "Error"}`,
+                4000
+              );
+              resolve({ ok: false, reason: "download_failed", error: d.error });
+            } else {
+              updateTtsUploadIndicator(d.progress || 0, "running", `Supertonic 3 (${vLabel})`);
+            }
+          }
+        } catch (pollErr) {
+          console.error("[SUPERTONIC] Poll error:", pollErr);
+        }
+        if (attempts > 600) { // 10 minutes max for ~380 MB core
+          clearInterval(pollTimer);
+          updateTtsUploadIndicator(0, "error", window.t ? window.t("transcriber.err_timeout", {}, "Timeout") : "Timeout");
+          resolve({ ok: false, reason: "timeout" });
+        }
+      }, 1000);
+    });
+  } catch (err) {
+    console.error("[SUPERTONIC] checkAndPromptSupertonicModel exception:", err);
+    return { ok: false, error: err };
+  }
+}
+window.checkAndPromptSupertonicModel = checkAndPromptSupertonicModel;
+window.SUPERTONIC_SUPPORTED_LANGUAGES = SUPERTONIC_SUPPORTED_LANGUAGES;
+window.SILERO_STRESS_SUPPORTED_LANGUAGES = SILERO_STRESS_SUPPORTED_LANGUAGES;
+
 function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   closeTtsQuickSettingsPopover();
   closeTxtQuickSettingsPopover();
@@ -2084,7 +2402,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   popup.className = "tts-quick-settings-popup";
 
   const s = window.transcriberSettings || {};
-  const curEngine = (s.tts_engine && ["gemini", "groq", "piper", "browser", "silero"].includes(s.tts_engine)) ? s.tts_engine : "piper";
+  const curEngine = (s.tts_engine && ["gemini", "groq", "piper", "browser", "silero", "supertonic"].includes(s.tts_engine)) ? s.tts_engine : "piper";
   const curModel = s.tts_model || (curEngine === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview");
   const curVoice = s.tts_voice || (curEngine === "piper" ? "ru_RU-terra5871-medium" : "auto");
   const rawDuck = (s.tts_ducking_level !== undefined) ? s.tts_ducking_level : 0.80;
@@ -2095,6 +2413,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   const curSolo = (s.tts_mute_others !== undefined) ? Boolean(s.tts_mute_others) : true;
   const curAnnounce = (s.tts_announce_callsign !== undefined) ? Boolean(s.tts_announce_callsign) : false;
   const curSkipShort = (s.tts_skip_short_callsign !== undefined) ? Boolean(s.tts_skip_short_callsign) : true;
+  const curPiperStress = (s.tts_piper_use_stress !== undefined) ? Boolean(s.tts_piper_use_stress) : true;
   const curStyle = s.tts_style || "radio";
 
   const duckMute = window.t ? window.t("transcriber.tts_ducking_mute", {}, "0% (тишина)") : "0% (тишина)";
@@ -2147,6 +2466,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     <select class="tts-quick-select" id="ttsQuickEngine">
       <option value="piper" ${curEngine === "piper" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_piper", {}, "🏠 Piper TTS (local)") : "🏠 Piper TTS (local)"}</option>
       <option value="silero" ${curEngine === "silero" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_silero", {}, "🏠 Silero TTS v5 (local)") : "🏠 Silero TTS v5 (local)"}</option>
+      <option value="supertonic" ${curEngine === "supertonic" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_supertonic", {}, "🏠 Supertonic 3 TTS (local)") : "🏠 Supertonic 3 TTS (local)"}</option>
       <option value="browser" ${curEngine === "browser" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_browser", {}, "🏠 System TTS (local)") : "🏠 System TTS (local)"}</option>
       <option value="gemini" ${curEngine === "gemini" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_gemini", {}, "🌐 Gemini API") : "🌐 Gemini API"}</option>
       <option value="groq" ${curEngine === "groq" ? "selected" : ""}>${window.t ? window.t("transcriber.tts_engine_groq", {}, "🌐 Groq Cloud TTS") : "🌐 Groq Cloud TTS"}</option>
@@ -2167,20 +2487,19 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   const modelOptionsHtml = (curEngine === "groq") ? `
       <option value="canopylabs/orpheus-v1-english" ${curModel === "canopylabs/orpheus-v1-english" ? "selected" : ""}>Orpheus V1 English (Expressive)</option>
       <option value="canopylabs/orpheus-arabic-saudi" ${curModel === "canopylabs/orpheus-arabic-saudi" ? "selected" : ""}>Orpheus Arabic Saudi</option>
-  ` : `
-      <option value="gemini-3.1-flash-tts-preview" ${curModel === "gemini-3.1-flash-tts-preview" ? "selected" : ""}>Gemini 3.1 Flash TTS Preview (${recLabel})</option>
-      <option value="gemini-3.8-flash-lite-tts" ${curModel === "gemini-3.8-flash-lite-tts" ? "selected" : ""}>Gemini 3.8 Flash-Lite TTS (${fastLabel})</option>
-      <option value="gemini-3.8-flash-tts" ${curModel === "gemini-3.8-flash-tts" ? "selected" : ""}>Gemini 3.8 Flash TTS (${qualLabel})</option>
-      <option value="gemini-2.5-flash-preview-tts" ${curModel === "gemini-2.5-flash-preview-tts" ? "selected" : ""}>Gemini 2.5 Flash TTS Preview (Free)</option>
-      <option value="gemini-2.5-pro-preview-tts" ${curModel === "gemini-2.5-pro-preview-tts" ? "selected" : ""}>Gemini 2.5 Pro TTS Preview (Pro)</option>
-      <option value="gemini-3.1-flash-live-preview" ${curModel === "gemini-3.1-flash-live-preview" ? "selected" : ""}>Gemini 3.1 Flash Live (Live Voice)</option>
-  `;
+  ` : "";
   rowModel.innerHTML = `
     <label class="tts-quick-label">${modelLbl}</label>
     <select class="tts-quick-select" id="ttsQuickModel">
       ${modelOptionsHtml}
     </select>
   `;
+  if (curEngine !== "groq") {
+    const initQuickMod = rowModel.querySelector("#ttsQuickModel");
+    if (initQuickMod) {
+      renderTtsModelOptions(initQuickMod, curModel);
+    }
+  }
 
   // 2b. Gemini Speech Style (shown only if gemini)
   const rowStyle = document.createElement("div");
@@ -2265,6 +2584,10 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       <input type="checkbox" id="ttsQuickSkipShortCallsign" ${curSkipShort ? "checked" : ""}>
       <span>${window.t ? window.t("transcriber.tts_skip_short_callsign", {}, "Не проговаривать Call sign для реплик короче 20 букв") : "Не проговаривать Call sign для реплик короче 20 букв"}</span>
     </label>
+    <label class="tts-quick-cb-label" id="ttsQuickRowPiperStress" style="display: ${(curEngine === "piper" && isSileroStressSupportedLang(curTargetLang)) ? "flex" : "none"};" title="${safeEscapeHtml(window.t ? window.t("transcriber.tts_piper_use_stress_title", {}, "Автоматическая расстановка ударений и омографов (Silero Stress)") : "Автоматическая расстановка ударений и омографов (Silero Stress)")}">
+      <input type="checkbox" id="ttsQuickPiperStress" ${curPiperStress ? "checked" : ""}>
+      <span>${window.t ? window.t("transcriber.tts_piper_use_stress", {}, "Расстановка ударений (Silero Stress)") : "Расстановка ударений (Silero Stress)"}</span>
+    </label>
   `;
 
   body.appendChild(rowTargetLang);
@@ -2316,18 +2639,49 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   }
 
   const selEngine = popup.querySelector("#ttsQuickEngine");
+  const selQuickModel = popup.querySelector("#ttsQuickModel");
   const selVoice = popup.querySelector("#ttsQuickVoice");
   const hintVoice = popup.querySelector("#ttsQuickVoiceHint");
   const getActiveLang = () => (selTargetLang && selTargetLang.value && selTargetLang.value !== "none") ? selTargetLang.value : (resolveCurrentTargetLang() || "ru");
 
+  if (selQuickModel && !selQuickModel._ttsModelWired) {
+    selQuickModel._ttsModelWired = true;
+    if (selQuickModel.value && selQuickModel.value !== "__REFRESH_TTS_MODELS__") {
+      selQuickModel._prevValidModel = selQuickModel.value;
+    }
+    selQuickModel.addEventListener("change", () => {
+      if (selQuickModel.value === "__REFRESH_TTS_MODELS__") {
+        refreshGeminiTtsModels(selQuickModel);
+        return;
+      }
+      if (selQuickModel.value) {
+        selQuickModel._prevValidModel = selQuickModel.value;
+      }
+      if (selEngine && selEngine.value === "groq") {
+        const isAr = selQuickModel.value.includes("arabic");
+        populateVoiceSelect(selVoice, "groq", isAr ? "ar" : "en", isAr ? "fahad" : "troy", hintVoice);
+      }
+    });
+  }
+
   // Populate dynamic voice select
   populateVoiceSelect(selVoice, curEngine, getActiveLang(), curVoice, hintVoice);
+
+  const rowQuickPiperStress = popup.querySelector("#ttsQuickRowPiperStress");
+  const syncQuickPiperStressVisibility = () => {
+    if (!rowQuickPiperStress) return;
+    const eng = selEngine ? selEngine.value : curEngine;
+    const langNow = getActiveLang();
+    rowQuickPiperStress.style.display = (eng === "piper" && isSileroStressSupportedLang(langNow)) ? "flex" : "none";
+  };
+  syncQuickPiperStressVisibility();
 
   // Wire Target Language change to update voices dynamically
   if (selTargetLang) {
     selTargetLang.addEventListener("change", async () => {
       const chosenLang = getActiveLang();
       const eng = selEngine ? selEngine.value : (s.tts_engine || "gemini");
+      syncQuickPiperStressVisibility();
       if (eng === "piper") {
         const checkRes = await checkAndPromptPiperModel(chosenLang, (newVoiceId) => {
           populateVoiceSelect(selVoice, "piper", chosenLang, newVoiceId, hintVoice);
@@ -2335,10 +2689,39 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           if (selEngine) selEngine.value = fallbackEng;
           rowModel.style.display = (fallbackEng === "gemini") ? "flex" : "none";
           rowStyle.style.display = (fallbackEng === "gemini") ? "flex" : "none";
+          syncQuickPiperStressVisibility();
           populateVoiceSelect(selVoice, fallbackEng, chosenLang, null, hintVoice);
         });
         if (checkRes && checkRes.ok) {
           populateVoiceSelect(selVoice, "piper", chosenLang, checkRes.default_voice || null, hintVoice);
+        }
+      } else if (eng === "supertonic") {
+        const checkSt = await checkAndPromptSupertonicModel(chosenLang, (newVoiceId) => {
+          populateVoiceSelect(selVoice, "supertonic", chosenLang, newVoiceId, hintVoice);
+        }, async (fallbackEng) => {
+          if (selEngine) selEngine.value = fallbackEng;
+          rowModel.style.display = (fallbackEng === "gemini") ? "flex" : "none";
+          rowStyle.style.display = (fallbackEng === "gemini") ? "flex" : "none";
+          syncQuickPiperStressVisibility();
+          if (fallbackEng === "piper") {
+            const pRes = await checkAndPromptPiperModel(chosenLang, (nv) => {
+              populateVoiceSelect(selVoice, "piper", chosenLang, nv, hintVoice);
+            }, (fb2) => {
+              if (selEngine) selEngine.value = fb2;
+              rowModel.style.display = (fb2 === "gemini") ? "flex" : "none";
+              rowStyle.style.display = (fb2 === "gemini") ? "flex" : "none";
+              syncQuickPiperStressVisibility();
+              populateVoiceSelect(selVoice, fb2, chosenLang, null, hintVoice);
+            });
+            if (pRes && pRes.ok) populateVoiceSelect(selVoice, "piper", chosenLang, pRes.default_voice || null, hintVoice);
+          } else {
+            populateVoiceSelect(selVoice, fallbackEng, chosenLang, null, hintVoice);
+          }
+        });
+        if (checkSt && checkSt.ok) {
+          populateVoiceSelect(selVoice, "supertonic", chosenLang, checkSt.voice_id || (selVoice ? selVoice.value : curVoice), hintVoice);
+        } else if (checkSt && checkSt.reason !== "unsupported") {
+          populateVoiceSelect(selVoice, "supertonic", chosenLang, null, hintVoice);
         }
       } else {
         populateVoiceSelect(selVoice, eng, chosenLang, (eng === "gemini" ? (selVoice ? selVoice.value : curVoice) : null), hintVoice);
@@ -2354,6 +2737,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       const chosenLang = getActiveLang();
       rowModel.style.display = (eng === "gemini" || eng === "groq") ? "flex" : "none";
       rowStyle.style.display = (eng === "gemini") ? "flex" : "none";
+      syncQuickPiperStressVisibility();
       const lblMod = rowModel.querySelector(".tts-quick-label");
       const selMod = rowModel.querySelector("#ttsQuickModel");
       if (selMod) {
@@ -2365,23 +2749,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           `;
         } else if (eng === "gemini") {
           if (lblMod) lblMod.textContent = window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Модель Gemini TTS:") : "🤖 Модель Gemini TTS:";
-          selMod.innerHTML = `
-            <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview (${recLabel})</option>
-            <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (${fastLabel})</option>
-            <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (${qualLabel})</option>
-            <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash TTS Preview (Free)</option>
-            <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro TTS Preview (Pro)</option>
-          `;
+          renderTtsModelOptions(selMod, curModel);
         }
-      }
-      if (selMod && !selMod._groqWired) {
-        selMod._groqWired = true;
-        selMod.addEventListener("change", () => {
-          if (selEngine && selEngine.value === "groq") {
-            const isAr = selMod.value.includes("arabic");
-            populateVoiceSelect(selVoice, "groq", isAr ? "ar" : "en", isAr ? "fahad" : "troy", hintVoice);
-          }
-        });
       }
       if (eng === "piper") {
         const checkRes = await checkAndPromptPiperModel(chosenLang, (newVoiceId) => {
@@ -2390,10 +2759,39 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           selEngine.value = fallbackEng;
           rowModel.style.display = (fallbackEng === "gemini") ? "flex" : "none";
           rowStyle.style.display = (fallbackEng === "gemini") ? "flex" : "none";
+          syncQuickPiperStressVisibility();
           populateVoiceSelect(selVoice, fallbackEng, chosenLang, null, hintVoice);
         });
         if (checkRes && checkRes.ok) {
           populateVoiceSelect(selVoice, "piper", chosenLang, curVoice, hintVoice);
+        }
+      } else if (eng === "supertonic") {
+        const checkSt = await checkAndPromptSupertonicModel(chosenLang, (newVoiceId) => {
+          populateVoiceSelect(selVoice, "supertonic", chosenLang, newVoiceId, hintVoice);
+        }, async (fallbackEng) => {
+          selEngine.value = fallbackEng;
+          rowModel.style.display = (fallbackEng === "gemini") ? "flex" : "none";
+          rowStyle.style.display = (fallbackEng === "gemini") ? "flex" : "none";
+          syncQuickPiperStressVisibility();
+          if (fallbackEng === "piper") {
+            const pRes = await checkAndPromptPiperModel(chosenLang, (nv) => {
+              populateVoiceSelect(selVoice, "piper", chosenLang, nv, hintVoice);
+            }, (fb2) => {
+              selEngine.value = fb2;
+              rowModel.style.display = (fb2 === "gemini") ? "flex" : "none";
+              rowStyle.style.display = (fb2 === "gemini") ? "flex" : "none";
+              syncQuickPiperStressVisibility();
+              populateVoiceSelect(selVoice, fb2, chosenLang, null, hintVoice);
+            });
+            if (pRes && pRes.ok) populateVoiceSelect(selVoice, "piper", chosenLang, pRes.default_voice || null, hintVoice);
+          } else {
+            populateVoiceSelect(selVoice, fallbackEng, chosenLang, null, hintVoice);
+          }
+        });
+        if (checkSt && checkSt.ok) {
+          populateVoiceSelect(selVoice, "supertonic", chosenLang, checkSt.voice_id || curVoice, hintVoice);
+        } else if (checkSt && checkSt.reason !== "unsupported") {
+          populateVoiceSelect(selVoice, "supertonic", chosenLang, null, hintVoice);
         }
       } else {
         populateVoiceSelect(selVoice, eng, chosenLang, (eng === "gemini" ? curVoice : null), hintVoice);
@@ -2407,9 +2805,19 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     selVoice.addEventListener("change", async () => {
       if (selVoice.value && selVoice.value.startsWith("__download__")) {
         const specificVoice = selVoice.value.includes(":") ? selVoice.value.split(":")[1] : null;
-        await checkAndPromptPiperModel(getActiveLang(), (newVoiceId) => {
-          populateVoiceSelect(selVoice, "piper", getActiveLang(), newVoiceId, hintVoice);
-        }, null, specificVoice);
+        const activeEng = selEngine ? selEngine.value : curEngine;
+        if (activeEng === "supertonic") {
+          const stRes = await checkAndPromptSupertonicModel(getActiveLang(), (newVoiceId) => {
+            populateVoiceSelect(selVoice, "supertonic", getActiveLang(), newVoiceId, hintVoice);
+          }, null, specificVoice);
+          if (!stRes || !stRes.ok) {
+            populateVoiceSelect(selVoice, "supertonic", getActiveLang(), curVoice, hintVoice);
+          }
+        } else {
+          await checkAndPromptPiperModel(getActiveLang(), (newVoiceId) => {
+            populateVoiceSelect(selVoice, "piper", getActiveLang(), newVoiceId, hintVoice);
+          }, null, specificVoice);
+        }
       }
     });
   }
@@ -2511,13 +2919,30 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
     });
   }
 
+  // Wire Piper Silero Stress checkbox
+  const cbPiperStress = popup.querySelector("#ttsQuickPiperStress");
+  if (cbPiperStress) {
+    cbPiperStress.addEventListener("change", () => {
+      const useStress = cbPiperStress.checked;
+      if (window.transcriberSettings) {
+        window.transcriberSettings.tts_piper_use_stress = useStress;
+      }
+      const optPiperStress = document.getElementById("optTtsPiperUseStress");
+      if (optPiperStress) optPiperStress.checked = useStress;
+    });
+  }
+
   // Test button
   const btnTest = popup.querySelector("#btnTtsQuickTest");
   if (btnTest) {
     btnTest.addEventListener("click", async (e) => {
       e.stopPropagation();
       const eng = selEngine ? selEngine.value : "gemini";
-      const mod = popup.querySelector("#ttsQuickModel") ? popup.querySelector("#ttsQuickModel").value : "gemini-3.1-flash-tts-preview";
+      const quickModEl = popup.querySelector("#ttsQuickModel");
+      const rawQuickMod = quickModEl ? quickModEl.value : "";
+      const mod = (rawQuickMod && rawQuickMod !== "__REFRESH_TTS_MODELS__")
+        ? rawQuickMod
+        : ((quickModEl && quickModEl._prevValidModel) || (eng === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview"));
       const sty = popup.querySelector("#ttsQuickStyle") ? popup.querySelector("#ttsQuickStyle").value : "radio";
       const voi = selVoice ? selVoice.value : "auto";
       const spd = rngSpeed ? (parseFloat(rngSpeed.value) || 1.1) : (s.tts_speed || 1.1);
@@ -2603,6 +3028,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             btnTest.textContent = oldTxt;
             return;
           }
+          const qPiperStressEl = popup.querySelector("#ttsQuickPiperStress");
           const resp = await fetch("/api/transcriber/tts-test", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2613,7 +3039,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
               speed: spd,
               target_lang: testLang,
               announce_callsign: announce,
-              callsign: "RX6AWG"
+              callsign: "RX6AWG",
+              piper_use_stress: qPiperStressEl ? qPiperStressEl.checked : true
             })
           });
           const res = await resp.json();
@@ -2637,6 +3064,58 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             console.warn("[TTS] Quick test Piper error:", res);
             const errDetail = res.message || res.detail || (window.t ? window.t("transcriber.err_synth", {}, "Synthesis error") : "Synthesis error");
             showToast(window.t ? window.t("transcriber.toast_tts_piper_err", { error: errDetail }, `⚠️ Piper TTS: ${errDetail}`) : `⚠️ Piper TTS: ${errDetail}`, 3500);
+          }
+        } else if (eng === "supertonic") {
+          const stLang = getActiveLang() || testLang;
+          const stText = getTtsTestPhrase(stLang);
+          const checkRes = await checkAndPromptSupertonicModel(stLang, (nv) => {
+            populateVoiceSelect(selVoice, "supertonic", stLang, nv, hintVoice);
+          }, null, testVoice || null);
+          if (!checkRes || !checkRes.ok) {
+            btnTest.disabled = false;
+            btnTest.textContent = oldTxt;
+            return;
+          }
+          const effStVoice = checkRes.voice_id || testVoice || "auto";
+          const resp = await fetch("/api/transcriber/tts-test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: stText,
+              engine: "supertonic",
+              voice: effStVoice,
+              speed: spd,
+              target_lang: stLang,
+              announce_callsign: announce,
+              callsign: "RX6AWG"
+            })
+          });
+          const res = await resp.json();
+          if (res.status === "ok" && res.audio_base64) {
+            if (window.ttsAudioQueueManager) {
+              window.ttsAudioQueueManager.enqueue({
+                hotspot_id: actHid,
+                slot: slot,
+                audio_base64: res.audio_base64,
+                text: stText,
+                engine: "supertonic",
+                speed: spd,
+                ducking_level: duckVal,
+                mute_others: solo,
+                is_test: true,
+                bypassMute: true
+              });
+            }
+            showToast(
+              window.t
+                ? window.t("transcriber.silero_gemini_toast_test", { engine: "Supertonic 3 TTS", lang: stLang.toUpperCase(), voice: effStVoice || "M1" }, `🔊 Supertonic 3 TTS [${stLang.toUpperCase()}] (${effStVoice || "M1"})...`)
+                : `🔊 Supertonic 3 TTS [${stLang.toUpperCase()}] (${effStVoice || "M1"})...`,
+              2500
+            );
+          } else {
+            console.warn("[TTS] Quick test Supertonic error:", res);
+            const errDetail = res.message || res.detail || (window.t ? window.t("transcriber.err_synth", {}, "Synthesis error") : "Synthesis error");
+            showToast(window.t ? window.t("transcriber.toast_tts_supertonic_err", { error: errDetail }, `⚠️ Supertonic 3: ${errDetail}`) : `⚠️ Supertonic 3: ${errDetail}`, 3500);
           }
         } else if (eng === "groq") {
           const testVoice = (voi === "auto" || !voi) ? "troy" : voi;
@@ -2767,7 +3246,11 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       e.stopPropagation();
       const chosenTargetLang = getActiveLang();
       const eng = selEngine ? selEngine.value : "gemini";
-      const mod = popup.querySelector("#ttsQuickModel") ? popup.querySelector("#ttsQuickModel").value : "gemini-3.1-flash-tts-preview";
+      const quickModEl = popup.querySelector("#ttsQuickModel");
+      const rawQuickMod = quickModEl ? quickModEl.value : "";
+      const mod = (rawQuickMod && rawQuickMod !== "__REFRESH_TTS_MODELS__")
+        ? rawQuickMod
+        : ((quickModEl && quickModEl._prevValidModel) || (eng === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview"));
       const sty = popup.querySelector("#ttsQuickStyle") ? popup.querySelector("#ttsQuickStyle").value : "radio";
       const voi = (selVoice && selVoice.value && !selVoice.value.startsWith("__download__")) ? selVoice.value : "auto";
       const spd = rngSpeed ? (parseFloat(rngSpeed.value) || 1.1) : (s.tts_speed || 1.1);
@@ -2776,6 +3259,19 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       const solo = popup.querySelector("#ttsQuickSolo") ? popup.querySelector("#ttsQuickSolo").checked : true;
       const announce = popup.querySelector("#ttsQuickAnnounceCallsign") ? popup.querySelector("#ttsQuickAnnounceCallsign").checked : false;
       const skipShort = popup.querySelector("#ttsQuickSkipShortCallsign") ? popup.querySelector("#ttsQuickSkipShortCallsign").checked : true;
+      const piperStress = popup.querySelector("#ttsQuickPiperStress") ? popup.querySelector("#ttsQuickPiperStress").checked : true;
+
+      const normTargetLang = (chosenTargetLang || "ru").toLowerCase().trim().split(/[-_]/)[0];
+      const effTargetLang = normTargetLang === "ua" ? "uk" : normTargetLang;
+      if (eng === "supertonic" && effTargetLang !== "none" && !SUPERTONIC_SUPPORTED_LANGUAGES.includes(effTargetLang)) {
+        showToast(
+          window.t
+            ? window.t("transcriber.supertonic_unsupported_toast", { lang: effTargetLang.toUpperCase() }, `⚠️ Язык [${effTargetLang.toUpperCase()}] не поддерживается в Supertonic 3 TTS. Выберите Piper TTS или Gemini API.`)
+            : `⚠️ Язык [${effTargetLang.toUpperCase()}] не поддерживается в Supertonic 3 TTS. Выберите Piper TTS или Gemini API.`,
+          4500
+        );
+        return;
+      }
 
       btnSave.disabled = true;
       btnSave.textContent = "⏳...";
@@ -2798,6 +3294,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
         tts_mute_others: solo,
         tts_announce_callsign: announce,
         tts_skip_short_callsign: skipShort,
+        tts_piper_use_stress: piperStress,
         tts_style: sty
       };
 
@@ -2826,6 +3323,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             window.transcriberSettings.tts_mute_others = solo;
             window.transcriberSettings.tts_announce_callsign = announce;
             window.transcriberSettings.tts_skip_short_callsign = skipShort;
+            window.transcriberSettings.tts_piper_use_stress = piperStress;
             window.transcriberSettings.tts_style = sty;
           }
 
@@ -2885,6 +3383,9 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           if (optAnnounce) optAnnounce.checked = announce;
           const optSkipShort = document.getElementById("optTtsSkipShortCallsign");
           if (optSkipShort) optSkipShort.checked = skipShort;
+          const optPiperStress = document.getElementById("optTtsPiperUseStress");
+          if (optPiperStress) optPiperStress.checked = piperStress;
+          updatePiperStressVisibility(eng, chosenTargetLang);
 
           syncTtsSoloMode();
           if (typeof window.summaryTtsReader !== "undefined" && window.summaryTtsReader && window.summaryTtsReader.isPlaying) {
@@ -3853,13 +4354,24 @@ class TtsAudioQueueManager {
       }
     }
 
+    const ap = (typeof window !== "undefined") ? (window.audioPlayer || window.dmrAudioPlayer) : null;
+    const fadeSec = (ap && typeof ap.getMuteFadeSec === "function") ? ap.getMuteFadeSec() : 0.005;
+
     // 1. If WebAudio TTS handle is active
     if (this.currentTtsHandle && this.currentTtsHandle.gainNode) {
       try {
-        const targetGain = isMuted ? 0.0 : 0.70;
-        const now = (this.currentTtsHandle.audioCtx && this.currentTtsHandle.audioCtx.currentTime) || 0;
-        this.currentTtsHandle.gainNode.gain.cancelScheduledValues(now);
-        this.currentTtsHandle.gainNode.gain.setValueAtTime(targetGain, now);
+        const nomGain = (typeof this.currentTtsHandle.nominalGain === "number") ? this.currentTtsHandle.nominalGain : 0.70;
+        const targetGain = isMuted ? 0.0 : nomGain;
+        const prevMuted = this.currentTtsHandle._lastSyncedMuted;
+        this.currentTtsHandle._lastSyncedMuted = isMuted;
+        const muteChanged = (prevMuted !== undefined && prevMuted !== isMuted);
+        if (muteChanged && ap && typeof ap._rampGainParam === "function") {
+          ap._rampGainParam(this.currentTtsHandle.gainNode.gain, targetGain, fadeSec, this.currentTtsHandle.audioCtx || ap.audioCtx);
+        } else {
+          const now = (this.currentTtsHandle.audioCtx && this.currentTtsHandle.audioCtx.currentTime) || 0;
+          this.currentTtsHandle.gainNode.gain.cancelScheduledValues(now);
+          this.currentTtsHandle.gainNode.gain.setValueAtTime(targetGain, now);
+        }
       } catch (_) {}
     }
 
@@ -3867,7 +4379,18 @@ class TtsAudioQueueManager {
     if (this.currentAudio) {
       try {
         const linearVol = isMuted ? 0.0 : Math.max(0.0, Math.min(1.0, (vol / 100.0) * 0.35));
-        this.currentAudio.volume = linearVol;
+        const prevAudioMuted = this.currentAudio._lastSyncedMuted;
+        this.currentAudio._lastSyncedMuted = isMuted;
+        const audioMuteChanged = (prevAudioMuted !== undefined && prevAudioMuted !== isMuted);
+        if (audioMuteChanged && !this.currentAudio.paused && ap && typeof ap._fadeHtmlAudioVolume === "function") {
+          ap._fadeHtmlAudioVolume(this.currentAudio, linearVol, fadeSec);
+        } else {
+          if (this.currentAudio._muteFadeRafId) {
+            try { cancelAnimationFrame(this.currentAudio._muteFadeRafId); } catch (_) {}
+            this.currentAudio._muteFadeRafId = null;
+          }
+          this.currentAudio.volume = linearVol;
+        }
       } catch (_) {}
     }
   }
@@ -4397,31 +4920,211 @@ function renderTranscriberModelOptions(selectEl) {
 }
 window.renderTranscriberModelOptions = renderTranscriberModelOptions;
 
-function renderTtsModelOptions(selectEl) {
+const REFRESH_TTS_MODELS_VALUE = "__REFRESH_TTS_MODELS__";
+
+function getDefaultGeminiTtsModels() {
+  const bRec = window.t ? window.t("transcriber.model_badge_rec", {}, "Recommended") : "Recommended";
+  const bFast = window.t ? window.t("transcriber.model_fast", {}, "Fast") : "Fast";
+  const bQual = window.t ? window.t("transcriber.model_qual", {}, "Quality") : "Quality";
+  return [
+    { id: "gemini-3.1-flash-tts-preview", label: `Gemini 3.1 Flash TTS Preview (⚡ ${bRec})` },
+    { id: "gemini-3.8-flash-lite-tts", label: `Gemini 3.8 Flash-Lite TTS (${bFast})` },
+    { id: "gemini-3.8-flash-tts", label: `Gemini 3.8 Flash TTS (${bQual})` },
+    { id: "gemini-2.5-flash-preview-tts", label: "Gemini 2.5 Flash TTS Preview (Free)" },
+    { id: "gemini-2.5-pro-preview-tts", label: "Gemini 2.5 Pro TTS Preview (Pro)" }
+  ];
+}
+
+let cachedTtsModels = null;
+let _isRefreshingTtsModels = false;
+
+function _loadCachedTtsModelsFromLS() {
+  if (Array.isArray(cachedTtsModels) && cachedTtsModels.length > 0) return cachedTtsModels;
+  try {
+    const raw = localStorage.getItem("proxdmr_tts_model_opts");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed
+          .filter(o => o && o.value && o.value !== REFRESH_TTS_MODELS_VALUE && !String(o.value).startsWith("canopylabs/"))
+          .map(o => ({ id: String(o.value), name: String(o.text || o.value), title: String(o.title || "") }));
+        if (cleaned.length > 0) {
+          cachedTtsModels = cleaned;
+          return cachedTtsModels;
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function _isGeminiTtsModelItem(m) {
+  if (!m || !m.id) return false;
+  if (m.category === "tts") return true;
+  if (m.category === "transcribe") return false;
+  const id = String(m.id || "").toLowerCase();
+  return id.includes("-tts") || id.includes("native-audio") || id.includes("-live");
+}
+
+function _formatGeminiTtsOptionLabel(m) {
+  const id = String(m.id || m.value || "");
+  if (m.label) {
+    return { label: m.label, title: m.title || m.description || "" };
+  }
+  const bRec = window.t ? window.t("transcriber.model_badge_rec", {}, "Recommended") : "Recommended";
+  const bFast = window.t ? window.t("transcriber.model_fast", {}, "Fast") : "Fast";
+  const bQual = window.t ? window.t("transcriber.model_qual", {}, "Quality") : "Quality";
+  if (id === "gemini-3.1-flash-tts-preview") return { label: `Gemini 3.1 Flash TTS Preview (⚡ ${bRec})`, title: m.description || "" };
+  if (id === "gemini-3.8-flash-lite-tts") return { label: `Gemini 3.8 Flash-Lite TTS (${bFast})`, title: m.description || "" };
+  if (id === "gemini-3.8-flash-tts") return { label: `Gemini 3.8 Flash TTS (${bQual})`, title: m.description || "" };
+  if (id === "gemini-2.5-flash-preview-tts") return { label: "Gemini 2.5 Flash TTS Preview (Free)", title: m.description || "" };
+  if (id === "gemini-2.5-pro-preview-tts") return { label: "Gemini 2.5 Pro TTS Preview (Pro)", title: m.description || "" };
+  const info = getLocalizedModelLabel(m, true);
+  return { label: info.label || m.name || id, title: info.title || m.description || "" };
+}
+
+function renderTtsModelOptions(selectEl, preferredVal = null) {
   const el = selectEl || document.getElementById("optTtsModel");
   if (!el) return;
-  const curVal = el.value || localStorage.getItem("proxdmr_tts_model") || "gemini-3.1-flash-tts-preview";
+
+  // Do not overwrite Groq TTS model list when Groq engine is active on main optTtsModel
+  if (el.id === "optTtsModel") {
+    const optEng = document.getElementById("optTtsEngine");
+    if (optEng && optEng.value === "groq") return;
+  }
+
+  const rawCur = (preferredVal && preferredVal !== REFRESH_TTS_MODELS_VALUE)
+    ? preferredVal
+    : ((el.value && el.value !== REFRESH_TTS_MODELS_VALUE)
+      ? el.value
+      : (el._prevValidModel || (window.transcriberSettings && window.transcriberSettings.tts_model) || localStorage.getItem("proxdmr_tts_model") || "gemini-3.1-flash-tts-preview"));
+  const curVal = (rawCur && rawCur !== REFRESH_TTS_MODELS_VALUE && !String(rawCur).startsWith("canopylabs/"))
+    ? String(rawCur)
+    : "gemini-3.1-flash-tts-preview";
+
+  const models = _loadCachedTtsModelsFromLS() || getDefaultGeminiTtsModels();
+  const refreshLabel = window.t
+    ? window.t("transcriber.refresh_tts_models", {}, "🔄 Обновить список моделей")
+    : "🔄 Обновить список моделей";
 
   el.innerHTML = "";
-  Object.keys(TTS_MODELS_META).forEach(id => {
-    const meta = TTS_MODELS_META[id];
-    const info = getLocalizedModelLabel({ id, ...meta }, true);
+
+  // First option: action item to refresh Gemini TTS models list from API
+  const refreshOpt = document.createElement("option");
+  refreshOpt.value = REFRESH_TTS_MODELS_VALUE;
+  refreshOpt.textContent = refreshLabel;
+  el.appendChild(refreshOpt);
+
+  const seen = new Set();
+  models.forEach(m => {
+    const id = String(m.id || m.value || "").trim();
+    if (!id || id === REFRESH_TTS_MODELS_VALUE || seen.has(id)) return;
+    seen.add(id);
+    const fmt = _formatGeminiTtsOptionLabel(m);
     const opt = document.createElement("option");
     opt.value = id;
-    opt.textContent = info.label;
-    if (info.title) opt.title = info.title;
+    opt.textContent = fmt.label;
+    if (fmt.title) opt.title = fmt.title;
     if (id === curVal) opt.selected = true;
     el.appendChild(opt);
   });
-  if (curVal && !Array.from(el.options).some(o => o.value === curVal)) {
+
+  if (curVal && !seen.has(curVal)) {
+    const fmt = _formatGeminiTtsOptionLabel({ id: curVal, name: curVal });
     const opt = document.createElement("option");
     opt.value = curVal;
-    opt.textContent = curVal;
+    opt.textContent = fmt.label;
     opt.selected = true;
     el.appendChild(opt);
   }
+
+  // Guarantee a real model (never the action option) is selected
+  if (!el.value || el.value === REFRESH_TTS_MODELS_VALUE) {
+    const firstModelOpt = Array.from(el.options).find(o => o.value !== REFRESH_TTS_MODELS_VALUE);
+    if (firstModelOpt) el.value = firstModelOpt.value;
+  }
+  el._prevValidModel = el.value;
 }
 window.renderTtsModelOptions = renderTtsModelOptions;
+
+async function refreshGeminiTtsModels(triggerSelectEl = null) {
+  const targetEl = triggerSelectEl || document.getElementById("optTtsModel");
+  const prevVal = (targetEl && targetEl._prevValidModel && targetEl._prevValidModel !== REFRESH_TTS_MODELS_VALUE)
+    ? targetEl._prevValidModel
+    : ((window.transcriberSettings && window.transcriberSettings.tts_model) || localStorage.getItem("proxdmr_tts_model") || "gemini-3.1-flash-tts-preview");
+
+  // Restore previous valid model immediately so the action text never sticks in the select trigger
+  if (targetEl && prevVal) {
+    targetEl.value = prevVal;
+  }
+
+  if (_isRefreshingTtsModels) return;
+  _isRefreshingTtsModels = true;
+
+  const mainOptTts = document.getElementById("optTtsModel");
+  const quickOptTts = document.getElementById("ttsQuickModel");
+  if (targetEl) targetEl.disabled = true;
+
+  showToast(
+    window.t ? window.t("transcriber.models_fetching", {}, "⏳ Загрузка...") : "⏳ Загрузка...",
+    1800
+  );
+
+  try {
+    const resp = await fetch("/api/transcriber/models");
+    const resJson = await resp.json();
+    const allModels = (resJson && Array.isArray(resJson.models)) ? resJson.models : [];
+    let ttsModels = (resJson && Array.isArray(resJson.tts_models) && resJson.tts_models.length > 0)
+      ? resJson.tts_models
+      : allModels.filter(_isGeminiTtsModelItem);
+
+    if (!ttsModels || ttsModels.length === 0) {
+      ttsModels = getDefaultGeminiTtsModels();
+    }
+
+    cachedTtsModels = ttsModels;
+
+    // Persist fresh Gemini TTS models list (excluding action item)
+    try {
+      const toSave = ttsModels.map(m => {
+        const id = String(m.id || m.value || "");
+        const fmt = _formatGeminiTtsOptionLabel(m);
+        return { value: id, text: fmt.label, title: fmt.title || "" };
+      }).filter(o => o.value && o.value !== REFRESH_TTS_MODELS_VALUE);
+      if (toSave.length > 0) {
+        localStorage.setItem("proxdmr_tts_model_opts", JSON.stringify(toSave));
+      }
+    } catch (_) {}
+
+    if (mainOptTts) {
+      const optEng = document.getElementById("optTtsEngine");
+      if (!optEng || optEng.value !== "groq") {
+        renderTtsModelOptions(mainOptTts, prevVal);
+      }
+    }
+    if (quickOptTts && quickOptTts.isConnected) {
+      const qEng = document.getElementById("ttsQuickEngine");
+      if (!qEng || qEng.value !== "groq") {
+        renderTtsModelOptions(quickOptTts, prevVal);
+      }
+    }
+
+    const updatedMsg = window.t
+      ? window.t("transcriber.toast_tts_models_updated", { count: ttsModels.length }, `✓ Список моделей TTS обновлён (${ttsModels.length})`)
+      : `✓ Список моделей TTS обновлён (${ttsModels.length})`;
+    showToast(updatedMsg, 3000);
+  } catch (err) {
+    console.error("[TRANSCRIBER] Failed to refresh Gemini TTS models:", err);
+    showToast(
+      window.t ? window.t("transcriber.models_fetch_err", {}, "⚠️ Ошибка при запросе моделей Gemini API") : "⚠️ Ошибка при запросе моделей Gemini API",
+      3500
+    );
+  } finally {
+    _isRefreshingTtsModels = false;
+    if (targetEl) targetEl.disabled = false;
+  }
+}
+window.refreshGeminiTtsModels = refreshGeminiTtsModels;
 
 const DEFAULT_TRANSCRIBER_MODELS = [
   {
@@ -4573,6 +5276,13 @@ async function loadTranscriberModelsCache() {
           description: m.description || ""
         };
       });
+    }
+
+    const fetchedTts = (data && Array.isArray(data.tts_models) && data.tts_models.length > 0)
+      ? data.tts_models
+      : ((data && Array.isArray(data.models)) ? data.models.filter(_isGeminiTtsModelItem) : []);
+    if (fetchedTts.length > 0) {
+      cachedTtsModels = fetchedTts;
     }
   } catch (_) {}
 }
@@ -7100,24 +7810,13 @@ function initGeminiTtsFrame() {
     if (groupModel) groupModel.style.display = (isGemini || isGroq) ? 'block' : 'none';
     if (groupStyle) groupStyle.style.display = isGemini ? 'block' : 'none';
     updateTtsApiKeyUI(curEng);
+    updatePiperStressVisibility(curEng, resolveCurrentTargetLang());
 
     if (optTtsModel) {
       if (isGemini) {
         if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_lbl", {}, "🤖 Gemini TTS Model:") : "🤖 Gemini TTS Model:";
-        const bRec = window.t ? window.t("transcriber.model_badge_rec", {}, "Recommended") : "Recommended";
-        const bFast = window.t ? window.t("transcriber.model_fast", {}, "Fast") : "Fast";
-        const bQual = window.t ? window.t("transcriber.model_qual", {}, "Quality") : "Quality";
-        optTtsModel.innerHTML = `
-          <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview (⚡ ${safeEscapeHtml(bRec)})</option>
-          <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS (${safeEscapeHtml(bFast)})</option>
-          <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS (${safeEscapeHtml(bQual)})</option>
-          <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash TTS Preview (Free)</option>
-          <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro TTS Preview (Pro)</option>
-        `;
-        const savedMod = (window.transcriberSettings && window.transcriberSettings.tts_model) || "gemini-3.1-flash-tts-preview";
-        if (Array.from(optTtsModel.options).some(o => o.value === savedMod)) {
-          optTtsModel.value = savedMod;
-        }
+        const savedMod = (window.transcriberSettings && window.transcriberSettings.tts_model) || localStorage.getItem("proxdmr_tts_model") || "gemini-3.1-flash-tts-preview";
+        renderTtsModelOptions(optTtsModel, savedMod);
       } else if (isGroq) {
         if (lblTtsModel) lblTtsModel.textContent = window.t ? window.t("transcriber.tts_model_groq_lbl", {}, "⚡ Groq TTS Model:") : "⚡ Groq TTS Model:";
         optTtsModel.innerHTML = `
@@ -7179,6 +7878,32 @@ function initGeminiTtsFrame() {
         if (checkSilero.ok) {
           populateVoiceSelect(optVoi, "silero", effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
         }
+      } else if (optEngine.value === "supertonic") {
+        const checkSt = await checkAndPromptSupertonicModel(effLang, (newVoiceId) => {
+          populateVoiceSelect(optVoi, "supertonic", effLang, newVoiceId, hint);
+        }, async (fallbackEng) => {
+          optEngine.value = fallbackEng;
+          updateEngineUI();
+          if (fallbackEng === "piper") {
+            const pRes = await checkAndPromptPiperModel(effLang, (newVoiceId) => {
+              populateVoiceSelect(optVoi, "piper", effLang, newVoiceId, hint);
+            }, (fb2) => {
+              optEngine.value = fb2;
+              updateEngineUI();
+              populateVoiceSelect(optVoi, fb2, effLang, null, hint);
+            });
+            if (pRes && pRes.ok) {
+              populateVoiceSelect(optVoi, "piper", effLang, pRes.default_voice || null, hint);
+            }
+          } else {
+            populateVoiceSelect(optVoi, fallbackEng, effLang, null, hint);
+          }
+        });
+        if (checkSt && checkSt.ok) {
+          populateVoiceSelect(optVoi, "supertonic", effLang, checkSt.voice_id || (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
+        } else if (checkSt && checkSt.reason !== "unsupported") {
+          populateVoiceSelect(optVoi, "supertonic", effLang, null, hint);
+        }
       } else {
         populateVoiceSelect(optVoi, optEngine.value, effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
       }
@@ -7207,9 +7932,26 @@ function initGeminiTtsFrame() {
         const specificVoice = optVoice.value.includes(":") ? optVoice.value.split(":")[1] : null;
         const effLang = resolveCurrentTargetLang();
         const hint = document.getElementById("ttsVoiceHint");
-        await checkAndPromptPiperModel(effLang, (newVoiceId) => {
-          populateVoiceSelect(optVoice, "piper", effLang, newVoiceId, hint);
-        }, null, specificVoice);
+        const curEng = optEngine ? optEngine.value : "piper";
+        if (curEng === "supertonic") {
+          const stRes = await checkAndPromptSupertonicModel(effLang, async (newVoiceId) => {
+            await populateVoiceSelect(optVoice, "supertonic", effLang, newVoiceId, hint);
+            if (optVoice) optVoice.value = newVoiceId;
+            if (window.transcriberSettings) window.transcriberSettings.tts_voice = newVoiceId;
+            fetch("/api/transcriber/settings", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ tts_engine: "supertonic", tts_voice: newVoiceId })
+            }).catch(() => {});
+          }, null, specificVoice);
+          if (!stRes || !stRes.ok) {
+            populateVoiceSelect(optVoice, "supertonic", effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
+          }
+        } else {
+          await checkAndPromptPiperModel(effLang, (newVoiceId) => {
+            populateVoiceSelect(optVoice, "piper", effLang, newVoiceId, hint);
+          }, null, specificVoice);
+        }
       }
     });
   }
@@ -7220,6 +7962,7 @@ function initGeminiTtsFrame() {
     optTargetLangEl.addEventListener("change", async () => {
       const curEng = optEngine ? optEngine.value : "gemini";
       const newLang = optTargetLangEl.value || "ru";
+      updatePiperStressVisibility(curEng, newLang);
       if (newLang === "none") return;
       const optVoi = document.getElementById("optTtsVoice");
       const hint = document.getElementById("ttsVoiceHint");
@@ -7253,6 +7996,30 @@ function initGeminiTtsFrame() {
         if (checkSilero.ok) {
           populateVoiceSelect(optVoi, "silero", newLang, null, hint);
         }
+      } else if (curEng === "supertonic") {
+        const checkSt = await checkAndPromptSupertonicModel(newLang, (newVoiceId) => {
+          populateVoiceSelect(optVoi, "supertonic", newLang, newVoiceId, hint);
+        }, async (fallbackEng) => {
+          if (optEngine) optEngine.value = fallbackEng;
+          updateEngineUI();
+          if (fallbackEng === "piper") {
+            const pRes = await checkAndPromptPiperModel(newLang, (newVoiceId) => {
+              populateVoiceSelect(optVoi, "piper", newLang, newVoiceId, hint);
+            }, (fb2) => {
+              if (optEngine) optEngine.value = fb2;
+              updateEngineUI();
+              populateVoiceSelect(optVoi, fb2, newLang, null, hint);
+            });
+            if (pRes && pRes.ok) populateVoiceSelect(optVoi, "piper", newLang, pRes.default_voice || null, hint);
+          } else {
+            populateVoiceSelect(optVoi, fallbackEng, newLang, null, hint);
+          }
+        });
+        if (checkSt && checkSt.ok) {
+          populateVoiceSelect(optVoi, "supertonic", newLang, checkSt.voice_id || (optVoi ? optVoi.value : null), hint);
+        } else if (checkSt && checkSt.reason !== "unsupported") {
+          populateVoiceSelect(optVoi, "supertonic", newLang, null, hint);
+        }
       } else if (curEng === "browser") {
         populateVoiceSelect(optVoi, "browser", newLang, null, hint);
       } else {
@@ -7275,16 +8042,30 @@ function initGeminiTtsFrame() {
 
     const engine = optTtsEngine ? optTtsEngine.value : 'gemini';
     const curTargetL = resolveCurrentTargetLang();
-    if (engine === 'silero' && curTargetL && !SILERO_SUPPORTED_LANGUAGES.includes(curTargetL.toLowerCase())) {
+    const normCurTargetL = (curTargetL || 'ru').toLowerCase().trim().split(/[-_]/)[0];
+    const effCurTargetL = normCurTargetL === 'ua' ? 'uk' : normCurTargetL;
+    if (engine === 'silero' && curTargetL && !SILERO_SUPPORTED_LANGUAGES.includes(effCurTargetL)) {
       showToast(
         window.t
-          ? window.t("transcriber.silero_unsupported_toast", { lang: curTargetL.toUpperCase() }, `⚠️ Language [${curTargetL.toUpperCase()}] is not supported by Silero TTS. Choose Piper TTS or Gemini API.`)
-          : `⚠️ Language [${curTargetL.toUpperCase()}] is not supported by Silero TTS. Choose Piper TTS or Gemini API.`,
+          ? window.t("transcriber.silero_unsupported_toast", { lang: effCurTargetL.toUpperCase() }, `⚠️ Language [${effCurTargetL.toUpperCase()}] is not supported by Silero TTS. Choose Piper TTS or Gemini API.`)
+          : `⚠️ Language [${effCurTargetL.toUpperCase()}] is not supported by Silero TTS. Choose Piper TTS or Gemini API.`,
         4000
       );
       return;
     }
-    const model = optTtsModel ? optTtsModel.value : (engine === 'groq' ? 'canopylabs/orpheus-v1-english' : 'gemini-3.1-flash-tts-preview');
+    if (engine === 'supertonic' && curTargetL && !SUPERTONIC_SUPPORTED_LANGUAGES.includes(effCurTargetL)) {
+      showToast(
+        window.t
+          ? window.t("transcriber.supertonic_unsupported_toast", { lang: effCurTargetL.toUpperCase() }, `⚠️ Язык [${effCurTargetL.toUpperCase()}] не поддерживается в Supertonic 3 TTS. Выберите Piper TTS или Gemini API.`)
+          : `⚠️ Язык [${effCurTargetL.toUpperCase()}] не поддерживается в Supertonic 3 TTS. Выберите Piper TTS или Gemini API.`,
+        4000
+      );
+      return;
+    }
+    const rawTestMod = optTtsModel ? optTtsModel.value : "";
+    const model = (rawTestMod && rawTestMod !== REFRESH_TTS_MODELS_VALUE)
+      ? rawTestMod
+      : ((optTtsModel && optTtsModel._prevValidModel) || (engine === 'groq' ? 'canopylabs/orpheus-v1-english' : 'gemini-3.1-flash-tts-preview'));
     const style = optTtsStyle ? optTtsStyle.value : 'radio';
     const voice = (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith('__download__')) ? optTtsVoice.value : (engine === 'groq' ? 'troy' : 'auto');
     const speed = optTtsSpeed ? (parseFloat(optTtsSpeed.value) || 1.1) : ((window.transcriberSettings && window.transcriberSettings.tts_speed) || 1.1);
@@ -7383,6 +8164,7 @@ function initGeminiTtsFrame() {
       if (!checkRes || !checkRes.ok) {
         return;
       }
+      const optPiperStressEl = document.getElementById('optTtsPiperUseStress');
       if (btn) { btn.disabled = true; btn.textContent = window.t ? window.t("transcriber.tts_synthesizing", {}, "⏳ Синтез...") : "⏳ Синтез..."; }
       try {
         const resp = await fetch('/api/transcriber/tts-test', {
@@ -7395,7 +8177,8 @@ function initGeminiTtsFrame() {
             speed: speed,
             target_lang: testLang,
             announce_callsign: announce,
-            callsign: "RX6AWG"
+            callsign: "RX6AWG",
+            piper_use_stress: optPiperStressEl ? optPiperStressEl.checked : true
           })
         });
         const data = await resp.json();
@@ -7424,6 +8207,69 @@ function initGeminiTtsFrame() {
         console.error('[TTS] Piper test error:', err);
         const errDetail = err.message || err;
         showToast(window.t ? window.t("transcriber.toast_tts_piper_err", { error: errDetail }, `⚠️ Piper TTS: ${errDetail}`) : `⚠️ Piper TTS: ${errDetail}`, 3500);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = window.t ? window.t("transcriber.tts_btn_test", {}, "🔊 Проверить звук") : "🔊 Проверить звук"; }
+      }
+      return;
+    }
+
+    if (engine === 'supertonic') {
+      const stLang = effCurTargetL || testLang;
+      const stText = getTtsTestPhrase(stLang);
+      const hint = document.getElementById('ttsVoiceHint');
+      const checkRes = await checkAndPromptSupertonicModel(stLang, (nv) => {
+        if (optTtsVoice) populateVoiceSelect(optTtsVoice, 'supertonic', stLang, nv, hint);
+      }, null, testVoice || null);
+      if (!checkRes || !checkRes.ok) {
+        return;
+      }
+      const effStVoice = checkRes.voice_id || testVoice || 'auto';
+      if (btn) { btn.disabled = true; btn.textContent = window.t ? window.t("transcriber.tts_synthesizing", {}, "⏳ Синтез...") : "⏳ Синтез..."; }
+      try {
+        const resp = await fetch('/api/transcriber/tts-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: stText,
+            engine: 'supertonic',
+            voice: effStVoice,
+            speed: speed,
+            target_lang: stLang,
+            announce_callsign: announce,
+            callsign: "RX6AWG"
+          })
+        });
+        const data = await resp.json();
+        if (data && data.status === 'ok' && data.audio_base64) {
+          showToast(
+            window.t
+              ? window.t("transcriber.tts_playback_toast", { engine: "Supertonic 3 TTS", lang: stLang.toUpperCase(), voice: effStVoice || "M1" }, `🔊 Supertonic 3 TTS [${stLang.toUpperCase()}] (${effStVoice || "M1"})`)
+              : `🔊 Supertonic 3 TTS [${stLang.toUpperCase()}] (${effStVoice || "M1"})`,
+            2500
+          );
+          if (window.ttsAudioQueueManager) {
+            window.ttsAudioQueueManager.enqueue({
+              hotspot_id: actHid,
+              slot: 1,
+              audio_base64: data.audio_base64,
+              text: stText,
+              engine: 'supertonic',
+              speed: speed,
+              ducking_level: duckVal,
+              mute_others: solo,
+              is_test: true,
+              bypassMute: true
+            });
+          }
+        } else {
+          console.warn('[TTS] Settings Supertonic test error:', data);
+          const errDetail = data.message || data.detail || (window.t ? window.t("transcriber.err_synth", {}, "Synthesis error") : "Synthesis error");
+          showToast(window.t ? window.t("transcriber.toast_tts_supertonic_err", { error: errDetail }, `⚠️ Supertonic 3: ${errDetail}`) : `⚠️ Supertonic 3: ${errDetail}`, 3500);
+        }
+      } catch (err) {
+        console.error('[TTS] Supertonic test error:', err);
+        const errDetail = err.message || err;
+        showToast(window.t ? window.t("transcriber.toast_tts_supertonic_err", { error: errDetail }, `⚠️ Supertonic 3: ${errDetail}`) : `⚠️ Supertonic 3: ${errDetail}`, 3500);
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = window.t ? window.t("transcriber.tts_btn_test", {}, "🔊 Проверить звук") : "🔊 Проверить звук"; }
       }
@@ -7595,6 +8441,7 @@ function initTranscriberSettings() {
     if (!selectEl) return;
     const opts = Array.from(selectEl.options)
       .filter(o => {
+        if (!o.value || o.value === REFRESH_TTS_MODELS_VALUE) return false;
         if (lsOptsKey === LS_TRANSCRIBE_OPTS) {
           const val = (o.value || "").toLowerCase();
           const txt = (o.textContent || "").toLowerCase();
@@ -7607,7 +8454,9 @@ function initTranscriberSettings() {
       }));
     try {
       localStorage.setItem(lsOptsKey,  JSON.stringify(opts));
-      localStorage.setItem(lsModelKey, selectEl.value);
+      if (selectEl.value && selectEl.value !== REFRESH_TTS_MODELS_VALUE) {
+        localStorage.setItem(lsModelKey, selectEl.value);
+      }
     } catch (_) {}
   }
 
@@ -7624,8 +8473,9 @@ function initTranscriberSettings() {
     optModel.value = savedTranscribeModel;
   }
   const savedTtsModel = localStorage.getItem(LS_TTS_MODEL);
-  if (savedTtsModel && optTtsModel && Array.from(optTtsModel.options).some(o => o.value === savedTtsModel)) {
+  if (savedTtsModel && savedTtsModel !== REFRESH_TTS_MODELS_VALUE && optTtsModel && Array.from(optTtsModel.options).some(o => o.value === savedTtsModel)) {
     optTtsModel.value = savedTtsModel;
+    optTtsModel._prevValidModel = savedTtsModel;
   }
 
   // Extra safety: purge any TTS options that might still be present in optModel
@@ -7642,9 +8492,20 @@ function initTranscriberSettings() {
   saveSelectOptsToLS(optModel, LS_TRANSCRIBE_MODEL, LS_TRANSCRIBE_OPTS);
   saveSelectOptsToLS(optTtsModel, LS_TTS_MODEL, LS_TTS_OPTS);
 
-  // Save selected value on change
+  // Save selected value on change (and trigger live Gemini TTS models refresh on action item)
   if (optModel)    optModel.addEventListener("change",    () => localStorage.setItem(LS_TRANSCRIBE_MODEL, optModel.value));
-  if (optTtsModel) optTtsModel.addEventListener("change", () => localStorage.setItem(LS_TTS_MODEL, optTtsModel.value));
+  if (optTtsModel) {
+    optTtsModel.addEventListener("change", () => {
+      if (optTtsModel.value === REFRESH_TTS_MODELS_VALUE) {
+        refreshGeminiTtsModels(optTtsModel);
+        return;
+      }
+      if (optTtsModel.value) {
+        optTtsModel._prevValidModel = optTtsModel.value;
+        localStorage.setItem(LS_TTS_MODEL, optTtsModel.value);
+      }
+    });
+  }
 
   const duckValEl = document.getElementById("optTtsDuckingVal");
   if (optTtsDucking && duckValEl) {
@@ -7752,6 +8613,17 @@ function initTranscriberSettings() {
       if (qSkipShort) qSkipShort.checked = isSkipShort;
     });
   }
+  const optTtsPiperUseStress = document.getElementById("optTtsPiperUseStress");
+  if (optTtsPiperUseStress) {
+    optTtsPiperUseStress.addEventListener("change", () => {
+      const useStress = optTtsPiperUseStress.checked;
+      if (window.transcriberSettings) {
+        window.transcriberSettings.tts_piper_use_stress = useStress;
+      }
+      const qPiperStress = document.getElementById("ttsQuickPiperStress");
+      if (qPiperStress) qPiperStress.checked = useStress;
+    });
+  }
 
   fetch("/api/transcriber/settings")
     .then(r => r.json())
@@ -7787,7 +8659,7 @@ function initTranscriberSettings() {
         updateRecApiKeyUI(curRecEng);
         updateTransApiKeyUI(curTransEng);
         updateNoTranslateUI(isNoTrans);
-        let effEngine = (data.settings.tts_engine && ["gemini", "groq", "piper", "browser", "silero"].includes(data.settings.tts_engine)) ? data.settings.tts_engine : "piper";
+        let effEngine = (data.settings.tts_engine && ["gemini", "groq", "piper", "browser", "silero", "supertonic"].includes(data.settings.tts_engine)) ? data.settings.tts_engine : "piper";
         if (effEngine === "deepgram" || effEngine === "edge") effEngine = "piper";
         const effVoice = data.settings.tts_voice || "ru_RU-terra5871-medium";
         if (optTtsEngine) {
@@ -7805,8 +8677,12 @@ function initTranscriberSettings() {
             <option value="canopylabs/orpheus-v1-english">Orpheus V1 English (⚡ Expressive, US)</option>
             <option value="canopylabs/orpheus-arabic-saudi">Orpheus Arabic Saudi</option>
           `;
+          if (data.settings.tts_model) optTtsModel.value = data.settings.tts_model;
+        } else if (optTtsModel && effEngine === 'gemini') {
+          renderTtsModelOptions(optTtsModel, data.settings.tts_model || null);
+        } else if (data.settings.tts_model && optTtsModel) {
+          optTtsModel.value = data.settings.tts_model;
         }
-        if (data.settings.tts_model && optTtsModel) optTtsModel.value = data.settings.tts_model;
         const optTtsStyle = document.getElementById('optTtsStyle');
         if (data.settings.tts_style && optTtsStyle) optTtsStyle.value = data.settings.tts_style;
         if (data.settings.tts_ducking_level !== undefined && optTtsDucking) {
@@ -7828,6 +8704,7 @@ function initTranscriberSettings() {
         if (data.settings.tts_mute_others !== undefined && optTtsMuteOthers) optTtsMuteOthers.checked = Boolean(data.settings.tts_mute_others);
         if (data.settings.tts_announce_callsign !== undefined && optTtsAnnounceCallsign) optTtsAnnounceCallsign.checked = Boolean(data.settings.tts_announce_callsign);
         if (data.settings.tts_skip_short_callsign !== undefined && optTtsSkipShortCallsign) optTtsSkipShortCallsign.checked = Boolean(data.settings.tts_skip_short_callsign);
+        if (data.settings.tts_piper_use_stress !== undefined && optTtsPiperUseStress) optTtsPiperUseStress.checked = Boolean(data.settings.tts_piper_use_stress);
         const optTtsSpeed = document.getElementById("optTtsSpeed");
         const speedValEl = document.getElementById("optTtsSpeedVal");
         if (data.settings.tts_speed !== undefined && optTtsSpeed) {
@@ -7861,6 +8738,7 @@ function initTranscriberSettings() {
         updateNoTranslateUI();
 
         const effLang = (!isNoTranslate && data.settings.target_lang) ? data.settings.target_lang : (optTargetLang ? optTargetLang.value : "ru");
+        updatePiperStressVisibility(effEngine, effLang);
         const ttsVoiceHint = document.getElementById("ttsVoiceHint");
         if (optTtsVoice) {
           populateVoiceSelect(optTtsVoice, effEngine, effLang, effVoice, ttsVoiceHint);
@@ -7979,8 +8857,15 @@ function initTranscriberSettings() {
             transcribeModels = cachedTranscriberModels.filter(isTranscriptionModel);
           }
 
-          populateSelect(optModel,    transcribeModels, LS_TRANSCRIBE_MODEL, LS_TRANSCRIBE_OPTS);
-          populateSelect(optTtsModel, ttsModels,        LS_TTS_MODEL,        LS_TTS_OPTS);
+          populateSelect(optModel, transcribeModels, LS_TRANSCRIBE_MODEL, LS_TRANSCRIBE_OPTS);
+          cachedTtsModels = ttsModels;
+          if (optTtsModel) {
+            const curTtsPrev = (optTtsModel.value && optTtsModel.value !== REFRESH_TTS_MODELS_VALUE)
+              ? optTtsModel.value
+              : (optTtsModel._prevValidModel || localStorage.getItem(LS_TTS_MODEL) || "gemini-3.1-flash-tts-preview");
+            renderTtsModelOptions(optTtsModel, curTtsPrev);
+            saveSelectOptsToLS(optTtsModel, LS_TTS_MODEL, LS_TTS_OPTS);
+          }
 
           const updatedMsg = window.t ? window.t("transcriber.toast_models_updated", { transcribe: transcribeModels.length, tts: ttsModels.length }, `✓ Models updated: ${transcribeModels.length} for transcription, ${ttsModels.length} for synthesis`) : `✓ Models updated: ${transcribeModels.length} for transcription, ${ttsModels.length} for synthesis`;
           showToast(updatedMsg, 3000);
@@ -8005,13 +8890,31 @@ function initTranscriberSettings() {
       const targetLangVal = isNoTrans ? "none" : (optTargetLang && optTargetLang.value ? optTargetLang.value : "ru");
 
       const chosenTtsEng = optTtsEngine ? optTtsEngine.value : "gemini";
-      if (chosenTtsEng === "silero" && targetLangVal !== "none" && !SILERO_SUPPORTED_LANGUAGES.includes(targetLangVal.toLowerCase())) {
+      const normSaveLang = (targetLangVal || "ru").toLowerCase().trim().split(/[-_]/)[0];
+      const effSaveLang = normSaveLang === "ua" ? "uk" : normSaveLang;
+      if (chosenTtsEng === "silero" && targetLangVal !== "none" && !SILERO_SUPPORTED_LANGUAGES.includes(effSaveLang)) {
         showToast(
           window.t
-            ? window.t("transcriber.silero_unsupported_toast", { lang: targetLangVal.toUpperCase() }, `⚠️ Language [${targetLangVal.toUpperCase()}] is not supported in Silero TTS. Choose Piper TTS or Gemini API.`)
-            : `⚠️ Language [${targetLangVal.toUpperCase()}] is not supported in Silero TTS. Choose Piper TTS or Gemini API.`,
+            ? window.t("transcriber.silero_unsupported_toast", { lang: effSaveLang.toUpperCase() }, `⚠️ Language [${effSaveLang.toUpperCase()}] is not supported in Silero TTS. Choose Piper TTS or Gemini API.`)
+            : `⚠️ Language [${effSaveLang.toUpperCase()}] is not supported in Silero TTS. Choose Piper TTS or Gemini API.`,
           4500
         );
+        return;
+      }
+      if (chosenTtsEng === "supertonic" && targetLangVal !== "none" && !SUPERTONIC_SUPPORTED_LANGUAGES.includes(effSaveLang)) {
+        showToast(
+          window.t
+            ? window.t("transcriber.supertonic_unsupported_toast", { lang: effSaveLang.toUpperCase() }, `⚠️ Язык [${effSaveLang.toUpperCase()}] не поддерживается в Supertonic 3 TTS. Выберите Piper TTS или Gemini API.`)
+            : `⚠️ Язык [${effSaveLang.toUpperCase()}] не поддерживается в Supertonic 3 TTS. Выберите Piper TTS или Gemini API.`,
+          4500
+        );
+        await checkAndPromptSupertonicModel(effSaveLang, null, (fallbackEng) => {
+          if (optTtsEngine) optTtsEngine.value = fallbackEng;
+          updatePiperStressVisibility(fallbackEng, effSaveLang);
+          const optVoi = document.getElementById("optTtsVoice");
+          const hint = document.getElementById("ttsVoiceHint");
+          if (optVoi) populateVoiceSelect(optVoi, fallbackEng, effSaveLang, null, hint);
+        });
         return;
       }
 
@@ -8052,7 +8955,9 @@ function initTranscriberSettings() {
         source_lang: sourceLangVal,
         target_lang: targetLangVal,
         tts_engine: optTtsEngine ? optTtsEngine.value : "gemini",
-        tts_model: optTtsModel ? optTtsModel.value : "gemini-3.1-flash-tts-preview",
+        tts_model: (optTtsModel && optTtsModel.value && optTtsModel.value !== REFRESH_TTS_MODELS_VALUE)
+          ? optTtsModel.value
+          : ((optTtsModel && optTtsModel._prevValidModel) || "gemini-3.1-flash-tts-preview"),
         tts_voice: (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith("__download__")) ? optTtsVoice.value : "auto",
         tts_speed: optTtsSpeed ? (parseFloat(optTtsSpeed.value) || 1.1) : 1.1,
         tts_ducking_level: optTtsDucking ? (Math.max(0, Math.min(100, parseFloat(optTtsDucking.value) || 80)) / 100.0) : 0.80,
@@ -8060,6 +8965,7 @@ function initTranscriberSettings() {
         tts_mute_others: optTtsMuteOthers ? optTtsMuteOthers.checked : true,
         tts_announce_callsign: (optTtsAnnounceCallsign ? optTtsAnnounceCallsign.checked : false),
         tts_skip_short_callsign: (optTtsSkipShortCallsign ? optTtsSkipShortCallsign.checked : true),
+        tts_piper_use_stress: (optTtsPiperUseStress ? optTtsPiperUseStress.checked : true),
         tts_style: (document.getElementById("optTtsStyle") ? document.getElementById("optTtsStyle").value : "radio")
       };
 
@@ -8082,6 +8988,10 @@ function initTranscriberSettings() {
           const qSkipShort = document.getElementById("ttsQuickSkipShortCallsign");
           if (qSkipShort && resJson.settings && resJson.settings.tts_skip_short_callsign !== undefined) {
             qSkipShort.checked = Boolean(resJson.settings.tts_skip_short_callsign);
+          }
+          const qPiperStress = document.getElementById("ttsQuickPiperStress");
+          if (qPiperStress && resJson.settings && resJson.settings.tts_piper_use_stress !== undefined) {
+            qPiperStress.checked = Boolean(resJson.settings.tts_piper_use_stress);
           }
           const qSolo = document.getElementById("ttsQuickSolo");
           if (qSolo) qSolo.checked = Boolean(resJson.settings && resJson.settings.tts_mute_others);
@@ -8172,7 +9082,10 @@ export {
   populateVoiceSelect,
   checkAndPromptPiperModel,
   checkAndPromptSileroModel,
+  checkAndPromptSupertonicModel,
   SILERO_SUPPORTED_LANGUAGES,
+  SUPERTONIC_SUPPORTED_LANGUAGES,
+  SILERO_STRESS_SUPPORTED_LANGUAGES,
   isStageLocalEngine,
   SUPPORTED_TARGET_LANGUAGES,
   renderSourceLangSelect,
@@ -8244,7 +9157,10 @@ if (typeof window !== "undefined") {
   window.populateVoiceSelect = populateVoiceSelect;
   window.checkAndPromptPiperModel = checkAndPromptPiperModel;
   window.checkAndPromptSileroModel = checkAndPromptSileroModel;
+  window.checkAndPromptSupertonicModel = checkAndPromptSupertonicModel;
   window.SILERO_SUPPORTED_LANGUAGES = SILERO_SUPPORTED_LANGUAGES;
+  window.SUPERTONIC_SUPPORTED_LANGUAGES = SUPERTONIC_SUPPORTED_LANGUAGES;
+  window.SILERO_STRESS_SUPPORTED_LANGUAGES = SILERO_STRESS_SUPPORTED_LANGUAGES;
   window.isStageLocalEngine = isStageLocalEngine;
   window.SUPPORTED_TARGET_LANGUAGES = SUPPORTED_TARGET_LANGUAGES;
   window.renderSourceLangSelect = renderSourceLangSelect;
@@ -8290,6 +9206,7 @@ if (typeof window !== "undefined") {
   window.__proxdmr.populateVoiceSelect = populateVoiceSelect;
   window.__proxdmr.checkAndPromptPiperModel = checkAndPromptPiperModel;
   window.__proxdmr.checkAndPromptSileroModel = checkAndPromptSileroModel;
+  window.__proxdmr.checkAndPromptSupertonicModel = checkAndPromptSupertonicModel;
   window.__proxdmr.renderSourceLangSelect = renderSourceLangSelect;
   window.__proxdmr.renderTargetLangSelect = renderTargetLangSelect;
   window.__proxdmr.renderTranscriberModelOptions = renderTranscriberModelOptions;

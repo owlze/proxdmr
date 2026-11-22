@@ -7,7 +7,7 @@
 import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName, getCountryInfo, getFlagBadgeHtml, getCleanTgDesc, getHotspotNetworkType } from '../core/formatters.js?v=2.9.787';
 import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
-import { openBmBenchmarkModal } from './bm-benchmark.js?v=2.9.799';
+import { openBmBenchmarkModal } from './bm-benchmark.js?v=2.9.809';
 import { openBmTgStaticModal, dropDynamicTGs } from './bm-static-manager.js?v=2.9.798';
 import {
   cycleHotspotPan,
@@ -35,7 +35,7 @@ import {
   setupCaptionBoxLongPress,
   ensureCaptionFontControls,
   setupCaptionBoxPinchZoom
-} from './transcriber.js?v=2.9.787';
+} from './transcriber.js?v=2.9.807';
 import {
   startTransmission,
   stopTransmission,
@@ -54,8 +54,8 @@ const isYsfOnlineStatus = (status) => {
   const u = String(status || "").trim().toUpperCase();
   return Boolean(u && u !== "STANDBY" && u !== "DISCONNECTED" && u !== "OFFLINE" && u !== "ERROR" && u !== "AUTH_FAILED");
 };
-import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, refreshM17Servers, refreshDstarServers, refreshSvxServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.801';
-import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.788';
+import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, refreshM17Servers, refreshDstarServers, refreshSvxServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.809';
+import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.807';
 import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.711';
 import { showLongPressEffect } from '../ui/long-press.js?v=2.9.711';
 
@@ -209,8 +209,13 @@ export function setActiveHotspotId(val) {
   const id = val || "default";
   activeHotspotId = id;
   window.activeHotspotId = id;
-  if (typeof window !== "undefined" && typeof window.syncActiveAudioRxPreset === "function") {
-    try { window.syncActiveAudioRxPreset(id); } catch (_) {}
+  if (typeof window !== "undefined") {
+    if (window.audioPlayer && typeof window.audioPlayer.syncSingleHotspotAudioMute === "function") {
+      try { window.audioPlayer.syncSingleHotspotAudioMute(id); } catch (_) {}
+    }
+    if (typeof window.syncActiveAudioRxPreset === "function") {
+      try { window.syncActiveAudioRxPreset(id); } catch (_) {}
+    }
   }
   return id;
 }
@@ -385,7 +390,12 @@ export function renderHotspotSelect() {
 export function switchActiveHotspot(newId) {
     const curActiveId = (typeof window !== "undefined" && window.activeHotspotId) || null;
     if (!newId || newId === curActiveId) return;
-    if (typeof window !== "undefined") window.activeHotspotId = newId;
+    if (typeof window !== "undefined") {
+      window.activeHotspotId = newId;
+      if (window.audioPlayer && typeof window.audioPlayer.syncSingleHotspotAudioMute === "function") {
+        try { window.audioPlayer.syncSingleHotspotAudioMute(newId); } catch (_) {}
+      }
+    }
     try {
       localStorage.setItem("proxdmr_active_hotspot_id", newId);
     } catch (_) {}

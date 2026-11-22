@@ -9,7 +9,7 @@ import { escapeHtml, attachTgLivePreview, isoToEmoji, getLocalizedCountryName } 
 import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
 import { resolveHotspotId } from '../core/state.js?v=2.9.698';
-import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.788';
+import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.807';
 
 // Safe window helper bridges
 

@@ -230,7 +230,10 @@ export   class RecordingsManager {
         r.classList.remove("row-blink-highlight");
       });
 
-      const row = document.querySelector(`.live-call-row[data-id="${callId}"]`);
+      let row = document.querySelector(`.live-call-row[data-id="${callId}"]`);
+      if (!row && typeof window.scrollToLogCallId === "function") {
+        row = window.scrollToLogCallId(callId, { align: "nearest" });
+      }
       if (!row) return;
 
       row.classList.add("is-playing-rec");
@@ -340,8 +343,12 @@ export   class RecordingsManager {
             } else if (this.currentRecording && this.currentRecording.call_id) {
               targetCallId = this.currentRecording.call_id;
               this.updateActiveRowHighlight();
-              const row = document.querySelector(`.live-call-row[data-id="${targetCallId}"]`);
-              if (row) row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+              if (typeof window.scrollToLogCallId === "function") {
+                window.scrollToLogCallId(targetCallId, { align: "nearest" });
+              } else {
+                const row = document.querySelector(`.live-call-row[data-id="${targetCallId}"]`);
+                if (row) row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+              }
             }
             if (targetCallId) {
               this.blinkRowHighlight(targetCallId);
@@ -1718,12 +1725,29 @@ export   class RecordingsManager {
     }
 
     getChronologicalRecordedCallIds() {
+      if (typeof window !== "undefined" && typeof window.getFilteredLogCalls === "function") {
+        const filteredCalls = window.getFilteredLogCalls();
+        if (Array.isArray(filteredCalls)) {
+          const calls = [];
+          const seen = new Set();
+          for (let i = 0; i < filteredCalls.length; i++) {
+            const c = filteredCalls[i];
+            if (!c || c.id == null) continue;
+            const cid = String(c.id);
+            if (seen.has(cid) || !this.hasRecording(cid)) continue;
+            seen.add(cid);
+            calls.push({ callId: cid, timestamp: c.timestamp || 0 });
+          }
+          calls.sort((a, b) => a.timestamp - b.timestamp);
+          return calls.map(item => item.callId);
+        }
+      }
       const logList = document.getElementById("logList");
       if (!logList) return [];
       const calls = [];
       const rows = logList.querySelectorAll(".live-call-row");
-      const heardMap = (typeof heardCalls !== "undefined" && Array.isArray(heardCalls)) 
-        ? new Map(heardCalls.map(c => [String(c.id), c.timestamp || 0])) 
+      const heardMap = (typeof heardCalls !== "undefined" && Array.isArray(heardCalls))
+        ? new Map(heardCalls.map(c => [String(c.id), c.timestamp || 0]))
         : new Map();
 
       rows.forEach((row, domIdx) => {
@@ -1815,17 +1839,19 @@ export   class RecordingsManager {
         ? (window.resolveHotspotId ? window.resolveHotspotId(rec.hotspot_id) : rec.hotspot_id)
         : (window.getActiveHotspotId ? window.getActiveHotspotId() : "default");
 
-      let isMuted = false;
+      let isGlobalMuted = false;
+      let isHotspotMuted = false;
       let vol = 80;
 
-      // Check global mute state
-      if (typeof window.isGlobalAudioMuted === "function" && window.isGlobalAudioMuted()) {
-        isMuted = true;
-      } else if (typeof window.isGlobalMuted === "function" && window.isGlobalMuted()) {
-        isMuted = true;
-      } else if (typeof window.isHotspotAudioMuted === "function") {
-        isMuted = window.isHotspotAudioMuted(hid);
+      // Check global and hotspot mute states separately so WebAudio recordings do not double-fade on global mute
+      if ((typeof window.isGlobalAudioMuted === "function" && window.isGlobalAudioMuted()) ||
+          (typeof window.isGlobalMuted === "function" && window.isGlobalMuted())) {
+        isGlobalMuted = true;
       }
+      if (typeof window.isHotspotAudioMuted === "function") {
+        isHotspotMuted = Boolean(window.isHotspotAudioMuted(hid));
+      }
+      const isMuted = Boolean(isGlobalMuted || isHotspotMuted);
       if (typeof window.getHotspotVolume === "function") {
         vol = window.getHotspotVolume(hid);
       }
@@ -1834,26 +1860,43 @@ export   class RecordingsManager {
       const attached = (ap && typeof ap.attachRecordingsAudio === "function")
         ? ap.attachRecordingsAudio(this.audio)
         : null;
+      const isPlayingNow = Boolean(!this.audio.paused && !this.audio.ended);
+      const fadeSec = (ap && typeof ap.getMuteFadeSec === "function") ? ap.getMuteFadeSec() : 0.005;
 
       if (attached && attached.gainNode) {
-        // Connected to Web Audio graph!
-        // HTMLMediaElement.volume stays at 1.0 (so volume is not squared).
-        // Gain is applied directly via Web Audio gainNode and routed to master limiter & master gain node.
+        // Connected to Web Audio graph (recordingsInputBus -> masterLimiter -> masterGainNode):
+        // Global mute is smoothly faded by masterGainNode itself; attached.gainNode fades hotspot mute cleanly!
         if (this.audio.volume !== 1.0) {
           try { this.audio.volume = 1.0; } catch (_) {}
         }
-        const targetGain = isMuted ? 0.0 : Math.max(0, Math.min(2.5, (vol / 100.0) * 1.40));
-        const now = (ap && ap.audioCtx) ? ap.audioCtx.currentTime : 0;
-        try {
-          attached.gainNode.gain.cancelScheduledValues(now);
-          attached.gainNode.gain.setTargetAtTime(targetGain, now, 0.015);
-        } catch (_) {
-          attached.gainNode.gain.value = targetGain;
+        const prevHsMuted = this._lastSyncedHsMuted;
+        this._lastSyncedHsMuted = isHotspotMuted;
+        const hsMuteChanged = (prevHsMuted !== undefined && prevHsMuted !== isHotspotMuted);
+        const targetGain = isHotspotMuted ? 0.0 : Math.max(0, Math.min(2.5, (vol / 100.0) * 1.40));
+        if (hsMuteChanged && isPlayingNow && ap && typeof ap._rampGainParam === "function") {
+          ap._rampGainParam(attached.gainNode.gain, targetGain, fadeSec, ap.audioCtx);
+        } else {
+          const now = (ap && ap.audioCtx) ? ap.audioCtx.currentTime : 0;
+          try {
+            attached.gainNode.gain.cancelScheduledValues(now);
+            attached.gainNode.gain.setTargetAtTime(targetGain, now, 0.015);
+          } catch (_) {
+            attached.gainNode.gain.value = targetGain;
+          }
         }
       } else {
         // Fallback for standalone / non-WebAudio environment
+        const prevAnyMuted = this._lastSyncedAnyMuted;
+        this._lastSyncedAnyMuted = isMuted;
+        const anyMuteChanged = (prevAnyMuted !== undefined && prevAnyMuted !== isMuted);
         const targetVolFloat = isMuted ? 0.0 : Math.max(0, Math.min(1.0, vol / 100.0));
-        if (this.audio.volume !== targetVolFloat) {
+        if (anyMuteChanged && isPlayingNow && ap && typeof ap._fadeHtmlAudioVolume === "function") {
+          ap._fadeHtmlAudioVolume(this.audio, targetVolFloat, fadeSec);
+        } else if (this.audio.volume !== targetVolFloat) {
+          if (this.audio._muteFadeRafId) {
+            try { cancelAnimationFrame(this.audio._muteFadeRafId); } catch (_) {}
+            this.audio._muteFadeRafId = null;
+          }
           try { this.audio.volume = targetVolFloat; } catch (_) {}
         }
       }
@@ -1994,9 +2037,13 @@ export   class RecordingsManager {
       }
 
       if (rec.call_id) {
-        const row = document.querySelector(`.live-call-row[data-id="${rec.call_id}"]`);
-        if (row) {
-          row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        if (typeof window.scrollToLogCallId === "function") {
+          window.scrollToLogCallId(rec.call_id, { align: "nearest" });
+        } else {
+          const row = document.querySelector(`.live-call-row[data-id="${rec.call_id}"]`);
+          if (row) {
+            row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
         }
       }
     }
@@ -2232,9 +2279,13 @@ export   class RecordingsManager {
       this.openPlayer();
       this.updateActiveRowHighlight(strCallId);
 
-      const targetRow = document.querySelector(`.live-call-row[data-id="${strCallId}"]`);
-      if (targetRow) {
-        targetRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      if (typeof window.scrollToLogCallId === "function") {
+        window.scrollToLogCallId(strCallId, { align: "nearest" });
+      } else {
+        const targetRow = document.querySelector(`.live-call-row[data-id="${strCallId}"]`);
+        if (targetRow) {
+          targetRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
       }
 
       try {

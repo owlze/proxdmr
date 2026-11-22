@@ -219,6 +219,8 @@ class HotspotAudioSlot {
     this.nextStartTime = 0;
     this.sampleRate = 8000;
     this.isMuted = false;
+    this._muteFadeOutUntilMs = 0;
+    this._muteResetTimer = null;
     this.agc = new ClassicalDspAgc();
     if (player && typeof player.getRxAgcConfig === "function") {
       this.agc.configure(player.getRxAgcConfig());
@@ -360,33 +362,77 @@ class HotspotAudioSlot {
     }
   }
 
-  setMuted(muted) {
-    this.isMuted = Boolean(muted);
+  setMuted(muted, opts = null) {
+    const nextMuted = Boolean(muted);
+    const immediate = Boolean(opts && opts.immediate);
+    const changed = (this.isMuted !== nextMuted);
+    this.isMuted = nextMuted;
+    if (!changed && !immediate) return;
+
+    const fadeSec = (!immediate && this.player && typeof this.player.getMuteFadeSec === "function")
+      ? this.player.getMuteFadeSec()
+      : 0.0;
+
+    if (this._muteResetTimer) {
+      clearTimeout(this._muteResetTimer);
+      this._muteResetTimer = null;
+    }
+
     if (this.slotMuteGainNode && this.audioCtx) {
-      const now = this.audioCtx.currentTime;
       const target = this.isMuted ? 0.0 : 1.0;
-      this.slotMuteGainNode.gain.cancelScheduledValues(now);
-      this.slotMuteGainNode.gain.setValueAtTime(target, now);
+      if (this.player && typeof this.player._rampGainParam === "function") {
+        this.player._rampGainParam(this.slotMuteGainNode.gain, target, fadeSec, this.audioCtx);
+      } else {
+        const now = this.audioCtx.currentTime;
+        this.slotMuteGainNode.gain.cancelScheduledValues(now);
+        this.slotMuteGainNode.gain.setValueAtTime(target, now);
+      }
     }
     if (this.activeTtsHandles && this.activeTtsHandles.size > 0 && this.audioCtx) {
-      const now = this.audioCtx.currentTime;
-      const ttsTarget = this.isMuted ? 0.0 : 0.70;
       this.activeTtsHandles.forEach(h => {
         if (h && h.gainNode && !h.bypassSlotMute) {
           try {
-            h.gainNode.gain.cancelScheduledValues(now);
-            h.gainNode.gain.setValueAtTime(ttsTarget, now);
+            const nom = (typeof h.nominalGain === "number") ? h.nominalGain : 0.40;
+            const ttsTarget = this.isMuted ? 0.0 : nom;
+            if (this.player && typeof this.player._rampGainParam === "function") {
+              this.player._rampGainParam(h.gainNode.gain, ttsTarget, fadeSec, this.audioCtx);
+            } else {
+              const now = this.audioCtx.currentTime;
+              h.gainNode.gain.cancelScheduledValues(now);
+              h.gainNode.gain.setValueAtTime(ttsTarget, now);
+            }
           } catch (_) {}
         }
       });
     }
     if (this.isMuted) {
-      this.reset();
+      if (immediate || fadeSec <= 0.01) {
+        this._muteFadeOutUntilMs = 0;
+        this.reset();
+      } else {
+        const tailMs = Math.ceil(fadeSec * 1000);
+        this._muteFadeOutUntilMs = (typeof performance !== "undefined" ? performance.now() : Date.now()) + tailMs + 80;
+        this._muteResetTimer = setTimeout(() => {
+          this._muteResetTimer = null;
+          if (this.isMuted) {
+            this._muteFadeOutUntilMs = 0;
+            this.reset();
+          }
+        }, tailMs + 60);
+      }
+    } else {
+      this._muteFadeOutUntilMs = 0;
     }
   }
 
+  isFeedAllowed() {
+    if (!this.isMuted) return true;
+    const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    return nowMs < (this._muteFadeOutUntilMs || 0);
+  }
+
   feed(arrayBuffer) {
-    if (this.isMuted) return;
+    if (!this.isFeedAllowed()) return;
     const now = this.audioCtx.currentTime;
     const int16Array = new Int16Array(arrayBuffer);
     const numSamples = int16Array.length;
@@ -598,6 +644,9 @@ class HotspotAudioChannel {
     this.player = player;
     this.volume = 1.0;
     this.isMuted = false;
+    this.isSingleAudioMuted = false;
+    this._channelFadeOutUntilMs = 0;
+    this._channelFadeInUntilMs = 0;
 
     this.channelGainNode = audioCtx.createGain();
     this.channelGainNode.gain.value = this.volume;
@@ -633,11 +682,11 @@ class HotspotAudioChannel {
     }
   }
 
-  setSlotMute(slot, muted) {
+  setSlotMute(slot, muted, opts = null) {
     const s = parseInt(slot, 10);
     const slotObj = this.slots[s];
     if (slotObj) {
-      slotObj.setMuted(muted);
+      slotObj.setMuted(muted, opts);
     }
   }
 
@@ -703,11 +752,21 @@ class HotspotAudioChannel {
     this.setSlotDucking(2, ducked, duckLevel, fadeTimeSec);
   }
 
+  isEffectivelyMuted() {
+    return Boolean(this.isMuted || this.isSingleAudioMuted);
+  }
+
+  isFeedAllowed() {
+    if (!this.isEffectivelyMuted()) return true;
+    const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    return nowMs < (this._channelFadeOutUntilMs || 0);
+  }
+
   feed(arrayBuffer, slot = 1) {
-    if (this.isMuted) return;
+    if (!this.isFeedAllowed()) return;
     const s = parseInt(slot, 10) || 1;
     const slotObj = this.slots[s];
-    if (slotObj && !slotObj.isMuted) {
+    if (slotObj && slotObj.isFeedAllowed()) {
       slotObj.feed(arrayBuffer);
     }
   }
@@ -717,13 +776,49 @@ class HotspotAudioChannel {
     this.slots[2].reset();
   }
 
-  setMuted(muted) {
-    this.isMuted = Boolean(muted);
-    const now = this.audioCtx ? this.audioCtx.currentTime : 0;
-    if (this.channelGainNode) {
-      const target = this.isMuted ? 0.0 : this.volume;
-      this.channelGainNode.gain.setTargetAtTime(target, now, 0.015);
+  _applyChannelMuteGain(immediate = false) {
+    const effMuted = this.isEffectivelyMuted();
+    const fadeSec = (!immediate && this.player && typeof this.player.getMuteFadeSec === "function")
+      ? this.player.getMuteFadeSec()
+      : 0.0;
+    const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    if (effMuted) {
+      this._channelFadeInUntilMs = 0;
+      this._channelFadeOutUntilMs = (immediate || fadeSec <= 0.01) ? 0 : (nowMs + Math.ceil(fadeSec * 1000) + 80);
+    } else {
+      this._channelFadeOutUntilMs = 0;
+      this._channelFadeInUntilMs = (immediate || fadeSec <= 0.01) ? 0 : (nowMs + Math.ceil(fadeSec * 1000));
     }
+    if (this.channelGainNode && this.audioCtx) {
+      const target = effMuted ? 0.0 : this.volume;
+      if (this.player && typeof this.player._rampGainParam === "function") {
+        this.player._rampGainParam(this.channelGainNode.gain, target, fadeSec, this.audioCtx);
+      } else {
+        const now = this.audioCtx.currentTime;
+        this.channelGainNode.gain.cancelScheduledValues(now);
+        this.channelGainNode.gain.setTargetAtTime(target, now, 0.015);
+      }
+    }
+  }
+
+  setMuted(muted, opts = null) {
+    const nextMuted = Boolean(muted);
+    const immediate = Boolean(opts && opts.immediate);
+    const prevEff = this.isEffectivelyMuted();
+    this.isMuted = nextMuted;
+    const nextEff = this.isEffectivelyMuted();
+    if (prevEff === nextEff && !immediate) return;
+    this._applyChannelMuteGain(immediate);
+  }
+
+  setSingleAudioMuted(muted, opts = null) {
+    const nextMuted = Boolean(muted);
+    const immediate = Boolean(opts && opts.immediate);
+    const prevEff = this.isEffectivelyMuted();
+    this.isSingleAudioMuted = nextMuted;
+    const nextEff = this.isEffectivelyMuted();
+    if (prevEff === nextEff && !immediate) return;
+    this._applyChannelMuteGain(immediate);
   }
 
   setVolume(vol) {
@@ -732,10 +827,16 @@ class HotspotAudioChannel {
     // Only divide by 100 if raw is a whole percentage > 25 (e.g. 50%, 80%, 100%)
     const normalized = raw > 25.0 ? (raw / 100.0) : raw;
     this.volume = Math.max(0.0, Math.min(25.0, normalized));
-    if (!this.isMuted && this.audioCtx && this.channelGainNode) {
-      const now = this.audioCtx.currentTime;
-      this.channelGainNode.gain.cancelScheduledValues(now);
-      this.channelGainNode.gain.setValueAtTime(this.volume, now);
+    if (!this.isEffectivelyMuted() && this.audioCtx && this.channelGainNode) {
+      const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+      const remFadeSec = Math.max(0, ((this._channelFadeInUntilMs || 0) - nowMs) / 1000.0);
+      if (remFadeSec > 0.02 && this.player && typeof this.player._rampGainParam === "function") {
+        this.player._rampGainParam(this.channelGainNode.gain, this.volume, remFadeSec, this.audioCtx);
+      } else {
+        const now = this.audioCtx.currentTime;
+        this.channelGainNode.gain.cancelScheduledValues(now);
+        this.channelGainNode.gain.setTargetAtTime(this.volume, now, 0.015);
+      }
     }
   }
 
@@ -796,6 +897,17 @@ class DMRAudioPlayer {
     this.globalMuted = false;
     this.pttMuted = false;
     this.soloMuted = false;
+    this.muteFadeEnabled = true;
+    this.muteFadeDuration = 0.3;
+    this._masterMutedState = false;
+    this._masterFadeOutUntilMs = 0;
+    this._masterFadeInUntilMs = 0;
+    this._masterPostMuteTimer = null;
+    this._soloFadeOutUntilMs = 0;
+    this._soloPostMuteTimer = null;
+    this._channelFadeOutUntilMs = new Map();
+    this._singleFadeOutUntilMs = new Map();
+    this._singleAudioMutedMap = new Map();
     this.workletNode = null;
     this.useWorklet = false;
     this.workletInitPromise = null;
@@ -816,6 +928,18 @@ class DMRAudioPlayer {
 
     try {
       if (typeof localStorage !== "undefined") {
+        const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+        const savedFadeEn = (uid ? localStorage.getItem(`proxdmr_u${uid}_mute_fade_enabled`) : null) ?? localStorage.getItem("proxdmr_mute_fade_enabled");
+        if (savedFadeEn !== null) {
+          this.muteFadeEnabled = (savedFadeEn !== "false");
+        }
+        const savedFadeDur = (uid ? localStorage.getItem(`proxdmr_u${uid}_mute_fade_duration`) : null) ?? localStorage.getItem("proxdmr_mute_fade_duration");
+        if (savedFadeDur !== null) {
+          const parsedF = parseFloat(String(savedFadeDur).replace(",", "."));
+          if (!isNaN(parsedF)) {
+            this.muteFadeDuration = Math.round(Math.max(0.1, Math.min(2.0, parsedF)) * 10) / 10;
+          }
+        }
         const savedBoost = localStorage.getItem("proxdmr_rx_boost_pct");
         if (savedBoost !== null) {
           const parsedB = parseInt(savedBoost, 10);
@@ -842,6 +966,88 @@ class DMRAudioPlayer {
         }
       }
     } catch (_) {}
+  }
+
+  getMuteFadeSec() {
+    if (!this.muteFadeEnabled) return 0.005;
+    const d = parseFloat(this.muteFadeDuration);
+    return !isNaN(d) ? Math.max(0.1, Math.min(2.0, d)) : 0.3;
+  }
+
+  setMuteFadeConfig(enabled, durationSec) {
+    if (enabled !== undefined && enabled !== null) {
+      this.muteFadeEnabled = Boolean(enabled);
+    }
+    if (durationSec !== undefined && durationSec !== null) {
+      const parsed = parseFloat(String(durationSec).replace(",", "."));
+      if (!isNaN(parsed)) {
+        this.muteFadeDuration = Math.round(Math.max(0.1, Math.min(2.0, parsed)) * 10) / 10;
+      }
+    }
+    if (this.useWorklet && this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({
+          type: "set_mute_fade",
+          enabled: this.muteFadeEnabled,
+          durationSec: this.muteFadeDuration
+        });
+      } catch (_) {}
+    }
+  }
+
+  _rampGainParam(gainParam, target, fadeSec, ctx = null) {
+    if (!gainParam) return;
+    const actx = ctx || this.audioCtx;
+    const safeTarget = Math.max(0.0, Number(target) || 0.0);
+    if (!actx) {
+      try { gainParam.value = safeTarget; } catch (_) {}
+      return;
+    }
+    const now = actx.currentTime;
+    try {
+      const curVal = Number.isFinite(gainParam.value) ? gainParam.value : safeTarget;
+      gainParam.cancelScheduledValues(now);
+      if (!fadeSec || fadeSec <= 0.001) {
+        gainParam.setValueAtTime(safeTarget, now);
+      } else {
+        gainParam.setValueAtTime(curVal, now);
+        gainParam.linearRampToValueAtTime(safeTarget, now + fadeSec);
+      }
+    } catch (_) {
+      try { gainParam.value = safeTarget; } catch (__) {}
+    }
+  }
+
+  _fadeHtmlAudioVolume(audioEl, targetVol, fadeSec) {
+    if (!audioEl) return;
+    const target = Math.max(0.0, Math.min(1.0, Number(targetVol) || 0.0));
+    if (audioEl._muteFadeRafId) {
+      try { cancelAnimationFrame(audioEl._muteFadeRafId); } catch (_) {}
+      audioEl._muteFadeRafId = null;
+    }
+    const durMs = Math.round((Number(fadeSec) || 0) * 1000);
+    if (durMs <= 16 || typeof requestAnimationFrame !== "function") {
+      try { audioEl.volume = target; } catch (_) {}
+      return;
+    }
+    const startVol = Math.max(0.0, Math.min(1.0, Number(audioEl.volume) || 0.0));
+    if (Math.abs(startVol - target) < 0.001) {
+      try { audioEl.volume = target; } catch (_) {}
+      return;
+    }
+    const startTs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const step = (ts) => {
+      const nowTs = (typeof ts === "number" ? ts : (typeof performance !== "undefined" ? performance.now() : Date.now()));
+      const p = Math.max(0.0, Math.min(1.0, (nowTs - startTs) / durMs));
+      const nextVal = startVol + (target - startVol) * p;
+      try { audioEl.volume = Math.max(0.0, Math.min(1.0, nextVal)); } catch (_) {}
+      if (p < 1.0) {
+        audioEl._muteFadeRafId = requestAnimationFrame(step);
+      } else {
+        audioEl._muteFadeRafId = null;
+      }
+    };
+    audioEl._muteFadeRafId = requestAnimationFrame(step);
   }
 
   initSync(existingAudioContext = null) {
@@ -984,7 +1190,7 @@ class DMRAudioPlayer {
     }
     this.workletInitPromise = (async () => {
       try {
-        await this.audioCtx.audioWorklet.addModule(`/static/js/worklets/dmr-audio-processor.js?v=2.9.792`);
+        await this.audioCtx.audioWorklet.addModule(`/static/js/worklets/dmr-audio-processor.js?v=2.9.803`);
         this.workletNode = new AudioWorkletNode(this.audioCtx, "dmr-audio-processor", {
           numberOfInputs: 0,
           numberOfOutputs: 1,
@@ -1024,6 +1230,11 @@ class DMRAudioPlayer {
     if (!this.useWorklet || !this.workletNode) return;
     try {
       this.workletNode.port.postMessage({
+        type: "set_mute_fade",
+        enabled: this.muteFadeEnabled,
+        durationSec: this.muteFadeDuration
+      });
+      this.workletNode.port.postMessage({
         type: "set_pre_gain",
         db: this.preGainDb
       });
@@ -1039,9 +1250,13 @@ class DMRAudioPlayer {
       });
       this.workletNode.port.postMessage({
         type: "set_global_mute",
-        muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
+        muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted),
+        immediate: true
       });
       this.channels.forEach((channel, hid) => {
+        const singleMuted = this._isSingleAudioMutedFor(hid);
+        channel.setSingleAudioMuted(singleMuted, { immediate: true });
+        this._singleAudioMutedMap.set(hid, singleMuted);
         this.workletNode.port.postMessage({
           type: "set_channel_volume",
           hotspotId: hid,
@@ -1050,7 +1265,14 @@ class DMRAudioPlayer {
         this.workletNode.port.postMessage({
           type: "set_channel_mute",
           hotspotId: hid,
-          muted: channel.isMuted
+          muted: channel.isMuted,
+          immediate: true
+        });
+        this.workletNode.port.postMessage({
+          type: "set_single_audio_mute",
+          hotspotId: hid,
+          muted: singleMuted,
+          immediate: true
         });
         for (const slot of [1, 2]) {
           const slotObj = channel.slots && channel.slots[slot];
@@ -1059,7 +1281,8 @@ class DMRAudioPlayer {
               type: "set_slot_mute",
               hotspotId: hid,
               slot: slot,
-              muted: slotObj.isMuted
+              muted: slotObj.isMuted,
+              immediate: true
             });
             const pan = slotObj.panMode || "LR";
             this.workletNode.port.postMessage({
@@ -1105,10 +1328,19 @@ class DMRAudioPlayer {
       this.ensureInitialized();
       const dest = this.rxInputBus || this.masterLimiter || (this.audioCtx ? this.audioCtx.destination : null);
       ch = new HotspotAudioChannel(hid, this.audioCtx, dest, this);
+      // Synchronize initial hotspot-level mute & single-hotspot-audio mute immediately
+      const initHsMuted = (typeof window !== "undefined" && typeof window.isHotspotAudioMuted === "function")
+        ? Boolean(window.isHotspotAudioMuted(hid))
+        : false;
+      ch.setMuted(initHsMuted, { immediate: true });
+      const initSingleMuted = this._isSingleAudioMutedFor(hid);
+      ch.setSingleAudioMuted(initSingleMuted, { immediate: true });
+      this._singleAudioMutedMap.set(hid, initSingleMuted);
+
       // Synchronize initial mute state for both slots from getHotspotMute / localStorage
       if (typeof window !== "undefined" && typeof window.getHotspotMute === "function") {
-        ch.setSlotMute(1, window.getHotspotMute(hid, 1));
-        ch.setSlotMute(2, window.getHotspotMute(hid, 2));
+        ch.setSlotMute(1, window.getHotspotMute(hid, 1), { immediate: true });
+        ch.setSlotMute(2, window.getHotspotMute(hid, 2), { immediate: true });
       } else if (typeof localStorage !== "undefined") {
         const currentHotspots = (typeof window !== "undefined" && window.currentHotspots) || [];
         const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
@@ -1116,8 +1348,8 @@ class DMRAudioPlayer {
         const isPrimary = hasRealDefault ? (hid === "default") : (hid === "default" || hid === primaryId);
         const m1 = localStorage.getItem(`proxdmr_mute_${hid}_ts1`) === "true" || (isPrimary && localStorage.getItem("proxdmr_mute_default_ts1") === "true");
         const m2 = localStorage.getItem(`proxdmr_mute_${hid}_ts2`) === "true" || (isPrimary && localStorage.getItem("proxdmr_mute_default_ts2") === "true");
-        ch.setSlotMute(1, m1);
-        ch.setSlotMute(2, m2);
+        ch.setSlotMute(1, m1, { immediate: true });
+        ch.setSlotMute(2, m2, { immediate: true });
       }
       // Synchronize initial volume from getHotspotVolume / localStorage
       if (typeof window !== "undefined" && typeof window.getHotspotVolume === "function") {
@@ -1160,19 +1392,28 @@ class DMRAudioPlayer {
           this.workletNode.port.postMessage({
             type: "set_channel_mute",
             hotspotId: hid,
-            muted: ch.isMuted
+            muted: ch.isMuted,
+            immediate: true
+          });
+          this.workletNode.port.postMessage({
+            type: "set_single_audio_mute",
+            hotspotId: hid,
+            muted: initSingleMuted,
+            immediate: true
           });
           this.workletNode.port.postMessage({
             type: "set_slot_mute",
             hotspotId: hid,
             slot: 1,
-            muted: ch.isSlotMuted(1)
+            muted: ch.isSlotMuted(1),
+            immediate: true
           });
           this.workletNode.port.postMessage({
             type: "set_slot_mute",
             hotspotId: hid,
             slot: 2,
-            muted: ch.isSlotMuted(2)
+            muted: ch.isSlotMuted(2),
+            immediate: true
           });
           this.workletNode.port.postMessage({
             type: "set_slot_pan",
@@ -1323,17 +1564,19 @@ class DMRAudioPlayer {
     if (this.audioCtx.state === "suspended") {
       this.audioCtx.resume().catch(() => {});
     }
-    if (this.globalMuted || this.pttMuted || this.soloMuted) return;
+    const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    if ((this.globalMuted || this.pttMuted) && nowMs >= (this._masterFadeOutUntilMs || 0)) return;
+    if (this.soloMuted && nowMs >= (this._soloFadeOutUntilMs || 0)) return;
+
     const hid = (hotspotId !== undefined && hotspotId !== null && hotspotId !== "") ? String(hotspotId) : "default";
     const s = parseInt(slot, 10) || 1;
 
-    // Check hotspot channel mute before sending
-    if (this.isHotspotMuted(hid)) return;
+    // Check hotspot channel mute (allow feeding during smooth fade-out tail)
+    if (this.isHotspotMuted(hid) && nowMs >= (this._channelFadeOutUntilMs.get(hid) || 0)) return;
 
-    // Check single hotspot audio only mode (only active hotspot is allowed to output sound)
-    if (typeof window !== "undefined" && typeof window.isSingleHotspotAudioEnabled === "function" && window.isSingleHotspotAudioEnabled()) {
-      const activeHid = String(window.activeHotspotId || ((window.currentHotspots && window.currentHotspots[0]) ? window.currentHotspots[0].id : "default"));
-      if (hid !== activeHid) {
+    // Check single hotspot audio mode (allow feeding during smooth fade-out tail)
+    if (this._isSingleAudioMutedFor(hid)) {
+      if (nowMs >= (this._singleFadeOutUntilMs.get(hid) || 0)) {
         return;
       }
     }
@@ -1343,7 +1586,7 @@ class DMRAudioPlayer {
         // Ensure channel and its slot mute/volume state are initialized and synced to the worklet
         this.getOrCreateChannel(hid);
         // Zero-copy transfer of raw PCM buffer to dedicated real-time audio thread
-        // (muted slots stay warm in the worklet ring buffer at gain=0.0 for instant 3ms TS switching)
+        // (muted slots stay warm in the worklet ring buffer at gain=0.0 for smooth mute/unmute & TS switching)
         this.workletNode.port.postMessage(
           { type: "feed", hotspotId: hid, slot: s, buffer: arrayBuffer },
           [arrayBuffer]
@@ -1354,9 +1597,10 @@ class DMRAudioPlayer {
       }
     }
 
-    if (this.isSlotMuted(hid, s)) return;
     const ch = this.getOrCreateChannel(hid);
-    if (ch.isMuted || ch.isSlotMuted(s)) return;
+    if (!ch.isFeedAllowed()) return;
+    const slotObj = ch.slots && ch.slots[s];
+    if (!slotObj || !slotObj.isFeedAllowed()) return;
     ch.feed(arrayBuffer, s);
   }
 
@@ -1564,6 +1808,8 @@ class DMRAudioPlayer {
     const handle = {
       source,
       gainNode: ttsGain,
+      nominalGain: 0.40,
+      _lastSyncedMuted: Boolean(isSlotMuted || isChannelMuted),
       hotspotId: hid,
       slot: s,
       bypassSlotMute,
@@ -1722,19 +1968,73 @@ class DMRAudioPlayer {
     });
   }
 
+  _isSingleAudioMutedFor(hotspotId, activeHidOverride = null) {
+    if (typeof window === "undefined" || typeof window.isSingleHotspotAudioEnabled !== "function" || !window.isSingleHotspotAudioEnabled()) {
+      return false;
+    }
+    const hid = String(hotspotId || "default");
+    const currentHotspots = window.currentHotspots || [];
+    const hasRealDefault = Array.isArray(currentHotspots) && currentHotspots.some(h => h && String(h.id) === "default");
+    const primaryId = (currentHotspots[0] && String(currentHotspots[0].id)) || "default";
+    const activeHid = String(activeHidOverride || window.activeHotspotId || primaryId || "default");
+    if (hid === activeHid) return false;
+    if (!hasRealDefault) {
+      const hidIsPrimary = (hid === "default" || hid === primaryId);
+      const activeIsPrimary = (activeHid === "default" || activeHid === primaryId);
+      if (hidIsPrimary && activeIsPrimary) return false;
+    }
+    return true;
+  }
+
+  syncSingleHotspotAudioMute(activeHidOverride = null) {
+    const allHids = this.getAllHotspotIds();
+    const fadeSec = this.getMuteFadeSec();
+    const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    allHids.forEach(hid => {
+      const shouldMute = this._isSingleAudioMutedFor(hid, activeHidOverride);
+      const prevMuted = this._singleAudioMutedMap.has(hid) ? this._singleAudioMutedMap.get(hid) : false;
+      this._singleAudioMutedMap.set(hid, shouldMute);
+      if (shouldMute && !prevMuted) {
+        this._singleFadeOutUntilMs.set(hid, nowMs + Math.ceil(fadeSec * 1000) + 80);
+      } else if (!shouldMute) {
+        this._singleFadeOutUntilMs.delete(hid);
+      }
+      if (this.useWorklet && this.workletNode) {
+        try {
+          this.workletNode.port.postMessage({
+            type: "set_single_audio_mute",
+            hotspotId: hid,
+            muted: shouldMute
+          });
+        } catch (_) {}
+      }
+      const ch = this.channels.get(hid);
+      if (ch) ch.setSingleAudioMuted(shouldMute);
+    });
+  }
+
   setHotspotMute(hotspotId, muted) {
     const hid = String(hotspotId || "default");
+    const isMuted = Boolean(muted);
+    const ch = this.getOrCreateChannel(hotspotId);
+    const prevMuted = Boolean(ch && ch.isMuted);
+    if (isMuted && !prevMuted) {
+      const fadeSec = this.getMuteFadeSec();
+      const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+      this._channelFadeOutUntilMs.set(hid, nowMs + Math.ceil(fadeSec * 1000) + 80);
+    } else if (!isMuted) {
+      this._channelFadeOutUntilMs.delete(hid);
+    }
     if (this.useWorklet && this.workletNode) {
       try {
         this.workletNode.port.postMessage({
           type: "set_channel_mute",
           hotspotId: hid,
-          muted: Boolean(muted)
+          muted: isMuted
         });
       } catch (_) {}
     }
-    const ch = this.getOrCreateChannel(hotspotId);
-    ch.setMuted(muted);
+    if (ch) ch.setMuted(isMuted);
   }
 
   isHotspotMuted(hotspotId) {
@@ -1743,33 +2043,95 @@ class DMRAudioPlayer {
     return ch ? ch.isMuted : false;
   }
 
-  _updateMasterGain() {
-    const isMuted = this.globalMuted || this.pttMuted;
-    if (this.audioCtx && this.masterGainNode) {
-      const now = this.audioCtx.currentTime;
-      const target = isMuted ? 0.0 : this.masterVolume;
-      this.masterGainNode.gain.cancelScheduledValues(now);
-      this.masterGainNode.gain.setTargetAtTime(target, now, 0.015);
+  _updateMasterGain(isMuteToggle = false, resetAfterFade = false) {
+    const isMuted = Boolean(this.globalMuted || this.pttMuted);
+    const prevMuted = Boolean(this._masterMutedState);
+    const muteChanged = (isMuted !== prevMuted);
+    this._masterMutedState = isMuted;
+
+    if (isMuteToggle || muteChanged) {
+      const fadeSec = this.getMuteFadeSec();
+      const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+      if (this._masterPostMuteTimer) {
+        clearTimeout(this._masterPostMuteTimer);
+        this._masterPostMuteTimer = null;
+      }
+
+      if (isMuted) {
+        this._masterFadeInUntilMs = 0;
+        const tailMs = Math.ceil(fadeSec * 1000);
+        this._masterFadeOutUntilMs = (fadeSec <= 0.01) ? 0 : (nowMs + tailMs + 80);
+
+        if (this.audioCtx && this.masterGainNode) {
+          this._rampGainParam(this.masterGainNode.gain, 0.0, fadeSec, this.audioCtx);
+        }
+
+        const finalizeMasterMute = () => {
+          this._masterPostMuteTimer = null;
+          if (!(this.globalMuted || this.pttMuted)) return;
+          this._masterFadeOutUntilMs = 0;
+          if (this.useWorklet && this.workletNode) {
+            try {
+              this.workletNode.port.postMessage({
+                type: "set_global_mute",
+                muted: true,
+                immediate: true
+              });
+              if (resetAfterFade || this.pttMuted) {
+                this.workletNode.port.postMessage({ type: "reset" });
+              }
+            } catch (_) {}
+          }
+          if (resetAfterFade || this.pttMuted) {
+            this.channels.forEach(ch => ch.reset());
+          }
+        };
+
+        if (fadeSec <= 0.01) {
+          finalizeMasterMute();
+        } else {
+          this._masterPostMuteTimer = setTimeout(finalizeMasterMute, tailMs + 60);
+        }
+      } else {
+        this._masterFadeOutUntilMs = 0;
+        this._masterFadeInUntilMs = (fadeSec <= 0.01) ? 0 : (nowMs + Math.ceil(fadeSec * 1000));
+
+        if (!this.soloMuted && this.useWorklet && this.workletNode) {
+          try {
+            this.workletNode.port.postMessage({
+              type: "set_global_mute",
+              muted: false,
+              immediate: true
+            });
+          } catch (_) {}
+        }
+        if (this.audioCtx && this.masterGainNode) {
+          this._rampGainParam(this.masterGainNode.gain, this.masterVolume, fadeSec, this.audioCtx);
+        }
+      }
+      return;
+    }
+
+    // Normal master volume slider adjustment (not a mute transition)
+    if (!isMuted && this.audioCtx && this.masterGainNode) {
+      const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+      const remFadeSec = Math.max(0, ((this._masterFadeInUntilMs || 0) - nowMs) / 1000.0);
+      if (remFadeSec > 0.02) {
+        this._rampGainParam(this.masterGainNode.gain, this.masterVolume, remFadeSec, this.audioCtx);
+      } else {
+        const now = this.audioCtx.currentTime;
+        this.masterGainNode.gain.cancelScheduledValues(now);
+        this.masterGainNode.gain.setTargetAtTime(this.masterVolume, now, 0.015);
+      }
     }
   }
 
   setPttMuted(muted) {
-    this.pttMuted = Boolean(muted);
-    this._updateMasterGain();
-    if (this.useWorklet && this.workletNode) {
-      try {
-        this.workletNode.port.postMessage({
-          type: "set_global_mute",
-          muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
-        });
-        if (this.pttMuted) {
-          this.workletNode.port.postMessage({ type: "reset" });
-        }
-      } catch (_) {}
-    }
-    if (this.pttMuted) {
-      this.channels.forEach(ch => ch.reset());
-    }
+    const nextMuted = Boolean(muted);
+    if (this.pttMuted === nextMuted) return;
+    this.pttMuted = nextMuted;
+    this._updateMasterGain(true, nextMuted);
   }
 
   isPttMuted() {
@@ -1777,26 +2139,60 @@ class DMRAudioPlayer {
   }
 
   setSoloMuted(muted) {
-    this.soloMuted = Boolean(muted);
-    if (this.audioCtx && this.rxInputBus) {
-      const now = this.audioCtx.currentTime;
-      const targetRx = this.soloMuted ? 0.0 : 1.0;
-      this.rxInputBus.gain.cancelScheduledValues(now);
-      this.rxInputBus.gain.setTargetAtTime(targetRx, now, 0.015);
+    const nextMuted = Boolean(muted);
+    if (this.soloMuted === nextMuted) return;
+    this.soloMuted = nextMuted;
+    const fadeSec = this.getMuteFadeSec();
+    const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+    if (this._soloPostMuteTimer) {
+      clearTimeout(this._soloPostMuteTimer);
+      this._soloPostMuteTimer = null;
     }
-    if (this.useWorklet && this.workletNode) {
-      try {
-        this.workletNode.port.postMessage({
-          type: "set_global_mute",
-          muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
-        });
-        if (this.soloMuted) {
-          this.workletNode.port.postMessage({ type: "reset" });
-        }
-      } catch (_) {}
-    }
+
     if (this.soloMuted) {
-      this.channels.forEach(ch => ch.reset());
+      const tailMs = Math.ceil(fadeSec * 1000);
+      this._soloFadeOutUntilMs = (fadeSec <= 0.01) ? 0 : (nowMs + tailMs + 80);
+      if (this.audioCtx && this.rxInputBus) {
+        this._rampGainParam(this.rxInputBus.gain, 0.0, fadeSec, this.audioCtx);
+      }
+
+      const finalizeSoloMute = () => {
+        this._soloPostMuteTimer = null;
+        if (!this.soloMuted) return;
+        this._soloFadeOutUntilMs = 0;
+        if (this.useWorklet && this.workletNode) {
+          try {
+            this.workletNode.port.postMessage({
+              type: "set_global_mute",
+              muted: true,
+              immediate: true
+            });
+            this.workletNode.port.postMessage({ type: "reset" });
+          } catch (_) {}
+        }
+        this.channels.forEach(ch => ch.reset());
+      };
+
+      if (fadeSec <= 0.01) {
+        finalizeSoloMute();
+      } else {
+        this._soloPostMuteTimer = setTimeout(finalizeSoloMute, tailMs + 60);
+      }
+    } else {
+      this._soloFadeOutUntilMs = 0;
+      if (!(this.globalMuted || this.pttMuted) && this.useWorklet && this.workletNode) {
+        try {
+          this.workletNode.port.postMessage({
+            type: "set_global_mute",
+            muted: false,
+            immediate: true
+          });
+        } catch (_) {}
+      }
+      if (this.audioCtx && this.rxInputBus) {
+        this._rampGainParam(this.rxInputBus.gain, 1.0, fadeSec, this.audioCtx);
+      }
     }
   }
 
@@ -1805,16 +2201,10 @@ class DMRAudioPlayer {
   }
 
   setGlobalMute(muted) {
-    this.globalMuted = Boolean(muted);
-    this._updateMasterGain();
-    if (this.useWorklet && this.workletNode) {
-      try {
-        this.workletNode.port.postMessage({
-          type: "set_global_mute",
-          muted: Boolean(this.globalMuted || this.pttMuted || this.soloMuted)
-        });
-      } catch (_) {}
-    }
+    const nextMuted = Boolean(muted);
+    if (this.globalMuted === nextMuted) return;
+    this.globalMuted = nextMuted;
+    this._updateMasterGain(true, false);
   }
 
   isGlobalMuted() {
@@ -1870,7 +2260,7 @@ class DMRAudioPlayer {
     const raw = isNaN(parsed) ? 1.0 : parsed;
     const normalized = raw > 2.5 ? (raw / 100.0) : raw;
     this.masterVolume = Math.max(0.0, Math.min(2.5, normalized));
-    this._updateMasterGain();
+    this._updateMasterGain(false, false);
   }
 
   attachRecordingsAudio(audioElement) {

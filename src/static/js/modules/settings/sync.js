@@ -5,7 +5,7 @@
  */
 
 import { resolveHotspotId } from "../network/ping-sparklines.js?v=2.9.712";
-import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.787";
+import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.807";
 
 let clientSettingsSyncTimer = null;
 let lastClientSettingsPushAt = 0;

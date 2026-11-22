@@ -10,6 +10,7 @@ config/jwt_secret.key
 config/cert.pem
 config/key.pem
 config/recordings/*.wav
+config/supertonic3/
 data/*.db*
 src/data/*.db*
 *.log

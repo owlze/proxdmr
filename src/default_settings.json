@@ -11,6 +11,8 @@
   "haptic_duration": 45,
   "simultaneous_slots": true,
   "check_mic_on_tx": false,
+  "mute_fade_enabled": true,
+  "mute_fade_duration": 0.3,
   "theme": "dark",
   "bg_type": "color",
   "bg_color": "#04170c",

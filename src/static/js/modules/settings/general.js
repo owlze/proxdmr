@@ -19,8 +19,13 @@ import {
   setHotspotVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   isSingleHotspotAudioEnabled,
-  setSingleHotspotAudioEnabled
-} from "../audio/volume-mute.js?v=2.9.801";
+  setSingleHotspotAudioEnabled,
+  isMuteFadeEnabled,
+  setMuteFadeEnabled,
+  getMuteFadeDuration,
+  setMuteFadeDuration,
+  applyMuteFadeUIAndEngine
+} from "../audio/volume-mute.js?v=2.9.809";
 import {
   isCheckMicOnTxEnabled,
   setCheckMicOnTxEnabled
@@ -44,6 +49,33 @@ export function initGeneralSettings() {
       setSingleHotspotAudioEnabled(optSingleHsAudio.checked, true);
     });
   }
+  const optMuteFadeEn = document.getElementById("optMuteFadeEnabled");
+  if (optMuteFadeEn && !optMuteFadeEn._wired) {
+    optMuteFadeEn._wired = true;
+    optMuteFadeEn.checked = isMuteFadeEnabled();
+    optMuteFadeEn.addEventListener("change", () => {
+      setMuteFadeEnabled(optMuteFadeEn.checked, true);
+    });
+  }
+  const optMuteFadeDur = document.getElementById("optMuteFadeDuration");
+  if (optMuteFadeDur && !optMuteFadeDur._wired) {
+    optMuteFadeDur._wired = true;
+    optMuteFadeDur.value = getMuteFadeDuration().toFixed(1);
+    optMuteFadeDur.addEventListener("input", () => {
+      const parsed = parseFloat(String(optMuteFadeDur.value || "").replace(",", "."));
+      if (!isNaN(parsed) && parsed >= 0.1 && parsed <= 2.0) {
+        setMuteFadeDuration(parsed, false);
+      }
+    });
+    optMuteFadeDur.addEventListener("change", () => {
+      setMuteFadeDuration(optMuteFadeDur.value, true);
+      optMuteFadeDur.value = getMuteFadeDuration().toFixed(1);
+    });
+    optMuteFadeDur.addEventListener("blur", () => {
+      optMuteFadeDur.value = getMuteFadeDuration().toFixed(1);
+    });
+  }
+  applyMuteFadeUIAndEngine();
   const btnSave = document.getElementById("btnSaveGeneralSettings");
   if (!btnSave || btnSave._wired) return;
   btnSave._wired = true;
@@ -61,6 +93,8 @@ export function initGeneralSettings() {
 
     const optCheckMic = document.getElementById("optCheckMicOnTx");
     const optSingleHsAudio = document.getElementById("optSingleHotspotAudio");
+    const optMuteFadeEnEl = document.getElementById("optMuteFadeEnabled");
+    const optMuteFadeDurEl = document.getElementById("optMuteFadeDuration");
 
     const lang = optLang ? optLang.value : undefined;
     const muteOnPtt = optMute ? optMute.checked : undefined;
@@ -68,6 +102,11 @@ export function initGeneralSettings() {
     const syncSys = optSyncSys ? optSyncSys.checked : undefined;
     const checkMicOnTx = optCheckMic ? optCheckMic.checked : undefined;
     const singleHsAudio = optSingleHsAudio ? optSingleHsAudio.checked : undefined;
+    const muteFadeEnabled = optMuteFadeEnEl ? optMuteFadeEnEl.checked : undefined;
+    const muteFadeDurationRaw = optMuteFadeDurEl ? parseFloat(String(optMuteFadeDurEl.value || "").replace(",", ".")) : undefined;
+    const muteFadeDuration = (muteFadeDurationRaw !== undefined && !isNaN(muteFadeDurationRaw))
+      ? Math.round(Math.max(0.1, Math.min(2.0, muteFadeDurationRaw)) * 10) / 10
+      : undefined;
     const hapticFeedback = optHaptic ? optHaptic.checked : undefined;
     const hapticDuration = optHapticDur ? parseInt(optHapticDur.value, 10) : undefined;
     const hamUser = optHamUser ? optHamUser.value.trim() : undefined;
@@ -80,6 +119,11 @@ export function initGeneralSettings() {
     if (syncSys !== undefined) setSystemVolumeSyncEnabled(syncSys, false);
     if (checkMicOnTx !== undefined) setCheckMicOnTxEnabled(checkMicOnTx, false);
     if (singleHsAudio !== undefined) setSingleHotspotAudioEnabled(singleHsAudio, false);
+    if (muteFadeEnabled !== undefined) setMuteFadeEnabled(muteFadeEnabled, false);
+    if (muteFadeDuration !== undefined) {
+      setMuteFadeDuration(muteFadeDuration, false);
+      if (optMuteFadeDurEl) optMuteFadeDurEl.value = muteFadeDuration.toFixed(1);
+    }
     if (hapticFeedback !== undefined) setHapticEnabled(hapticFeedback, false);
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) setHapticDuration(hapticDuration, false);
     if (disableUpdates !== undefined) window.DISABLE_UPDATE_NOTIFICATIONS = disableUpdates;
@@ -94,6 +138,8 @@ export function initGeneralSettings() {
     if (syncSys !== undefined) payload.sync_system_volume = syncSys;
     if (checkMicOnTx !== undefined) payload.check_mic_on_tx = checkMicOnTx;
     if (singleHsAudio !== undefined) payload.single_hotspot_audio = singleHsAudio;
+    if (muteFadeEnabled !== undefined) payload.mute_fade_enabled = muteFadeEnabled;
+    if (muteFadeDuration !== undefined) payload.mute_fade_duration = muteFadeDuration;
     if (hapticFeedback !== undefined) payload.haptic_feedback = hapticFeedback;
     if (hapticDuration !== undefined && !isNaN(hapticDuration)) payload.haptic_duration = hapticDuration;
     if (hamUser !== undefined) payload.hamqth_username = hamUser;
@@ -121,6 +167,12 @@ export function initGeneralSettings() {
         }
         if (singleHsAudio !== undefined) {
           try { window.ws.send(JSON.stringify({ type: "set_single_hotspot_audio", enabled: singleHsAudio })); } catch (_) {}
+        }
+        if (muteFadeEnabled !== undefined) {
+          try { window.ws.send(JSON.stringify({ type: "set_mute_fade_enabled", enabled: muteFadeEnabled })); } catch (_) {}
+        }
+        if (muteFadeDuration !== undefined) {
+          try { window.ws.send(JSON.stringify({ type: "set_mute_fade_duration", duration: muteFadeDuration })); } catch (_) {}
         }
         if (lang !== undefined) {
           try { window.ws.send(JSON.stringify({ type: "set_language", language: lang })); } catch (_) {}

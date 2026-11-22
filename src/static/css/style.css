@@ -9613,6 +9613,7 @@ body.is-apk-mode .log-hotspot-tabs {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-anchor: none;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -9620,6 +9621,19 @@ body.is-apk-mode .log-hotspot-tabs {
   border-radius: var(--app-border-radius, 0px);
   background: transparent;
   min-width: 320px;
+}
+
+.log-virtual-spacer {
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.log-virtual-viewport {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 100%;
 }
 
 .live-activity-list::-webkit-scrollbar {
@@ -10068,14 +10082,17 @@ body.is-apk-mode .log-hotspot-tabs {
   user-select: none;
 }
 
-/* Call Row (Table item) - 5 Columns, 2 Lines, Compact height */
+/* Call Row (Table item) - 5 Columns, 2 Lines, Compact uniform height for O(1) virtual scroll */
 .live-call-row {
   display: grid;
   grid-template-columns: minmax(120px, 150px) minmax(70px, 1fr) 42px 20px 84px;
   align-items: center;
   gap: 5px;
   padding: 1.5px 6px;
-  min-height: 29px;
+  height: 2.2rem;
+  min-height: 32px;
+  flex-shrink: 0;
+  contain: layout style;
   font-size: 0.70rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.035);
   background: var(--bg-monitor-table, #0f1512);
@@ -26495,6 +26512,193 @@ html.is-apk-mode #myContactsModal .contacts-modal-content {
     background: rgba(245, 50, 50, 1);
     box-shadow: 0 0 16px rgba(245, 50, 50, 0.85), inset 0 0 5px rgba(255, 255, 255, 0.35);
   }
+}
+
+/* Header Server CPU Load Gauge Indicator (28x28 button left of [R]) */
+.header-cpu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  border-radius: var(--app-border-radius, 0px);
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+}
+
+.header-cpu-btn:hover {
+  background: rgba(30, 41, 59, 0.78);
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+.header-cpu-btn:active {
+  transform: scale(0.92);
+}
+
+.header-cpu-btn .cpu-gauge-svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.header-cpu-btn .cpu-gauge-track {
+  stroke: rgba(148, 163, 184, 0.24);
+}
+
+.header-cpu-btn .cpu-gauge-arc {
+  transition: stroke-dashoffset 0.45s ease, stroke 0.25s ease;
+}
+
+.header-cpu-btn .cpu-chip-pins {
+  stroke: rgba(203, 213, 225, 0.72);
+  transition: stroke 0.25s ease;
+}
+
+.header-cpu-btn .cpu-chip-body {
+  fill: rgba(15, 23, 42, 0.85);
+  stroke: rgba(226, 232, 240, 0.85);
+  transition: stroke 0.25s ease, fill 0.25s ease;
+}
+
+.header-cpu-btn .cpu-chip-core {
+  transition: fill 0.25s ease;
+}
+
+/* Zone 1: <= 75% (Green) */
+.header-cpu-btn.cpu-low {
+  border-color: rgba(34, 197, 94, 0.38);
+}
+.header-cpu-btn.cpu-low .cpu-gauge-arc {
+  stroke: #22c55e;
+  filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.55));
+}
+.header-cpu-btn.cpu-low .cpu-chip-core {
+  fill: #22c55e;
+}
+
+/* Zone 2: 76-90% (Yellow) */
+.header-cpu-btn.cpu-warn {
+  border-color: rgba(250, 204, 21, 0.52);
+  background: rgba(66, 52, 10, 0.42);
+}
+.header-cpu-btn.cpu-warn .cpu-gauge-arc {
+  stroke: #facc15;
+  filter: drop-shadow(0 0 2.5px rgba(250, 204, 21, 0.65));
+}
+.header-cpu-btn.cpu-warn .cpu-chip-body {
+  stroke: #fde047;
+}
+.header-cpu-btn.cpu-warn .cpu-chip-pins {
+  stroke: rgba(253, 224, 71, 0.8);
+}
+.header-cpu-btn.cpu-warn .cpu-chip-core {
+  fill: #facc15;
+}
+
+/* Zone 3: 91%+ (Red + subtle pulse) */
+.header-cpu-btn.cpu-crit {
+  border-color: rgba(239, 68, 68, 0.75);
+  background: rgba(127, 29, 29, 0.52);
+  animation: cpu-crit-pulse 1.4s infinite ease-in-out;
+}
+.header-cpu-btn.cpu-crit .cpu-gauge-arc {
+  stroke: #ef4444;
+  filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.8));
+}
+.header-cpu-btn.cpu-crit .cpu-chip-body {
+  stroke: #fca5a5;
+}
+.header-cpu-btn.cpu-crit .cpu-chip-pins {
+  stroke: rgba(252, 165, 165, 0.85);
+}
+.header-cpu-btn.cpu-crit .cpu-chip-core {
+  fill: #ef4444;
+}
+
+@keyframes cpu-crit-pulse {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.45), inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.85), inset 0 0 4px rgba(254, 202, 202, 0.3);
+  }
+}
+
+/* Light Theme overrides for CPU Gauge */
+[data-theme="light"] .header-cpu-btn {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .header-cpu-btn:hover {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.32);
+}
+[data-theme="light"] .header-cpu-btn .cpu-gauge-track {
+  stroke: rgba(15, 23, 42, 0.14);
+}
+[data-theme="light"] .header-cpu-btn .cpu-chip-body {
+  fill: #f8fafc;
+  stroke: #334155;
+}
+[data-theme="light"] .header-cpu-btn .cpu-chip-pins {
+  stroke: #64748b;
+}
+[data-theme="light"] .header-cpu-btn.cpu-low {
+  border-color: rgba(22, 163, 74, 0.42);
+}
+[data-theme="light"] .header-cpu-btn.cpu-low .cpu-gauge-arc {
+  stroke: #16a34a;
+  filter: none;
+}
+[data-theme="light"] .header-cpu-btn.cpu-low .cpu-chip-core {
+  fill: #16a34a;
+}
+[data-theme="light"] .header-cpu-btn.cpu-warn {
+  background: rgba(254, 243, 199, 0.85);
+  border-color: rgba(217, 119, 6, 0.55);
+}
+[data-theme="light"] .header-cpu-btn.cpu-warn .cpu-gauge-arc {
+  stroke: #d97706;
+  filter: none;
+}
+[data-theme="light"] .header-cpu-btn.cpu-warn .cpu-chip-body {
+  stroke: #b45309;
+}
+[data-theme="light"] .header-cpu-btn.cpu-warn .cpu-chip-pins {
+  stroke: #b45309;
+}
+[data-theme="light"] .header-cpu-btn.cpu-warn .cpu-chip-core {
+  fill: #d97706;
+}
+[data-theme="light"] .header-cpu-btn.cpu-crit {
+  background: rgba(254, 226, 226, 0.9);
+  border-color: rgba(220, 38, 38, 0.65);
+}
+[data-theme="light"] .header-cpu-btn.cpu-crit .cpu-gauge-arc {
+  stroke: #dc2626;
+  filter: none;
+}
+[data-theme="light"] .header-cpu-btn.cpu-crit .cpu-chip-body {
+  stroke: #b91c1c;
+}
+[data-theme="light"] .header-cpu-btn.cpu-crit .cpu-chip-pins {
+  stroke: #b91c1c;
+}
+[data-theme="light"] .header-cpu-btn.cpu-crit .cpu-chip-core {
+  fill: #dc2626;
 }
 
 /* Log Action Buttons: Tape (Cassette) & Transcript (Scroll) */

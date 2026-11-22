@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.801">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.809">
   <script>
     window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
@@ -598,6 +598,25 @@
               <!-- Hotspot Offline Transcribe Button (t) -->
               <button type="button" id="headerOfflineTranscribeBtn" class="header-transcribe-btn btn-hs-transcribe transcribe-off" data-hotspot-id="default" title="Офлайн-транскрибация записей (Google AI)" aria-label="Офлайн-транскрибация" data-i18n-title="recordings.offline_transcribe_title" data-i18n-aria-label="recordings.offline_transcribe_title" style="display: none;">
                 <span class="transcribe-letter">t</span>
+              </button>
+              <!-- Server CPU Load Gauge Indicator -->
+              <button type="button" class="header-cpu-btn cpu-low" title="Загрузка CPU сервера" aria-label="Загрузка CPU сервера" data-i18n-title="header.cpu_indicator_default" data-i18n-aria-label="header.cpu_indicator_default">
+                <svg class="cpu-gauge-svg" viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">
+                  <circle class="cpu-gauge-track" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" transform="rotate(135 14 14)"></circle>
+                  <circle class="cpu-gauge-arc" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" stroke-dashoffset="52.78" transform="rotate(135 14 14)"></circle>
+                  <g class="cpu-chip-pins" stroke-width="1.25" stroke-linecap="round">
+                    <line x1="12" y1="7.4" x2="12" y2="9.5"></line>
+                    <line x1="16" y1="7.4" x2="16" y2="9.5"></line>
+                    <line x1="12" y1="18.5" x2="12" y2="20.6"></line>
+                    <line x1="16" y1="18.5" x2="16" y2="20.6"></line>
+                    <line x1="7.4" y1="12" x2="9.5" y2="12"></line>
+                    <line x1="7.4" y1="16" x2="9.5" y2="16"></line>
+                    <line x1="18.5" y1="12" x2="20.6" y2="12"></line>
+                    <line x1="18.5" y1="16" x2="20.6" y2="16"></line>
+                  </g>
+                  <rect class="cpu-chip-body" x="9.5" y="9.5" width="9" height="9" rx="1.6" stroke-width="1.3"></rect>
+                  <rect class="cpu-chip-core" x="11.8" y="11.8" width="4.4" height="4.4" rx="0.7"></rect>
+                </svg>
               </button>
               <!-- Hotspot Recording Button (R) -->
               <button type="button" id="headerMasterRecBtn" class="header-rec-btn btn-hs-rec rec-standby" data-hotspot-id="default" title="Автозапись TS1/2: вкл/выкл" aria-label="Автозапись разговора" data-i18n-title="recordings.autorec_title" data-i18n-aria-label="recordings.autorec_title">
@@ -1357,6 +1376,26 @@
           <!-- Hotspot Offline Transcribe Button (t) -->
           <button type="button" class="header-transcribe-btn btn-hs-transcribe transcribe-off" title="Офлайн-транскрибация записей (Google AI)" aria-label="Офлайн-транскрибация" data-i18n-title="recordings.offline_transcribe_title" data-i18n-aria-label="recordings.offline_transcribe_title" style="display: none;">
             <span class="transcribe-letter">t</span>
+          </button>
+
+          <!-- Server CPU Load Gauge Indicator -->
+          <button type="button" class="header-cpu-btn cpu-low" title="Загрузка CPU сервера" aria-label="Загрузка CPU сервера" data-i18n-title="header.cpu_indicator_default" data-i18n-aria-label="header.cpu_indicator_default">
+            <svg class="cpu-gauge-svg" viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">
+              <circle class="cpu-gauge-track" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" transform="rotate(135 14 14)"></circle>
+              <circle class="cpu-gauge-arc" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" stroke-dashoffset="52.78" transform="rotate(135 14 14)"></circle>
+              <g class="cpu-chip-pins" stroke-width="1.25" stroke-linecap="round">
+                <line x1="12" y1="7.4" x2="12" y2="9.5"></line>
+                <line x1="16" y1="7.4" x2="16" y2="9.5"></line>
+                <line x1="12" y1="18.5" x2="12" y2="20.6"></line>
+                <line x1="16" y1="18.5" x2="16" y2="20.6"></line>
+                <line x1="7.4" y1="12" x2="9.5" y2="12"></line>
+                <line x1="7.4" y1="16" x2="9.5" y2="16"></line>
+                <line x1="18.5" y1="12" x2="20.6" y2="12"></line>
+                <line x1="18.5" y1="16" x2="20.6" y2="16"></line>
+              </g>
+              <rect class="cpu-chip-body" x="9.5" y="9.5" width="9" height="9" rx="1.6" stroke-width="1.3"></rect>
+              <rect class="cpu-chip-core" x="11.8" y="11.8" width="4.4" height="4.4" rx="0.7"></rect>
+            </svg>
           </button>
 
           <!-- Hotspot Recording Button (R) -->
@@ -2878,6 +2917,17 @@
           </small>
         </div>
 
+        <!-- Mute Fade Option -->
+        <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px; flex-wrap: wrap;">
+          <label style="cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;">
+            <input type="checkbox" id="optMuteFadeEnabled" {% if mute_fade_enabled is defined and not mute_fade_enabled %}{% else %}checked{% endif %}> <strong data-i18n="general.mute_fade_enabled">Затухание звука</strong>
+          </label>
+          <div id="muteFadeDurationRow" style="display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; margin-left: 8px; transition: opacity 0.2s ease;">
+            <input type="number" id="optMuteFadeDuration" class="form-input" min="0.1" max="2.0" step="0.1" value="{{ '%.1f'|format(mute_fade_duration|default(0.3)) }}" style="width: 72px; padding: 4px 8px; font-size: 0.85rem; text-align: center;">
+            <span style="font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap;" data-i18n="general.mute_fade_unit_sec">сек (0.1 – 2.0)</span>
+          </div>
+        </div>
+
         <!-- BLE PTT (Bluetooth button) — Collapsible Frame (APK only) -->
         <div class="apikeys-frame collapsed" id="blePttPanel" style="display: none; margin-bottom: 8px;">
           <div class="apikeys-frame-header" id="blePttToggle">
@@ -3756,6 +3806,7 @@
                 <select id="optTtsEngine" class="form-input" style="cursor: pointer; width: 100%;">
                   <option value="piper" selected data-i18n="transcriber.tts_engine_piper">🏠 Piper TTS (local)</option>
                   <option value="silero" data-i18n="transcriber.tts_engine_silero">🏠 Silero TTS v5 (local)</option>
+                  <option value="supertonic" data-i18n="transcriber.tts_engine_supertonic">🏠 Supertonic 3 TTS (local)</option>
                   <option value="browser" data-i18n="transcriber.tts_engine_browser">🏠 System TTS (local)</option>
                   <option value="gemini" data-i18n="transcriber.tts_engine_gemini">🌐 Gemini API</option>
                   <option value="groq" data-i18n="transcriber.tts_engine_groq">🌐 Groq Cloud TTS</option>
@@ -3835,6 +3886,13 @@
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.83rem; font-weight: 500; color: var(--text-primary); user-select: none;">
                       <input type="checkbox" id="optTtsSkipShortCallsign" checked>
                       <span data-i18n="transcriber.tts_skip_short_callsign">Не проговаривать Call sign для реплик короче 20 букв</span>
+                    </label>
+                  </div>
+                  <!-- Piper Silero Stress checkbox (visible only for Piper TTS + supported languages) -->
+                  <div class="form-group" id="groupTtsPiperStress" style="margin-bottom: 0; display: none;">
+                    <label data-i18n-title="transcriber.tts_piper_use_stress_title" title="Автоматическая расстановка ударений и омографов (Silero Stress) для русских и украинских голосов Piper" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.83rem; font-weight: 500; color: var(--text-primary); user-select: none;">
+                      <input type="checkbox" id="optTtsPiperUseStress" checked>
+                      <span data-i18n="transcriber.tts_piper_use_stress">Расстановка ударений (Silero Stress)</span>
                     </label>
                   </div>
                   <!-- Speech playback speed slider -->
@@ -5017,8 +5075,8 @@
           <button type="button" class="tg-action-tile tile-direct" id="btnTgActionDirectCall">
             <div class="tile-icon-box">⚡</div>
             <div class="tile-text-box">
-              <div class="tile-title" data-i18n="tg_action.direct_title">Директивный переход</div>
-              <div class="tile-desc" data-i18n="tg_action.direct_desc">Выбрать хотспот, таймслот и привязать к эфиру</div>
+              <div class="tile-title" data-i18n="tg_action.direct_title">Выделенный канал</div>
+              <div class="tile-desc" data-i18n="tg_action.direct_desc">Организовать выделенный постоянный канал на выбранном хотспоте и TS</div>
             </div>
             <span class="tile-chevron">➔</span>
           </button>
@@ -5082,7 +5140,7 @@
         <div class="modal-title-group">
           <div class="modal-title-with-badge">
             <span class="modal-icon">⚡</span>
-            <h3 data-i18n="direct_call.title">Директивный переход</h3>
+            <h3 data-i18n="direct_call.title">Выделенный канал</h3>
           </div>
           <div class="tg-action-target-preview">
             <span class="quick-assign-target-pill" id="directCallPill">TG 2501</span>
@@ -5130,7 +5188,7 @@
       </div>
       <div class="modal-footer direct-call-footer">
         <button type="button" id="btnCancelDirectCall" class="btn-secondary" data-i18n="buttons.cancel">Отмена</button>
-        <button type="button" id="btnApplyDirectCall" class="btn-primary" data-i18n="direct_call.btn_apply">⚡ Применить переход</button>
+        <button type="button" id="btnApplyDirectCall" class="btn-primary" data-i18n="direct_call.btn_apply">⚡ Выделить канал</button>
       </div>
     </div>
   </div>
@@ -6479,8 +6537,8 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.801"></script>
-  <script src="/static/js/audio-player.js?v=2.9.792"></script>
+  <script src="/static/js/i18n.js?v=2.9.809"></script>
+  <script src="/static/js/audio-player.js?v=2.9.803"></script>
   <script src="/static/js/dialog.js?v=2.9.711"></script>
   <script src="/static/js/auth.js?v=2.9.760"></script>
   <style>
@@ -6738,7 +6796,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.711"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.801"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.809"></script>
 </body>
 </html>
 

@@ -1288,6 +1288,7 @@ class GeminiTranscriberService:
         self.tts_mute_others: bool = True
         self.tts_announce_callsign: bool = False
         self.tts_skip_short_callsign: bool = True
+        self.tts_piper_use_stress: bool = True
         self.tts_style: str = "radio"
         self._announced_call_ids: OrderedDict = OrderedDict()
         self._tts_enabled_slots: set = set()
@@ -1320,6 +1321,7 @@ class GeminiTranscriberService:
         tts_mute_others: bool = True,
         tts_announce_callsign: bool = False,
         tts_skip_short_callsign: bool = True,
+        tts_piper_use_stress: bool = True,
         tts_style: str = "radio",
         transcriber_engine: str = "gemini",
         translation_engine: str = "gemini",
@@ -1385,7 +1387,7 @@ class GeminiTranscriberService:
         self.target_lang = target_lang.strip() if target_lang and target_lang.strip() else "ru"
         self.tts_enabled = bool(tts_enabled)
         self.tts_engine = (tts_engine or "gemini").lower().strip()
-        if self.tts_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "silero"):
+        if self.tts_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "silero", "supertonic"):
             self.tts_engine = "gemini"
         default_model = "aura-2-asteria-en" if self.tts_engine == "deepgram" else ("canopylabs/orpheus-v1-english" if self.tts_engine == "groq" else "gemini-3.1-flash-tts-preview")
         self.tts_model = tts_model or default_model
@@ -1398,6 +1400,7 @@ class GeminiTranscriberService:
         self.tts_mute_others = bool(tts_mute_others)
         self.tts_announce_callsign = bool(tts_announce_callsign)
         self.tts_skip_short_callsign = bool(tts_skip_short_callsign)
+        self.tts_piper_use_stress = bool(tts_piper_use_stress)
         self.tts_style = (tts_style or "radio").lower().strip()
 
         if self.tts_engine == "piper":
@@ -2066,24 +2069,28 @@ class GeminiTranscriberService:
         callsign: str = "",
         announce_callsign: bool = False,
         style: Optional[str] = None,
-        raw_phrase: bool = False
+        raw_phrase: bool = False,
+        piper_use_stress: Optional[bool] = None
     ) -> Tuple[Optional[bytes], Optional[str]]:
         """
-        Synthesizes text to speech using Piper TTS or Gemini TTS model.
+        Synthesizes text to speech using Piper, Silero, Supertonic 3, Groq, Deepgram or Gemini TTS model.
         Returns (wav_bytes, error_message).
         """
         effective_lang = (target_lang or self.target_lang or "ru").lower().strip()
         if effective_lang == "none":
             effective_lang = "ru"
         eff_engine = (engine or self.tts_engine or "gemini").lower().strip()
-        if eff_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "silero"):
+        if eff_engine not in ("gemini", "groq", "deepgram", "piper", "browser", "silero", "supertonic"):
             eff_engine = "gemini"
 
         if eff_engine == "piper":
             from piper_service import PiperService
             from callsign_phonetic import get_callsign_announcement, concatenate_wavs
+            from stress_service import StressService
 
             piper_srv = PiperService.get_instance()
+            stress_srv = StressService.get_instance()
+            use_stress = self.tts_piper_use_stress if piper_use_stress is None else bool(piper_use_stress)
             if voice and voice != "auto":
                 v_lang = piper_srv.get_voice_lang(voice)
                 if v_lang and v_lang != effective_lang and piper_srv.is_voice_installed(voice):
@@ -2095,8 +2102,11 @@ class GeminiTranscriberService:
                 return None, _tr("transcriber.piper_not_ready", fallback="Speech model for language '{lang}' is not ready ({reason})", lang=effective_lang.upper(), reason=reason)
 
             if raw_phrase:
+                raw_text = text
+                if use_stress and stress_srv.is_lang_supported(effective_lang):
+                    raw_text = stress_srv.apply_stress_unicode(raw_text, lang=effective_lang)
                 wav_bytes, sample_rate, err = await piper_srv.synthesize_async(
-                    text=text,
+                    text=raw_text,
                     voice_id=voice_id,
                     speed=speed or 0.9,
                     noise_scale=0.7,
@@ -2108,6 +2118,8 @@ class GeminiTranscriberService:
             if announce_callsign and callsign:
                 call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="piper")
                 if call_phrase:
+                    if use_stress and stress_srv.is_lang_supported(effective_lang):
+                        call_phrase = stress_srv.apply_stress_unicode(call_phrase, lang=effective_lang)
                     c_wav, _, _ = await piper_srv.synthesize_async(
                         text=call_phrase,
                         voice_id=voice_id,
@@ -2132,6 +2144,9 @@ class GeminiTranscriberService:
                 if call_announcement_wav:
                     return call_announcement_wav, None
                 return None, _tr("transcriber.empty_tts_filtered", fallback="Empty text for speech synthesis (filtered as foreign language)")
+
+            if use_stress and stress_srv.is_lang_supported(effective_lang):
+                speech_text = stress_srv.apply_stress_unicode(speech_text, lang=effective_lang)
 
             wav_bytes, sample_rate, err = await piper_srv.synthesize_async(
                 text=speech_text,
@@ -2194,6 +2209,81 @@ class GeminiTranscriberService:
             )
             if call_announcement_wav and wav_bytes:
                 comb, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=200)
+                return comb or wav_bytes, err
+            return wav_bytes or call_announcement_wav, err
+
+        if eff_engine == "supertonic":
+            from supertonic_service import SupertonicService
+            from stress_service import StressService
+            from callsign_phonetic import get_callsign_announcement, concatenate_wavs
+
+            st_srv = SupertonicService.get_instance()
+            stress_srv = StressService.get_instance()
+
+            if not st_srv.is_lang_supported(effective_lang):
+                return None, _tr(
+                    "transcriber.supertonic_lang_unsupported",
+                    fallback="⚠️ Language [{lang}] is not supported in Supertonic 3 TTS",
+                    lang=effective_lang.upper()
+                )
+
+            ready, voice_id, reason = st_srv.is_voice_ready_for_lang(effective_lang, voice, gender=gender)
+            if not ready or not voice_id:
+                logger.warning(f"[TRANSCRIBER] Supertonic 3 TTS not ready for language '{effective_lang}': {reason}")
+                return None, _tr(
+                    "transcriber.supertonic_not_ready",
+                    fallback="Supertonic 3 model is not ready ({reason})",
+                    lang=effective_lang.upper(),
+                    reason=reason
+                )
+
+            if raw_phrase:
+                raw_text = (text or "").strip()
+                if stress_srv.is_lang_supported(effective_lang):
+                    raw_text = stress_srv.apply_stress_unicode(raw_text, lang=effective_lang)
+                wav_bytes, _, err = await st_srv.synthesize_async(
+                    text=raw_text,
+                    voice_id=voice_id,
+                    lang=effective_lang,
+                    speed=speed or 0.95
+                )
+                return wav_bytes, err
+
+            call_announcement_wav = None
+            if announce_callsign and callsign:
+                call_phrase = get_callsign_announcement(callsign, lang=effective_lang, engine="piper")
+                if call_phrase:
+                    if stress_srv.is_lang_supported(effective_lang):
+                        call_phrase = stress_srv.apply_stress_unicode(call_phrase, lang=effective_lang)
+                    c_wav, _, _ = await st_srv.synthesize_async(
+                        text=call_phrase,
+                        voice_id=voice_id,
+                        lang=effective_lang,
+                        speed=0.95
+                    )
+                    if c_wav:
+                        call_announcement_wav = c_wav
+
+            speech_text = strip_callsigns_for_tts(text, callsign=callsign)
+            from tts_normalizer import normalize_text_for_tts
+            speech_text = normalize_text_for_tts(speech_text, target_lang=effective_lang, strip_callsigns=True, callsign=callsign)
+
+            if not speech_text or not speech_text.strip():
+                if call_announcement_wav:
+                    return call_announcement_wav, None
+                return None, _tr("transcriber.empty_tts_text", fallback="Empty text for speech synthesis")
+
+            if stress_srv.is_lang_supported(effective_lang):
+                speech_text = stress_srv.apply_stress_unicode(speech_text, lang=effective_lang)
+
+            wav_bytes, _, err = await st_srv.synthesize_async(
+                text=speech_text,
+                voice_id=voice_id,
+                lang=effective_lang,
+                speed=speed or self.tts_speed
+            )
+            if call_announcement_wav and wav_bytes:
+                comb, _ = concatenate_wavs([call_announcement_wav, wav_bytes], pause_ms=180)
                 return comb or wav_bytes, err
             return wav_bytes or call_announcement_wav, err
 
@@ -2469,8 +2559,17 @@ class GeminiTranscriberService:
                 logger.info(
                     f"[TRANSCRIBER] TS{slot} Early callsign announcement (piper) [{callsign}] ({eff_lang}): '{call_phrase}' at 0.9x"
                 )
+                piper_call_phrase = call_phrase
+                if self.tts_piper_use_stress:
+                    try:
+                        from stress_service import StressService
+                        stress_srv = StressService.get_instance()
+                        if stress_srv.is_lang_supported(eff_lang):
+                            piper_call_phrase = stress_srv.apply_stress_unicode(piper_call_phrase, lang=eff_lang)
+                    except Exception:
+                        pass
                 c_wav, _, c_err = await piper_srv.synthesize_async(
-                    text=call_phrase,
+                    text=piper_call_phrase,
                     voice_id=voice_id,
                     speed=0.9,
                     noise_scale=0.7,
@@ -2536,6 +2635,52 @@ class GeminiTranscriberService:
                     })
                 elif c_err:
                     logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign Silero synthesis failed: {c_err}")
+                return
+
+            if eff_engine == "supertonic":
+                from supertonic_service import SupertonicService
+                from stress_service import StressService
+                st_srv = SupertonicService.get_instance()
+                ready, st_voice, _ = st_srv.is_voice_ready_for_lang(eff_lang, self.tts_voice, gender=gender)
+                if not ready or not st_voice:
+                    return
+                st_phrase = call_phrase
+                try:
+                    stress_srv = StressService.get_instance()
+                    if stress_srv.is_lang_supported(eff_lang):
+                        st_phrase = stress_srv.apply_stress_unicode(st_phrase, lang=eff_lang)
+                except Exception:
+                    pass
+                logger.info(
+                    f"[TRANSCRIBER] TS{slot} Early callsign announcement (supertonic) [{callsign}] ({eff_lang}): '{call_phrase}' at 0.95x"
+                )
+                c_wav, _, c_err = await st_srv.synthesize_async(
+                    text=st_phrase,
+                    voice_id=st_voice,
+                    lang=eff_lang,
+                    speed=0.95
+                )
+                if c_wav and self.broadcast_fn:
+                    b64_wav = base64.b64encode(c_wav).decode("ascii")
+                    await self.broadcast_fn({
+                        "type": "tts_speech",
+                        "hotspot_id": hid,
+                        "slot": slot,
+                        "audio_base64": b64_wav,
+                        "text": call_phrase,
+                        "call_id": call_id,
+                        "engine": "supertonic",
+                        "voice": st_voice,
+                        "gender": gender,
+                        "pitch": pitch,
+                        "speed": 0.95,
+                        "is_callsign_announcement": True,
+                        "ducking_level": self.tts_ducking_level,
+                        "pause_ducking_level": self.tts_pause_ducking_level,
+                        "mute_others": self.tts_mute_others
+                    })
+                elif c_err:
+                    logger.warning(f"[TRANSCRIBER] TS{slot} Early callsign Supertonic 3 synthesis failed: {c_err}")
                 return
 
             actual_voice = resolve_tts_voice(self.tts_voice, gender=gender, pitch=pitch)
@@ -3192,6 +3337,61 @@ class GeminiTranscriberService:
                                 pass
                         return
                     actual_voice = silero_srv.resolve_voice(self.tts_voice, lang=eff_l_choice, gender=detected_gender)
+                elif self.tts_engine == "supertonic":
+                    from supertonic_service import SupertonicService
+                    st_srv = SupertonicService.get_instance()
+                    if not st_srv.is_lang_supported(eff_l_choice):
+                        logger.warning(
+                            f"[TRANSCRIBER] TS{slot} Supertonic 3 TTS does not support language '{eff_l_choice}'. Skipping speech synthesis."
+                        )
+                        if self.broadcast_fn:
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "pipeline_stage",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "stage": "tts",
+                                    "status": "error",
+                                    "engine": "supertonic"
+                                })
+                            except Exception:
+                                pass
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "tts_error",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "error": _tr("transcriber.supertonic_lang_unsupported", fallback="⚠️ Language [{lang}] is not supported in Supertonic 3 TTS", lang=eff_l_choice.upper())
+                                })
+                            except Exception:
+                                pass
+                        return
+                    st_ready, st_voice_id, st_reason = st_srv.is_voice_ready_for_lang(eff_l_choice, self.tts_voice, gender=detected_gender)
+                    if not st_ready or not st_voice_id:
+                        logger.info(f"[TRANSCRIBER] TS{slot} Supertonic 3 TTS not ready for '{eff_l_choice}': {st_reason}")
+                        if self.broadcast_fn:
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "pipeline_stage",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "stage": "tts",
+                                    "status": "error",
+                                    "engine": "supertonic"
+                                })
+                            except Exception:
+                                pass
+                            try:
+                                await self.broadcast_fn({
+                                    "type": "tts_error",
+                                    "hotspot_id": hid,
+                                    "slot": slot,
+                                    "error": _tr("transcriber.supertonic_not_ready", fallback="Supertonic 3 model is not ready ({reason})", lang=eff_l_choice.upper(), reason=st_reason)
+                                })
+                            except Exception:
+                                pass
+                        return
+                    actual_voice = st_voice_id
                 else:
                     actual_voice = resolve_tts_voice(self.tts_voice, gender=detected_gender, pitch=effective_pitch, last_voice=state.get("last_voice", ""), turn=effective_turn)
                     state["last_voice"] = actual_voice
@@ -3267,6 +3467,15 @@ class GeminiTranscriberService:
                         if not speech_text or not speech_text.strip():
                             logger.info(f"[TRANSCRIBER] TS{slot} Piper TTS skipped: text empty after foreign filter / callsign strip.")
                             return
+
+                        if self.tts_piper_use_stress:
+                            try:
+                                from stress_service import StressService
+                                stress_srv = StressService.get_instance()
+                                if stress_srv.is_lang_supported(eff_lang):
+                                    speech_text = stress_srv.apply_stress_unicode(speech_text, lang=eff_lang)
+                            except Exception as se:
+                                logger.warning(f"[TRANSCRIBER] TS{slot} StressService error for Piper: {se}")
 
                         wav_bytes, sample_rate, tts_err = await piper_srv.synthesize_async(
                             text=speech_text,
@@ -3344,7 +3553,7 @@ class GeminiTranscriberService:
                                 })
                             except Exception:
                                 pass
-                elif self.tts_engine in ("gemini", "groq", "deepgram", "silero"):
+                elif self.tts_engine in ("gemini", "groq", "deepgram", "silero", "supertonic"):
                     try:
                         clean_text = strip_callsigns_for_tts(display_text, callsign=callsign)
                         eff_l = (detected_lang if is_direct else self.target_lang) or "ru"

@@ -1,6 +1,6 @@
 import { getCountryInfo, getCallCountryInfo, getFlagBadgeHtml, formatCallerDisplay, getCleanTgDesc, formatHistoryTime, getHistoryTimeMode, setHistoryTimeMode, adjustPttDescFontSize , cleanName } from '../core/formatters.js?v=2.9.787';
 import { showToast } from '../core/toast.js?v=2.9.699';
-import { logSelection } from './log-selection.js?v=2.9.758';
+import { logSelection } from './log-selection.js?v=2.9.805';
 
   // --- BrandMeister Live Activity Monitor ---
   const logCountBadge = document.getElementById("logCountBadge");
@@ -22,10 +22,21 @@ Object.defineProperty(window, 'heardCalls', {
 
   let logFilter = "all";
   let logSearchQuery = "";
-  const LOG_PAGE_SIZE = 300;
-  let logVisibleLimit = LOG_PAGE_SIZE;
-  let _lastLogFilterKey = "";
-  let _logPaginationScrollMode = null;
+  const V_OVERSCAN = 16;
+  const V_REUSE_MARGIN = 6;
+  let _filteredLogCalls = [];
+  let _lastLogViewKey = "";
+  let _vRowHeight = 35;
+  let _vRowHeightMeasured = false;
+  let _vRenderedStart = -1;
+  let _vRenderedEnd = -1;
+  let _vSpacerTop = null;
+  let _vViewport = null;
+  let _vSpacerBottom = null;
+  let _vScrollRaf = null;
+  let _vResizeObserver = null;
+  let _vNeedsRenderOnShow = false;
+  let _vLastMeta = { isMobile: false, effectiveHid: "all", isAsc: false };
   let liveTickerInterval = null;
 
   function ensureLiveTicker() {
@@ -582,6 +593,13 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       } else {
         applyDesktopLogHeight();
       }
+      if (visibilityChanged || _vNeedsRenderOnShow) {
+        _vNeedsRenderOnShow = false;
+        renderLogList();
+        requestAnimationFrame(() => {
+          if (isLogVisible) renderVirtualWindow(false);
+        });
+      }
     } else {
       cleanupPcCardResizeObserver();
       liveMonitorPanel.classList.remove("pc-height-hotspot");
@@ -611,6 +629,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
 
   // Listen to window resize to update mobile compact mode dynamically and PTT desc font size
   window.addEventListener("resize", () => {
+    _vRowHeightMeasured = false;
+    _vRenderedStart = -1;
+    _vRenderedEnd = -1;
     updateLogVisibility(false);
     renderLogHotspotTabs();
     syncLogFilterUI();
@@ -667,9 +688,9 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
   }
 
   function pruneHeardCalls() {
-    // No 24h time cutoff — keep history up to safety cap (disk quota governs recordings)
-    if (heardCalls.length > 10000) {
-      heardCalls.splice(10000);
+    // No 24h time cutoff — virtual scroll handles tens of thousands of rows at O(1) DOM cost
+    if (heardCalls.length > 50000) {
+      heardCalls.splice(50000);
     }
   }
 
@@ -1011,6 +1032,446 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
   window.syncTgNamesFromServer = syncTgNamesFromServer;
   syncTgNamesFromServer();
 
+  function ensureVirtualScaffold() {
+    if (!logList) return false;
+    if (_vSpacerTop && _vViewport && _vSpacerBottom && _vViewport.parentElement === logList) {
+      return true;
+    }
+    logList.innerHTML = "";
+    _vSpacerTop = document.createElement("div");
+    _vSpacerTop.className = "log-virtual-spacer log-virtual-spacer-top";
+    _vSpacerTop.setAttribute("aria-hidden", "true");
+    _vViewport = document.createElement("div");
+    _vViewport.className = "log-virtual-viewport";
+    _vSpacerBottom = document.createElement("div");
+    _vSpacerBottom.className = "log-virtual-spacer log-virtual-spacer-bottom";
+    _vSpacerBottom.setAttribute("aria-hidden", "true");
+    logList.appendChild(_vSpacerTop);
+    logList.appendChild(_vViewport);
+    logList.appendChild(_vSpacerBottom);
+    return true;
+  }
+
+  function buildRowRenderContext() {
+    const tFn = (typeof window !== "undefined" && typeof window.t === "function") ? window.t : null;
+    const myCall = ((window.radioState && window.radioState.callsign) || (document.getElementById("callsignDisplay") && document.getElementById("callsignDisplay").textContent) || "").trim().toUpperCase();
+    const myDmrId = (window.radioState && window.radioState.dmr_id) || "";
+    const hotspotsMap = new Map();
+    const hsList = window.currentHotspots || [];
+    for (let i = 0; i < hsList.length; i++) {
+      if (hsList[i] && hsList[i].id != null) {
+        hotspotsMap.set(String(hsList[i].id), hsList[i]);
+      }
+    }
+    const recMgr = window.recordingsManager || null;
+    return {
+      nowSec: Date.now() / 1000,
+      isMobile: _vLastMeta.isMobile,
+      showHsBadge: (!_vLastMeta.isMobile && window.currentLogHotspotId === "all"),
+      hotspotsMap,
+      myCall,
+      myDmrId: String(myDmrId),
+      isMyCall: Boolean(myCall && myCall !== "N0CALL" && myCall !== "---"),
+      formatFn: (typeof window !== "undefined" && typeof window.formatHistoryTime === "function")
+        ? window.formatHistoryTime
+        : (typeof formatHistoryTime === "function" ? formatHistoryTime : null),
+      resolveCity: (typeof window !== "undefined" && typeof window.resolveCityName === "function") ? window.resolveCityName : null,
+      resolveCountry: (typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function") ? window.resolveCountryDisplayName : null,
+      getNetType: (typeof window !== "undefined" && typeof window.getHotspotNetworkType === "function") ? window.getHotspotNetworkType : null,
+      getRawTgName: (typeof window !== "undefined" && typeof window.getNetworkRawTgName === "function") ? window.getNetworkRawTgName : null,
+      recMgr,
+      activeCallId: recMgr ? recMgr.getActiveCallId() : null,
+      selectedIds: (logSelection && logSelection.selectedIds) ? logSelection.selectedIds : null,
+      tFn,
+      sUnit: tFn ? tFn("live.sec", {}, "с") : "с",
+      txTooltip: tFn ? tFn("live.tx_tooltip", {}, "Моя передача (TX)") : "Моя передача (TX)",
+      myTxTitle: tFn ? tFn("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)",
+      aslLinkModeTitle: tFn ? tFn("live.asl_link_mode_tooltip", {}, "Режим линка: приём и передача (RX/TX)") : "Режим линка: приём и передача (RX/TX)",
+      tgSpecial91: tFn ? tFn("tg_special.91", {}, "Worldwide") : "Worldwide",
+      tgSpecial92: tFn ? tFn("countries.EU", {}, "Europe") : "Europe",
+      privateCallLabel: tFn ? tFn("live.private_call", {}, "Личный") : "Личный",
+      hasTransTitle: tFn ? tFn("live.has_transcription", {}, "Текст передачи") : "Текст передачи",
+      playTooltip: tFn ? tFn("recordings.play_tooltip", {}, "Прослушать запись") : "Прослушать запись",
+      timeToggleTooltip: tFn ? tFn("live.time_toggle_tooltip", {}, "Время вызова: нажмите для переключения LOC ↔ UTC") : "Время вызова: нажмите для переключения LOC ↔ UTC"
+    };
+  }
+
+  function renderSingleLogRowHtml(c, ctx) {
+    const isTx = Boolean(c.is_tx);
+    const country = getCallCountryInfo(c);
+    const flagHtml = isTx
+      ? `<span class="tx-mic-icon" title="${ctx.txTooltip}">\u{1F399}\u{FE0F}</span>`
+      : getFlagBadgeHtml(country, false, country.flag);
+    const isForeign = !isTx && (String(c.src_id) !== ctx.myDmrId);
+    const validTa = (c.talker_alias && c.talker_alias.trim()) ? c.talker_alias.trim() : "";
+    const isLeakedTa = isForeign && ctx.isMyCall && (validTa.toUpperCase() === ctx.myCall || validTa.toUpperCase().startsWith(ctx.myCall + " "));
+    const effectiveTa = isLeakedTa ? "" : validTa;
+
+    const baseCaller = formatCallerDisplay(c.src_callsign, c.src_name, effectiveTa, c.src_id, c.caller_display);
+    const callNetType = ctx.getNetType ? ctx.getNetType(c.hotspot_id) : "bm";
+    const idStr = String(c.id || "");
+    const isAllStarCall = (c.network_type === "allstar" || callNetType === "allstar" || idStr.startsWith("asl_"));
+    const isYsfCall = (c.network_type === "ysf" || callNetType === "ysf" || idStr.startsWith("ysf_") || String(c.dst_name || "").startsWith("YSF #"));
+    const isM17Call = (c.network_type === "m17" || callNetType === "m17" || idStr.startsWith("m17_"));
+    const isDstarCall = (c.network_type === "dstar" || callNetType === "dstar" || idStr.startsWith("dstar_"));
+    const isSvxCall = (c.network_type === "svx" || callNetType === "svx" || idStr.startsWith("svx_"));
+    const isPrivateCall = !isAllStarCall && !isYsfCall && !isM17Call && !isDstarCall && !isSvxCall && (c.call_type !== "GROUP");
+    const isNonMccNet = (callNetType === "tgif" || callNetType === "xlx" || isYsfCall || isM17Call || isDstarCall);
+    const tgCountry = (!isPrivateCall && !isNonMccNet && !isAllStarCall) ? getCountryInfo(c.dst_id) : null;
+
+    let isDiffCountry = false;
+    let tgFlagHtml = "";
+    let tgCountryName = "";
+    let tgText = "";
+    let tgDisplayHtml = "";
+    let tgDesc = "";
+    let tgDescHtml = "";
+    let tgCellTitle = "";
+
+    const hsKey = String(c.hotspot_id || "default");
+    const hsObj = ctx.hotspotsMap.get(hsKey) || null;
+
+    if (isAllStarCall) {
+      const targetNode = c.dst_id || (hsObj && hsObj.allstar_node) || (window.radioState && window.radioState.allstar_node) || "1999";
+      tgText = `Node ${targetNode}`;
+      tgDisplayHtml = `<span class="asl-node-badge-text">Node <strong>${targetNode}</strong></span>`;
+      tgDesc = "RX/TX";
+      tgDescHtml = `<span class="asl-link-mode-badge" title="${ctx.aslLinkModeTitle}">RX/TX</span>`;
+      tgCellTitle = ctx.tFn ? ctx.tFn("live.asl_target_node_title", { node: targetNode }, `Целевой узел: Node ${targetNode} (RX/TX)`) : `Целевой узел: Node ${targetNode} (RX/TX)`;
+    } else if (isYsfCall) {
+      const ysfRoomId = String(c.dst_id || "25000").trim();
+      const ysfRoomName = String(c.dst_name || c.talker_alias || `YSF #${ysfRoomId}`).trim();
+      tgText = `#${ysfRoomId}`;
+      tgDisplayHtml = `<span class="ysf-room-badge-text">#<strong>${ysfRoomId}</strong></span>`;
+      tgDesc = ysfRoomName;
+      tgCellTitle = `${ysfRoomName} (#${ysfRoomId})`;
+    } else if (isDstarCall || isM17Call) {
+      const netLabel = isDstarCall ? "D-STAR" : "M17";
+      const refName = String(c.dst_name || (c.dst_id ? `${netLabel} ${c.dst_id}` : netLabel)).trim();
+      tgText = refName;
+      tgDisplayHtml = `<span class="ysf-room-badge-text"><strong>${refName}</strong></span>`;
+      tgDesc = "";
+      tgCellTitle = refName;
+    } else {
+      tgText = isPrivateCall ? `ID ${c.dst_id}` : `${c.dst_id}`;
+      tgDisplayHtml = isPrivateCall ? `ID <span class="dmr-id-text">${c.dst_id}</span>` : `${c.dst_id}`;
+
+      if (!isPrivateCall && tgCountry) {
+        const callerKey = String(country?.iso || country?.name_en || country?.name || "").trim().toLowerCase();
+        const tgKey = String(tgCountry?.iso || tgCountry?.name_en || tgCountry?.name || "").trim().toLowerCase();
+        const isTgGlobal = Boolean(tgCountry.iso === "GLOBAL" || tgCountry.flag === "🌐" || tgKey === "global" || tgKey.includes("worldwide"));
+
+        if (isTgGlobal) {
+          if (callerKey && callerKey !== "global") isDiffCountry = true;
+        } else if (tgKey && tgKey !== "global") {
+          if (callerKey !== tgKey) isDiffCountry = true;
+        }
+
+        if (isDiffCountry) {
+          const locTgCountry = ctx.resolveCountry ? ctx.resolveCountry(tgCountry) : (tgCountry.name || "");
+          tgFlagHtml = `<span class="tg-flag" title="${locTgCountry || ''}">${getFlagBadgeHtml(tgCountry, c.dst_id === 9990)}</span>`;
+          if (!isTgGlobal && locTgCountry) {
+            tgCountryName = locTgCountry;
+          } else if (c.dst_id === 91) {
+            tgCountryName = ctx.tgSpecial91;
+          } else if (c.dst_id === 92) {
+            tgCountryName = ctx.tgSpecial92;
+          }
+        }
+      }
+
+      if (!isPrivateCall) {
+        const netRaw = ctx.getRawTgName
+          ? ctx.getRawTgName(c.dst_id, callNetType)
+          : ((typeof window.TG_NAMES !== "undefined" && window.TG_NAMES[c.dst_id]) || "");
+        const rawName = netRaw || c.talkgroup_name || c.dst_name || "";
+        let cleaned = "";
+        if (rawName || isNonMccNet) {
+          cleaned = typeof getCleanTgDesc === "function" ? getCleanTgDesc(c.dst_id, rawName, null, callNetType) : rawName;
+        }
+
+        if (isDiffCountry) {
+          if (tgCountryName) {
+            if (cleaned) {
+              const lowerCleaned = cleaned.toLowerCase();
+              const lowerCountry = tgCountryName.toLowerCase();
+              tgDesc = (lowerCleaned.startsWith(lowerCountry) || lowerCleaned.includes(lowerCountry))
+                ? cleaned
+                : `${tgCountryName} ${cleaned}`;
+            } else {
+              tgDesc = tgCountryName;
+            }
+          } else {
+            tgDesc = cleaned;
+          }
+        } else if (cleaned) {
+          const shortDesc = isNonMccNet ? cleaned : cleaned.split(/[\(\/]/)[0].trim();
+          tgDesc = shortDesc || cleaned;
+        }
+      } else {
+        const userObj = (typeof USER_CALLSIGNS !== "undefined" && USER_CALLSIGNS[c.dst_id]) || null;
+        if (userObj && (userObj.callsign || userObj.name)) {
+          tgDesc = `${userObj.callsign || ''} ${userObj.name || ''}`.trim();
+        } else {
+          tgDesc = ctx.privateCallLabel;
+        }
+      }
+
+      const tgCountryDisp = tgCountry
+        ? (ctx.resolveCountry ? ctx.resolveCountry(tgCountry) : (tgCountry.name || ""))
+        : "";
+      tgDescHtml = tgDesc ? `<span class="tg-desc-text" title="${tgDesc}">${tgDesc}</span>` : "";
+      tgCellTitle = `${tgText}${isDiffCountry && tgCountryDisp ? ' [' + tgCountryDisp + ']' : ''}${tgDesc ? ' — ' + tgDesc : ''}`;
+    }
+
+    const activeClass = c.active ? (isTx ? " active-call active-tx-call" : " active-call") : "";
+    const txRowClass = isTx ? " is-tx-row" : "";
+    const timeStr = ctx.formatFn
+      ? ctx.formatFn(c.timestamp || ctx.nowSec)
+      : (c.time_str || (new Date((c.timestamp || ctx.nowSec) * 1000)).toTimeString().substring(0, 8));
+    const elapsed = Math.max(0, ctx.nowSec - (c.timestamp || ctx.nowSec)).toFixed(1);
+    const durStr = c.active
+      ? `<span class="live-duration-tick duration-active" data-start="${c.timestamp}">🔴 ${elapsed}${ctx.sUnit}</span>`
+      : `<span class="duration-text" style="color: #ffffff;">${c.duration ? c.duration + ctx.sUnit : '—'}</span>`;
+
+    const rawCityStr = (c.city || "").trim();
+    const locCity = (rawCityStr && ctx.resolveCity) ? ctx.resolveCity(rawCityStr) : rawCityStr;
+    const locCountry = ctx.resolveCountry ? ctx.resolveCountry(country) : (country?.name || "");
+    const locationInfo = (isTx && !isAllStarCall) ? "" : (locCity ? (locCountry ? `${locCity}, ${locCountry}` : locCity) : locCountry);
+    const plainTitle = `${(isTx ? '[TX] ' : '')}${baseCaller.replace(/<[^>]+>/g, '')}${locationInfo ? ' - ' + locationInfo : ''}`;
+
+    const hsBadge = (ctx.showHsBadge && hsObj)
+      ? `<span class="log-hs-badge" title="${hsObj.name}">${hsObj.name}</span>`
+      : "";
+
+    let callerNameLine = "";
+    if (effectiveTa) {
+      callerNameLine = effectiveTa.replace(/\s*\(\s*\d{3,8}\s*\)$/, "").trim();
+    } else if (c.src_callsign && c.src_callsign.trim() && c.src_callsign !== "---" && !c.src_callsign.startsWith("ID:")) {
+      const call = c.src_callsign.trim().toUpperCase();
+      const cName = typeof cleanName === "function" ? cleanName(c.src_name) : (c.src_name || "").trim();
+      callerNameLine = (cName && cName.toUpperCase() !== call) ? `${call} ${cName}` : call;
+    } else if (c.caller_display && c.caller_display.trim() && c.caller_display !== "---") {
+      const raw = c.caller_display.replace(/<[^>]+>/g, "").trim();
+      const mParen = raw.match(/^(.*?)\s*\(\s*(\d{3,8})\s*\)$/);
+      callerNameLine = mParen ? mParen[1].trim() : raw;
+    }
+    if (!callerNameLine || (isForeign && ctx.isMyCall && callerNameLine.toUpperCase() === ctx.myCall)) {
+      if (c.src_callsign && c.src_callsign.trim() && c.src_callsign !== "---" && !c.src_callsign.startsWith("ID:")) {
+        const call = c.src_callsign.trim().toUpperCase();
+        const cName = typeof cleanName === "function" ? cleanName(c.src_name) : (c.src_name || "").trim();
+        callerNameLine = (cName && cName.toUpperCase() !== call) ? `${call} ${cName}` : call;
+      } else {
+        callerNameLine = c.src_id ? `ID: ${c.src_id}` : "---";
+      }
+    }
+
+    if (isAllStarCall && callerNameLine) {
+      callerNameLine = callerNameLine.replace(/^[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF\uFE00-\uFE0F\s]+/, '').trim();
+    }
+
+    const validId = c.src_id && String(c.src_id) !== "0" && String(c.src_id) !== "---" ? String(c.src_id) : "";
+    let stationSubHtml = "";
+    if (isAllStarCall) {
+      const nodeStr = validId ? `<span class="asl-station-node">#${validId}</span>` : "";
+      const locDetail = locCity || (locCountry && locCountry !== "Unknown" ? locCountry : "");
+      const locSpan = locDetail ? `<span class="station-country">(${locDetail})</span>` : "";
+      stationSubHtml = [nodeStr, locSpan].filter(Boolean).join(" ");
+    } else {
+      const dmrIdHtml = validId ? `<span class="dmr-id-text">${validId}</span>` : "";
+      const locText = locationInfo ? `<span class="station-country">(${locationInfo})</span>` : "";
+      stationSubHtml = [dmrIdHtml, locText].filter(Boolean).join(" ");
+    }
+
+    const srcType = c.source_type || 'VoIP';
+    const slotHtml = isAllStarCall
+      ? `<span class="asl-cell-badge asl-cell-badge-${srcType.toLowerCase()}" title="${ctx.tFn ? ctx.tFn("live.asl_source_type_tooltip", { type: srcType }, `Источник вызова: ${srcType}`) : `Источник вызова: ${srcType}`}">${srcType}</span>`
+      : (isYsfCall
+        ? `<span class="ysf-cell-badge" title="C4FM / YSF">C4FM</span>`
+        : (isDstarCall
+          ? `<span class="ysf-cell-badge" title="D-STAR">D-STAR</span>`
+          : (isM17Call
+            ? `<span class="ysf-cell-badge" title="M17">M17</span>`
+            : (isSvxCall
+              ? `<span class="ysf-cell-badge" title="SVXReflector">SVX</span>`
+              : `<span class="slot-text-ts${c.slot}">TS${c.slot}</span>`))));
+
+    const hasTranscription = Boolean(c.transcription && c.transcription.trim());
+    const flagClass = hasTranscription ? "station-flag has-transcription" : "station-flag";
+    const transMarkerHtml = hasTranscription
+      ? `<span class="log-text-marker" data-call-id="${c.id}" title="${ctx.hasTransTitle}"></span>`
+      : "";
+
+    const hasRec = Boolean(ctx.recMgr && ctx.recMgr.hasRecording(c.id));
+    const isCurPlaying = Boolean(ctx.recMgr && ctx.recMgr.isPlayingCall(c.id));
+    const isCurRecRow = Boolean(ctx.activeCallId && String(ctx.activeCallId) === idStr);
+    const recRowClass = isCurRecRow ? " is-playing-rec" : "";
+    const selRowClass = (ctx.selectedIds && ctx.selectedIds.has(idStr)) ? " is-selected" : "";
+    const playBtnHtml = hasRec ? `<button type="button" class="log-play-btn${isCurPlaying ? ' playing' : ''}" data-call-id="${c.id}" title="${ctx.playTooltip}"><img src="/static/img/Log_PLAY.png" class="log-play-img" alt="Play"></button>` : '';
+    const tgLinkTitle = isAllStarCall
+      ? (ctx.tFn ? ctx.tFn("live.asl_node_title", { node: c.dst_id }, `Node ${c.dst_id}`) : `Node ${c.dst_id}`)
+      : (isYsfCall
+        ? (ctx.tFn ? ctx.tFn("live.tune_ysf_title", { room: tgText }, `Перейти в комнату ${tgText}`) : `Перейти в комнату ${tgText}`)
+        : (ctx.tFn ? ctx.tFn("live.tune_title", { tg: tgText, slot: c.slot }) : `Tune to ${tgText} (TS${c.slot})`));
+
+    return `<div class="live-call-row${txRowClass}${activeClass}${recRowClass}${selRowClass}" data-id="${c.id}" data-hid="${hsKey}" data-net="${callNetType}"><div class="live-row-desktop"><div class="cell-station" title="${plainTitle}" data-radio-id="${c.src_id}" data-callsign="${c.src_callsign || ''}" data-name="${c.src_name || ''}"><span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? ctx.myTxTitle : locCountry}">${flagHtml}</span>${transMarkerHtml}<div class="station-text-wrap" data-radio-id="${c.src_id}"><div class="station-name-line">${isTx ? '<span class="log-tx-badge">TX</span>' : ''}${callerNameLine}${hsBadge}</div><div class="station-sub-line">${stationSubHtml}</div></div></div><div class="cell-tg" title="${tgCellTitle}"><div class="tg-line-top"><span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isYsfCall ? 'is-ysf-room' : (isPrivateCall ? 'is-id' : 'is-tg'))}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${hsKey}" title="${tgLinkTitle}">${tgDisplayHtml}</span>${tgFlagHtml}</div><div class="tg-line-sub">${tgDescHtml || '<span class="tg-desc-none">—</span>'}</div></div><div class="cell-slot">${slotHtml}</div><div class="cell-play">${playBtnHtml}</div><div class="cell-duration"><div class="dur-line-top" style="color: #ffffff;">${durStr}</div><div class="dur-line-sub" title="${ctx.timeToggleTooltip}">${timeStr}</div></div></div></div>`;
+  }
+
+  function renderVirtualWindow(force = false) {
+    if (!logList || !isLogVisible) return;
+    const total = _filteredLogCalls.length;
+    if (total === 0) return;
+    if (!ensureVirtualScaffold()) return;
+
+    const rowH = _vRowHeight > 16 ? _vRowHeight : 35;
+    const scrollTop = Math.max(0, logList.scrollTop || 0);
+    const viewH = logList.clientHeight || 600;
+    const visStart = Math.max(0, Math.floor(scrollTop / rowH));
+    const visEnd = Math.min(total, Math.ceil((scrollTop + viewH) / rowH));
+
+    if (!force && _vRenderedStart >= 0 && _vRenderedEnd >= 0) {
+      const safeTop = Math.max(0, visStart - V_REUSE_MARGIN);
+      const safeBottom = Math.min(total, visEnd + V_REUSE_MARGIN);
+      if (_vRenderedStart <= safeTop && _vRenderedEnd >= safeBottom) {
+        return;
+      }
+    }
+
+    let startIdx = Math.max(0, visStart - V_OVERSCAN);
+    // Keep startIdx even so CSS :nth-child(even) zebra striping never flickers while scrolling
+    startIdx = startIdx & ~1;
+    const endIdx = Math.min(total, visEnd + V_OVERSCAN);
+
+    const ctx = buildRowRenderContext();
+    const parts = new Array(endIdx - startIdx);
+    for (let i = startIdx; i < endIdx; i++) {
+      parts[i - startIdx] = renderSingleLogRowHtml(_filteredLogCalls[i], ctx);
+    }
+
+    _vSpacerTop.style.height = `${Math.round(startIdx * rowH)}px`;
+    _vSpacerBottom.style.height = `${Math.round(Math.max(0, total - endIdx) * rowH)}px`;
+    _vViewport.innerHTML = parts.join("");
+    _vRenderedStart = startIdx;
+    _vRenderedEnd = endIdx;
+
+    // Measure actual CSS row height once per viewport layout so scroll geometry is pixel-exact
+    if (!_vRowHeightMeasured && _vViewport.firstElementChild) {
+      const rect = _vViewport.firstElementChild.getBoundingClientRect();
+      const measured = rect && rect.height ? rect.height : 0;
+      if (measured >= 20 && measured <= 120) {
+        _vRowHeightMeasured = true;
+        if (Math.abs(measured - _vRowHeight) > 0.25) {
+          const oldRowH = _vRowHeight;
+          const wasPinnedBottom = _vLastMeta.isAsc && (logList.scrollHeight - logList.scrollTop <= (logList.clientHeight || 600) + 60);
+          _vRowHeight = measured;
+          _vSpacerTop.style.height = `${Math.round(startIdx * _vRowHeight)}px`;
+          _vSpacerBottom.style.height = `${Math.round(Math.max(0, total - endIdx) * _vRowHeight)}px`;
+          if (wasPinnedBottom) {
+            logList.scrollTop = Math.max(0, total * _vRowHeight - (logList.clientHeight || 600));
+          } else if (scrollTop > 0) {
+            logList.scrollTop = Math.max(0, Math.round(scrollTop * (_vRowHeight / oldRowH)));
+          }
+        }
+      }
+    }
+  }
+
+  function scrollToLogCallId(callId, opts = null) {
+    if (!logList || !callId || !isLogVisible) return null;
+    const strId = String(callId);
+    const idx = _filteredLogCalls.findIndex(c => String(c.id) === strId);
+    if (idx === -1) return null;
+
+    const rowH = _vRowHeight > 16 ? _vRowHeight : 35;
+    const viewH = logList.clientHeight || 400;
+    const rowTop = idx * rowH;
+    const rowBottom = rowTop + rowH;
+    const curTop = logList.scrollTop || 0;
+    const curBottom = curTop + viewH;
+    const align = (opts && opts.align) || "nearest";
+
+    if (align === "center") {
+      logList.scrollTop = Math.max(0, Math.round(rowTop - (viewH - rowH) / 2));
+    } else if (rowTop < curTop) {
+      logList.scrollTop = Math.max(0, Math.round(rowTop - rowH));
+    } else if (rowBottom > curBottom) {
+      logList.scrollTop = Math.max(0, Math.round(rowBottom - viewH + rowH));
+    }
+
+    renderVirtualWindow(true);
+    const escId = (typeof CSS !== "undefined" && typeof CSS.escape === "function")
+      ? CSS.escape(strId)
+      : strId.replace(/["\\]/g, "\\$&");
+    return logList.querySelector(`.live-call-row[data-id="${escId}"]`);
+  }
+
+  function initLogVirtualScroll() {
+    if (!logList || logList._virtualScrollWired) return;
+    logList._virtualScrollWired = true;
+    logList.style.overflowAnchor = "none";
+
+    logList.addEventListener("scroll", () => {
+      if (_vScrollRaf) return;
+      _vScrollRaf = requestAnimationFrame(() => {
+        _vScrollRaf = null;
+        renderVirtualWindow(false);
+        const pop = document.getElementById("logTranscriptionPopover");
+        if (pop && pop.classList.contains("is-visible") && logTableScrollWrap) {
+          logTableScrollWrap.dispatchEvent(new Event("scroll"));
+        }
+      });
+    }, { passive: true });
+
+    // Single delegated click handler for Play and Quick-Tune TG (0 per-row listener overhead!)
+    logList.addEventListener("click", (e) => {
+      const playBtn = e.target && e.target.closest ? e.target.closest(".log-play-btn") : null;
+      if (playBtn) {
+        e.stopPropagation();
+        const cid = playBtn.dataset.callId;
+        if (window.recordingsManager && cid) {
+          window.recordingsManager.playByCallId(cid);
+        }
+        return;
+      }
+
+      const tuneBtn = e.target && e.target.closest ? e.target.closest(".btn-quick-tune-tg") : null;
+      if (tuneBtn) {
+        if (window.__proxdmr_log_swipe_active) return;
+        e.stopPropagation();
+        const tg = parseInt(tuneBtn.dataset.tg, 10);
+        const slot = parseInt(tuneBtn.dataset.slot, 10);
+        const hid = tuneBtn.dataset.hid;
+        if (hid && typeof window.switchActiveHotspot === "function") window.switchActiveHotspot(hid);
+        if (tuneBtn.classList.contains("is-asl-node")) return;
+        if (tuneBtn.classList.contains("is-ysf-room")) {
+          if (tg > 0 && typeof window.connectYsfRoomById === "function") {
+            const card = hid ? document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`) : null;
+            window.connectYsfRoomById(String(tg), `YSF #${tg}`, card);
+          }
+          return;
+        }
+        if (tg > 0) {
+          if (slot === 1 || slot === 2) {
+            if (typeof window.setActiveSlot === "function") window.setActiveSlot(slot, true);
+          }
+          if (typeof window.setTg === "function") window.setTg(tg, true);
+        }
+      }
+    });
+
+    if (typeof window !== "undefined" && typeof window.ResizeObserver === "function") {
+      _vResizeObserver = new ResizeObserver(() => {
+        if (!isLogVisible) return;
+        if (_vScrollRaf) cancelAnimationFrame(_vScrollRaf);
+        _vScrollRaf = requestAnimationFrame(() => {
+          _vScrollRaf = null;
+          renderVirtualWindow(false);
+        });
+      });
+      _vResizeObserver.observe(logList);
+    }
+  }
+
   function renderLogList() {
     if (!logList) return;
     const isMobile = window.innerWidth <= 768;
@@ -1074,55 +1535,6 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       }
     }
 
-    const curFilterKey = `${effectiveHid}|${logFilter}|${logSearchQuery}`;
-    if (curFilterKey !== _lastLogFilterKey) {
-      _lastLogFilterKey = curFilterKey;
-      logVisibleLimit = LOG_PAGE_SIZE;
-      _logPaginationScrollMode = null;
-    }
-
-    const filtered = heardCalls.filter(c => {
-      if (totalHs > 1 && (isMobile || effectiveHid !== "all")) {
-        const callHidResolved = resolveHid(c.hotspot_id);
-        if (callHidResolved !== effResolved) return false;
-      }
-      if (!isNoTsNetwork && logFilter !== "all" && c.slot.toString() !== logFilter) return false;
-      if (logSearchQuery) {
-        const txWord = (typeof window !== "undefined" && window.t) ? String(window.t("live.tx_search_word", {}, "tx")).toLowerCase() : "tx";
-        const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery) || (txWord && txWord.includes(logSearchQuery)));
-        const call = (c.src_callsign || "").toLowerCase();
-        const name = (c.src_name || "").toLowerCase();
-        const idStr = (c.src_id || "").toString();
-        const tgStr = (c.dst_id || "").toString();
-        const ta = (c.talker_alias || "").toLowerCase();
-        const trText = (c.transcription || "").toLowerCase();
-        return isTxMatch ||
-               call.includes(logSearchQuery) || 
-               name.includes(logSearchQuery) || 
-               idStr.includes(logSearchQuery) || 
-               tgStr.includes(logSearchQuery) ||
-               ta.includes(logSearchQuery) ||
-               trText.includes(logSearchQuery);
-      }
-      return true;
-    });
-
-    if (logCountBadge) logCountBadge.textContent = filtered.length;
-
-    if (filtered.length === 0) {
-      let emptyMsg = window.t ? window.t("live.empty_waiting") : "Ожидание активности в сети BM...";
-      if (logSearchQuery) {
-        emptyMsg = window.t ? window.t("live.empty_not_found") : "Ничего не найдено по запросу";
-      } else if (isMobile || effectiveHid !== "all") {
-        const hsObj = (window.currentHotspots || []).find(h => h.id === effectiveHid);
-        emptyMsg = window.t ? window.t("live.empty_hotspot", { name: hsObj ? hsObj.name : "хотспоте" }) : `Ожидание активности на ${hsObj ? hsObj.name : "хотспоте"}...`;
-      }
-      logList.innerHTML = `<div class="log-empty-msg">${emptyMsg}</div>`;
-      return;
-    }
-
-    const nowSec = Date.now() / 1000;
-
     if (typeof window.getLogSortOrderForHotspot === "function") {
       const savedOrder = window.getLogSortOrderForHotspot(effectiveHid);
       if (window.__proxdmrLogSortOrder !== savedOrder) {
@@ -1133,443 +1545,102 @@ Object.defineProperty(window, 'isLogVisible', { get: () => isLogVisible, set: (v
       }
     }
 
-    const shownCount = Math.min(logVisibleLimit, filtered.length);
-    const remainingCount = Math.max(0, filtered.length - shownCount);
-    const toRender = filtered.slice(0, shownCount);
-    if (window.__proxdmrLogSortOrder === "asc") {
-      toRender.reverse();
-    }
+    const txWord = (logSearchQuery && typeof window !== "undefined" && window.t)
+      ? String(window.t("live.tx_search_word", {}, "tx")).toLowerCase()
+      : "tx";
 
-    const rowsHtml = toRender.map(c => {
-      const isTx = Boolean(c.is_tx);
-      const country = getCallCountryInfo(c);
-      const flagHtml = isTx 
-        ? `<span class="tx-mic-icon" title="${window.t ? window.t("live.tx_tooltip", {}, "Моя передача (TX)") : "Моя передача (TX)"}">\u{1F399}\u{FE0F}</span>` 
-        : getFlagBadgeHtml(country, false, country.flag);
-      const myCall = ((window.radioState && window.radioState.callsign) || (document.getElementById("callsignDisplay") && document.getElementById("callsignDisplay").textContent) || "").trim().toUpperCase();
-      const myDmrId = (window.radioState && window.radioState.dmr_id) || "";
-      const isMyCall = Boolean(myCall && myCall !== "N0CALL" && myCall !== "---");
-      const isForeign = !isTx && (String(c.src_id) !== String(myDmrId));
-      const validTa = (c.talker_alias && c.talker_alias.trim()) ? c.talker_alias.trim() : "";
-      const isLeakedTa = isForeign && isMyCall && (validTa.toUpperCase() === myCall || validTa.toUpperCase().startsWith(myCall + " "));
-      const effectiveTa = isLeakedTa ? "" : validTa;
-
-      const baseCaller = formatCallerDisplay(c.src_callsign, c.src_name, effectiveTa, c.src_id, c.caller_display);
-      const callerDisplay = isTx ? `<span class="log-tx-badge">TX</span>${baseCaller}` : baseCaller;
-
-      const callNetType = (typeof window.getHotspotNetworkType === "function")
-        ? window.getHotspotNetworkType(c.hotspot_id)
-        : "bm";
-      const isAllStarCall = (c.network_type === "allstar" || callNetType === "allstar" || String(c.id || "").startsWith("asl_"));
-      const isYsfCall = (c.network_type === "ysf" || callNetType === "ysf" || String(c.id || "").startsWith("ysf_") || String(c.dst_name || "").startsWith("YSF #"));
-      const isM17Call = (c.network_type === "m17" || callNetType === "m17" || String(c.id || "").startsWith("m17_"));
-      const isDstarCall = (c.network_type === "dstar" || callNetType === "dstar" || String(c.id || "").startsWith("dstar_"));
-      const isSvxCall = (c.network_type === "svx" || callNetType === "svx" || String(c.id || "").startsWith("svx_"));
-      const isPrivateCall = !isAllStarCall && !isYsfCall && !isM17Call && !isDstarCall && !isSvxCall && (c.call_type !== "GROUP");
-      const isNonMccNet = (callNetType === "tgif" || callNetType === "xlx" || isYsfCall || isM17Call || isDstarCall);
-      const callerCountry = getCallCountryInfo(c);
-      const tgCountry = (!isPrivateCall && !isNonMccNet && !isAllStarCall) ? getCountryInfo(c.dst_id) : null;
-
-      let isDiffCountry = false;
-      let tgFlagHtml = "";
-      let tgCountryName = "";
-      let tgText = "";
-      let tgDisplayHtml = "";
-      let tgDesc = "";
-      let tgDescHtml = "";
-      let tgCellTitle = "";
-
-      if (isAllStarCall) {
-        const callHsObj = (window.currentHotspots || []).find(h => h.id === (c.hotspot_id || "default"));
-        const targetNode = c.dst_id || (callHsObj && callHsObj.allstar_node) || (window.radioState && window.radioState.allstar_node) || "1999";
-        tgText = `Node ${targetNode}`;
-        tgDisplayHtml = `<span class="asl-node-badge-text">Node <strong>${targetNode}</strong></span>`;
-        tgDesc = "RX/TX";
-        const linkModeTitle = window.t ? window.t("live.asl_link_mode_tooltip", {}, "Режим линка: приём и передача (RX/TX)") : "Режим линка: приём и передача (RX/TX)";
-        tgDescHtml = `<span class="asl-link-mode-badge" title="${linkModeTitle}">RX/TX</span>`;
-        tgCellTitle = window.t ? window.t("live.asl_target_node_title", { node: targetNode }, `Целевой узел: Node ${targetNode} (RX/TX)`) : `Целевой узел: Node ${targetNode} (RX/TX)`;
-      } else if (isYsfCall) {
-        const ysfRoomId = String(c.dst_id || "25000").trim();
-        const ysfRoomName = String(c.dst_name || c.talker_alias || `YSF #${ysfRoomId}`).trim();
-        tgText = `#${ysfRoomId}`;
-        tgDisplayHtml = `<span class="ysf-room-badge-text">#<strong>${ysfRoomId}</strong></span>`;
-        tgDesc = ysfRoomName;
-        tgCellTitle = `${ysfRoomName} (#${ysfRoomId})`;
-      } else if (isDstarCall || isM17Call) {
-        const netLabel = isDstarCall ? "D-STAR" : "M17";
-        const refName = String(c.dst_name || (c.dst_id ? `${netLabel} ${c.dst_id}` : netLabel)).trim();
-        tgText = refName;
-        tgDisplayHtml = `<span class="ysf-room-badge-text"><strong>${refName}</strong></span>`;
-        tgDesc = "";
-        tgCellTitle = refName;
-      } else {
-        tgText = isPrivateCall ? `ID ${c.dst_id}` : `${c.dst_id}`;
-        tgDisplayHtml = isPrivateCall ? `ID <span class="dmr-id-text">${c.dst_id}</span>` : `${c.dst_id}`;
-
-        if (!isPrivateCall && tgCountry) {
-          const resolveCtry = (obj) => {
-            if (!obj) return "";
-            return (typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function")
-              ? window.resolveCountryDisplayName(obj)
-              : (obj.name || "");
-          };
-          const callerKey = String(callerCountry?.iso || callerCountry?.name_en || callerCountry?.name || "").trim().toLowerCase();
-          const tgKey = String(tgCountry?.iso || tgCountry?.name_en || tgCountry?.name || "").trim().toLowerCase();
-          const isTgGlobal = Boolean(tgCountry.iso === "GLOBAL" || tgCountry.flag === "🌐" || tgKey === "global" || tgKey.includes("worldwide"));
-
-          if (isTgGlobal) {
-            if (callerKey && callerKey !== "global") {
-              isDiffCountry = true;
-            }
-          } else if (tgKey && tgKey !== "global") {
-            if (callerKey !== tgKey) {
-              isDiffCountry = true;
-            }
-          }
-
-          if (isDiffCountry) {
-            const locTgCountry = resolveCtry(tgCountry);
-            tgFlagHtml = `<span class="tg-flag" title="${locTgCountry || ''}">${getFlagBadgeHtml(tgCountry, c.dst_id === 9990)}</span>`;
-            if (!isTgGlobal && locTgCountry) {
-              tgCountryName = locTgCountry;
-            } else if (c.dst_id === 91) {
-              tgCountryName = window.t ? window.t("tg_special.91", {}, "Worldwide") : "Worldwide";
-            } else if (c.dst_id === 92) {
-              tgCountryName = window.t ? window.t("countries.EU", {}, "Europe") : "Europe";
-            }
-          }
-        }
-
-        if (!isPrivateCall) {
-          const netRaw = (typeof window.getNetworkRawTgName === "function")
-            ? window.getNetworkRawTgName(c.dst_id, callNetType)
-            : ((typeof window.TG_NAMES !== "undefined" && window.TG_NAMES[c.dst_id]) || "");
-          const rawName = netRaw || c.talkgroup_name || c.dst_name || "";
-          let cleaned = "";
-          if (rawName || isNonMccNet) {
-            cleaned = typeof getCleanTgDesc === "function" ? getCleanTgDesc(c.dst_id, rawName, null, callNetType) : rawName;
-          }
-
-          if (isDiffCountry) {
-            if (tgCountryName) {
-              if (cleaned) {
-                const lowerCleaned = cleaned.toLowerCase();
-                const lowerCountry = tgCountryName.toLowerCase();
-                if (lowerCleaned.startsWith(lowerCountry) || lowerCleaned.includes(lowerCountry)) {
-                  tgDesc = cleaned;
-                } else {
-                  tgDesc = `${tgCountryName} ${cleaned}`;
-                }
-              } else {
-                tgDesc = tgCountryName;
-              }
-            } else {
-              tgDesc = cleaned;
-            }
-          } else {
-            if (cleaned) {
-              const shortDesc = isNonMccNet ? cleaned : cleaned.split(/[\(\/]/)[0].trim();
-              tgDesc = shortDesc || cleaned;
-            }
-          }
-        } else {
-          const userObj = (typeof USER_CALLSIGNS !== "undefined" && USER_CALLSIGNS[c.dst_id]) || null;
-          if (userObj && (userObj.callsign || userObj.name)) {
-            tgDesc = `${userObj.callsign || ''} ${userObj.name || ''}`.trim();
-          } else {
-            tgDesc = window.t ? window.t("live.private_call", {}, "Личный") : "Личный";
-          }
-        }
-
-      const tgCountryDisp = (tgCountry && typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function")
-        ? window.resolveCountryDisplayName(tgCountry)
-        : (tgCountry?.name || "");
-      tgDescHtml = tgDesc ? `<span class="tg-desc-text" title="${tgDesc}">${tgDesc}</span>` : "";
-      tgCellTitle = `${tgText}${isDiffCountry && tgCountryDisp ? ' [' + tgCountryDisp + ']' : ''}${tgDesc ? ' — ' + tgDesc : ''}`;
+    const filtered = heardCalls.filter(c => {
+      if (totalHs > 1 && (isMobile || effectiveHid !== "all")) {
+        const callHidResolved = resolveHid(c.hotspot_id);
+        if (callHidResolved !== effResolved) return false;
       }
-      const activeClass = c.active ? (isTx ? " active-call active-tx-call" : " active-call") : "";
-      const txRowClass = isTx ? " is-tx-row" : "";
-      const formatFn = (typeof window !== "undefined" && typeof window.formatHistoryTime === "function")
-        ? window.formatHistoryTime
-        : (typeof formatHistoryTime === "function" ? formatHistoryTime : null);
-      const timeStr = formatFn
-        ? formatFn(c.timestamp || nowSec)
-        : (c.time_str || (new Date((c.timestamp || nowSec) * 1000)).toTimeString().substring(0, 8));
-      const elapsed = Math.max(0, nowSec - (c.timestamp || nowSec)).toFixed(1);
-      const sUnit = window.t ? window.t("live.sec", {}, "с") : "с";
-      const durStr = c.active 
-        ? `<span class="live-duration-tick duration-active" data-start="${c.timestamp}">🔴 ${elapsed}${sUnit}</span>` 
-        : `<span class="duration-text" style="color: #ffffff;">${c.duration ? c.duration + sUnit : '—'}</span>`;
-
-      const rawCityStr = (c.city || "").trim();
-      const locCity = rawCityStr && typeof window !== "undefined" && typeof window.resolveCityName === "function"
-        ? window.resolveCityName(rawCityStr)
-        : rawCityStr;
-      const locCountry = (typeof window !== "undefined" && typeof window.resolveCountryDisplayName === "function")
-        ? window.resolveCountryDisplayName(country)
-        : (country?.name || "");
-      const locationInfo = (isTx && !isAllStarCall) ? "" : (locCity ? (locCountry ? `${locCity}, ${locCountry}` : locCity) : locCountry);
-      const plainTitle = `${(isTx ? '[TX] ' : '')}${baseCaller.replace(/<[^>]+>/g, '')}${locationInfo ? ' - ' + locationInfo : ''}`;
-      
-      const hsObj = (window.currentHotspots || []).find(h => h.id === (c.hotspot_id || "default"));
-      const hsBadge = (!isMobile && window.currentLogHotspotId === "all" && hsObj) 
-        ? `<span class="log-hs-badge" title="${hsObj.name}">${hsObj.name}</span>` 
-        : "";
-
-      // Caller name extraction: Callsign & Name, without parentheses ID (as ID is on line 2)
-      let callerNameLine = "";
-      if (effectiveTa) {
-        callerNameLine = effectiveTa.replace(/\s*\(\s*\d{3,8}\s*\)$/, "").trim();
-      } else if (c.src_callsign && c.src_callsign.trim() && c.src_callsign !== "---" && !c.src_callsign.startsWith("ID:")) {
-        const call = c.src_callsign.trim().toUpperCase();
-        const cName = typeof cleanName === "function" ? cleanName(c.src_name) : (c.src_name || "").trim();
-        callerNameLine = (cName && cName.toUpperCase() !== call) ? `${call} ${cName}` : call;
-      } else if (c.caller_display && c.caller_display.trim() && c.caller_display !== "---") {
-        let raw = c.caller_display.replace(/<[^>]+>/g, "").trim();
-        const mParen = raw.match(/^(.*?)\s*\(\s*(\d{3,8})\s*\)$/);
-        callerNameLine = mParen ? mParen[1].trim() : raw;
+      if (!isNoTsNetwork && logFilter !== "all" && c.slot.toString() !== logFilter) return false;
+      if (logSearchQuery) {
+        const isTxMatch = c.is_tx && (logSearchQuery === "tx" || "передача".includes(logSearchQuery) || (txWord && txWord.includes(logSearchQuery)));
+        const call = (c.src_callsign || "").toLowerCase();
+        const name = (c.src_name || "").toLowerCase();
+        const idStr = (c.src_id || "").toString();
+        const tgStr = (c.dst_id || "").toString();
+        const ta = (c.talker_alias || "").toLowerCase();
+        const trText = (c.transcription || "").toLowerCase();
+        return isTxMatch ||
+               call.includes(logSearchQuery) ||
+               name.includes(logSearchQuery) ||
+               idStr.includes(logSearchQuery) ||
+               tgStr.includes(logSearchQuery) ||
+               ta.includes(logSearchQuery) ||
+               trText.includes(logSearchQuery);
       }
-      if (!callerNameLine || (isForeign && isMyCall && callerNameLine.toUpperCase() === myCall)) {
-        if (c.src_callsign && c.src_callsign.trim() && c.src_callsign !== "---" && !c.src_callsign.startsWith("ID:")) {
-          const call = c.src_callsign.trim().toUpperCase();
-          const cName = typeof cleanName === "function" ? cleanName(c.src_name) : (c.src_name || "").trim();
-          callerNameLine = (cName && cName.toUpperCase() !== call) ? `${call} ${cName}` : call;
-        } else {
-          callerNameLine = c.src_id ? `ID: ${c.src_id}` : "---";
-        }
-      }
-
-      if (isAllStarCall && callerNameLine) {
-        // Strip any leading emoji flags to prevent duplicate flag display
-        callerNameLine = callerNameLine.replace(/^[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF\uFE00-\uFE0F\s]+/, '').trim();
-      }
-
-      // Line 2: DMR ID / AllStar Node + country/location
-      const validId = c.src_id && String(c.src_id) !== "0" && String(c.src_id) !== "---" ? String(c.src_id) : "";
-      let stationSubHtml = "";
-      if (isAllStarCall) {
-        const nodeStr = validId ? `<span class="asl-station-node">#${validId}</span>` : "";
-        const locDetail = locCity || (locCountry && locCountry !== "Unknown" ? locCountry : "");
-        const locSpan = locDetail ? `<span class="station-country">(${locDetail})</span>` : "";
-        stationSubHtml = [nodeStr, locSpan].filter(Boolean).join(" ");
-      } else {
-        const dmrIdHtml = validId ? `<span class="dmr-id-text">${validId}</span>` : "";
-        const locText = locationInfo ? `<span class="station-country">(${locationInfo})</span>` : "";
-        stationSubHtml = [dmrIdHtml, locText].filter(Boolean).join(" ");
-      }
-
-      const srcType = c.source_type || 'VoIP';
-      const slotHtml = isAllStarCall
-        ? `<span class="asl-cell-badge asl-cell-badge-${srcType.toLowerCase()}" title="${window.t ? window.t("live.asl_source_type_tooltip", { type: srcType }, `Источник вызова: ${srcType}`) : `Источник вызова: ${srcType}`}">${srcType}</span>`
-        : (isYsfCall
-          ? `<span class="ysf-cell-badge" title="C4FM / YSF">C4FM</span>`
-          : (isDstarCall
-            ? `<span class="ysf-cell-badge" title="D-STAR">D-STAR</span>`
-            : (isM17Call
-              ? `<span class="ysf-cell-badge" title="M17">M17</span>`
-              : (isSvxCall
-                ? `<span class="ysf-cell-badge" title="SVXReflector">SVX</span>`
-                : `<span class="slot-text-ts${c.slot}">TS${c.slot}</span>`))));
-
-      const hasTranscription = Boolean(c.transcription && c.transcription.trim());
-      const flagClass = hasTranscription ? "station-flag has-transcription" : "station-flag";
-      const transMarkerHtml = hasTranscription 
-        ? `<span class="log-text-marker" data-call-id="${c.id}" title="${window.t ? window.t("live.has_transcription", {}, "Текст передачи") : "Текст передачи"}"></span>` 
-        : "";
-
-      const hasRec = Boolean(window.recordingsManager && window.recordingsManager.hasRecording(c.id));
-      const isCurPlaying = Boolean(window.recordingsManager && window.recordingsManager.isPlayingCall(c.id));
-      const activeCallId = window.recordingsManager ? window.recordingsManager.getActiveCallId() : null;
-      const isCurRecRow = Boolean(activeCallId && String(activeCallId) === String(c.id));
-      const recRowClass = isCurRecRow ? " is-playing-rec" : "";
-      const playBtnHtml = hasRec ? `<button type="button" class="log-play-btn${isCurPlaying ? ' playing' : ''}" data-call-id="${c.id}" title="${window.t ? window.t("recordings.play_tooltip", {}, "Прослушать запись") : "Прослушать запись"}"><img src="/static/img/Log_PLAY.png" class="log-play-img" alt="Play"></button>` : '';
-
-      return `
-        <div class="live-call-row${txRowClass}${activeClass}${recRowClass}" data-id="${c.id}" data-hid="${c.hotspot_id || 'default'}" data-net="${callNetType}">
-          <!-- Desktop 4-column 2-line layout -->
-          <div class="live-row-desktop">
-            <div class="cell-station" title="${plainTitle}" data-radio-id="${c.src_id}" data-callsign="${c.src_callsign || ''}" data-name="${c.src_name || ''}">
-              <span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? (window.t ? window.t("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)") : locCountry}">${flagHtml}</span>
-              ${transMarkerHtml}
-              <div class="station-text-wrap" data-radio-id="${c.src_id}">
-                <div class="station-name-line">${isTx ? '<span class="log-tx-badge">TX</span>' : ''}${callerNameLine}${hsBadge}</div>
-                <div class="station-sub-line">${stationSubHtml}</div>
-              </div>
-            </div>
-            <div class="cell-tg" title="${tgCellTitle}">
-              <div class="tg-line-top">
-                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isYsfCall ? 'is-ysf-room' : (isPrivateCall ? 'is-id' : 'is-tg'))}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}" title="${isAllStarCall ? (window.t ? window.t("live.asl_node_title", { node: c.dst_id }, `Node ${c.dst_id}`) : `Node ${c.dst_id}`) : (isYsfCall ? (window.t ? window.t("live.tune_ysf_title", { room: tgText }, `Перейти в комнату ${tgText}`) : `Перейти в комнату ${tgText}`) : (window.t ? window.t("live.tune_title", { tg: tgText, slot: c.slot }) : `Tune to ${tgText} (TS${c.slot})`))}">
-                  ${tgDisplayHtml}
-                </span>
-                ${tgFlagHtml}
-              </div>
-              <div class="tg-line-sub">
-                ${tgDescHtml || '<span class="tg-desc-none">—</span>'}
-              </div>
-            </div>
-            <div class="cell-slot">
-              ${slotHtml}
-            </div>
-            <div class="cell-play">
-              ${playBtnHtml}
-            </div>
-            <div class="cell-duration">
-              <div class="dur-line-top" style="color: #ffffff;">
-                ${durStr}
-              </div>
-              <div class="dur-line-sub" title="${window.t ? window.t('live.time_toggle_tooltip', {}, 'Время вызова: нажмите для переключения LOC ↔ UTC') : 'Время вызова: нажмите для переключения LOC ↔ UTC'}">
-                ${timeStr}
-              </div>
-            </div>
-          </div>
-
-          <!-- Mobile layout (matches desktop 5-column 2-line structure) -->
-          <div class="live-row-mobile">
-            <span class="${flagClass}" data-call-id="${c.id}" title="${isTx ? (window.t ? window.t("live.my_tx_title", {}, "Моя передача (TX)") : "Моя передача (TX)") : locCountry}">${flagHtml}</span>
-            ${transMarkerHtml}
-            <div class="station-text-wrap" data-radio-id="${c.src_id}">
-              <div class="station-name-line">${isTx ? '<span class="log-tx-badge">TX</span>' : ''}${callerNameLine}${hsBadge}</div>
-              <div class="station-sub-line">${stationSubHtml}</div>
-            </div>
-            <div class="cell-tg" title="${tgCellTitle}">
-              <div class="tg-line-top">
-                <span class="tg-plain-link btn-quick-tune-tg ${isAllStarCall ? 'is-asl-node' : (isYsfCall ? 'is-ysf-room' : (isPrivateCall ? 'is-id' : 'is-tg'))}" data-tg="${c.dst_id}" data-slot="${c.slot}" data-hid="${c.hotspot_id || 'default'}">${tgDisplayHtml}</span>
-                ${tgFlagHtml}
-              </div>
-              <div class="tg-line-sub">${tgDescHtml || '—'}</div>
-            </div>
-            <div class="cell-slot">
-              ${slotHtml}
-            </div>
-            <div class="cell-play">
-              ${playBtnHtml}
-            </div>
-            <div class="cell-duration">
-              <div class="dur-line-top" style="color: #ffffff;">${durStr}</div>
-              <div class="dur-line-sub" title="${window.t ? window.t('live.time_toggle_tooltip', {}, 'Время вызова: нажмите для переключения LOC ↔ UTC') : 'Время вызова: нажмите для переключения LOC ↔ UTC'}">${timeStr}</div>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join("");
+      return true;
+    });
 
     const isAsc = (window.__proxdmrLogSortOrder === "asc");
-    const nextStep = Math.min(LOG_PAGE_SIZE, remainingCount);
-    let moreBarHtml = "";
-    if (remainingCount > 0 || (logVisibleLimit > LOG_PAGE_SIZE && filtered.length > LOG_PAGE_SIZE)) {
-      const hintText = remainingCount > 0
-        ? (window.t ? window.t("live.more_records_hint", { shown: shownCount, total: filtered.length }, `Показано последних ${shownCount} из ${filtered.length} вызовов`) : `Показано последних ${shownCount} из ${filtered.length} вызовов`)
-        : (window.t ? window.t("live.all_records_shown_hint", { total: filtered.length }, `Показаны все ${filtered.length} вызовов`) : `Показаны все ${filtered.length} вызовов`);
-      let actionsHtml = "";
-      if (remainingCount > 0) {
-        const loadNextText = window.t ? window.t("live.load_next_btn", { count: nextStep }, `Загрузить следующие ${nextStep} записей`) : `Загрузить следующие ${nextStep} записей`;
-        actionsHtml += `<button type="button" class="btn-log-load-more">${loadNextText}</button>`;
-      }
-      if (remainingCount > LOG_PAGE_SIZE) {
-        const loadAllText = window.t ? window.t("live.load_all_btn", { count: remainingCount }, `Показать все (+${remainingCount})`) : `Показать все (+${remainingCount})`;
-        actionsHtml += `<button type="button" class="btn-log-load-all">${loadAllText}</button>`;
-      }
-      if (logVisibleLimit > LOG_PAGE_SIZE && filtered.length > LOG_PAGE_SIZE) {
-        const collapseText = window.t ? window.t("live.collapse_limit_btn", { count: LOG_PAGE_SIZE }, `Свернуть до ${LOG_PAGE_SIZE}`) : `Свернуть до ${LOG_PAGE_SIZE}`;
-        actionsHtml += `<button type="button" class="btn-log-collapse-limit">${collapseText}</button>`;
-      }
-      moreBarHtml = `<div class="log-more-bar${isAsc ? ' is-asc' : ' is-desc'}"><div class="log-more-hint">${hintText}</div><div class="log-more-actions">${actionsHtml}</div></div>`;
-    }
-    const html = moreBarHtml ? (isAsc ? (moreBarHtml + rowsHtml) : (rowsHtml + moreBarHtml)) : rowsHtml;
-    const scrollWrap = document.getElementById("logTableScrollWrap");
-    const prevScrollHeight = scrollWrap ? scrollWrap.scrollHeight : 0;
-    const prevScrollTop = scrollWrap ? scrollWrap.scrollTop : 0;
-    const hadRowsBefore = Boolean(logList.querySelector(".live-call-row"));
-    const wasAtBottom = scrollWrap && (scrollWrap.scrollHeight - scrollWrap.scrollTop <= scrollWrap.clientHeight + 50);
-    logList.innerHTML = html;
+    const prevLen = _filteredLogCalls.length;
+    const prevFirstId = prevLen > 0 ? String(_filteredLogCalls[0].id) : "";
+    const prevScrollTop = logList.scrollTop || 0;
+    const wasAtBottom = (logList.scrollHeight - prevScrollTop <= (logList.clientHeight || 600) + 50);
 
-    const pagMode = _logPaginationScrollMode;
-    _logPaginationScrollMode = null;
-
-    if (scrollWrap && (pagMode === "more" || pagMode === "all")) {
-      if (isAsc) {
-        scrollWrap.scrollTop = Math.max(0, prevScrollTop + (scrollWrap.scrollHeight - prevScrollHeight));
-      } else {
-        scrollWrap.scrollTop = prevScrollTop;
-      }
-    } else if (scrollWrap && pagMode === "collapse") {
-      scrollWrap.scrollTop = isAsc ? scrollWrap.scrollHeight : 0;
-    } else if (isAsc && scrollWrap) {
-      if (wasAtBottom || !hadRowsBefore) {
-        scrollWrap.scrollTop = scrollWrap.scrollHeight;
-      }
-    }
-    if (window.recordingsManager && typeof window.recordingsManager.updateActiveRowHighlight === "function") {
-      window.recordingsManager.updateActiveRowHighlight();
+    if (isAsc) {
+      filtered.reverse();
     }
 
-    const loadMoreBtn = logList.querySelector(".btn-log-load-more");
-    if (loadMoreBtn) {
-      loadMoreBtn.onclick = (e) => {
-        if (window.__proxdmr_log_swipe_active) return;
-        e.stopPropagation();
-        _logPaginationScrollMode = "more";
-        logVisibleLimit += LOG_PAGE_SIZE;
-        renderLogList();
-      };
-    }
-    const loadAllBtn = logList.querySelector(".btn-log-load-all");
-    if (loadAllBtn) {
-      loadAllBtn.onclick = (e) => {
-        if (window.__proxdmr_log_swipe_active) return;
-        e.stopPropagation();
-        _logPaginationScrollMode = "all";
-        logVisibleLimit = Math.max(LOG_PAGE_SIZE, filtered.length);
-        renderLogList();
-      };
-    }
-    const collapseBtn = logList.querySelector(".btn-log-collapse-limit");
-    if (collapseBtn) {
-      collapseBtn.onclick = (e) => {
-        if (window.__proxdmr_log_swipe_active) return;
-        e.stopPropagation();
-        _logPaginationScrollMode = "collapse";
-        logVisibleLimit = LOG_PAGE_SIZE;
-        renderLogList();
-      };
+    _filteredLogCalls = filtered;
+    _vLastMeta = { isMobile, effectiveHid, isAsc };
+
+    if (logCountBadge) logCountBadge.textContent = filtered.length;
+
+    // When History panel is closed, skip DOM work completely (0ms cost during background calls)
+    if (!isLogVisible) {
+      _vNeedsRenderOnShow = true;
+      return;
     }
 
-    // Play recording buttons listener
-    logList.querySelectorAll(".log-play-btn").forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const cid = btn.dataset.callId;
-        if (window.recordingsManager && cid) {
-          window.recordingsManager.playByCallId(cid);
-        }
-      };
-    });
+    if (filtered.length === 0) {
+      let emptyMsg = window.t ? window.t("live.empty_waiting") : "Ожидание активности в сети BM...";
+      if (logSearchQuery) {
+        emptyMsg = window.t ? window.t("live.empty_not_found") : "Ничего не найдено по запросу";
+      } else if (isMobile || effectiveHid !== "all") {
+        const hsObj = (window.currentHotspots || []).find(h => h.id === effectiveHid);
+        emptyMsg = window.t ? window.t("live.empty_hotspot", { name: hsObj ? hsObj.name : "хотспоте" }) : `Ожидание активности на ${hsObj ? hsObj.name : "хотспоте"}...`;
+      }
+      _vSpacerTop = null;
+      _vViewport = null;
+      _vSpacerBottom = null;
+      _vRenderedStart = -1;
+      _vRenderedEnd = -1;
+      logList.innerHTML = `<div class="log-empty-msg">${emptyMsg}</div>`;
+      return;
+    }
 
-    // Quick tune listener
-    logList.querySelectorAll(".btn-quick-tune-tg").forEach(btn => {
-      btn.onclick = (e) => {
-        if (window.__proxdmr_log_swipe_active) return;
-        e.stopPropagation();
-        const tg = parseInt(btn.dataset.tg, 10);
-        const slot = parseInt(btn.dataset.slot, 10);
-        const hid = btn.dataset.hid;
-        if (hid && typeof window.switchActiveHotspot === "function") window.switchActiveHotspot(hid);
-        if (btn.classList.contains("is-asl-node")) return;
-        if (btn.classList.contains("is-ysf-room")) {
-          if (tg > 0 && typeof window.connectYsfRoomById === "function") {
-            const card = hid ? document.querySelector(`.radio-container[data-hotspot-id="${hid}"]`) : null;
-            window.connectYsfRoomById(String(tg), `YSF #${tg}`, card);
-          }
-          return;
-        }
-        if (tg > 0) {
-          if (slot === 1 || slot === 2) {
-            if (typeof window.setActiveSlot === "function") window.setActiveSlot(slot, true);
-          }
-          if (typeof window.setTg === "function") window.setTg(tg, true);
-        }
-      };
-    });
+    const curViewKey = `${effectiveHid}|${logFilter}|${logSearchQuery}|${isAsc ? "asc" : "desc"}`;
+    const viewChanged = (curViewKey !== _lastLogViewKey);
+    _lastLogViewKey = curViewKey;
+
+    const rowH = _vRowHeight > 16 ? _vRowHeight : 35;
+    const newTotalH = filtered.length * rowH;
+    const viewH = logList.clientHeight || 600;
+    const newFirstId = String(filtered[0].id);
+
+    ensureVirtualScaffold();
+
+    if (viewChanged) {
+      _vSpacerTop.style.height = "0px";
+      _vSpacerBottom.style.height = `${Math.round(newTotalH)}px`;
+      logList.scrollTop = isAsc ? Math.max(0, Math.round(newTotalH - viewH)) : 0;
+    } else if (isAsc) {
+      if (wasAtBottom || prevLen === 0) {
+        _vSpacerBottom.style.height = `${Math.round(newTotalH)}px`;
+        logList.scrollTop = Math.max(0, Math.round(newTotalH - viewH));
+      }
+    } else {
+      // desc (newest at top): preserve visual anchor if user scrolled down to read history
+      const addedCount = filtered.length - prevLen;
+      if (prevScrollTop > 8 && addedCount > 0 && prevFirstId && newFirstId !== prevFirstId) {
+        logList.scrollTop = Math.max(0, Math.round(prevScrollTop + addedCount * rowH));
+      }
+    }
+
+    renderVirtualWindow(true);
 
     ensureLiveTicker();
     if (logSelection && typeof logSelection.updateUI === "function") {
@@ -1719,7 +1790,11 @@ Object.defineProperty(window, 'logFilter', { get: () => logFilter, set: (v) => l
 Object.defineProperty(window, 'logSearchQuery', { get: () => logSearchQuery, set: (v) => logSearchQuery = v, configurable: true });
 window.renderLogList = renderLogList;
 window.ensureLiveTicker = ensureLiveTicker;
+window.getFilteredLogCalls = () => _filteredLogCalls;
+window.getFilteredLogCallIds = () => _filteredLogCalls.map(c => String(c.id));
+window.scrollToLogCallId = scrollToLogCallId;
 
+initLogVirtualScroll();
 initLogSwipe();
 logSelection.init();
 window.syncLiveMonitorPlacement = syncLiveMonitorPlacement;
@@ -1735,6 +1810,9 @@ window.__proxdmr.addOrUpdateCall = addOrUpdateCall;
 window.__proxdmr.endCall = endCall;
 window.__proxdmr.resolveCaller = resolveCaller;
 window.__proxdmr.renderLogList = renderLogList;
+window.__proxdmr.getFilteredLogCalls = window.getFilteredLogCalls;
+window.__proxdmr.getFilteredLogCallIds = window.getFilteredLogCallIds;
+window.__proxdmr.scrollToLogCallId = scrollToLogCallId;
 window.__proxdmr.getHeardCalls = () => heardCalls;
 window.__proxdmr.setHeardCalls = (c) => { heardCalls = Array.isArray(c) ? c : []; renderLogList(); };
 window.__proxdmr.clearHeardCalls = () => { heardCalls = []; renderLogList(); };

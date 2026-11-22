@@ -81,6 +81,7 @@ class SlotAudioState {
     this.volume = 1.0;
     this.muted = false;
     this.channelMuted = false;
+    this.singleAudioMuted = false;
     this.globalMuted = false;
     this.pan = "center"; // "center", "left", "right"
     this.duckGain = 1.0;
@@ -103,9 +104,41 @@ class SlotAudioState {
     this.chebyS1 = new Float32Array(4);
     this.chebyS2 = new Float32Array(4);
 
-    // Fade on start/stop to prevent clicks
+    // Volume/ducking de-click ramp (fast 3ms)
     this.currentGain = 1.0;
     this.fadeStep = 1.0 / (sampleRate * 0.003); // 3ms micro-ramp
+
+    // Dedicated mute fade envelope (0.0..1.0), configurable 0.1..2.0s or 3ms de-click
+    this.muteGain = 1.0;
+    this.muteFadeEnabled = true;
+    this.muteFadeDuration = 0.3;
+    this.muteFadeStep = 1.0 / Math.max(1, sampleRate * 0.3);
+  }
+
+  isEffectiveMuted() {
+    return Boolean(this.muted || this.channelMuted || this.singleAudioMuted || this.globalMuted);
+  }
+
+  setMuteFadeConfig(enabled, durationSec) {
+    this.muteFadeEnabled = Boolean(enabled);
+    const parsed = parseFloat(durationSec);
+    this.muteFadeDuration = !isNaN(parsed) ? Math.max(0.1, Math.min(2.0, parsed)) : 0.3;
+    const effSec = this.muteFadeEnabled ? this.muteFadeDuration : 0.003;
+    this.muteFadeStep = 1.0 / Math.max(1, this.sampleRate * effSec);
+  }
+
+  syncImmediateMuteGain() {
+    this.muteGain = this.isEffectiveMuted() ? 0.0 : 1.0;
+  }
+
+  _advanceMuteGain(samplesCount) {
+    const targetMute = this.isEffectiveMuted() ? 0.0 : 1.0;
+    const delta = this.muteFadeStep * samplesCount;
+    if (Math.abs(this.muteGain - targetMute) > delta) {
+      this.muteGain += (this.muteGain < targetMute) ? delta : -delta;
+    } else {
+      this.muteGain = targetMute;
+    }
   }
 
   _resetAgcState() {
@@ -360,12 +393,14 @@ class SlotAudioState {
         this.isPlaying = true;
         this.fadeInRemaining = 64;
       } else {
+        this._advanceMuteGain(frames);
         return;
       }
     }
 
     const readCount = this.ring.read(this.tempChunk, frames);
     if (readCount === 0) {
+      this._advanceMuteGain(frames);
       if (this.txEnded) {
         this.isPlaying = false;
         this.txEnded = false;
@@ -406,8 +441,9 @@ class SlotAudioState {
       this.duckGain = this.targetDuckGain;
     }
 
-    const isEffectiveMuted = this.muted || this.channelMuted || this.globalMuted;
-    const targetGain = isEffectiveMuted ? 0.0 : (this.volume * this.duckGain);
+    const targetLevel = this.volume * this.duckGain;
+    const targetMuteGain = this.isEffectiveMuted() ? 0.0 : 1.0;
+    const muteStep = this.muteFadeStep;
 
     let panL = 1.0;
     let panR = 1.0;
@@ -420,13 +456,19 @@ class SlotAudioState {
     }
 
     for (let i = 0; i < readCount; i++) {
-      if (Math.abs(this.currentGain - targetGain) > this.fadeStep) {
-        this.currentGain += (this.currentGain < targetGain) ? this.fadeStep : -this.fadeStep;
+      if (Math.abs(this.currentGain - targetLevel) > this.fadeStep) {
+        this.currentGain += (this.currentGain < targetLevel) ? this.fadeStep : -this.fadeStep;
       } else {
-        this.currentGain = targetGain;
+        this.currentGain = targetLevel;
       }
 
-      let sample = this.tempChunk[i] * this.currentGain;
+      if (Math.abs(this.muteGain - targetMuteGain) > muteStep) {
+        this.muteGain += (this.muteGain < targetMuteGain) ? muteStep : -muteStep;
+      } else {
+        this.muteGain = targetMuteGain;
+      }
+
+      let sample = this.tempChunk[i] * this.currentGain * this.muteGain;
 
       // Micro-fade-in de-click ramp
       if (this.fadeInRemaining > 0) {
@@ -443,6 +485,7 @@ class SlotAudioState {
     // De-click ramp down on partial read before dry buffer
     if (readCount < frames) {
       const remaining = frames - readCount;
+      this._advanceMuteGain(remaining);
       let decay = this.lastPlayedSample;
       for (let i = 0; i < remaining; i++) {
         decay *= 0.90;
@@ -487,12 +530,15 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.slots = new Map(); // key: "hotspotId_slot" -> SlotAudioState
-    this.channelVolumes = new Map(); // key: "hotspotId" -> number
-    this.channelMutes = new Map();   // key: "hotspotId" -> boolean
+    this.channelVolumes = new Map();     // key: "hotspotId" -> number
+    this.channelMutes = new Map();       // key: "hotspotId" -> boolean
+    this.channelSingleMutes = new Map(); // key: "hotspotId" -> boolean
     this.preGainDb = 0;
     this.preGainLinear = 1.0;
     this.jitterSec = 0.120; // 120ms default
     this.globalMuted = false;
+    this.muteFadeEnabled = true;
+    this.muteFadeDuration = 0.3;
     this.agcConfig = {
       enabled: true,
       depthDb: 18,
@@ -508,6 +554,7 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
     let st = this.slots.get(key);
     if (!st) {
       st = new SlotAudioState(key, sampleRate);
+      st.setMuteFadeConfig(this.muteFadeEnabled, this.muteFadeDuration);
       st.globalMuted = this.globalMuted;
       if (this.channelVolumes.has(normHid)) {
         st.volume = this.channelVolumes.get(normHid);
@@ -517,6 +564,10 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
       if (this.channelMutes.has(normHid)) {
         st.channelMuted = this.channelMutes.get(normHid);
       }
+      if (this.channelSingleMutes.has(normHid)) {
+        st.singleAudioMuted = this.channelSingleMutes.get(normHid);
+      }
+      st.syncImmediateMuteGain();
       this.slots.set(key, st);
     }
     return st;
@@ -561,9 +612,26 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
         break;
       }
 
+      case "set_mute_fade": {
+        if (data.enabled !== undefined) {
+          this.muteFadeEnabled = Boolean(data.enabled);
+        }
+        if (data.durationSec !== undefined) {
+          const parsed = parseFloat(data.durationSec);
+          if (!isNaN(parsed)) {
+            this.muteFadeDuration = Math.max(0.1, Math.min(2.0, parsed));
+          }
+        }
+        for (const st of this.slots.values()) {
+          st.setMuteFadeConfig(this.muteFadeEnabled, this.muteFadeDuration);
+        }
+        break;
+      }
+
       case "set_slot_mute": {
         const st = this.getSlot(data.hotspotId, data.slot);
         st.muted = Boolean(data.muted);
+        if (data.immediate) st.syncImmediateMuteGain();
         break;
       }
 
@@ -574,6 +642,19 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
         for (const slot of [1, 2]) {
           const st = this.getSlot(hid, slot);
           st.channelMuted = isMuted;
+          if (data.immediate) st.syncImmediateMuteGain();
+        }
+        break;
+      }
+
+      case "set_single_audio_mute": {
+        const hid = data.hotspotId || "default";
+        const isMuted = Boolean(data.muted);
+        this.channelSingleMutes.set(hid, isMuted);
+        for (const slot of [1, 2]) {
+          const st = this.getSlot(hid, slot);
+          st.singleAudioMuted = isMuted;
+          if (data.immediate) st.syncImmediateMuteGain();
         }
         break;
       }
@@ -582,6 +663,7 @@ class DMRAudioProcessor extends AudioWorkletProcessor {
         this.globalMuted = Boolean(data.muted);
         for (const st of this.slots.values()) {
           st.globalMuted = this.globalMuted;
+          if (data.immediate) st.syncImmediateMuteGain();
         }
         break;
       }

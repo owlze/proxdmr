@@ -190,6 +190,10 @@ class LogSelectionManager {
   }
 
   _getAllRenderedRowIds() {
+    if (typeof window !== "undefined" && typeof window.getFilteredLogCallIds === "function") {
+      const allIds = window.getFilteredLogCallIds();
+      if (Array.isArray(allIds)) return allIds;
+    }
     const rows = document.querySelectorAll("#logList .live-call-row");
     const ids = [];
     rows.forEach(r => {
