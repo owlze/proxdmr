@@ -791,6 +791,7 @@ import { showToast } from '../core/toast.js?v=2.9.699';
     _wireCollapsibleToggle("toolbarBgColorsFrame", "toolbarBgColorsToggle");
     _wireCollapsibleToggle("hotspotTsColorsFrame", "hotspotTsColorsToggle");
     _wireCollapsibleToggle("mobileHsDividerFrame", "mobileHsDividerToggle");
+    _wireCollapsibleToggle("chartsSettingsFrame", "chartsSettingsToggle");
   }
 
   function initSettingsTabHints() {

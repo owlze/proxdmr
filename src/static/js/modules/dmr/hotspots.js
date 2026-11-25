@@ -7,7 +7,7 @@
 import { safeEscapeHtml, escapeHtml, isoToEmoji, getLocalizedCountryName, getCountryInfo, getFlagBadgeHtml, getCleanTgDesc, getHotspotNetworkType } from '../core/formatters.js?v=2.9.787';
 import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
-import { openBmBenchmarkModal } from './bm-benchmark.js?v=2.9.809';
+import { openBmBenchmarkModal } from './bm-benchmark.js?v=2.9.826';
 import { openBmTgStaticModal, dropDynamicTGs } from './bm-static-manager.js?v=2.9.798';
 import {
   cycleHotspotPan,
@@ -35,7 +35,7 @@ import {
   setupCaptionBoxLongPress,
   ensureCaptionFontControls,
   setupCaptionBoxPinchZoom
-} from './transcriber.js?v=2.9.807';
+} from './transcriber.js?v=2.9.821';
 import {
   startTransmission,
   stopTransmission,
@@ -54,8 +54,8 @@ const isYsfOnlineStatus = (status) => {
   const u = String(status || "").trim().toUpperCase();
   return Boolean(u && u !== "STANDBY" && u !== "DISCONNECTED" && u !== "OFFLINE" && u !== "ERROR" && u !== "AUTH_FAILED");
 };
-import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, refreshM17Servers, refreshDstarServers, refreshSvxServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.809';
-import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.807';
+import { getDmrNetworkProfile, getNetworkServersList, renderNetworkBadgeElement, updateCardNetworkBadge, refreshFreeDmrServers, refreshAdnServers, refreshDmrPlusServers, refreshYsfServers, refreshM17Servers, refreshDstarServers, refreshSvxServers, sortServersForDropdown, getBmServerInfo, resolveCardMasterInfo } from './bm-banner.js?v=2.9.826';
+import { getServerCollectionValue, hasServerCollectionKey, setServerCollectionKey, deleteServerCollectionKey } from '../settings/sync.js?v=2.9.826';
 import { checkServerApkUpdate, updateApkUpdateUI } from '../core/updater.js?v=2.9.711';
 import { showLongPressEffect } from '../ui/long-press.js?v=2.9.711';
 
@@ -488,11 +488,10 @@ export function triggerAddNewHotspot() {
     while (usedSsids.has(nextSsid)) {
       nextSsid++;
     }
-    const nextNum = currentHotspots.length + 1;
     const baseHs = currentHotspots[0] || {};
     openEditHotspotForm({
       id: "",
-      name: window.t ? window.t("hotspots.name_prefix", { num: nextNum }, `Hotspot #${nextNum}`) : `Hotspot #${nextNum}`,
+      name: "",
       callsign: baseHs.callsign || (callsignDisplay && callsignDisplay.textContent !== "N0CALL" ? callsignDisplay.textContent : ""),
       talker_alias: "",
       send_talker_alias: true,
@@ -4005,7 +4004,7 @@ function parseKeyedHtmlClientFallback(rawHtml) {
 async function fetchActiveKeyedAslNodes() {
   try {
     const controller = new AbortController();
-    const tId = setTimeout(() => controller.abort(), 6500);
+    const tId = setTimeout(() => controller.abort(), 11500);
     const res = await fetch("/api/allstar/keyed", { signal: controller.signal });
     clearTimeout(tId);
     if (res.ok) {
@@ -4019,7 +4018,7 @@ async function fetchActiveKeyedAslNodes() {
   // Browser direct fallback (stats.allstarlink.org sends Access-Control-Allow-Origin: *)
   try {
     const controller = new AbortController();
-    const tId = setTimeout(() => controller.abort(), 6500);
+    const tId = setTimeout(() => controller.abort(), 11500);
     const res = await fetch("https://stats.allstarlink.org/stats/keyed", {
       signal: controller.signal,
       headers: { "Accept": "text/html" }
@@ -4231,7 +4230,7 @@ async function rollRandomKeyedAslNode(cid, card, targetHs, userNodes, diceBtn) {
 
       let waitConnMs = 0;
       let isConnected = false;
-      while (waitConnMs < 8500 && isLoopAlive()) {
+      while (waitConnMs < 12000 && isLoopAlive()) {
         const linkedInArray = Array.isArray(targetHs.asl_links) && targetHs.asl_links.some(l => String(l.node).trim() === chosenNode && !l.connecting);
         if (String(targetHs.connected_node || "").trim() === chosenNode || linkedInArray) {
           isConnected = true;
@@ -6816,8 +6815,9 @@ export function isYsfDashAutoOpenEnabled(cid = "default") {
     let v = hasServerCollectionKey("ysf_dash_auto", cid)
       ? getServerCollectionValue("ysf_dash_auto", cid)
       : localStorage.getItem(`proxdmr_ysf_dash_auto_${cid}`);
-    if (v === null || v === undefined) return true;
-    return v === true || v === "1" || v === "true";
+    if (v === null || v === undefined || v === "") return true;
+    if (v === false || v === 0 || v === "0" || v === "false") return false;
+    return v === true || v === 1 || v === "1" || v === "true";
   } catch (_) {
     return true;
   }
@@ -8961,7 +8961,7 @@ export function updateCardYsfPanel(card, hs) {
     if (autoWrap && autoChk) {
       autoWrap.onclick = (e) => {
         e.stopPropagation();
-        if (e.target !== autoChk) {
+        if (e.target !== autoChk && !(e.target && e.target.closest && e.target.closest("label"))) {
           autoChk.checked = !autoChk.checked;
           autoChk.dispatchEvent(new Event("change"));
         }
@@ -10880,7 +10880,7 @@ export function updateCardAllStarPanel(card, hs) {
         autoChk._wired = true;
         autoWrap.onclick = (e) => {
           e.stopPropagation();
-          if (e.target !== autoChk) {
+          if (e.target !== autoChk && !(e.target && e.target.closest && e.target.closest("label"))) {
             autoChk.checked = !autoChk.checked;
             autoChk.dispatchEvent(new Event("change"));
           }
@@ -11257,14 +11257,23 @@ export function renderRadiosGrid() {
           : (window.t ? window.t("vfo.hotspot_collapse_title", {}, "Collapse this hotspot (hold: collapse without disconnecting)") : "Collapse this hotspot (hold: collapse without disconnecting)");
       }
 
-      // Populate text
+      // Populate text (hide header name badge when name is empty or auto-generated "Хотспот #N" / "Hotspot #N")
       const nameBadge = card.querySelector(".hotspot-name-badge");
       if (nameBadge) {
         nameBadge.removeAttribute("data-i18n");
-        const hsName = hs.name || (window.t ? window.t("vfo.hotspot_default_numbered", { num: idx + 1 }, `Hotspot #${idx + 1}`) : `Hotspot #${idx + 1}`);
-        nameBadge.textContent = hsName;
-        nameBadge.title = hsName;
-        nameBadge.classList.toggle("is-online", (!isCollapsed || isLive) && isHotspotFullyOnline(hs));
+        const rawHsName = String((hs && hs.name) || "").trim();
+        const isAutoDefaultName = !rawHsName || /^(?:хотспот|hotspot)\s*#?\s*\d+$/i.test(rawHsName);
+        if (isAutoDefaultName) {
+          nameBadge.textContent = "";
+          nameBadge.title = "";
+          nameBadge.style.display = "none";
+          nameBadge.classList.remove("is-online");
+        } else {
+          nameBadge.style.display = "";
+          nameBadge.textContent = rawHsName;
+          nameBadge.title = rawHsName;
+          nameBadge.classList.toggle("is-online", (!isCollapsed || isLive) && isHotspotFullyOnline(hs));
+        }
       }
 
       const duplexBadge = card.querySelector(".duplex-badge");
@@ -13250,6 +13259,9 @@ export function renderRadiosGrid() {
     });
 
     syncCollapsedHotspotStacks();
+    if (typeof window !== "undefined" && window._lastServerCpuMetrics && typeof window.updateServerCpuIndicator === "function") {
+      window.requestAnimationFrame(() => window.updateServerCpuIndicator(window._lastServerCpuMetrics));
+    }
 
     renderLogHotspotTabs();
     initQuickAssign();
@@ -14005,12 +14017,24 @@ export function applyEditHsNetworkTypeUI(netType, options = {}) {
     }
 
     if (cleanType === "allstar") {
-      if (masterSelectGroup) masterSelectGroup.style.display = "none";
-      if (hostPortRow) hostPortRow.style.display = "none";
+      if (masterSelectGroup) {
+        masterSelectGroup.style.display = "none";
+        masterSelectGroup.classList.add("hs-field-hidden");
+      }
+      if (hostPortRow) {
+        hostPortRow.style.display = "none";
+        hostPortRow.classList.add("hs-field-hidden");
+      }
       if (editHsHost) editHsHost.removeAttribute("required");
     } else {
-      if (masterSelectGroup) masterSelectGroup.style.display = "";
-      if (hostPortRow) hostPortRow.style.display = "";
+      if (masterSelectGroup) {
+        masterSelectGroup.style.display = "";
+        masterSelectGroup.classList.remove("hs-field-hidden");
+      }
+      if (hostPortRow) {
+        hostPortRow.style.display = "";
+        hostPortRow.classList.remove("hs-field-hidden");
+      }
       if (editHsHost) editHsHost.setAttribute("required", "required");
     }
 
@@ -14621,6 +14645,11 @@ export function wireCustomHsDropdownEvents() {
         closeCustomHsDropdown();
       }
     });
+    window.addEventListener("resize", () => closeCustomHsDropdown(), { passive: true });
+    const modalBody = document.querySelector("#settingsModal .settings-modal-body");
+    if (modalBody) {
+      modalBody.addEventListener("scroll", () => closeCustomHsDropdown(), { passive: true });
+    }
   }
 }
 
@@ -14638,7 +14667,42 @@ export function toggleCustomHsDropdown() {
       window.closeAllServerComboboxes();
     }
     customDd.classList.add("is-open");
+    customMenu.style.visibility = "hidden";
     customMenu.style.display = "block";
+    customMenu.style.width = "max-content";
+    customMenu.style.minWidth = "";
+    customMenu.style.maxWidth = "";
+
+    const tRect = (customTrigger || customDd).getBoundingClientRect();
+    const modalEl = customDd.closest(".modal-content");
+    const mRect = modalEl ? modalEl.getBoundingClientRect() : { left: 8, right: window.innerWidth - 8, width: window.innerWidth - 16 };
+    const maxAllowedW = Math.max(160, Math.floor(Math.min(window.innerWidth - 16, mRect.width - 12)));
+    const naturalW = Math.ceil(customMenu.scrollWidth) + 8;
+    const finalW = Math.min(Math.max(Math.ceil(tRect.width), naturalW), maxAllowedW);
+
+    const minLeft = Math.max(8, Math.floor(mRect.left + 6));
+    const maxRight = Math.min(window.innerWidth - 8, Math.floor(mRect.right - 6));
+    let leftPos = Math.floor(tRect.left);
+    if (leftPos + finalW > maxRight) {
+      leftPos = Math.max(minLeft, maxRight - finalW);
+    }
+
+    const spaceBelow = window.innerHeight - tRect.bottom - 12;
+    const spaceAbove = tRect.top - 12;
+    let topPos = Math.floor(tRect.bottom + 3);
+    let maxH = Math.max(140, Math.min(spaceBelow, window.innerHeight - 160));
+    if (spaceBelow < 160 && spaceAbove > spaceBelow) {
+      maxH = Math.max(140, Math.min(spaceAbove - 3, window.innerHeight - 160));
+      const measuredH = Math.min(customMenu.scrollHeight, maxH);
+      topPos = Math.max(8, Math.floor(tRect.top - measuredH - 3));
+    }
+
+    customMenu.style.width = `${finalW}px`;
+    customMenu.style.left = `${leftPos}px`;
+    customMenu.style.top = `${topPos}px`;
+    customMenu.style.maxHeight = `${maxH}px`;
+    customMenu.style.visibility = "visible";
+
     if (customTrigger) customTrigger.setAttribute("aria-expanded", "true");
     const sel = customMenu.querySelector(".is-selected");
     if (sel && typeof sel.scrollIntoView === "function") {
@@ -18086,8 +18150,8 @@ export function isM17DashAutoOpenEnabled(cid = "default") {
     const val = hasServerCollectionKey("m17_dash_auto", cid)
       ? getServerCollectionValue("m17_dash_auto", cid)
       : localStorage.getItem(`proxdmr_m17_dash_auto_${cid}`);
-    if (val === true || val === "1" || val === "true") return true;
-    if (val === false || val === "0" || val === "false") return false;
+    if (val === true || val === 1 || val === "1" || val === "true") return true;
+    if (val === false || val === 0 || val === "0" || val === "false") return false;
   } catch (_) {}
   return false;
 }
@@ -18724,21 +18788,20 @@ export function updateCardM17Panel(card, hs) {
 // D-STAR PROTOCOL CARD PANEL & DASHBOARD
 // ═════════════════════════════════════════════════════════════════════════
 
-export function isDstarDashAutoOpenEnabled(cid) {
+export function isDstarDashAutoOpenEnabled(cid = "default") {
   try {
-    return localStorage.getItem(`proxdmr_dstar_dash_auto_${cid}`) === "1";
-  } catch (_) {
-    return false;
-  }
+    const val = hasServerCollectionKey("dstar_dash_auto", cid)
+      ? getServerCollectionValue("dstar_dash_auto", cid)
+      : localStorage.getItem(`proxdmr_dstar_dash_auto_${cid}`);
+    if (val === true || val === 1 || val === "1" || val === "true") return true;
+    if (val === false || val === 0 || val === "0" || val === "false") return false;
+  } catch (_) {}
+  return false;
 }
 
-export function setDstarDashAutoOpen(cid, enabled) {
+export function setDstarDashAutoOpen(cid = "default", enabled = false) {
   try {
-    if (enabled) {
-      localStorage.setItem(`proxdmr_dstar_dash_auto_${cid}`, "1");
-    } else {
-      localStorage.removeItem(`proxdmr_dstar_dash_auto_${cid}`);
-    }
+    setServerCollectionKey("dstar_dash_auto", cid, enabled ? "1" : "0", "proxdmr_dstar_dash_auto_", false);
   } catch (_) {}
 }
 
@@ -19256,21 +19319,20 @@ export function updateCardDstarPanel(card, hs) {
 // SVXREFLECTOR CARD PANEL & DASHBOARD
 // ═════════════════════════════════════════════════════════════════════════
 
-export function isSvxDashAutoOpenEnabled(cid) {
+export function isSvxDashAutoOpenEnabled(cid = "default") {
   try {
-    return localStorage.getItem(`proxdmr_svx_dash_auto_${cid}`) === "1";
-  } catch (_) {
-    return false;
-  }
+    const val = hasServerCollectionKey("svx_dash_auto", cid)
+      ? getServerCollectionValue("svx_dash_auto", cid)
+      : localStorage.getItem(`proxdmr_svx_dash_auto_${cid}`);
+    if (val === true || val === 1 || val === "1" || val === "true") return true;
+    if (val === false || val === 0 || val === "0" || val === "false") return false;
+  } catch (_) {}
+  return false;
 }
 
-export function setSvxDashAutoOpen(cid, enabled) {
+export function setSvxDashAutoOpen(cid = "default", enabled = false) {
   try {
-    if (enabled) {
-      localStorage.setItem(`proxdmr_svx_dash_auto_${cid}`, "1");
-    } else {
-      localStorage.removeItem(`proxdmr_svx_dash_auto_${cid}`);
-    }
+    setServerCollectionKey("svx_dash_auto", cid, enabled ? "1" : "0", "proxdmr_svx_dash_auto_", false);
   } catch (_) {}
 }
 
@@ -20052,8 +20114,8 @@ export function isAslDashAutoOpenEnabled(cid = "default") {
     let val = hasServerCollectionKey("asl_dash_auto", cid)
       ? getServerCollectionValue("asl_dash_auto", cid)
       : localStorage.getItem(`proxdmr_asl_dash_auto_${cid}`);
-    if (val === false || val === "0" || val === "false") return false;
-    if (val === true || val === "1" || val === "true") return true;
+    if (val === false || val === 0 || val === "0" || val === "false") return false;
+    if (val === true || val === 1 || val === "1" || val === "true") return true;
   } catch (_) {}
   return true;
 }

@@ -28,10 +28,10 @@ import {
   syncAllTranscribeSlotsToServer,
   disableAllTranscribe,
   disableHotspotTranscribe
-} from '../dmr/transcriber.js?v=2.9.807';
+} from '../dmr/transcriber.js?v=2.9.821';
 import { renderTranscriptionSummary } from '../dmr/transcription.js?v=2.9.787';
 import { renderQuickMemButtons } from '../dmr/quick-assign.js?v=2.9.787';
-import { hydrateServerCollections } from '../settings/sync.js?v=2.9.807';
+import { hydrateServerCollections } from '../settings/sync.js?v=2.9.826';
 import { updateApkUpdateUI } from '../core/updater.js?v=2.9.711';
 import { setHapticEnabled, setHapticDuration } from '../core/haptic.js?v=2.9.711';
 
@@ -1355,6 +1355,9 @@ export function handleServerMessage(msg) {
       renderHotspotsList();
       applyActiveHotspotToUI();
       refreshAllCardsBmBanner();
+      if (Array.isArray(msg.system_metrics_history)) {
+        hydrateServerMetricsHistory(msg.system_metrics_history);
+      }
       if (msg.system_metrics) {
         updateServerCpuIndicator(msg.system_metrics);
       }
@@ -1540,6 +1543,29 @@ export function handleServerMessage(msg) {
             window.setMuteFadeDuration(safeFd, false);
           }
         }
+        if (msg.app_settings.show_server_load_indicator !== undefined) {
+          const showLoad = Boolean(msg.app_settings.show_server_load_indicator);
+          if (uid) localStorage.setItem(`proxdmr_u${uid}_show_server_load_indicator`, showLoad ? "true" : "false");
+          localStorage.setItem("proxdmr_show_server_load_indicator", showLoad ? "true" : "false");
+          setShowServerLoadIndicatorEnabled(showLoad, false);
+        }
+        if (
+          msg.app_settings.server_load_ram_color !== undefined ||
+          msg.app_settings.server_load_cpu_color !== undefined ||
+          msg.app_settings.server_load_scale_px !== undefined ||
+          msg.app_settings.server_load_scale_sec !== undefined ||
+          msg.app_settings.ping_client_color !== undefined ||
+          msg.app_settings.ping_server_color !== undefined
+        ) {
+          setServerLoadChartSettings({
+            ram_color: msg.app_settings.server_load_ram_color,
+            cpu_color: msg.app_settings.server_load_cpu_color,
+            scale_px: msg.app_settings.server_load_scale_px,
+            scale_sec: msg.app_settings.server_load_scale_sec,
+            ping_client_color: msg.app_settings.ping_client_color,
+            ping_server_color: msg.app_settings.ping_server_color
+          }, false);
+        }
         if (msg.app_settings.mute_on_ptt !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_mute_on_ptt`, msg.app_settings.mute_on_ptt ? "true" : "false");
           localStorage.setItem("proxdmr_mute_on_ptt", msg.app_settings.mute_on_ptt ? "true" : "false");
@@ -1563,9 +1589,12 @@ export function handleServerMessage(msg) {
           setHotspotVolumeSyncEnabled(msg.app_settings.sync_hotspot_volume, false);
         }
         if (msg.app_settings.sync_system_volume !== undefined) {
-          if (uid) localStorage.setItem(`proxdmr_u${uid}_sync_system_volume`, msg.app_settings.sync_system_volume ? "true" : "false");
-          localStorage.setItem("proxdmr_sync_system_volume", msg.app_settings.sync_system_volume ? "true" : "false");
-          setSystemVolumeSyncEnabled(msg.app_settings.sync_system_volume, false);
+          const isApk = typeof window.isApkClient === "function" && window.isApkClient();
+          if (isApk) {
+            if (uid) localStorage.setItem(`proxdmr_u${uid}_sync_system_volume`, msg.app_settings.sync_system_volume ? "true" : "false");
+            localStorage.setItem("proxdmr_sync_system_volume", msg.app_settings.sync_system_volume ? "true" : "false");
+            setSystemVolumeSyncEnabled(msg.app_settings.sync_system_volume, false);
+          }
         }
         if (msg.app_settings.haptic_feedback !== undefined) {
           if (uid) localStorage.setItem(`proxdmr_u${uid}_haptic_feedback`, msg.app_settings.haptic_feedback ? "true" : "false");
@@ -1949,6 +1978,10 @@ export function handleServerMessage(msg) {
       }
     } else if (msg.type === "mute_on_ptt_change") {
       setMuteOnPttEnabled(Boolean(msg.enabled), false);
+    } else if (msg.type === "sync_system_volume_change") {
+      if (typeof window.isApkClient === "function" && window.isApkClient()) {
+        setSystemVolumeSyncEnabled(Boolean(msg.enabled), false);
+      }
     } else if (msg.type === "volume_up_ptt_change" || msg.type === "volume_down_ptt_change") {
       setVolumeUpPttEnabled(Boolean(msg.enabled), false);
       setVolumeDownPttEnabled(Boolean(msg.enabled), false);
@@ -1984,6 +2017,17 @@ export function handleServerMessage(msg) {
       if (typeof window.setMuteFadeDuration === "function") {
         window.setMuteFadeDuration(Number(msg.duration), false);
       }
+    } else if (msg.type === "show_server_load_indicator_change") {
+      setShowServerLoadIndicatorEnabled(Boolean(msg.enabled), false);
+    } else if (msg.type === "server_load_chart_settings_change") {
+      setServerLoadChartSettings({
+        ram_color: msg.ram_color,
+        cpu_color: msg.cpu_color,
+        scale_px: msg.scale_px,
+        scale_sec: msg.scale_sec,
+        ping_client_color: msg.ping_client_color,
+        ping_server_color: msg.ping_server_color
+      }, false);
     } else if (msg.type === "vocoder_settings_change") {
       if (window.updateVocoderUI) {
         window.updateVocoderUI(msg.settings);
@@ -2526,6 +2570,10 @@ export function handleServerMessage(msg) {
       if (targetHs) {
         if (targetHs._aslDisconnectingNodes && msg.node) {
           targetHs._aslDisconnectingNodes.delete(String(msg.node).trim());
+        }
+        if (targetHs._aslConnectingNodes instanceof Map) {
+          if (msg.node) targetHs._aslConnectingNodes.delete(String(msg.node).trim());
+          if (msg.failed_node) targetHs._aslConnectingNodes.delete(String(msg.failed_node).trim());
         }
         targetHs._aslDynamicMatrixMode = false;
         targetHs._aslDashMatrixOpen = false;
@@ -3584,6 +3632,23 @@ export function handleServerMessage(msg) {
         if (msg.tts_engine !== undefined) window.transcriberSettings.tts_engine = msg.tts_engine;
         if (msg.tts_voice !== undefined) window.transcriberSettings.tts_voice = msg.tts_voice;
         if (msg.tts_speed !== undefined) window.transcriberSettings.tts_speed = msg.tts_speed;
+        if (msg.tts_auto_speed !== undefined) {
+          const autoEn = Boolean(msg.tts_auto_speed);
+          window.transcriberSettings.tts_auto_speed = autoEn;
+          const optAuto = document.getElementById("optTtsAutoSpeed");
+          if (optAuto) optAuto.checked = autoEn;
+          const grpAutoMax = document.getElementById("groupTtsAutoSpeedMax");
+          if (grpAutoMax) grpAutoMax.style.display = autoEn ? "block" : "none";
+        }
+        if (msg.tts_auto_speed_max !== undefined) {
+          const mSpd = Math.max(1.10, Math.min(1.70, Number(msg.tts_auto_speed_max) || 1.40));
+          window.transcriberSettings.tts_auto_speed_max = mSpd;
+          const txt = `${mSpd.toFixed(2).replace(/\.?0+$/, "")}x`;
+          const optAutoMax = document.getElementById("optTtsAutoSpeedMax");
+          const optAutoMaxVal = document.getElementById("optTtsAutoSpeedMaxVal");
+          if (optAutoMax) optAutoMax.value = mSpd.toFixed(2);
+          if (optAutoMaxVal) optAutoMaxVal.textContent = txt;
+        }
         if (msg.tts_ducking_level !== undefined) window.transcriberSettings.tts_ducking_level = msg.tts_ducking_level;
         if (msg.tts_pause_ducking_level !== undefined) window.transcriberSettings.tts_pause_ducking_level = msg.tts_pause_ducking_level;
         if (msg.tts_mute_others !== undefined) {
@@ -3616,6 +3681,13 @@ export function handleServerMessage(msg) {
           if (optPiperStress) optPiperStress.checked = Boolean(msg.tts_piper_use_stress);
           const qPiperStress = document.getElementById("ttsQuickPiperStress");
           if (qPiperStress) qPiperStress.checked = Boolean(msg.tts_piper_use_stress);
+        }
+        if (msg.semantic_optimization !== undefined) {
+          window.transcriberSettings.semantic_optimization = Boolean(msg.semantic_optimization);
+          const optSemOpt = document.getElementById("optSemanticOptimization");
+          if (optSemOpt) optSemOpt.checked = Boolean(msg.semantic_optimization);
+          const popSemOpt = document.getElementById("popTxtSemanticOptimization");
+          if (popSemOpt) popSemOpt.checked = Boolean(msg.semantic_optimization);
         }
       }
       if (msg.source_lang !== undefined) {
@@ -4011,29 +4083,329 @@ if (typeof window !== "undefined") {
   });
 }
 
-const CPU_GAUGE_ARC_LEN = 52.78;
+const SYS_COLOR_RAM = "#3399cc";
+const SYS_COLOR_CPU = "#99cc00";
+const SYS_COLOR_WARN = "#ff9933";
+const SYS_COLOR_CRIT = "#ff0033";
+const SYS_HISTORY_MAX_SEC = 3600; // Keep up to 60 min of history for custom px/sec scales
+const SYS_CHART_DEFAULT_W = 62;
+const SYS_CHART_H = 24;
+const SYS_CHART_PAD_Y = 1.25;
+const SYS_BAR_SEGMENTS = 8;
+let _sysChartUidCounter = 0;
+let _sysChartResizeObserver = null;
+let _sysChartResizeRaf = 0;
+
+function scheduleRedrawAllServerMetricsCharts() {
+  if (typeof window === "undefined" || _sysChartResizeRaf) return;
+  _sysChartResizeRaf = window.requestAnimationFrame(() => {
+    _sysChartResizeRaf = 0;
+    const hist = getServerMetricsHistory();
+    const lastM = window._lastServerCpuMetrics;
+    const curCpu = lastM ? Number(lastM.cpu_percent) || 0 : 0;
+    const curRam = lastM ? Number(lastM.ram_percent) || 0 : 0;
+    const nowSec = Date.now() / 1000;
+    if (typeof document !== "undefined") {
+      document.querySelectorAll(".header-cpu-btn").forEach((btn) => {
+        renderServerMetricsChart(btn, hist, nowSec, curCpu, curRam);
+      });
+    }
+  });
+}
+
+function ensureServerCpuResizeObserver(btn) {
+  if (!btn || typeof window === "undefined") return;
+  if (!window._sysChartWindowResizeWired) {
+    window._sysChartWindowResizeWired = true;
+    window.addEventListener("resize", scheduleRedrawAllServerMetricsCharts, { passive: true });
+  }
+  if (typeof ResizeObserver === "function") {
+    if (!_sysChartResizeObserver) {
+      _sysChartResizeObserver = new ResizeObserver(() => {
+        scheduleRedrawAllServerMetricsCharts();
+      });
+    }
+    if (!btn._sysResizeObserved) {
+      btn._sysResizeObserved = true;
+      _sysChartResizeObserver.observe(btn);
+    }
+  }
+}
+
+function getServerMetricsHistory() {
+  if (typeof window === "undefined") return [];
+  if (!Array.isArray(window._serverMetricsHistory)) {
+    window._serverMetricsHistory = [];
+  }
+  return window._serverMetricsHistory;
+}
+
+function hydrateServerMetricsHistory(rawList) {
+  if (!Array.isArray(rawList) || typeof window === "undefined") return;
+  const nowSec = Date.now() / 1000;
+  const cutoff = nowSec - (SYS_HISTORY_MAX_SEC + 15);
+  const parsed = [];
+  for (let i = 0; i < rawList.length; i++) {
+    const item = rawList[i];
+    if (!item) continue;
+    let t, cpu, ram;
+    if (Array.isArray(item)) {
+      t = Number(item[0]);
+      cpu = Number(item[1]);
+      ram = Number(item[2]);
+    } else if (typeof item === "object") {
+      t = Number(item.t);
+      cpu = Number(item.cpu);
+      ram = Number(item.ram);
+    } else {
+      continue;
+    }
+    if (!Number.isFinite(t) || t < cutoff) continue;
+    parsed.push({
+      t,
+      cpu: Number.isFinite(cpu) ? Math.max(0, Math.min(100, cpu)) : 0,
+      ram: Number.isFinite(ram) ? Math.max(0, Math.min(100, ram)) : 0
+    });
+  }
+  parsed.sort((a, b) => a.t - b.t);
+  window._serverMetricsHistory = parsed;
+}
+
+function getSysMetricColor(pct, baseColor) {
+  if (pct > 95) return SYS_COLOR_CRIT;
+  if (pct >= 85) return SYS_COLOR_WARN;
+  return baseColor;
+}
+
+function updateSegmentedBar(barEl, pct, baseColor) {
+  if (!barEl) return;
+  const segs = barEl.querySelectorAll(".sys-seg");
+  const total = segs.length || SYS_BAR_SEGMENTS;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const litCount = (clamped > 0) ? Math.max(1, Math.min(total, Math.round((clamped / 100) * total))) : 0;
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    if (i < litCount) {
+      let col = baseColor;
+      if (clamped > 95 && i === total - 1) {
+        col = SYS_COLOR_CRIT;
+      } else if (clamped >= 85 && i >= total - 2) {
+        col = SYS_COLOR_WARN;
+      }
+      seg.style.backgroundColor = col;
+    } else {
+      seg.style.backgroundColor = "";
+    }
+  }
+}
+
+function buildSysSmoothPath(coords) {
+  if (!coords || coords.length < 2) return "";
+  let d = `M ${coords[0].x} ${coords[0].y}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i];
+    const p1 = coords[i + 1];
+    const midX = ((p0.x + p1.x) / 2).toFixed(2);
+    const midY = ((p0.y + p1.y) / 2).toFixed(2);
+    d += ` Q ${p0.x} ${p0.y}, ${midX} ${midY}`;
+  }
+  const last = coords[coords.length - 1];
+  d += ` L ${last.x} ${last.y}`;
+  return d;
+}
+
+function buildSysLineGradientStops(coords, width, baseColor) {
+  if (!coords || coords.length < 2) {
+    return `<stop offset="0%" stop-color="${baseColor}"/><stop offset="100%" stop-color="${baseColor}"/>`;
+  }
+  const stops = [];
+  for (let i = 0; i < coords.length; i++) {
+    const c = coords[i];
+    const offset = Math.max(0, Math.min(100, (c.x / width) * 100)).toFixed(2);
+    const col = getSysMetricColor(c.val, baseColor);
+    if (i > 0) {
+      const prevCol = getSysMetricColor(coords[i - 1].val, baseColor);
+      if (prevCol !== col) {
+        stops.push(`<stop offset="${offset}%" stop-color="${prevCol}"/>`);
+      }
+    }
+    stops.push(`<stop offset="${offset}%" stop-color="${col}"/>`);
+  }
+  const firstCol = getSysMetricColor(coords[0].val, baseColor);
+  const lastCol = getSysMetricColor(coords[coords.length - 1].val, baseColor);
+  stops.unshift(`<stop offset="0%" stop-color="${firstCol}"/>`);
+  stops.push(`<stop offset="100%" stop-color="${lastCol}"/>`);
+  return stops.join("");
+}
+
+function renderServerMetricsChart(btn, history, nowSec, curCpu, curRam) {
+  const svg = btn.querySelector(".sys-sparkline");
+  if (!svg) return;
+  const ramPath = svg.querySelector(".sys-line-ram");
+  const cpuPath = svg.querySelector(".sys-line-cpu");
+  if (!ramPath || !cpuPath) return;
+
+  ensureServerCpuResizeObserver(btn);
+
+  if (!btn.dataset.sysChartUid) {
+    _sysChartUidCounter += 1;
+    btn.dataset.sysChartUid = String(_sysChartUidCounter);
+  }
+  const uid = btn.dataset.sysChartUid;
+  const maskGradId = `sysMaskGrad_${uid}`;
+  const maskId = `sysMask_${uid}`;
+  const ramGradId = `sysRamGrad_${uid}`;
+  const cpuGradId = `sysCpuGrad_${uid}`;
+
+  const chartCfg = getServerLoadChartSettings();
+  const ramColor = chartCfg.ram_color;
+  const cpuColor = chartCfg.cpu_color;
+  const scalePx = chartCfg.scale_px;
+  const scaleSec = chartCfg.scale_sec;
+
+  const chartWrap = btn.querySelector(".sys-chart-wrap");
+  const rectW = chartWrap ? Math.round(chartWrap.getBoundingClientRect().width) : 0;
+  const W = Math.max(24, rectW || SYS_CHART_DEFAULT_W);
+  const H = SYS_CHART_H;
+  const padY = SYS_CHART_PAD_Y;
+  const drawH = H - padY * 2;
+  // Dynamic time window: scalePx pixels = scaleSec seconds => windowSec = W * (scaleSec / scalePx)
+  const windowSec = Math.max(1, W * (scaleSec / scalePx));
+  const windowStart = nowSec - windowSec;
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const warnLine = svg.querySelector(".sys-thresh-warn");
+  const critLine = svg.querySelector(".sys-thresh-crit");
+  const yWarn = (H - padY - 0.85 * drawH).toFixed(3);
+  const yCrit = (H - padY - 0.95 * drawH).toFixed(3);
+  if (warnLine) {
+    warnLine.setAttribute("x2", String(W));
+    warnLine.setAttribute("y1", yWarn);
+    warnLine.setAttribute("y2", yWarn);
+  }
+  if (critLine) {
+    critLine.setAttribute("x2", String(W));
+    critLine.setAttribute("y1", yCrit);
+    critLine.setAttribute("y2", yCrit);
+  }
+
+  const pts = [];
+  let prevBeforeWindow = null;
+  for (let i = 0; i < history.length; i++) {
+    const p = history[i];
+    if (!p) continue;
+    if (p.t < windowStart) {
+      prevBeforeWindow = p;
+    } else {
+      pts.push({ t: p.t, cpu: p.cpu, ram: p.ram });
+    }
+  }
+  if (prevBeforeWindow && pts.length > 0 && pts[0].t > windowStart) {
+    pts.unshift({ t: windowStart, cpu: prevBeforeWindow.cpu, ram: prevBeforeWindow.ram });
+  }
+  if (pts.length === 0) {
+    pts.push({ t: Math.max(windowStart, nowSec - 2), cpu: curCpu, ram: curRam });
+    pts.push({ t: nowSec, cpu: curCpu, ram: curRam });
+  } else if (pts.length === 1) {
+    pts.unshift({ t: Math.max(windowStart, pts[0].t - 2), cpu: pts[0].cpu, ram: pts[0].ram });
+    if (pts[pts.length - 1].t < nowSec) {
+      pts.push({ t: nowSec, cpu: curCpu, ram: curRam });
+    }
+  } else {
+    if (pts[0].t - windowStart < 15) {
+      pts[0].t = windowStart;
+    }
+    const lastPt = pts[pts.length - 1];
+    if (nowSec - lastPt.t > 0.5) {
+      pts.push({ t: nowSec, cpu: curCpu, ram: curRam });
+    }
+  }
+
+  const ramCoords = [];
+  const cpuCoords = [];
+  const minXStep = 0.75;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const xRaw = Math.max(0, Math.min(W, ((p.t - windowStart) / windowSec) * W));
+    if (ramCoords.length > 0 && i < pts.length - 1 && (xRaw - ramCoords[ramCoords.length - 1].x) < minXStep) {
+      continue;
+    }
+    const x = Number(xRaw.toFixed(2));
+    const yRam = Number((H - padY - (Math.max(0, Math.min(100, p.ram)) / 100) * drawH).toFixed(2));
+    const yCpu = Number((H - padY - (Math.max(0, Math.min(100, p.cpu)) / 100) * drawH).toFixed(2));
+    ramCoords.push({ x, y: yRam, val: p.ram });
+    cpuCoords.push({ x, y: yCpu, val: p.cpu });
+  }
+  if (ramCoords.length < 2) return;
+
+  let defs = svg.querySelector("defs");
+  if (!defs) {
+    defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    svg.insertBefore(defs, svg.firstChild);
+  }
+  defs.innerHTML =
+    `<linearGradient id="${maskGradId}" x1="0%" y1="0%" x2="100%" y2="0%">` +
+      `<stop offset="0%" stop-color="#fff" stop-opacity="0.15"/>` +
+      `<stop offset="5%" stop-color="#fff" stop-opacity="1"/>` +
+      `<stop offset="100%" stop-color="#fff" stop-opacity="1"/>` +
+    `</linearGradient>` +
+    `<mask id="${maskId}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#${maskGradId})"/></mask>` +
+    `<linearGradient id="${ramGradId}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${W}" y2="0">` +
+      buildSysLineGradientStops(ramCoords, W, ramColor) +
+    `</linearGradient>` +
+    `<linearGradient id="${cpuGradId}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${W}" y2="0">` +
+      buildSysLineGradientStops(cpuCoords, W, cpuColor) +
+    `</linearGradient>`;
+
+  ramPath.setAttribute("d", buildSysSmoothPath(ramCoords));
+  ramPath.setAttribute("stroke", `url(#${ramGradId})`);
+  ramPath.setAttribute("stroke-width", "1.5");
+  ramPath.setAttribute("mask", `url(#${maskId})`);
+
+  cpuPath.setAttribute("d", buildSysSmoothPath(cpuCoords));
+  cpuPath.setAttribute("stroke", `url(#${cpuGradId})`);
+  cpuPath.setAttribute("stroke-width", "1.5");
+  cpuPath.setAttribute("mask", `url(#${maskId})`);
+}
 
 export function updateServerCpuIndicator(metrics) {
   if (!metrics || typeof metrics !== "object") return;
+  if (Array.isArray(metrics.history)) {
+    hydrateServerMetricsHistory(metrics.history);
+  }
   const rawCpu = Number(metrics.cpu_percent);
   const cpu = Number.isFinite(rawCpu) ? Math.max(0, Math.min(100, rawCpu)) : 0;
   const cpuRounded = Math.round(cpu);
   const cores = Math.max(1, parseInt(metrics.cpu_cores, 10) || 1);
   const rawRam = Number(metrics.ram_percent);
-  const ramRounded = Number.isFinite(rawRam) ? Math.max(0, Math.min(100, Math.round(rawRam))) : 0;
+  const ram = Number.isFinite(rawRam) ? Math.max(0, Math.min(100, rawRam)) : 0;
+  const ramRounded = Math.round(ram);
+
+  const nowSec = Date.now() / 1000;
+  const hist = getServerMetricsHistory();
+  if (hist.length === 0 || (nowSec - hist[hist.length - 1].t) >= 0.8) {
+    hist.push({ t: nowSec, cpu, ram });
+  } else {
+    hist[hist.length - 1].cpu = cpu;
+    hist[hist.length - 1].ram = ram;
+  }
+  const cutoff = nowSec - (SYS_HISTORY_MAX_SEC + 15);
+  while (hist.length > 0 && hist[0].t < cutoff) {
+    hist.shift();
+  }
 
   if (typeof window !== "undefined") {
     window._lastServerCpuMetrics = { cpu_percent: cpu, cpu_cores: cores, ram_percent: ramRounded };
   }
 
-  // Color thresholds: <=75 green, 76-90 yellow, 91+ red
-  const zoneClass = (cpuRounded >= 91) ? "cpu-crit" : ((cpuRounded >= 76) ? "cpu-warn" : "cpu-low");
-  const visPct = (cpu > 0) ? Math.max(2, Math.min(100, cpu)) : 0;
-  const dashOffset = (CPU_GAUGE_ARC_LEN * (1 - visPct / 100)).toFixed(2);
+  // Border thresholds matching chart/bar spec: <85 normal, 85-95 #ff9933, >95 #ff0033
+  const maxLoad = Math.max(cpu, ram);
+  const zoneClass = (maxLoad > 95) ? "cpu-crit" : ((maxLoad >= 85) ? "cpu-warn" : "cpu-low");
   const tip = (typeof window !== "undefined" && typeof window.t === "function")
     ? window.t("header.cpu_indicator_title", { cpu: cpuRounded, cores, ram: ramRounded }, `Загрузка CPU сервера: ${cpuRounded}% (${cores} ядер) | RAM: ${ramRounded}%`)
     : `Загрузка CPU сервера: ${cpuRounded}% (${cores} ядер) | RAM: ${ramRounded}%`;
 
+  const chartCfg = getServerLoadChartSettings();
   if (typeof document === "undefined") return;
   document.querySelectorAll(".header-cpu-btn").forEach((btn) => {
     btn.classList.remove("cpu-low", "cpu-warn", "cpu-crit");
@@ -4041,10 +4413,10 @@ export function updateServerCpuIndicator(metrics) {
     btn.title = tip;
     btn.setAttribute("aria-label", tip);
     btn.dataset.cpu = String(cpuRounded);
-    const arc = btn.querySelector(".cpu-gauge-arc");
-    if (arc) {
-      arc.setAttribute("stroke-dashoffset", dashOffset);
-    }
+    btn.dataset.ram = String(ramRounded);
+    updateSegmentedBar(btn.querySelector(".sys-bar-ram"), ram, chartCfg.ram_color);
+    updateSegmentedBar(btn.querySelector(".sys-bar-cpu"), cpu, chartCfg.cpu_color);
+    renderServerMetricsChart(btn, hist, nowSec, cpu, ram);
   });
 }
 
@@ -4077,6 +4449,201 @@ if (typeof document !== "undefined" && !document._cpuGaugeClickWired) {
   });
 }
 
+export function isShowServerLoadIndicatorEnabled() {
+  const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+  if (uid) {
+    const uVal = localStorage.getItem(`proxdmr_u${uid}_show_server_load_indicator`);
+    if (uVal !== null) return uVal !== "false";
+  }
+  if (typeof window !== "undefined" && typeof window.__showServerLoadIndicator === "boolean") {
+    return window.__showServerLoadIndicator;
+  }
+  const gVal = localStorage.getItem("proxdmr_show_server_load_indicator");
+  if (gVal !== null) return gVal !== "false";
+  return true;
+}
+
+export function applyServerLoadIndicatorVisibility(enabled) {
+  const boolVal = enabled !== false;
+  if (typeof document !== "undefined") {
+    document.documentElement.classList.toggle("hide-server-load-indicator", !boolVal);
+    if (document.body) {
+      document.body.classList.toggle("hide-server-load-indicator", !boolVal);
+    }
+  }
+  if (boolVal && typeof window !== "undefined" && window._lastServerCpuMetrics) {
+    updateServerCpuIndicator(window._lastServerCpuMetrics);
+  }
+}
+
+export function setShowServerLoadIndicatorEnabled(enabled, syncServer = true) {
+  const boolVal = enabled !== false;
+  if (typeof window !== "undefined") {
+    window.__showServerLoadIndicator = boolVal;
+  }
+  try {
+    localStorage.setItem("proxdmr_show_server_load_indicator", boolVal ? "true" : "false");
+    const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+    if (uid) {
+      localStorage.setItem(`proxdmr_u${uid}_show_server_load_indicator`, boolVal ? "true" : "false");
+    }
+  } catch (_) {}
+  if (typeof document !== "undefined") {
+    const chk = document.getElementById("optShowServerLoad");
+    if (chk) chk.checked = boolVal;
+    const chkApp = document.getElementById("optShowServerLoadAppearance");
+    if (chkApp) chkApp.checked = boolVal;
+  }
+  applyServerLoadIndicatorVisibility(boolVal);
+  if (syncServer) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "set_show_server_load_indicator", enabled: boolVal }));
+      } catch (_) {}
+    }
+    fetch("/api/settings/general", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ show_server_load_indicator: boolVal })
+    }).catch(() => {});
+  }
+}
+
+function normalizeChartHex(val, fallback) {
+  const s = String(val || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : fallback;
+}
+
+function normalizeChartScaleInt(val, fallback = 1) {
+  const n = Math.round(Number(val));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(60, n));
+}
+
+const PING_COLOR_DEFAULT = "#22c55e";
+
+export function getServerLoadChartSettings() {
+  let stored = null;
+  try {
+    const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+    const raw = (uid && localStorage.getItem(`proxdmr_u${uid}_server_load_chart_settings`))
+      || localStorage.getItem("proxdmr_server_load_chart_settings");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") stored = parsed;
+    }
+  } catch (_) {}
+  const ssr = (typeof window !== "undefined" && window.__serverLoadChartSettings && typeof window.__serverLoadChartSettings === "object")
+    ? window.__serverLoadChartSettings
+    : null;
+  const src = stored || ssr || {};
+  return {
+    ram_color: normalizeChartHex(src.ram_color, SYS_COLOR_RAM),
+    cpu_color: normalizeChartHex(src.cpu_color, SYS_COLOR_CPU),
+    scale_px: normalizeChartScaleInt(src.scale_px, 1),
+    scale_sec: normalizeChartScaleInt(src.scale_sec, 1),
+    ping_client_color: normalizeChartHex(src.ping_client_color, PING_COLOR_DEFAULT),
+    ping_server_color: normalizeChartHex(src.ping_server_color, PING_COLOR_DEFAULT)
+  };
+}
+
+export function syncServerLoadChartSettingsUI(cfg) {
+  if (typeof document === "undefined") return;
+  const c = cfg || getServerLoadChartSettings();
+  const ramPicker = document.getElementById("optSysRamColorPicker");
+  const ramSwatch = document.getElementById("sysRamColorSwatch");
+  const ramHex = document.getElementById("sysRamColorHex");
+  const cpuPicker = document.getElementById("optSysCpuColorPicker");
+  const cpuSwatch = document.getElementById("sysCpuColorSwatch");
+  const cpuHex = document.getElementById("sysCpuColorHex");
+  const pxInput = document.getElementById("optSysChartPx");
+  const secInput = document.getElementById("optSysChartSec");
+  const pingCliPicker = document.getElementById("optPingClientColorPicker");
+  const pingCliSwatch = document.getElementById("pingClientColorSwatch");
+  const pingCliHex = document.getElementById("pingClientColorHex");
+  const pingSrvPicker = document.getElementById("optPingServerColorPicker");
+  const pingSrvSwatch = document.getElementById("pingServerColorSwatch");
+  const pingSrvHex = document.getElementById("pingServerColorHex");
+
+  if (ramPicker) ramPicker.value = c.ram_color;
+  if (ramSwatch) ramSwatch.style.backgroundColor = c.ram_color;
+  if (ramHex) ramHex.textContent = c.ram_color.toUpperCase();
+  if (cpuPicker) cpuPicker.value = c.cpu_color;
+  if (cpuSwatch) cpuSwatch.style.backgroundColor = c.cpu_color;
+  if (cpuHex) cpuHex.textContent = c.cpu_color.toUpperCase();
+  if (pxInput && document.activeElement !== pxInput) pxInput.value = String(c.scale_px);
+  if (secInput && document.activeElement !== secInput) secInput.value = String(c.scale_sec);
+  if (pingCliPicker) pingCliPicker.value = c.ping_client_color;
+  if (pingCliSwatch) pingCliSwatch.style.backgroundColor = c.ping_client_color;
+  if (pingCliHex) pingCliHex.textContent = c.ping_client_color.toUpperCase();
+  if (pingSrvPicker) pingSrvPicker.value = c.ping_server_color;
+  if (pingSrvSwatch) pingSrvSwatch.style.backgroundColor = c.ping_server_color;
+  if (pingSrvHex) pingSrvHex.textContent = c.ping_server_color.toUpperCase();
+}
+
+export function setServerLoadChartSettings(partial, syncServer = true) {
+  const prev = getServerLoadChartSettings();
+  const next = {
+    ram_color: normalizeChartHex(partial && partial.ram_color !== undefined ? partial.ram_color : prev.ram_color, SYS_COLOR_RAM),
+    cpu_color: normalizeChartHex(partial && partial.cpu_color !== undefined ? partial.cpu_color : prev.cpu_color, SYS_COLOR_CPU),
+    scale_px: normalizeChartScaleInt(partial && partial.scale_px !== undefined ? partial.scale_px : prev.scale_px, 1),
+    scale_sec: normalizeChartScaleInt(partial && partial.scale_sec !== undefined ? partial.scale_sec : prev.scale_sec, 1),
+    ping_client_color: normalizeChartHex(partial && partial.ping_client_color !== undefined ? partial.ping_client_color : prev.ping_client_color, PING_COLOR_DEFAULT),
+    ping_server_color: normalizeChartHex(partial && partial.ping_server_color !== undefined ? partial.ping_server_color : prev.ping_server_color, PING_COLOR_DEFAULT)
+  };
+  if (typeof window !== "undefined") {
+    window.__serverLoadChartSettings = next;
+  }
+  try {
+    const raw = JSON.stringify(next);
+    localStorage.setItem("proxdmr_server_load_chart_settings", raw);
+    const uid = (typeof window !== "undefined" && window.currentUserId) || null;
+    if (uid) {
+      localStorage.setItem(`proxdmr_u${uid}_server_load_chart_settings`, raw);
+    }
+  } catch (_) {}
+  syncServerLoadChartSettingsUI(next);
+  if (typeof window !== "undefined" && window._lastServerCpuMetrics) {
+    updateServerCpuIndicator(window._lastServerCpuMetrics);
+  } else {
+    scheduleRedrawAllServerMetricsCharts();
+  }
+  if (typeof window !== "undefined" && typeof window.refreshAllCardsBmBanner === "function") {
+    try { window.refreshAllCardsBmBanner(); } catch (_) {}
+  }
+  if (syncServer) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({
+          type: "set_server_load_chart_settings",
+          ram_color: next.ram_color,
+          cpu_color: next.cpu_color,
+          scale_px: next.scale_px,
+          scale_sec: next.scale_sec,
+          ping_client_color: next.ping_client_color,
+          ping_server_color: next.ping_server_color
+        }));
+      } catch (_) {}
+    }
+    fetch("/api/settings/general", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        server_load_ram_color: next.ram_color,
+        server_load_cpu_color: next.cpu_color,
+        server_load_scale_px: next.scale_px,
+        server_load_scale_sec: next.scale_sec,
+        ping_client_color: next.ping_client_color,
+        ping_server_color: next.ping_server_color
+      })
+    }).catch(() => {});
+  }
+  return next;
+}
+
+applyServerLoadIndicatorVisibility(isShowServerLoadIndicatorEnabled());
+syncServerLoadChartSettingsUI(getServerLoadChartSettings());
+
 // Global attachments
 window.connectWebSocket = connectWebSocket;
 window.handleGwDisconnectFailure = handleGwDisconnectFailure;
@@ -4087,6 +4654,12 @@ window.enterSessionPausedState = enterSessionPausedState;
 window.restorePausedSession = restorePausedSession;
 window.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;
 window.updateServerCpuIndicator = updateServerCpuIndicator;
+window.isShowServerLoadIndicatorEnabled = isShowServerLoadIndicatorEnabled;
+window.applyServerLoadIndicatorVisibility = applyServerLoadIndicatorVisibility;
+window.setShowServerLoadIndicatorEnabled = setShowServerLoadIndicatorEnabled;
+window.getServerLoadChartSettings = getServerLoadChartSettings;
+window.syncServerLoadChartSettingsUI = syncServerLoadChartSettingsUI;
+window.setServerLoadChartSettings = setServerLoadChartSettings;
 
 window.__proxdmr = window.__proxdmr || {};
 window.__proxdmr.connectWebSocket = connectWebSocket;
@@ -4098,3 +4671,9 @@ window.__proxdmr.enterSessionPausedState = enterSessionPausedState;
 window.__proxdmr.restorePausedSession = restorePausedSession;
 window.__proxdmr.resetTranscribeAndTtsOnDisconnect = resetTranscribeAndTtsOnDisconnect;
 window.__proxdmr.updateServerCpuIndicator = updateServerCpuIndicator;
+window.__proxdmr.isShowServerLoadIndicatorEnabled = isShowServerLoadIndicatorEnabled;
+window.__proxdmr.applyServerLoadIndicatorVisibility = applyServerLoadIndicatorVisibility;
+window.__proxdmr.setShowServerLoadIndicatorEnabled = setShowServerLoadIndicatorEnabled;
+window.__proxdmr.getServerLoadChartSettings = getServerLoadChartSettings;
+window.__proxdmr.syncServerLoadChartSettingsUI = syncServerLoadChartSettingsUI;
+window.__proxdmr.setServerLoadChartSettings = setServerLoadChartSettings;

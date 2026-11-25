@@ -7,7 +7,7 @@
 import { safeEscapeHtml, isoToEmoji, getLocalizedCountryName } from '../core/formatters.js?v=2.9.787';
 import { showToast } from '../core/toast.js?v=2.9.699';
 import { pushNavState, notifyNavClosed } from '../ui/navigation.js?v=2.9.614';
-import { ws } from '../network/ws.js?v=2.9.809';
+import { ws } from '../network/ws.js?v=2.9.826';
 
 // Accessors for app functions and state
 const resolveHotspotId = (id) => (window.resolveHotspotId ? window.resolveHotspotId(id) : id);

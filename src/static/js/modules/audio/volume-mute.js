@@ -5,9 +5,9 @@
  */
 
 import { showCenterHudToast, showToast } from "../core/toast.js?v=2.9.699";
-import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.807";
+import { scheduleSyncClientSettings } from "../settings/sync.js?v=2.9.826";
 import { updateHotspotCardMuteUI, updateHotspotCardPanUI } from "./routing.js?v=2.9.792";
-import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.809";
+import { renderHotspotsList, renderHotspotSelect, switchActiveHotspot } from "../dmr/hotspots.js?v=2.9.826";
 
 let muteClickTimer = null;
 let lastMuteClickTime = 0;
@@ -748,16 +748,33 @@ export function isSystemVolumeSyncEnabled() {
   }
   const v = localStorage.getItem("proxdmr_sync_system_volume");
   if (v !== null) return v === "true";
+  if (typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.isSystemVolumeSyncEnabled === "function") {
+    try {
+      return Boolean(window.AndroidBridge.isSystemVolumeSyncEnabled());
+    } catch (_) {}
+  }
   return true; // Default: ENABLED in APK!
 }
 
 export function setSystemVolumeSyncEnabled(enabled, syncServer = true) {
+  // Never allow desktop Web browsers to overwrite Android APK's sync_system_volume setting!
+  if (!isApkClient()) {
+    const chkWeb = document.getElementById("optSyncSystemVolume");
+    if (chkWeb) {
+      chkWeb.disabled = true;
+      chkWeb.checked = false;
+    }
+    return;
+  }
   const boolVal = Boolean(enabled);
   localStorage.setItem("proxdmr_sync_system_volume", boolVal ? "true" : "false");
   const uid = (typeof window !== "undefined" && window.currentUserId) || null;
   if (uid) localStorage.setItem(`proxdmr_u${uid}_sync_system_volume`, boolVal ? "true" : "false");
   const chk = document.getElementById("optSyncSystemVolume");
-  if (chk) chk.checked = boolVal;
+  if (chk) {
+    chk.disabled = false;
+    chk.checked = boolVal;
+  }
 
   if (typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.setSystemVolumeSyncEnabled === "function") {
     try {
@@ -1631,13 +1648,27 @@ export function initVolumeMute() {
   }
 
   applyMuteFadeUIAndEngine();
-  if (isSystemVolumeSyncEnabled() && typeof window !== "undefined" && window.AndroidBridge && typeof window.AndroidBridge.getSystemVolume === "function") {
-    try {
-      const sysVol = window.AndroidBridge.getSystemVolume();
-      if (typeof sysVol === "number" && sysVol >= 0) {
-        onSystemVolumeChanged(sysVol);
+  if (isApkClient() && typeof window !== "undefined" && window.AndroidBridge) {
+    const syncEn = isSystemVolumeSyncEnabled();
+    if (typeof window.AndroidBridge.setSystemVolumeSyncEnabled === "function") {
+      try {
+        window.AndroidBridge.setSystemVolumeSyncEnabled(syncEn);
+      } catch (_) {}
+    }
+    if (syncEn && typeof window.AndroidBridge.getSystemVolume === "function") {
+      try {
+        const sysVol = window.AndroidBridge.getSystemVolume();
+        if (typeof sysVol === "number" && sysVol >= 0) {
+          onSystemVolumeChanged(sysVol);
+        } else {
+          updateAllVolumeAndMuteUI();
+        }
+      } catch (_) {
+        updateAllVolumeAndMuteUI();
       }
-    } catch (_) {}
+    } else {
+      updateAllVolumeAndMuteUI();
+    }
   } else {
     updateAllVolumeAndMuteUI();
   }

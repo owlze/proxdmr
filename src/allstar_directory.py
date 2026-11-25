@@ -163,11 +163,18 @@ class AllStarDirectoryManager:
         self._stats_circuit_broken_ts: float = 0.0
         self._keyed_cache: List[Dict[str, Any]] = []
         self._keyed_cache_ts: float = 0.0
+        self._keyed_fail_ts: float = 0.0
+        self._keyed_lock: Optional[asyncio.Lock] = None
 
     def _get_stats_http_lock(self) -> asyncio.Lock:
         if self._stats_http_lock is None:
             self._stats_http_lock = asyncio.Lock()
         return self._stats_http_lock
+
+    def _get_keyed_lock(self) -> asyncio.Lock:
+        if self._keyed_lock is None:
+            self._keyed_lock = asyncio.Lock()
+        return self._keyed_lock
 
     def get_stats(self) -> Dict[str, Any]:
         return {
@@ -512,7 +519,7 @@ class AllStarDirectoryManager:
             },
         )
         ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=6.0, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=10.0, context=ctx) as resp:
             raw_html = resp.read().decode("utf-8", errors="replace")
 
         parsed_rows = self.parse_keyed_html(raw_html)
@@ -555,22 +562,64 @@ class AllStarDirectoryManager:
             })
         return enriched
 
+    def _build_fallback_keyed_pool(self) -> List[Dict[str, Any]]:
+        fallback: List[Dict[str, Any]] = []
+        for cn in CURATED_POPULAR_NODES:
+            node_str = str(cn.get("node", "")).strip()
+            if not node_str or node_str in ("1999", "9999"):
+                continue
+            call_str = str(cn.get("callsign") or f"Node {node_str}").strip()
+            city_str = str(cn.get("city") or "").strip()
+            label = f"{call_str} · {city_str}" if (call_str and city_str and city_str.lower() != call_str.lower()) else (call_str or cn.get("name") or f"Node {node_str}")
+            fallback.append({
+                "node": node_str,
+                "callsign": call_str,
+                "label": label,
+                "location": str(cn.get("location") or ""),
+                "city": city_str,
+                "country": str(cn.get("country") or "INT"),
+                "flag": str(cn.get("flag") or "🌐"),
+                "frequency": "",
+                "public_links_count": 1,
+                "total_links_count": 1,
+                "linked_nodes": [],
+            })
+        return fallback
+
     async def fetch_keyed_nodes(self, force: bool = False) -> List[Dict[str, Any]]:
-        """Returns enriched list of currently keyed public AllStarLink nodes (cached for 10s)."""
+        """Returns enriched list of currently keyed public AllStarLink nodes (cached for 10s, with 10s failure backoff)."""
         now = time.time()
         if not force and self._keyed_cache and (now - self._keyed_cache_ts) < KEYED_CACHE_TTL_SEC:
             return self._keyed_cache
-        try:
-            items = await asyncio.to_thread(self._fetch_keyed_sync)
-            if items:
-                self._keyed_cache = items
-                self._keyed_cache_ts = time.time()
-            return items
-        except Exception as e:
-            logger.warning(f"[ASL-DIR] Failed to fetch live keyed nodes from {ASL_KEYED_URL}: {e}")
-            if self._keyed_cache and (now - self._keyed_cache_ts) < 60.0:
+        if not force and self._keyed_fail_ts > 0.0 and (now - self._keyed_fail_ts) < 10.0:
+            if self._keyed_cache and (now - self._keyed_cache_ts) < 300.0:
                 return self._keyed_cache
-            return []
+            return self._build_fallback_keyed_pool()
+
+        async with self._get_keyed_lock():
+            now = time.time()
+            if not force and self._keyed_cache and (now - self._keyed_cache_ts) < KEYED_CACHE_TTL_SEC:
+                return self._keyed_cache
+            if not force and self._keyed_fail_ts > 0.0 and (now - self._keyed_fail_ts) < 10.0:
+                if self._keyed_cache and (now - self._keyed_cache_ts) < 300.0:
+                    return self._keyed_cache
+                return self._build_fallback_keyed_pool()
+            try:
+                items = await asyncio.to_thread(self._fetch_keyed_sync)
+                if isinstance(items, list) and items:
+                    self._keyed_cache = items
+                    self._keyed_cache_ts = time.time()
+                    self._keyed_fail_ts = 0.0
+                    return self._keyed_cache
+                if self._keyed_cache and (now - self._keyed_cache_ts) < 300.0:
+                    return self._keyed_cache
+                return self._build_fallback_keyed_pool()
+            except Exception as e:
+                self._keyed_fail_ts = time.time()
+                logger.warning(f"[ASL-DIR] Failed to fetch live keyed nodes from {ASL_KEYED_URL}: {e}")
+                if self._keyed_cache and (now - self._keyed_cache_ts) < 300.0:
+                    return self._keyed_cache
+                return self._build_fallback_keyed_pool()
 
     @staticmethod
     def _query_dns_txt(node_str: str) -> Tuple[bool, str, int]:

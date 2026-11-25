@@ -317,7 +317,6 @@ def mask_settings_for_demo(settings_data: dict) -> dict:
     out["transcriber_api_keys"] = []
     out["groq_api_key"] = "••••••••••••" if out.get("groq_api_key") else ""
     out["groq_api_keys"] = []
-    out["deepgram_api_key"] = "••••••••••••" if out.get("deepgram_api_key") else ""
     out["hamqth_username"] = "Your CALL" if out.get("hamqth_username") else ""
     out["hamqth_password"] = "••••••••••••" if out.get("hamqth_password") else ""
     out["qrz_com_username"] = "Your CALL" if out.get("qrz_com_username") else ""

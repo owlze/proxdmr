@@ -1,135 +1,116 @@
 <!-- lang:en -->
-# ProxDMR v2.21
+## Additions and Fixes
 
-## What's New
+- **Semantic optimization (speech smoothing) and QSO context:** An optional mode has been added to correct typical ASR/vocoder errors by taking into account the sliding context of the last 3 slot replies (over 180 seconds). Works for cloud translation, local Qwen (lightweight processing), and "No Translation" mode / language matching.
+- **Adaptive playback speed (live broadcast catch-up):** Monitors the playback queue's lag relative to slots, trims silence at the edges of WAV files, and smoothly accelerates speech as the queue builds up while preserving voice tone (WSOLA for Silero/Gemini/Groq and native acceleration for Piper/Supertonic).
+- **Dynamic language selection and ASR fallback:** The list of source languages dynamically adapts to the capabilities of the selected translator.
+- **Voices by engine and button indicators:** Added separate saving of the selected voice for each TTS engine.
+- **Queue and LLM stability:** Valid empty LLM responses when filtering out interjections are no longer considered an API error; pressing PTT or Mute now guarantees that the delayed TTS inter-replica pause timer is canceled.
+- **New server hardware load widget in the hotspot header:** Two vertical bar gauges (RAM and CPU) and a line graph showing load history.
+- **"What's New" window and release parser:** The "What's New" button is now always visible next to "Check for Updates" and loads release notes from GitHub as needed.
+- **Atomic history writing and record isolation:** Saving `calls_history` has been converted to a thread-safe atomic write.
+- **Refactoring and tests.**
+- **Minor UI tweaks.**
 
-- **Supertonic 3 Local ONNX TTS Engine:** Added a new fully offline multilingual neural speech synthesis engine (`supertonic_service.py`) supporting 31 languages at 44.1 kHz WAV with 10 selectable voice styles (`F1`-`F5`, `M1`-`M5`), on-demand download of the ONNX core (~380 MB) and lightweight voice profiles (~0.3 MB) into persistent `config/supertonic3/`, automatic readiness checks, and fallback prompts for unsupported languages.
-- **Automatic Stress & Homograph Disambiguation (Silero Stress):** Integrated `silero-stress` (`stress_service.py`) for automatic Unicode stress placement (`U+0301`) across Russian, Ukrainian, Belarusian (neural accentors), and 8 additional Cyrillic languages — active for both Supertonic 3 TTS and Piper TTS (with a dedicated toggle in Transcriber Settings and Quick Settings).
-- **Smooth Audio Mute Fade & Upgraded AudioWorklet Engine:** Added configurable smooth fade-in/fade-out (`0.1`-`2.0 s`, default `0.3 s`, toggleable in General Settings) for global, per-hotspot, single-hotspot, and per-slot mute/unmute. Muted slots stay warm in the AudioWorklet ring buffer for click-free transitions and timeslot switching without double-fading archive recordings.
-- **Virtualized Call History Log:** Rebuilt the QSO call history table with pixel-exact virtual scrolling (`O(1)` DOM rendering), a single delegated click handler, anchor-preserving live updates, removal of the 24-hour cutoff, and zero background DOM overhead when the History panel is closed — smoothly handling tens of thousands of entries.
-- **Real-Time Server CPU & RAM Indicator:** Added a live server CPU load and RAM utilization badge in the top header with threshold coloring (`<=75%` green, `76-90%` yellow, `91%+` red) and a detailed breakdown toast on click.
-- **UI, UX & Localization Polish:** Refined Dedicated Channel workflow and labels, added a TTS model list refresh action, smoothed About credits scrolling, improved `pxi-select` / `marquee` behavior, and updated all 8 UI locales (`en`, `ru`, `uk`, `de`, `es`, `fr`, `it`, `nl`).
-
-## Upgrade Note
-
-- **Upgrading from v2.20 or earlier:** Because v2.21 adds new Python dependencies (`supertonic>=1.3.1`, `silero-stress>=1.5`), pull the updated Docker image (`docker compose pull && docker compose up -d`) or rebuild your container (`docker compose up -d --build`) to enable Supertonic 3 TTS and Silero Stress.
-- **Android APK:** Remains at **v1.36** (`ProxDMR-1.36.apk`).
+<details>
+<summary>Other languages (RU / UK / DE / ES / FR / IT / NL)</summary>
 
 <!-- lang:ru -->
-# ProxDMR v2.21
+## Новые функции и исправления
 
-## Что нового
-
-- **Локальный ONNX-движок Supertonic 3 TTS:** добавлен полностью офлайн многоязычный нейронный синтез речи (`supertonic_service.py`) с поддержкой 31 языка (44.1 кГц WAV) и 10 стилей голосов (`F1`-`F5`, `M1`-`M5`), загрузкой ONNX-ядра (~380 МБ) и лёгких голосовых стилей (~0.3 МБ) по запросу в постоянную папку `config/supertonic3/`, проверкой готовности и подсказками переключения для неподдерживаемых языков.
-- **Автоматическая расстановка ударений и омографов (Silero Stress):** интегрирован модуль `silero-stress` (`stress_service.py`) с простановкой ударений Unicode (`U+0301`) для русского, украинского, белорусского (нейронные модели) и ещё 8 языков — работает как для Supertonic 3 TTS, так и для Piper TTS (с отдельным переключателем в настройках транскрибатора и быстром меню).
-- **Плавное затухание звука при Mute и обновлённый AudioWorklet:** добавлено настраиваемое плавное затухание и нарастание звука (`0.1`-`2.0 с`, по умолчанию `0.3 с`, включается в Общих настройках) для глобального Mute, отдельных хотспотов, режима одного хотспота и таймслотов. Приглушённые слоты остаются активными в кольцевом буфере AudioWorklet для переключений без щелчков и без двойного затухания при воспроизведении записей.
-- **Виртуализация журнала истории вызовов:** таблица истории QSO переведена на виртуальный скроллинг (`O(1)` по узлам DOM) с единым делегированным обработчиком кликов, сохранением позиции при поступлении новых вызовов, снятием суточного ограничения и нулевой нагрузкой на DOM при закрытой панели истории — десятки тысяч записей работают мгновенно.
-- **Индикатор CPU и RAM сервера в шапке:** добавлен живой индикатор загрузки процессора и памяти сервера в верхней панели с цветовой индикацией (`<=75%` зелёный, `76-90%` жёлтый, `91%+` красный) и подробной сводкой по нажатию.
-- **Улучшения интерфейса и локализаций:** уточнена терминология «Выделенный канал», добавлена кнопка обновления списка моделей TTS, плавная прокрутка титров «О программе», доработки `pxi-select` / `marquee` и синхронный перевод всех 8 языков интерфейса (`ru`, `en`, `uk`, `de`, `es`, `fr`, `it`, `nl`).
-
-## Важно при обновлении
-
-- **Обновление с v2.20 и ниже:** в v2.21 добавлены новые Python-зависимости (`supertonic>=1.3.1`, `silero-stress>=1.5`), поэтому для работы Supertonic 3 TTS и Silero Stress обновите Docker-образ (`docker compose pull && docker compose up -d`) или пересоберите контейнер (`docker compose up -d --build`).
-- **Android APK:** актуальная версия остаётся **v1.36** (`ProxDMR-1.36.apk`).
+- **Семантическая оптимизация (сглаживание речи) и контекст QSO:** добавлен опциональный режим исправления типовых ошибок ASR/вокодера с учётом скользящего контекста последних 3 реплик слота (за 180 секунд). Работает для облачного перевода, локального Qwen (облегчённая обработка) и режима «Без перевода» / совпадения языков.
+- **Адаптивная скорость воспроизведения (догон прямого эфира):** отслеживает отставание очереди воспроизведения от слотов, обрезает тишину по краям WAV-файлов и плавно ускоряет речь по мере накопления очереди с сохранением тембра голоса (WSOLA для Silero/Gemini/Groq и нативное ускорение для Piper/Supertonic).
+- **Динамический выбор языков и fallback ASR:** список исходных языков динамически подстраивается под возможности выбранного переводчика.
+- **Голоса по движкам и индикаторы кнопок:** добавлено раздельное сохранение выбранного голоса для каждого TTS-движка.
+- **Стабильность очереди и LLM:** корректные пустые ответы LLM при отсеивании междометий больше не считаются ошибкой API; нажатие PTT или Mute теперь гарантированно отменяет отложенный таймер паузы между репликами TTS.
+- **Новый виджет нагрузки сервера в шапке хотспота:** два вертикальных столбиковых индикатора (RAM и CPU) и линейный график истории нагрузки.
+- **Окно «Что нового» и парсер релизов:** кнопка «Что нового» теперь всегда отображается рядом с «Проверить обновления» и при необходимости подгружает текст релиза с GitHub.
+- **Атомарная запись истории и изоляция записей:** сохранение `calls_history` переведено на потокобезопасную атомарную запись.
+- **Рефакторинг и тесты.**
+- **Небольшие доработки интерфейса.**
 
 <!-- lang:uk -->
-# ProxDMR v2.21
+## Нові функції та виправлення
 
-## Що нового
-
-- **Локальний ONNX-рушій Supertonic 3 TTS:** додано повністю офлайн багатомовний нейронний синтез мовлення (`supertonic_service.py`) із підтримкою 31 мови (44.1 кГц WAV) і 10 стилів голосів (`F1`-`F5`, `M1`-`M5`), завантаженням ONNX-ядра (~380 МБ) та стилів (~0.3 МБ) за запитом у `config/supertonic3/`, перевіркою готовності та підказками для непідтримуваних мов.
-- **Автоматична розстановка наголосів та омографів (Silero Stress):** інтегровано `silero-stress` (`stress_service.py`) із наголосами Unicode (`U+0301`) для української, російської, білоруської (нейронні моделі) та ще 8 мов — працює для Supertonic 3 TTS і Piper TTS (з окремим перемикачем у налаштуваннях транскрибатора та швидкому меню).
-- **Плавне затухання звуку при Mute та оновлений AudioWorklet:** додано налаштовуване плавне затухання/наростання (`0.1`-`2.0 с`, за замовчуванням `0.3 с`) для глобального Mute, окремих хотспотів, режиму одного хотспота та таймслотів без клацань і без подвійного затухання записів.
-- **Віртуалізація журналу історії викликів:** перероблено таблицю QSO з піксельно точним віртуальним скролінгом (`O(1)` DOM), знято 24-годинне обмеження та прибрано фонове навантаження DOM при закритій панелі історії.
-- **Індикатор CPU та RAM сервера у шапці:** відображення завантаження CPU і RAM у реальному часі з колірними порогами (`<=75%`, `76-90%`, `91%+`) та детальною підказкою при натисканні.
-- **Покращення інтерфейсу та локалізацій:** оновлено термінологію «Виділений канал», додано кнопку оновлення списку моделей TTS, плавну прокрутку вікна «Про програму», правки `pxi-select` / `marquee` та повний переклад усіх 8 мов інтерфейсу.
-
-## Важливо при оновленні
-
-- **Оновлення з v2.20 або старішої:** v2.21 додає нові Python-залежності (`supertonic>=1.3.1`, `silero-stress>=1.5`), тому оновіть Docker-образ (`docker compose pull && docker compose up -d`) або перезберіть контейнер (`docker compose up -d --build`).
-- **Android APK:** актуальна версія залишається **v1.36** (`ProxDMR-1.36.apk`).
+- **Семантична оптимізація (згладжування мовлення) та контекст QSO:** додано опціональний режим виправлення типових помилок ASR/вокодера з урахуванням ковзного контексту останніх 3 реплік слота (за 180 секунд). Працює для хмарного перекладу, локального Qwen (полегшена обробка) та режиму «Без перекладу» / збігу мов.
+- **Адаптивна швидкість відтворення (наздоганяння прямого ефіру):** відстежує відставання черги відтворення від слотів, обрізає тишу на краях WAV-файлів і плавно прискорює мовлення в міру накопичення черги зі збереженням тембру голосу (WSOLA для Silero/Gemini/Groq і нативне прискорення для Piper/Supertonic).
+- **Динамічний вибір мов і fallback ASR:** список вихідних мов динамічно адаптується до можливостей обраного перекладача.
+- **Голоси за рушіями та індикатори кнопок:** додано окреме збереження вибраного голосу для кожного TTS-рушія.
+- **Стабільність черги та LLM:** коректні порожні відповіді LLM при відсіюванні вигуків більше не вважаються помилкою API; натискання PTT або Mute тепер гарантовано скасовує відкладений таймер паузи між репліками TTS.
+- **Новий віджет навантаження сервера у шапці хотспота:** два вертикальних стовпчикових індикатори (RAM і CPU) та лінійний графік історії навантаження.
+- **Вікно «Що нового» та парсер релізів:** кнопка «Що нового» тепер завжди видима поруч із «Перевірити оновлення» і за потреби підвантажує текст із GitHub.
+- **Атомарний запис історії та ізоляція записів:** збереження `calls_history` переведено на потокобезпечний атомарний запис.
+- **Рефакторинг і тести.**
+- **Незначні доопрацювання інтерфейсу.**
 
 <!-- lang:de -->
-# ProxDMR v2.21
+## Neuerungen und Fehlerbehebungen
 
-## Neuheiten
-
-- **Lokale ONNX-TTS-Engine Supertonic 3:** Neue vollständig offline arbeitende mehrsprachige neuronale Sprachsynthese (`supertonic_service.py`) für 31 Sprachen (44,1 kHz WAV) mit 10 Stimmen (`F1`-`F5`, `M1`-`M5`), On-Demand-Download des ONNX-Kerns (~380 MB) und leichter Stimmprofile (~0,3 MB) in `config/supertonic3/` sowie automatischen Bereitschaftsprüfungen.
-- **Automatische Betonung & Homographen-Auflösung (Silero Stress):** Integration von `silero-stress` (`stress_service.py`) mit automatischer Unicode-Betonung (`U+0301`) für Russisch, Ukrainisch, Belarussisch (neuronale Modelle) und 8 weitere Sprachen — aktiv für Supertonic 3 TTS und Piper TTS (mit eigenem Schalter in den Einstellungen).
-- **Sanftes Audio-Mute-Fade & verbesserte AudioWorklet-Engine:** Konfigurierbares sanftes Ein-/Ausblenden (`0,1`-`2,0 s`, Standard `0,3 s`) für globales Mute, einzelne Hotspots, Einzel-Hotspot-Modus und Zeitschlitze — knackfreie Übergänge ohne doppeltes Fading bei Aufnahmen.
-- **Virtualisierte Rufhistorie:** Neu entwickelte QSO-Verlaufstabelle mit Virtual Scrolling (`O(1)` DOM), ohne 24-Stunden-Grenze und ohne DOM-Last bei geschlossenem Verlaufsfenster — verarbeitet flüssig zehntausende Einträge.
-- **Echtzeit-CPU- & RAM-Anzeige im Header:** Live-Indikator für Server-CPU- und RAM-Auslastung mit Farbschwellen (`<=75%` grün, `76-90%` gelb, `91%+` rot) und Detail-Toast beim Klick.
-- **UI-, UX- & Lokalisierungs-Feinschliff:** Verfeinerte Benennung für dedizierte Kanäle, Schaltfläche zum Aktualisieren der TTS-Modellliste, ruhigerer Abspann im Info-Dialog, `pxi-select`/`marquee`-Verbesserungen und aktualisierte Übersetzungen in allen 8 Sprachen.
-
-## Update-Hinweis
-
-- **Upgrade von v2.20 oder älter:** v2.21 fügt neue Python-Abhängigkeiten hinzu (`supertonic>=1.3.1`, `silero-stress>=1.5`). Bitte das Docker-Image aktualisieren (`docker compose pull && docker compose up -d`) oder neu bauen (`docker compose up -d --build`).
-- **Android APK:** Bleibt bei **v1.36** (`ProxDMR-1.36.apk`).
+- **Semantische Optimierung (Sprachglättung) und QSO-Kontext:** Ein optionaler Modus zur Korrektur typischer ASR-/Vocoder-Fehler anhand des gleitenden Kontexts der letzten 3 Slot-Antworten (über 180 Sekunden) wurde hinzugefügt. Funktioniert für Cloud-Übersetzung, lokales Qwen (schlanke Verarbeitung) sowie den Modus „Keine Übersetzung“ / Sprachübereinstimmung.
+- **Adaptive Wiedergabegeschwindigkeit (Live-Aufholmodus):** Überwacht den Rückstand der Wiedergabewarteschlange gegenüber den Slots, entfernt Stille an den Rändern von WAV-Dateien und beschleunigt die Sprache bei wachsender Warteschlange sanft unter Beibehaltung der Stimmfarbe (WSOLA für Silero/Gemini/Groq und native Beschleunigung für Piper/Supertonic).
+- **Dynamische Sprachauswahl und ASR-Fallback:** Die Liste der Quellsprachen passt sich dynamisch an die Fähigkeiten des gewählten Übersetzers an.
+- **Stimmen pro Engine und Schaltflächenindikatoren:** Getrenntes Speichern der gewählten Stimme für jede TTS-Engine hinzugefügt.
+- **Warteschlangen- und LLM-Stabilität:** Gültige leere LLM-Antworten beim Herausfiltern von Fülllauten gelten nicht mehr als API-Fehler; das Drücken von PTT oder Mute bricht nun garantiert den verzögerten TTS-Pausentimer zwischen Antworten ab.
+- **Neues Server-Hardware-Last-Widget im Hotspot-Header:** Zwei vertikale Balkenanzeigen (RAM und CPU) sowie ein Liniendiagramm für den Lastverlauf.
+- **„Was ist neu“-Fenster und Release-Parser:** Die Schaltfläche „Was ist neu“ ist nun immer neben „Nach Updates suchen“ sichtbar und lädt Release-Notes bei Bedarf direkt von GitHub.
+- **Atomares Schreiben der Historie und Datensatz-Isolation:** Das Speichern von `calls_history` wurde auf thread-sicheres atomares Schreiben umgestellt.
+- **Refactoring und Tests.**
+- **Kleinere UI-Anpassungen.**
 
 <!-- lang:es -->
-# ProxDMR v2.21
+## Novedades y correcciones
 
-## Novedades
-
-- **Motor TTS local ONNX Supertonic 3:** Nuevo motor neuronal multilingüe totalmente offline (`supertonic_service.py`) compatible con 31 idiomas en WAV a 44,1 kHz y 10 estilos de voz (`F1`-`F5`, `M1`-`M5`), descarga bajo demanda del núcleo ONNX (~380 MB) y perfiles de voz (~0,3 MB) en `config/supertonic3/`, comprobaciones de disponibilidad y aviso de cambio para idiomas no compatibles.
-- **Acentuación automática y desambiguación de homógrafos (Silero Stress):** Integración de `silero-stress` (`stress_service.py`) con acentuación Unicode (`U+0301`) para ruso, ucraniano, bielorruso (modelos neuronales) y 8 idiomas adicionales, compatible tanto con Supertonic 3 TTS como con Piper TTS (con interruptor dedicado).
-- **Fundido suave de silencio (Mute Fade) y motor AudioWorklet mejorado:** Fundido de entrada/salida configurable (`0,1`-`2,0 s`, por defecto `0,3 s`) para silencio global, por hotspot, modo de hotspot único y por timeslot, evitando chasquidos y doble atenuación en grabaciones.
-- **Historial de llamadas virtualizado:** Tabla de historial QSO reconstruida con desplazamiento virtual (`O(1)` DOM), sin límite de 24 horas y con coste nulo en segundo plano cuando el panel está cerrado, manejando decenas de miles de registros con fluidez.
-- **Indicador de CPU y RAM del servidor en la cabecera:** Insignia en tiempo real con umbrales de color (`<=75%` verde, `76-90%` amarillo, `91%+` rojo) y resumen detallado al pulsar.
-- **Mejoras de interfaz y traducciones:** Flujo y etiquetas refinados para Canal Dedicado, botón de actualización de modelos TTS, desplazamiento más suave en Acerca de, mejoras en `pxi-select` / `marquee` y actualización completa en los 8 idiomas de la interfaz.
-
-## Nota de actualización
-
-- **Actualización desde v2.20 o anterior:** v2.21 añade nuevas dependencias de Python (`supertonic>=1.3.1`, `silero-stress>=1.5`). Actualice la imagen Docker (`docker compose pull && docker compose up -d`) o reconstruya el contenedor (`docker compose up -d --build`).
-- **Android APK:** Se mantiene en **v1.36** (`ProxDMR-1.36.apk`).
+- **Optimización semántica (suavizado del habla) y contexto QSO:** Se añadió un modo opcional para corregir errores típicos de ASR/vocoder teniendo en cuenta el contexto deslizante de las últimas 3 respuestas del slot (durante 180 segundos). Funciona con traducción en la nube, Qwen local (procesamiento ligero) y el modo «Sin traducción» / coincidencia de idioma.
+- **Velocidad de reproducción adaptativa (alcance de emisión en directo):** Supervisa el retraso de la cola de reproducción respecto a los slots, recorta el silencio en los extremos de los archivos WAV y acelera suavemente el habla conforme crece la cola preservando el tono de voz (WSOLA para Silero/Gemini/Groq y aceleración nativa para Piper/Supertonic).
+- **Selección dinámica de idiomas y respaldo ASR:** La lista de idiomas de origen se adapta dinámicamente a las capacidades del traductor seleccionado.
+- **Voces por motor e indicadores de botones:** Se añadió el guardado independiente de la voz seleccionada para cada motor TTS.
+- **Estabilidad de la cola y LLM:** Las respuestas vacías válidas del LLM al filtrar interjecciones ya no se consideran un error de API; pulsar PTT o Mute ahora cancela de forma garantizada el temporizador de pausa entre réplicas TTS.
+- **Nuevo widget de carga de hardware del servidor en la cabecera del hotspot:** Dos barras verticales (RAM y CPU) y una gráfica de líneas con el historial de carga.
+- **Ventana «Novedades» y analizador de versiones:** El botón «Novedades» ahora es siempre visible junto a «Buscar actualizaciones» y carga el texto desde GitHub cuando hace falta.
+- **Escritura atómica del historial y aislamiento de registros:** El guardado de `calls_history` se ha convertido en una escritura atómica segura para hilos.
+- **Refactorización y pruebas.**
+- **Pequeños ajustes de interfaz.**
 
 <!-- lang:fr -->
-# ProxDMR v2.21
+## Ajouts et corrections
 
-## Nouveautés
-
-- **Moteur TTS local ONNX Supertonic 3 :** Ajout d'un moteur neuronal multilingue 100 % hors ligne (`supertonic_service.py`) prenant en charge 31 langues en WAV 44,1 kHz avec 10 styles de voix (`F1`-`F5`, `M1`-`M5`), téléchargement à la demande du noyau ONNX (~380 Mo) et des styles (~0,3 Mo) dans `config/supertonic3/`, vérification de disponibilité et bascule guidée pour les langues non prises en charge.
-- **Accentuation automatique et désambiguïsation des homographes (Silero Stress) :** Intégration de `silero-stress` (`stress_service.py`) avec accentuation Unicode (`U+0301`) pour le russe, l'ukrainien, le biélorusse (modèles neuronaux) et 8 autres langues — actif pour Supertonic 3 TTS et Piper TTS (avec option dédiée).
-- **Fondu sonore progressif (Mute Fade) et moteur AudioWorklet amélioré :** Fondu configurable (`0,1`-`2,0 s`, par défaut `0,3 s`) pour le mode muet global, par hotspot, hotspot unique et par timeslot, garantissant des transitions sans clic et sans double atténuation des enregistrements.
-- **Historique d'appels virtualisé :** Tableau QSO reconstruit avec défilement virtuel (`O(1)` DOM), suppression de la limite de 24 h et coût DOM nul lorsque le panneau est fermé — gère aisément des dizaines de milliers d'entrées.
-- **Indicateur CPU et RAM du serveur en temps réel :** Badge dans l'en-tête avec seuils de couleur (`<=75%` vert, `76-90%` jaune, `91%+` rouge) et notification détaillée au clic.
-- **Finitions UI, UX et traductions :** Terminologie affinée pour le canal dédié, bouton d'actualisation des modèles TTS, défilement plus fluide dans À propos, améliorations `pxi-select` / `marquee` et mise à jour complète des 8 langues d'interface.
-
-## Note de mise à jour
-
-- **Mise à jour depuis v2.20 ou antérieure :** v2.21 ajoute de nouvelles dépendances Python (`supertonic>=1.3.1`, `silero-stress>=1.5`). Mettez à jour l'image Docker (`docker compose pull && docker compose up -d`) ou reconstruisez le conteneur (`docker compose up -d --build`).
-- **APK Android :** Reste en **v1.36** (`ProxDMR-1.36.apk`).
+- **Optimisation sémantique (lissage vocal) et contexte QSO :** Ajout d'un mode optionnel pour corriger les erreurs typiques d'ASR/vocodeur en tenant compte du contexte glissant des 3 dernières répliques du slot (sur 180 secondes). Fonctionne pour la traduction cloud, Qwen local (traitement léger) et le mode « Sans traduction » / correspondance de langue.
+- **Vitesse de lecture adaptative (rattrapage du direct) :** Surveille le retard de la file de lecture par rapport aux slots, supprime les silences aux extrémités des fichiers WAV et accélère progressivement la parole lorsque la file grossit tout en préservant le timbre de la voix (WSOLA pour Silero/Gemini/Groq et accélération native pour Piper/Supertonic).
+- **Sélection dynamique des langues et repli ASR :** La liste des langues sources s'adapte dynamiquement aux capacités du traducteur sélectionné.
+- **Voix par moteur et indicateurs de boutons :** Enregistrement distinct de la voix choisie pour chaque moteur TTS.
+- **Stabilité de la file et du LLM :** Les réponses vides valides du LLM lors du filtrage des interjections ne sont plus considérées comme une erreur API ; l'appui sur PTT ou Mute garantit désormais l'annulation du minuteur de pause entre répliques TTS.
+- **Nouveau widget de charge matérielle serveur dans l'en-tête du hotspot :** Deux jauges verticales (RAM et CPU) et un graphique linéaire d'historique de charge.
+- **Fenêtre « Nouveautés » et analyseur de versions :** Le bouton « Nouveautés » est désormais toujours visible à côté de « Vérifier les mises à jour » et charge les notes depuis GitHub au besoin.
+- **Écriture atomique de l'historique et isolation des enregistrements :** L'enregistrement de `calls_history` utilise désormais une écriture atomique thread-safe.
+- **Refactorisation et tests.**
+- **Ajustements mineurs de l'interface.**
 
 <!-- lang:it -->
-# ProxDMR v2.21
+## Aggiunte e correzioni
 
-## Novità
-
-- **Motore TTS locale ONNX Supertonic 3:** Nuovo motore neurale multilingua completamente offline (`supertonic_service.py`) per 31 lingue in WAV a 44,1 kHz con 10 stili vocali (`F1`-`F5`, `M1`-`M5`), download su richiesta del core ONNX (~380 MB) e dei profili vocali (~0,3 MB) in `config/supertonic3/`, controlli automatici di disponibilità e suggerimenti di fallback.
-- **Accentuazione automatica e disambiguazione omografi (Silero Stress):** Integrazione di `silero-stress` (`stress_service.py`) con accenti Unicode (`U+0301`) per russo, ucraino, bielorusso (modelli neurali) e altre 8 lingue — attivo sia per Supertonic 3 TTS che per Piper TTS (con interruttore dedicato).
-- **Dissolvenza audio Mute (Mute Fade) e motore AudioWorklet aggiornato:** Dissolvenza in ingresso/uscita configurabile (`0,1`-`2,0 s`, predefinito `0,3 s`) per mute globale, per hotspot, modalità singolo hotspot e timeslot, eliminando clic e doppie dissolvenze nelle registrazioni.
-- **Cronologia chiamate virtualizzata:** Tabella QSO ricostruita con scorrimento virtuale (`O(1)` DOM), rimozione del limite di 24 ore e carico DOM nullo a pannello chiuso — gestisce fluidamente decine di migliaia di voci.
-- **Indicatore CPU e RAM del server nell'intestazione:** Badge in tempo reale con soglie cromatiche (`<=75%` verde, `76-90%` giallo, `91%+` rosso) e riepilogo dettagliato al clic.
-- **Rifiniture UI, UX e localizzazione:** Flusso e testi perfezionati per Canale Dedicato, pulsante di aggiornamento modelli TTS, scorrimento crediti più fluido in Informazioni, miglioramenti `pxi-select` / `marquee` e traduzioni aggiornate in tutte le 8 lingue.
-
-## Nota di aggiornamento
-
-- **Aggiornamento da v2.20 o precedente:** v2.21 aggiunge nuove dipendenze Python (`supertonic>=1.3.1`, `silero-stress>=1.5`). Aggiorna l'immagine Docker (`docker compose pull && docker compose up -d`) o ricostruisci il container (`docker compose up -d --build`).
-- **APK Android:** Rimane alla **v1.36** (`ProxDMR-1.36.apk`).
+- **Ottimizzazione semantica (fluidità del parlato) e contesto QSO:** Aggiunta una modalità opzionale per correggere i tipici errori ASR/vocoder tenendo conto del contesto scorrevole delle ultime 3 risposte dello slot (su 180 secondi). Funziona con traduzione cloud, Qwen locale (elaborazione leggera) e modalità «Nessuna traduzione» / corrispondenza lingua.
+- **Velocità di riproduzione adattiva (recupero della diretta):** Monitora il ritardo della coda di riproduzione rispetto agli slot, taglia il silenzio ai bordi dei file WAV e accelera gradualmente il parlato all'aumentare della coda preservando il timbro vocale (WSOLA per Silero/Gemini/Groq e accelerazione nativa per Piper/Supertonic).
+- **Selezione dinamica della lingua e fallback ASR:** L'elenco delle lingue di origine si adatta dinamicamente alle capacità del traduttore selezionato.
+- **Voci per motore e indicatori dei pulsanti:** Aggiunto il salvataggio separato della voce selezionata per ciascun motore TTS.
+- **Stabilità della coda e dell'LLM:** Le risposte vuote valide dell'LLM durante il filtraggio delle interiezioni non sono più trattate come errori API; la pressione di PTT o Mute garantisce ora l'annullamento del timer di pausa tra le repliche TTS.
+- **Nuovo widget carico hardware del server nell'intestazione hotspot:** Due barre verticali (RAM e CPU) e un grafico a linee con la cronologia del carico.
+- **Finestra «Novità» e parser dei rilasci:** Il pulsante «Novità» è ora sempre visibile accanto a «Controlla aggiornamenti» e carica le note da GitHub quando necessario.
+- **Scrittura atomica della cronologia e isolamento dei record:** Il salvataggio di `calls_history` è stato convertito in scrittura atomica thread-safe.
+- **Refactoring e test.**
+- **Piccoli ritocchi all'interfaccia.**
 
 <!-- lang:nl -->
-# ProxDMR v2.21
+## Toevoegingen en verbeteringen
 
-## Nieuw in deze versie
+- **Semantische optimalisatie (spraakverzachting) en QSO-context:** Optionele modus toegevoegd om typische ASR-/vocoderfouten te corrigeren op basis van de schuivende context van de laatste 3 slot-reacties (over 180 seconden). Werkt voor cloudvertaling, lokale Qwen (lichte verwerking) en de modus «Geen vertaling» / taalovereenkomst.
+- **Adaptieve afspeelsnelheid (live-inhaalmodus):** Bewaakt de achterstand van de afspeelwachtrij ten opzichte van de slots, knipt stilte aan de randen van WAV-bestanden weg en versnelt spraak geleidelijk naarmate de wachtrij groeit met behoud van stemklank (WSOLA voor Silero/Gemini/Groq en native versnelling voor Piper/Supertonic).
+- **Dynamische taalselectie en ASR-fallback:** De lijst met brontalen past zich dynamisch aan de mogelijkheden van de gekozen vertaler aan.
+- **Stemmen per engine en knopindicatoren:** Aparte opslag toegevoegd van de geselecteerde stem voor elke TTS-engine.
+- **Stabiliteit van wachtrij en LLM:** Geldige lege LLM-antwoorden bij het filteren van tussenwerpsels gelden niet langer als API-fout; het indrukken van PTT of Mute annuleert nu gegarandeerd de vertraagde TTS-pauzetimer tussen berichten.
+- **Nieuwe server-hardwarebelastingwidget in de hotspot-header:** Twee verticale balkmeters (RAM en CPU) en een lijngrafiek met de belastingsgeschiedenis.
+- **Venster «Wat is nieuw» en release-parser:** De knop «Wat is nieuw» is nu altijd zichtbaar naast «Controleren op updates» en laadt releasenotes zo nodig rechtstreeks van GitHub.
+- **Atomaire geschiedenisopslag en recordisolatie:** Het opslaan van `calls_history` is omgezet naar thread-safe atomaire opslag.
+- **Refactoring en tests.**
+- **Kleine UI-aanpassingen.**
 
-- **Lokale ONNX-TTS-engine Supertonic 3:** Nieuwe volledig offline meertalige neurale spraaksynthese (`supertonic_service.py`) voor 31 talen in 44,1 kHz WAV met 10 stemstijlen (`F1`-`F5`, `M1`-`M5`), on-demand download van de ONNX-kern (~380 MB) en stemprofielen (~0,3 MB) in `config/supertonic3/`, automatische gereedheidscontroles en fallback-meldingen.
-- **Automatische klemtoon & homograaf-onderscheid (Silero Stress):** Integratie van `silero-stress` (`stress_service.py`) met Unicode-klemtonen (`U+0301`) voor Russisch, Oekraïens, Wit-Russisch (neurale modellen) en 8 extra talen — actief voor zowel Supertonic 3 TTS als Piper TTS (met eigen schakelaar).
-- **Vloeiende audio-mute-fade & vernieuwde AudioWorklet-engine:** Instelbare vloeiende fade-in/fade-out (`0,1`-`2,0 s`, standaard `0,3 s`) voor globale mute, per hotspot, enkele-hotspot-modus en timeslots zonder klikken of dubbele fade op opnames.
-- **Gevirtualiseerde oproepgeschiedenis:** Vernieuwde QSO-tabel met virtual scrolling (`O(1)` DOM), zonder 24-uurslimiet en zonder DOM-belasting wanneer het paneel gesloten is — verwerkt moeiteloos tienduizenden rijen.
-- **Realtime server-CPU- & RAM-indicator in de header:** Live-badge met kleurdrempels (`<=75%` groen, `76-90%` geel, `91%+` rood) en uitgebreid overzicht bij klikken.
-- **UI-, UX- & vertaalverbeteringen:** Verfijnde benaming voor Toegewezen kanaal, knop om TTS-modellen te verversen, rustiger scrollen in Over, verbeteringen in `pxi-select` / `marquee` en bijgewerkte vertalingen voor alle 8 talen.
-
-## Upgrademelding
-
-- **Upgraden vanaf v2.20 of ouder:** v2.21 voegt nieuwe Python-afhankelijkheden toe (`supertonic>=1.3.1`, `silero-stress>=1.5`). Werk het Docker-image bij (`docker compose pull && docker compose up -d`) of bouw de container opnieuw (`docker compose up -d --build`).
-- **Android APK:** Blijft op **v1.36** (`ProxDMR-1.36.apk`).
+</details>

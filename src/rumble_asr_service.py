@@ -98,6 +98,7 @@ ISO2_TO_RUMBLE_LANG: Dict[str, str] = {
     "ms": "Malay",
     "fa": "Persian",
     "mk": "Macedonian",
+    "tl": "Filipino",
     "fil": "Filipino",
 }
 
@@ -398,8 +399,28 @@ class RumbleAsrService:
             forced_iso2 = None
             forced_lang_en = None
             if source_lang_iso2 and source_lang_iso2.lower() not in ("auto", "none", ""):
-                forced_iso2 = source_lang_iso2.lower()[:2]
-                forced_lang_en = ISO2_TO_RUMBLE_LANG.get(forced_iso2)
+                raw_sl = source_lang_iso2.lower().strip()
+                forced_lang_en = ISO2_TO_RUMBLE_LANG.get(raw_sl)
+                if forced_lang_en:
+                    forced_iso2 = "tl" if raw_sl == "fil" else raw_sl[:2]
+                else:
+                    try:
+                        try:
+                            from language_capabilities import resolve_asr_language
+                        except ImportError:
+                            from src.language_capabilities import resolve_asr_language
+                        resolved_iso2, is_fb = resolve_asr_language(raw_sl, "rumble")
+                        if resolved_iso2:
+                            forced_iso2 = resolved_iso2
+                            forced_lang_en = ISO2_TO_RUMBLE_LANG.get(resolved_iso2)
+                            if is_fb and forced_lang_en:
+                                logger.info(
+                                    f"[RUMBLE-ASR] Language '{raw_sl}' not native in Rumble-2-Flash; "
+                                    f"using closest ASR language '{resolved_iso2}' ({forced_lang_en})."
+                                )
+                    except Exception:
+                        forced_iso2 = raw_sl[:2]
+                        forced_lang_en = ISO2_TO_RUMBLE_LANG.get(forced_iso2)
 
             with self._infer_lock:
                 processor, model = self._ensure_loaded_locked()

@@ -39,7 +39,7 @@
   <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/css/style.css?v=2.9.809">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.9.828">
   <script>
     window.CACHE_VERSION = "2.9.528";
     window.isFirstRun = {{ 'true' if is_first_run else 'false' }};
@@ -62,6 +62,19 @@
     if (!window.__enableNetworkColors) {
       document.documentElement.classList.add("no-net-colors");
       document.addEventListener("DOMContentLoaded", function() { if (document.body) document.body.classList.add("no-net-colors"); });
+    }
+    window.__showServerLoadIndicator = {{ 'true' if (show_server_load_indicator is not defined or show_server_load_indicator) else 'false' }};
+    window.__serverLoadChartSettings = {
+      ram_color: "{{ server_load_ram_color | default('#3399cc') }}",
+      cpu_color: "{{ server_load_cpu_color | default('#99cc00') }}",
+      scale_px: {{ server_load_scale_px | default(1) }},
+      scale_sec: {{ server_load_scale_sec | default(1) }},
+      ping_client_color: "{{ ping_client_color | default('#22c55e') }}",
+      ping_server_color: "{{ ping_server_color | default('#22c55e') }}"
+    };
+    if (!window.__showServerLoadIndicator) {
+      document.documentElement.classList.add("hide-server-load-indicator");
+      document.addEventListener("DOMContentLoaded", function() { if (document.body) document.body.classList.add("hide-server-load-indicator"); });
     }
     if (typeof window !== "undefined" && window.AndroidBridge) {
       document.documentElement.classList.add("is-apk-mode");
@@ -599,24 +612,21 @@
               <button type="button" id="headerOfflineTranscribeBtn" class="header-transcribe-btn btn-hs-transcribe transcribe-off" data-hotspot-id="default" title="Офлайн-транскрибация записей (Google AI)" aria-label="Офлайн-транскрибация" data-i18n-title="recordings.offline_transcribe_title" data-i18n-aria-label="recordings.offline_transcribe_title" style="display: none;">
                 <span class="transcribe-letter">t</span>
               </button>
-              <!-- Server CPU Load Gauge Indicator -->
+              <!-- Server RAM/CPU Segmented Bars + 5-min Trend Chart -->
               <button type="button" class="header-cpu-btn cpu-low" title="Загрузка CPU сервера" aria-label="Загрузка CPU сервера" data-i18n-title="header.cpu_indicator_default" data-i18n-aria-label="header.cpu_indicator_default">
-                <svg class="cpu-gauge-svg" viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">
-                  <circle class="cpu-gauge-track" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" transform="rotate(135 14 14)"></circle>
-                  <circle class="cpu-gauge-arc" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" stroke-dashoffset="52.78" transform="rotate(135 14 14)"></circle>
-                  <g class="cpu-chip-pins" stroke-width="1.25" stroke-linecap="round">
-                    <line x1="12" y1="7.4" x2="12" y2="9.5"></line>
-                    <line x1="16" y1="7.4" x2="16" y2="9.5"></line>
-                    <line x1="12" y1="18.5" x2="12" y2="20.6"></line>
-                    <line x1="16" y1="18.5" x2="16" y2="20.6"></line>
-                    <line x1="7.4" y1="12" x2="9.5" y2="12"></line>
-                    <line x1="7.4" y1="16" x2="9.5" y2="16"></line>
-                    <line x1="18.5" y1="12" x2="20.6" y2="12"></line>
-                    <line x1="18.5" y1="16" x2="20.6" y2="16"></line>
-                  </g>
-                  <rect class="cpu-chip-body" x="9.5" y="9.5" width="9" height="9" rx="1.6" stroke-width="1.3"></rect>
-                  <rect class="cpu-chip-core" x="11.8" y="11.8" width="4.4" height="4.4" rx="0.7"></rect>
-                </svg>
+                <span class="sys-bars" aria-hidden="true">
+                  <span class="sys-bar sys-bar-ram"><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i></span>
+                  <span class="sys-bar sys-bar-cpu"><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i></span>
+                </span>
+                <span class="sys-chart-wrap" aria-hidden="true">
+                  <svg class="sys-sparkline" viewBox="0 0 62 24" preserveAspectRatio="none">
+                    <defs></defs>
+                    <line class="sys-thresh-warn" x1="0" y1="4.475" x2="62" y2="4.475"></line>
+                    <line class="sys-thresh-crit" x1="0" y1="2.325" x2="62" y2="2.325"></line>
+                    <path class="sys-line-ram" d="" fill="none" stroke="#3399cc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+                    <path class="sys-line-cpu" d="" fill="none" stroke="#99cc00" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+                  </svg>
+                </span>
               </button>
               <!-- Hotspot Recording Button (R) -->
               <button type="button" id="headerMasterRecBtn" class="header-rec-btn btn-hs-rec rec-standby" data-hotspot-id="default" title="Автозапись TS1/2: вкл/выкл" aria-label="Автозапись разговора" data-i18n-title="recordings.autorec_title" data-i18n-aria-label="recordings.autorec_title">
@@ -1378,24 +1388,21 @@
             <span class="transcribe-letter">t</span>
           </button>
 
-          <!-- Server CPU Load Gauge Indicator -->
+          <!-- Server RAM/CPU Segmented Bars + 5-min Trend Chart -->
           <button type="button" class="header-cpu-btn cpu-low" title="Загрузка CPU сервера" aria-label="Загрузка CPU сервера" data-i18n-title="header.cpu_indicator_default" data-i18n-aria-label="header.cpu_indicator_default">
-            <svg class="cpu-gauge-svg" viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">
-              <circle class="cpu-gauge-track" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" transform="rotate(135 14 14)"></circle>
-              <circle class="cpu-gauge-arc" cx="14" cy="14" r="11.2" fill="none" stroke-width="2.3" stroke-linecap="round" stroke-dasharray="52.78 70.38" stroke-dashoffset="52.78" transform="rotate(135 14 14)"></circle>
-              <g class="cpu-chip-pins" stroke-width="1.25" stroke-linecap="round">
-                <line x1="12" y1="7.4" x2="12" y2="9.5"></line>
-                <line x1="16" y1="7.4" x2="16" y2="9.5"></line>
-                <line x1="12" y1="18.5" x2="12" y2="20.6"></line>
-                <line x1="16" y1="18.5" x2="16" y2="20.6"></line>
-                <line x1="7.4" y1="12" x2="9.5" y2="12"></line>
-                <line x1="7.4" y1="16" x2="9.5" y2="16"></line>
-                <line x1="18.5" y1="12" x2="20.6" y2="12"></line>
-                <line x1="18.5" y1="16" x2="20.6" y2="16"></line>
-              </g>
-              <rect class="cpu-chip-body" x="9.5" y="9.5" width="9" height="9" rx="1.6" stroke-width="1.3"></rect>
-              <rect class="cpu-chip-core" x="11.8" y="11.8" width="4.4" height="4.4" rx="0.7"></rect>
-            </svg>
+            <span class="sys-bars" aria-hidden="true">
+              <span class="sys-bar sys-bar-ram"><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i></span>
+              <span class="sys-bar sys-bar-cpu"><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i><i class="sys-seg"></i></span>
+            </span>
+            <span class="sys-chart-wrap" aria-hidden="true">
+              <svg class="sys-sparkline" viewBox="0 0 62 24" preserveAspectRatio="none">
+                <defs></defs>
+                <line class="sys-thresh-warn" x1="0" y1="4.475" x2="62" y2="4.475"></line>
+                <line class="sys-thresh-crit" x1="0" y1="2.325" x2="62" y2="2.325"></line>
+                <path class="sys-line-ram" d="" fill="none" stroke="#3399cc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+                <path class="sys-line-cpu" d="" fill="none" stroke="#99cc00" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+              </svg>
+            </span>
           </button>
 
           <!-- Hotspot Recording Button (R) -->
@@ -2387,7 +2394,7 @@
               <label for="editHsAllStarNode" data-i18n="hs_edit.allstar_node_label" style="margin-bottom: 0;">Номер ноды AllStarLink (Node Number)</label>
             </div>
             <input type="text" id="editHsAllStarNode" class="form-input" maxlength="10" value="1999" placeholder="например: 41522 или 1999 (Echo)" data-i18n-placeholder="hs_edit.allstar_node_placeholder">
-            <small class="form-hint" data-i18n="hs_edit.allstar_node_hint">Номер узла AllStarLink для подключения через протокол IAX2 (порт по умолчанию 4569 UDP)</small>
+            <small class="form-hint" data-i18n="hs_edit.allstar_node_hint">Номер вашего узла AllStarLink (Node Number)</small>
             <div class="form-group-checkbox" id="editHsAllStarAlwaysOnlineGroup" style="margin-top: 10px;">
               <label style="cursor: pointer; color: var(--text-primary); font-size: 0.85rem; font-weight: normal; display: inline-flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="editHsAllStarAlwaysOnline" checked>
@@ -2896,6 +2903,20 @@
           </small>
         </div>
 
+        <!-- Sync with Android System Volume Option -->
+        <div id="groupSyncSystemVolume" class="form-group-checkbox" style="display: block; padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
+          <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="optSyncSystemVolume" {% if sync_system_volume is defined and not sync_system_volume %}{% else %}checked{% endif %}>
+            <strong data-i18n="general.sync_system_volume">Синхронизировать с громкостью системы (Android)</strong>
+          </label>
+          <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="general.sync_system_volume_hint">
+            Связывает регулятор громкости в программе с системной громкостью смартфона (клавиши громкости телефона двигают регулятор в ProxDMR, и наоборот)
+          </small>
+          <small id="hintSyncSystemVolumeWeb" class="form-hint" style="margin-left: 24px; display: none; color: #94a3b8; font-style: italic; margin-top: 2px;" data-i18n="general.sync_system_volume_web_hint">
+            ℹ️ В веб-браузере на ПК доступ к системному микшеру ОС Windows/Linux ограничен политиками безопасности браузера (Sandbox). Функция активна в приложении ProxDMR для Android (APK).
+          </small>
+        </div>
+
 
         <!-- Check Mic on TX Option -->
         <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
@@ -2926,6 +2947,16 @@
             <input type="number" id="optMuteFadeDuration" class="form-input" min="0.1" max="2.0" step="0.1" value="{{ '%.1f'|format(mute_fade_duration|default(0.3)) }}" style="width: 72px; padding: 4px 8px; font-size: 0.85rem; text-align: center;">
             <span style="font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap;" data-i18n="general.mute_fade_unit_sec">сек (0.1 – 2.0)</span>
           </div>
+        </div>
+
+        <!-- Show Server Load Indicator Option -->
+        <div class="form-group-checkbox" style="padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;">
+          <label style="cursor: pointer;">
+            <input type="checkbox" id="optShowServerLoad" {% if show_server_load_indicator is not defined or show_server_load_indicator %}checked{% endif %}> <strong data-i18n="general.show_server_load_indicator">Показывать индикатор загрузки сервера</strong>
+          </label>
+          <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="general.show_server_load_indicator_hint">
+            Отображает панель с индикаторами RAM/CPU и 5-минутным графиком нагрузки в заголовке карточек хотспотов
+          </small>
         </div>
 
         <!-- BLE PTT (Bluetooth button) — Collapsible Frame (APK only) -->
@@ -2988,22 +3019,8 @@
             </span>
           </div>
           <div class="apikeys-frame-body" id="androidSettingsBody" style="padding: 10px 12px 10px;">
-            <!-- Sync with Android System Volume Option -->
-            <div id="groupSyncSystemVolume" class="form-group-checkbox" style="display: block;">
-              <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="optSyncSystemVolume" {% if sync_system_volume is defined and not sync_system_volume %}{% else %}checked{% endif %}>
-                <strong data-i18n="general.sync_system_volume">Синхронизировать с громкостью системы (Android)</strong>
-              </label>
-              <small class="form-hint" style="margin-left: 24px; display: block;" data-i18n="general.sync_system_volume_hint">
-                Связывает регулятор громкости в программе с системной громкостью смартфона (клавиши громкости телефона двигают регулятор в ProxDMR, и наоборот)
-              </small>
-              <small id="hintSyncSystemVolumeWeb" class="form-hint" style="margin-left: 24px; display: none; color: #94a3b8; font-style: italic; margin-top: 2px;" data-i18n="general.sync_system_volume_web_hint">
-                ℹ️ В веб-браузере на ПК доступ к системному микшеру ОС Windows/Linux ограничен политиками безопасности браузера (Sandbox). Функция активна в приложении ProxDMR для Android (APK).
-              </small>
-            </div>
-
             <!-- Hardware PTT Button (Smartphone physical keys — APK only) -->
-            <div id="groupHardwarePtt" style="display: block; padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+            <div id="groupHardwarePtt" style="display: block;">
               <label for="optHardwarePttMode" style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; margin-bottom: 6px;">
                 <span>📻</span>
                 <strong data-i18n="android.hw_ptt_title">Аппаратная кнопка PTT (смартфон)</strong>
@@ -3118,22 +3135,6 @@
               </small>
             </div>
           </div>
-        </div>
-
-        <!-- Android APK Download / Update Block -->
-        <div id="webApkDownloadBlock" class="settings-action-block settings-apk-block" style="display: none; padding-top: 6px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);"
-             data-server-apk-version="{{ apk_version | default('1.11') }}"
-             data-server-apk-filename="{{ apk_filename | default('ProxDMR-1.11.apk') }}"
-             data-server-apk-path="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}">
-          <div class="settings-apk-title" style="font-size: 0.82rem; font-weight: 700; color: #58a6ff; margin-bottom: 3px;">
-            <span data-i18n="apk.settings_title">📱 Приложение ProxDMR для Android</span>
-          </div>
-          <p style="font-size: 0.78rem; color: #8b949e; margin: 0 0 6px 0; line-height: 1.3;" data-i18n="apk.settings_desc">
-            Для стабильного приема радиосигнала в фоновом режиме, автоподключения VPN и использования боковых кнопок как PTT установите APK.
-          </p>
-          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkSettings" class="btn-primary" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-decoration: none; padding: 10px; box-sizing: border-box; font-weight: 600; border-radius: var(--app-border-radius, 0px);">
-            <span data-i18n="apk.btn_download_apk">📥 Скачать {{ apk_filename | default('ProxDMR-1.11.apk') }}</span>
-          </a>
         </div>
 
         <!-- Visual appearance settings have been moved to the dedicated "Оформление" (tab-appearance) tab -->
@@ -3258,21 +3259,23 @@
                   </div>
                 </div>
                 <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-                  <button type="button" id="btnViewReleaseNotesSettings" class="btn-secondary" style="flex: 1; min-width: 120px; font-size: 0.82rem; padding: 7px 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
-                    <span>📋</span> <span data-i18n="updates.view_changes">Что нового</span>
-                  </button>
-                  <button type="button" id="btnApplyUpdateSettings" class="btn-primary" style="flex: 1; min-width: 130px; font-size: 0.82rem; font-weight: 700; padding: 7px 12px; cursor: pointer; background: #e74c3c; border-color: #c0392b; display: flex; align-items: center; justify-content: center; gap: 6px; display: {% if is_admin %}flex{% else %}none{% endif %};">
+                  <button type="button" id="btnApplyUpdateSettings" class="btn-primary" style="flex: 1; min-width: 130px; font-size: 0.82rem; font-weight: 700; padding: 7px 12px; cursor: pointer; background: #e74c3c; border-color: #c0392b; display: {% if is_admin %}flex{% else %}none{% endif %}; align-items: center; justify-content: center; gap: 6px;">
                     <span>⚡</span> <span data-i18n="updates.apply_btn">Обновить сейчас</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <!-- Manual Check Button -->
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <button type="button" id="btnCheckUpdateManual" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-                <span id="btnCheckUpdateIcon">🔄</span> <span id="btnCheckUpdateText" data-i18n="updates.check_btn">Проверить обновления</span>
-              </button>
+            <!-- Manual Check & What's New Buttons -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button type="button" id="btnCheckUpdateManual" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                  <span id="btnCheckUpdateIcon">🔄</span> <span id="btnCheckUpdateText" data-i18n="updates.check_btn">Проверить обновления</span>
+                </button>
+                <button type="button" id="btnViewReleaseNotesSettings" class="btn-secondary" style="font-size: 0.82rem; padding: 6px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                  <span>📋</span> <span data-i18n="updates.view_changes">Что нового</span>
+                </button>
+              </div>
               <div id="systemCheckStatusText" style="font-size: 0.76rem; color: #8b949e; text-align: right;"></div>
             </div>
           </div>
@@ -3283,6 +3286,22 @@
           <button type="button" id="btnSaveGeneralSettings" class="btn-primary" data-i18n="buttons.save_settings">
             Сохранить настройки
           </button>
+        </div>
+
+        <!-- Android APK Download / Update Block (placed just above Server Restart) -->
+        <div id="webApkDownloadBlock" class="settings-action-block settings-apk-block" style="display: none; padding-top: 10px; margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08);"
+             data-server-apk-version="{{ apk_version | default('1.11') }}"
+             data-server-apk-filename="{{ apk_filename | default('ProxDMR-1.11.apk') }}"
+             data-server-apk-path="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}">
+          <div class="settings-apk-title" style="font-size: 0.82rem; font-weight: 700; color: #58a6ff; margin-bottom: 3px;">
+            <span data-i18n="apk.settings_title">📱 Приложение ProxDMR для Android</span>
+          </div>
+          <p style="font-size: 0.78rem; color: #8b949e; margin: 0 0 6px 0; line-height: 1.3;" data-i18n="apk.settings_desc">
+            Для стабильного приема радиосигнала в фоновом режиме, автоподключения VPN и использования боковых кнопок как PTT установите APK.
+          </p>
+          <a href="{{ apk_path | default('/download/' ~ (apk_filename | default('ProxDMR-1.11.apk'))) }}" id="btnDownloadApkSettings" class="btn-primary" download="{{ apk_filename | default('ProxDMR-1.11.apk') }}" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-decoration: none; padding: 10px; box-sizing: border-box; font-weight: 600; border-radius: var(--app-border-radius, 0px);">
+            <span data-i18n="apk.btn_download_apk">📥 Скачать {{ apk_filename | default('ProxDMR-1.11.apk') }}</span>
+          </a>
         </div>
 
         <!-- Server Restart Block (admin/superadmin only) -->
@@ -3621,7 +3640,7 @@
         </div>
 
         <!-- 5. Mobile Hotspot Divider Strip (Collapsible Frame) -->
-        <div class="apikeys-frame collapsed" id="mobileHsDividerFrame" style="margin-bottom: 0;">
+        <div class="apikeys-frame collapsed" id="mobileHsDividerFrame" style="margin-bottom: 8px;">
           <div class="apikeys-frame-header" id="mobileHsDividerToggle">
             <span class="apikeys-frame-title">
               <span>🚧</span> <span data-i18n="general.mobile_hs_divider_title">Разделитель хотспотов (мобильный экран)</span>
@@ -3639,6 +3658,111 @@
             <small class="form-hint" style="margin-top: 8px; display: block;" data-i18n="general.mobile_hs_divider_hint">
               Тонкая полосатая разделительная линия между открытыми карточками хотспотов. Отображается только в мобильном режиме экрана, когда открыто 2 и более хотспота.
             </small>
+          </div>
+        </div>
+
+        <!-- 6. Ping / CPU-RAM Charts Settings (Collapsible Frame) -->
+        <div class="apikeys-frame collapsed" id="chartsSettingsFrame" style="margin-bottom: 0;">
+          <div class="apikeys-frame-header" id="chartsSettingsToggle">
+            <span class="apikeys-frame-title">
+              <span>📈</span> <span data-i18n="appearance.charts_title">Графики ping/cpu-ram</span>
+            </span>
+            <span class="apikeys-frame-actions">
+              <span class="apikeys-chevron" id="chartsSettingsChevron">▼</span>
+            </span>
+          </div>
+          <div class="apikeys-frame-body" id="chartsSettingsBody" style="padding: 10px 12px 10px;">
+            <!-- Ping Charts Colors (Client <-> ProxDMR & ProxDMR <-> Hub/Node) -->
+            <div class="toolbar-bg-theme-group" id="pingChartColorsGroup" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+              <div class="toolbar-bg-theme-header">
+                <span class="toolbar-bg-theme-title">
+                  <span>📶</span> <span data-i18n="appearance.charts_ping_colors_title">Цвета графиков Ping (&lt; 100 мс)</span>
+                </span>
+                <button type="button" class="btn-toolbar-bg-reset" id="btnResetPingColors" title="Сбросить цвета графиков Ping" data-i18n-title="general.toolbar_bg_reset">
+                  <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
+                </button>
+              </div>
+              <div class="toolbar-bg-pickers-grid">
+                <label class="toolbar-bg-picker-item" for="optPingClientColorPicker">
+                  <span class="toolbar-bg-swatch" id="pingClientColorSwatch" style="background-color: {{ ping_client_color | default('#22c55e') }};">
+                    <input type="color" id="optPingClientColorPicker" value="{{ ping_client_color | default('#22c55e') }}" title="От клиента до ProxDMR" data-i18n-title="appearance.charts_ping_client_color">
+                  </span>
+                  <span class="toolbar-bg-meta">
+                    <span class="toolbar-bg-label" data-i18n="appearance.charts_ping_client_color">От клиента до ProxDMR</span>
+                    <span class="toolbar-bg-hex" id="pingClientColorHex">{{ (ping_client_color | default('#22c55e')) | upper }}</span>
+                  </span>
+                </label>
+                <label class="toolbar-bg-picker-item" for="optPingServerColorPicker">
+                  <span class="toolbar-bg-swatch" id="pingServerColorSwatch" style="background-color: {{ ping_server_color | default('#22c55e') }};">
+                    <input type="color" id="optPingServerColorPicker" value="{{ ping_server_color | default('#22c55e') }}" title="От ProxDMR до хаба/ноды" data-i18n-title="appearance.charts_ping_server_color">
+                  </span>
+                  <span class="toolbar-bg-meta">
+                    <span class="toolbar-bg-label" data-i18n="appearance.charts_ping_server_color">От ProxDMR до хаба/ноды</span>
+                    <span class="toolbar-bg-hex" id="pingServerColorHex">{{ (ping_server_color | default('#22c55e')) | upper }}</span>
+                  </span>
+                </label>
+              </div>
+              <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="appearance.charts_ping_hint">
+                Задаёт базовый цвет линии и заливки каждого графика Ping при нормальной задержке (&lt; 100 мс). Повышенная задержка (100–170, 170–250, ≥ 250 мс) подсвечивается автоматически.
+              </small>
+            </div>
+
+            <!-- Duplicate Show Server Load Indicator Checkbox (synced with General tab) -->
+            <div class="form-group-checkbox" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+              <label style="cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="optShowServerLoadAppearance" {% if show_server_load_indicator is not defined or show_server_load_indicator %}checked{% endif %}>
+                <strong data-i18n="general.show_server_load_indicator">Показывать индикатор загрузки сервера</strong>
+              </label>
+            </div>
+
+            <!-- CPU & RAM Colors -->
+            <div class="toolbar-bg-theme-group" id="sysChartColorsGroup" style="margin-bottom: 10px;">
+              <div class="toolbar-bg-theme-header">
+                <span class="toolbar-bg-theme-title">
+                  <span>🎨</span> <span data-i18n="appearance.charts_colors_title">Цвета индикаторов и линий CPU / RAM</span>
+                </span>
+                <button type="button" class="btn-toolbar-bg-reset" id="btnResetChartsSettings" title="Сбросить цвета и масштаб по умолчанию" data-i18n-title="general.toolbar_bg_reset">
+                  <span>↺</span> <span data-i18n="general.toolbar_bg_reset">Сбросить</span>
+                </button>
+              </div>
+              <div class="toolbar-bg-pickers-grid">
+                <label class="toolbar-bg-picker-item" for="optSysRamColorPicker">
+                  <span class="toolbar-bg-swatch" id="sysRamColorSwatch" style="background-color: {{ server_load_ram_color | default('#3399cc') }};">
+                    <input type="color" id="optSysRamColorPicker" value="{{ server_load_ram_color | default('#3399cc') }}" title="Цвет RAM" data-i18n-title="appearance.charts_ram_color">
+                  </span>
+                  <span class="toolbar-bg-meta">
+                    <span class="toolbar-bg-label" data-i18n="appearance.charts_ram_color">Цвет RAM</span>
+                    <span class="toolbar-bg-hex" id="sysRamColorHex">{{ (server_load_ram_color | default('#3399cc')) | upper }}</span>
+                  </span>
+                </label>
+                <label class="toolbar-bg-picker-item" for="optSysCpuColorPicker">
+                  <span class="toolbar-bg-swatch" id="sysCpuColorSwatch" style="background-color: {{ server_load_cpu_color | default('#99cc00') }};">
+                    <input type="color" id="optSysCpuColorPicker" value="{{ server_load_cpu_color | default('#99cc00') }}" title="Цвет CPU" data-i18n-title="appearance.charts_cpu_color">
+                  </span>
+                  <span class="toolbar-bg-meta">
+                    <span class="toolbar-bg-label" data-i18n="appearance.charts_cpu_color">Цвет CPU</span>
+                    <span class="toolbar-bg-hex" id="sysCpuColorHex">{{ (server_load_cpu_color | default('#99cc00')) | upper }}</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Scale Setting: px / sec (both numbers editable) -->
+            <div class="sys-chart-scale-section">
+              <div class="sys-chart-scale-row">
+                <span class="sys-chart-scale-label" data-i18n="appearance.charts_scale_label">Масштаб графика:</span>
+                <div class="sys-chart-scale-inputs">
+                  <input type="number" id="optSysChartPx" class="form-input sys-chart-scale-input" min="1" max="60" step="1" value="{{ server_load_scale_px | default(1) }}">
+                  <span class="sys-chart-scale-unit" data-i18n="appearance.charts_scale_unit_px">px</span>
+                  <span class="sys-chart-scale-sep">/</span>
+                  <input type="number" id="optSysChartSec" class="form-input sys-chart-scale-input" min="1" max="60" step="1" value="{{ server_load_scale_sec | default(1) }}">
+                  <span class="sys-chart-scale-unit" data-i18n="appearance.charts_scale_unit_sec">сек</span>
+                </div>
+              </div>
+              <small class="form-hint" style="margin-top: 6px; display: block;" data-i18n="appearance.charts_hint">
+                Задаёт цвета столбцов и линий RAM/CPU (до 85%) и масштаб оси времени графика (сколько пикселей соответствует заданному числу секунд). Зоны 85–95% (#ff9933) и выше 95% (#ff0033) подсвечиваются автоматически.
+              </small>
+            </div>
           </div>
         </div>
       </div>
@@ -3759,6 +3883,17 @@
                 </label>
               </div>
 
+              <!-- Item 6b: Semantic Optimization Checkbox -->
+              <div class="form-group" id="groupSemanticOptimization" style="margin-bottom: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); user-select: none;">
+                  <input type="checkbox" id="optSemanticOptimization">
+                  <span data-i18n="transcriber.semantic_optimization_lbl">✨ Смысловая оптимизация (сглаживание речи)</span>
+                </label>
+                <small class="form-hint" style="margin-top: 3px; display: block;" data-i18n="transcriber.semantic_optimization_hint">
+                  Сглаживает искажения распознавания и формы речи с учётом контекста последних фраз QSO, не выдумывая фактов. Для облачного перевода работает без лишних запросов; для локального или без перевода использует облако при наличии ключа.
+                </small>
+              </div>
+
               <!-- Item 7: Source Language Selection -->
               <div class="form-group" id="groupTranscriberSourceLang" style="margin-bottom: 5px; transition: opacity 0.2s ease;">
                 <label for="optTranscriberSourceLang" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;" data-i18n="transcriber.source_lang">
@@ -3768,6 +3903,7 @@
                 <small class="form-hint" style="margin-top: 4px; display: block;" data-i18n="transcriber.source_lang_hint">
                   AUTO — язык речи определяется автоматически. Явный выбор повышает точность на коротких фразах.
                 </small>
+                <small id="hintTranscriberSourceAsrFallback" class="form-hint" style="margin-top: 3px; display: none; color: #f59e0b; font-weight: 500;"></small>
               </div>
 
               <!-- Item 8: Target Language Selection -->
@@ -3895,15 +4031,22 @@
                       <span data-i18n="transcriber.tts_piper_use_stress">Расстановка ударений (Silero Stress)</span>
                     </label>
                   </div>
-                  <!-- Speech playback speed slider -->
+                  <!-- Adaptive auto-tempo catch-up checkbox -->
                   <div class="form-group" style="margin-bottom: 0; margin-top: 2px;">
+                    <label data-i18n-title="transcriber.tts_auto_speed_hint" title="Плавно ускоряет речь без искажения тембра при отставании от живого эфира, подрезает тишину по краям фраз и мягко возвращается к базовой скорости после догона" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.83rem; font-weight: 500; color: var(--text-primary); user-select: none;">
+                      <input type="checkbox" id="optTtsAutoSpeed">
+                      <span data-i18n="transcriber.tts_auto_speed_lbl">⚡ Автоподстройка темпа (догон эфира)</span>
+                    </label>
+                  </div>
+                  <!-- Max auto-tempo catch-up slider (shown when auto-speed is checked) -->
+                  <div class="form-group" id="groupTtsAutoSpeedMax" style="margin-bottom: 0; display: none;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                      <label for="optTtsSpeed" data-i18n="transcriber.tts_speed_lbl" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0;">
-                        ⚡ Скорость воспроизведения:
+                      <label for="optTtsAutoSpeedMax" data-i18n="transcriber.tts_auto_speed_max_lbl" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0;">
+                        Макс. темп автоускорения:
                       </label>
-                      <span id="optTtsSpeedVal" style="font-size: 0.82rem; font-weight: 700; color: var(--accent-color, #4a90e2); font-family: monospace;">1.1x</span>
+                      <span id="optTtsAutoSpeedMaxVal" style="font-size: 0.8rem; font-weight: 700; color: var(--accent-color, #4a90e2); font-family: monospace;">1.4x</span>
                     </div>
-                    <input type="range" id="optTtsSpeed" min="1.0" max="2.0" step="0.05" value="1.1" class="form-range" style="width: 100%; cursor: pointer;">
+                    <input type="range" id="optTtsAutoSpeedMax" min="1.10" max="1.70" step="0.05" value="1.40" class="form-range" style="width: 100%; cursor: pointer;">
                   </div>
                 </div>
 
@@ -6188,7 +6331,7 @@
         <div class="rec-setting-row" style="display: flex; align-items: center; justify-content: space-between;">
           <label for="recMinDurationInput" style="font-size: 0.95rem; font-weight: 500;" data-i18n="recordings.min_duration">Мин. длительность записи:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="recMinDurationInput" class="rec-number-input" min="0.1" max="60" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
+            <input type="number" id="recMinDurationInput" class="rec-number-input" min="0.1" max="60" step="0.1" placeholder="2" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
             <span style="font-size: 0.85rem; color: var(--text-muted, #8b949e);" data-i18n="recordings.sec_unit">сек</span>
           </div>
         </div>
@@ -6197,7 +6340,7 @@
         <div class="rec-setting-row" style="display: flex; align-items: center; justify-content: space-between;">
           <label for="recQuotaGbInput" style="font-size: 0.95rem; font-weight: 500; white-space: nowrap;" data-i18n="recordings.quota_storage">Квота хранилища:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="recQuotaGbInput" class="rec-number-input" min="0.1" max="1000" step="0.1" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
+            <input type="number" id="recQuotaGbInput" class="rec-number-input" min="0.1" max="1000" step="0.1" placeholder="0.49" style="width: 70px; height: 28px; text-align: center; padding: 2px 0 2px 6px; border-radius: var(--app-border-radius, 0px); box-sizing: border-box;">
             <span style="font-size: 0.85rem; color: var(--text-muted, #8b949e);" data-i18n="recordings.gb_unit">Гб</span>
             <button type="button" id="recClearAllBtn" class="rec-clear-btn" title="Удалить все сохраненные аудиозаписи" aria-label="Очистить все записи" data-i18n-title="recordings.clear_all_title" data-i18n-aria-label="recordings.clear_all_title" style="margin-left: 18px; height: 28px;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
@@ -6315,7 +6458,7 @@
       <div class="system-changelog-header">
         <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
           <span style="font-size: 1.2rem;">📋</span>
-          <h3 id="systemChangelogModalTitle" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="updates.modal_title_static">
+          <h3 id="systemChangelogModalTitle" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
             What's new in ProxDMR
           </h3>
         </div>
@@ -6537,10 +6680,10 @@
   </style>
 
   <!-- Scripts -->
-  <script src="/static/js/i18n.js?v=2.9.809"></script>
+  <script src="/static/js/i18n.js?v=2.9.811"></script>
   <script src="/static/js/audio-player.js?v=2.9.803"></script>
   <script src="/static/js/dialog.js?v=2.9.711"></script>
-  <script src="/static/js/auth.js?v=2.9.760"></script>
+  <script src="/static/js/auth.js?v=2.9.814"></script>
   <style>
     /* Demo Mode Styles */
     .auth-demo-box {
@@ -6796,7 +6939,7 @@
     }
 </style>
   <script src="/static/js/admin.js?v=2.9.711"></script>
-  <script type="module" src="/static/js/app.js?v=2.9.809"></script>
+  <script type="module" src="/static/js/app.js?v=2.9.827"></script>
 </body>
 </html>
 

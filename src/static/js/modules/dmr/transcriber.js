@@ -51,7 +51,6 @@ if (!window.transcriberKeysCache) {
 try {
   window.transcriberKeysCache.gemini = localStorage.getItem("proxdmr_key_gemini") || "";
   window.transcriberKeysCache.groq = localStorage.getItem("proxdmr_key_groq") || "";
-  window.transcriberKeysCache.deepgram = localStorage.getItem("proxdmr_key_deepgram") || "";
 } catch (_) {}
 
 export function getEngineKeys(engine) {
@@ -132,8 +131,6 @@ export function getCachedTranscriberKey(engine) {
       } else {
         k = window.transcriberSettings.groq_api_key;
       }
-    } else if (engine === "deepgram") {
-      k = window.transcriberSettings.deepgram_api_key;
     }
   }
   if (!k) {
@@ -166,8 +163,6 @@ export function setTranscriberKey(engine, key) {
       } else if (clean) {
         window.transcriberSettings.groq_api_keys[0] = clean;
       }
-    } else if (engine === "deepgram") {
-      window.transcriberSettings.deepgram_api_key = clean;
     }
   }
 }
@@ -183,16 +178,19 @@ window.transcriberSettings = {
   groq_use_other_keys: true,
   transcriber_engine: "groq",
   translation_engine: "groq",
+  semantic_optimization: false,
   api_key: "",
   groq_api_key: "",
-  deepgram_api_key: "",
   model: "gemini-3.5-flash",
   target_lang: "ru",
   tts_enabled: false,
   tts_engine: "piper",
   tts_model: "gemini-3.1-flash-tts-preview",
   tts_voice: "ru_RU-terra5871-medium",
-  tts_speed: 1.1,
+  tts_voices_by_engine: {},
+  tts_speed: 1.0,
+  tts_auto_speed: false,
+  tts_auto_speed_max: 1.40,
   tts_ducking_level: 0.80,
   tts_mute_others: true,
   tts_announce_callsign: false,
@@ -203,7 +201,6 @@ window.transcriberSettings = {
 try {
   window.transcriberSettings.api_key = localStorage.getItem("proxdmr_key_gemini") || "";
   window.transcriberSettings.groq_api_key = localStorage.getItem("proxdmr_key_groq") || "";
-  window.transcriberSettings.deepgram_api_key = localStorage.getItem("proxdmr_key_deepgram") || "";
   const lsRec = localStorage.getItem("proxdmr_rec_engine");
   if (lsRec) window.transcriberSettings.transcriber_engine = lsRec;
   const lsTrans = localStorage.getItem("proxdmr_trans_engine");
@@ -215,7 +212,6 @@ window.onTranscriberSettingsUpdate = function(settings) {
   window.transcriberSettings = Object.assign({}, window.transcriberSettings, settings);
   if (settings.api_key) setTranscriberKey("gemini", settings.api_key);
   if (settings.groq_api_key) setTranscriberKey("groq", settings.groq_api_key);
-  if (settings.deepgram_api_key) setTranscriberKey("deepgram", settings.deepgram_api_key);
   if (settings.transcriber_engine) {
     try { localStorage.setItem("proxdmr_rec_engine", settings.transcriber_engine); } catch (_) {}
   }
@@ -232,12 +228,52 @@ window.onTranscriberSettingsUpdate = function(settings) {
     optTransEng.value = settings.translation_engine;
     if (typeof updateTransApiKeyUI === "function") updateTransApiKeyUI(settings.translation_engine);
   }
+  const optSourceLangWs = document.getElementById("optTranscriberSourceLang");
+  if (optSourceLangWs && typeof renderSourceLangSelect === "function") {
+    const isNoTransWs = (settings.target_lang !== undefined)
+      ? (settings.target_lang === "none")
+      : Boolean(document.getElementById("optTranscriberNoTranslate") && document.getElementById("optTranscriberNoTranslate").checked);
+    renderSourceLangSelect(optSourceLangWs, {
+      translationEngine: settings.translation_engine || (optTransEng ? optTransEng.value : undefined),
+      recEngine: settings.transcriber_engine || (optRecEng ? optRecEng.value : undefined),
+      isNoTranslate: isNoTransWs,
+      desiredValue: settings.source_lang !== undefined ? settings.source_lang : undefined,
+      hintEl: document.getElementById("hintTranscriberSourceAsrFallback")
+    });
+  }
+  if (settings.semantic_optimization !== undefined) {
+    const optSemOpt = document.getElementById("optSemanticOptimization");
+    if (optSemOpt) optSemOpt.checked = Boolean(settings.semantic_optimization);
+    const popSemOpt = document.getElementById("popTxtSemanticOptimization");
+    if (popSemOpt) popSemOpt.checked = Boolean(settings.semantic_optimization);
+  }
+  if (settings.tts_voices_by_engine && typeof settings.tts_voices_by_engine === "object") {
+    mergeRememberedTtsVoices(settings.tts_voices_by_engine);
+  }
+  if (settings.tts_engine && settings.tts_voice) {
+    const wsTgtLang = (settings.target_lang && settings.target_lang !== "none")
+      ? settings.target_lang
+      : ((window.transcriberSettings && window.transcriberSettings.target_lang !== "none" && window.transcriberSettings.target_lang) || "ru");
+    rememberTtsVoice(settings.tts_engine, wsTgtLang, settings.tts_voice);
+  }
   if (typeof refreshAllSlotTtsBadges === "function") {
     refreshAllSlotTtsBadges();
   }
   const optTtsEng = document.getElementById("optTtsEngine");
+  if (optTtsEng && settings.tts_engine) {
+    optTtsEng.value = settings.tts_engine;
+  }
   if (typeof updateTtsApiKeyUI === "function") {
     updateTtsApiKeyUI(optTtsEng ? optTtsEng.value : (settings.tts_engine || "piper"));
+  }
+  const optTtsVoiWs = document.getElementById("optTtsVoice");
+  if (optTtsVoiWs && (settings.tts_engine || settings.tts_voice) && typeof populateVoiceSelect === "function") {
+    const effEngWs = settings.tts_engine || (optTtsEng ? optTtsEng.value : "piper");
+    const effLangWs = (settings.target_lang && settings.target_lang !== "none")
+      ? settings.target_lang
+      : (typeof resolveCurrentTargetLang === "function" ? resolveCurrentTargetLang() : "ru");
+    const effVoiWs = settings.tts_voice || getRememberedTtsVoice(effEngWs, effLangWs);
+    populateVoiceSelect(optTtsVoiWs, effEngWs, effLangWs, effVoiWs, document.getElementById("ttsVoiceHint"));
   }
 };
 
@@ -650,32 +686,230 @@ export function resolveCurrentTargetLang() {
 window.resolveCurrentTargetLang = resolveCurrentTargetLang;
 
 const SUPPORTED_TARGET_LANGUAGES = [
-  { code: "en", flag: "🇬🇧", native: "English" },
-  { code: "uk", flag: "🇺🇦", native: "Українська" },
-  { code: "de", flag: "🇩🇪", native: "Deutsch" },
-  { code: "fr", flag: "🇫🇷", native: "Français" },
-  { code: "es", flag: "🇪🇸", native: "Español" },
-  { code: "it", flag: "🇮🇹", native: "Italiano" },
-  { code: "ru", flag: "🇷🇺", native: "Русский" },
-  { code: "pl", flag: "🇵🇱", native: "Polski" },
-  { code: "pt", flag: "🇵🇹", native: "Português" },
-  { code: "nl", flag: "🇳🇱", native: "Nederlands" },
-  { code: "tr", flag: "🇹🇷", native: "Türkçe" },
-  { code: "ja", flag: "🇯🇵", native: "日本語" },
-  { code: "zh", flag: "🇨🇳", native: "中文" },
-  { code: "ko", flag: "🇰🇷", native: "한국어" },
-  { code: "cs", flag: "🇨🇿", native: "Čeština" },
-  { code: "ro", flag: "🇷🇴", native: "Română" },
-  { code: "bg", flag: "🇧🇬", native: "Български" },
-  { code: "el", flag: "🇬🇷", native: "Ελληνικά" },
-  { code: "hu", flag: "🇭🇺", native: "Magyar" },
-  { code: "sv", flag: "🇸🇪", native: "Svenska" },
-  { code: "no", flag: "🇳🇴", native: "Norsk" },
-  { code: "fi", flag: "🇫🇮", native: "Suomi" },
-  { code: "da", flag: "🇩🇰", native: "Dansk" },
-  { code: "he", flag: "🇮🇱", native: "עברית" },
-  { code: "ar", flag: "🇸🇦", native: "العربية" }
+  { code: "en", flag: "🇬🇧", native: "English", en: "English" },
+  { code: "uk", flag: "🇺🇦", native: "Українська", en: "Ukrainian" },
+  { code: "de", flag: "🇩🇪", native: "Deutsch", en: "German" },
+  { code: "fr", flag: "🇫🇷", native: "Français", en: "French" },
+  { code: "es", flag: "🇪🇸", native: "Español", en: "Spanish" },
+  { code: "it", flag: "🇮🇹", native: "Italiano", en: "Italian" },
+  { code: "ru", flag: "🇷🇺", native: "Русский", en: "Russian" },
+  { code: "pl", flag: "🇵🇱", native: "Polski", en: "Polish" },
+  { code: "pt", flag: "🇵🇹", native: "Português", en: "Portuguese" },
+  { code: "nl", flag: "🇳🇱", native: "Nederlands", en: "Dutch" },
+  { code: "tr", flag: "🇹🇷", native: "Türkçe", en: "Turkish" },
+  { code: "ja", flag: "🇯🇵", native: "日本語", en: "Japanese" },
+  { code: "zh", flag: "🇨🇳", native: "中文", en: "Chinese" },
+  { code: "ko", flag: "🇰🇷", native: "한국어", en: "Korean" },
+  { code: "cs", flag: "🇨🇿", native: "Čeština", en: "Czech" },
+  { code: "ro", flag: "🇷🇴", native: "Română", en: "Romanian" },
+  { code: "bg", flag: "🇧🇬", native: "Български", en: "Bulgarian" },
+  { code: "el", flag: "🇬🇷", native: "Ελληνικά", en: "Greek" },
+  { code: "hu", flag: "🇭🇺", native: "Magyar", en: "Hungarian" },
+  { code: "sv", flag: "🇸🇪", native: "Svenska", en: "Swedish" },
+  { code: "no", flag: "🇳🇴", native: "Norsk", en: "Norwegian" },
+  { code: "fi", flag: "🇫🇮", native: "Suomi", en: "Finnish" },
+  { code: "da", flag: "🇩🇰", native: "Dansk", en: "Danish" },
+  { code: "he", flag: "🇮🇱", native: "עברית", en: "Hebrew" },
+  { code: "ar", flag: "🇸🇦", native: "العربية", en: "Arabic" }
 ];
+
+const DEFAULT_LANGUAGE_CAPABILITIES = {
+  catalog: [
+    ...SUPPORTED_TARGET_LANGUAGES,
+    { code: "vi", flag: "🇻🇳", native: "Tiếng Việt", en: "Vietnamese", iso3: "VIE" },
+    { code: "th", flag: "🇹🇭", native: "ไทย", en: "Thai", iso3: "THA" },
+    { code: "id", flag: "🇮🇩", native: "Bahasa Indonesia", en: "Indonesian", iso3: "IND" },
+    { code: "fa", flag: "🇮🇷", native: "فارسی", en: "Persian", iso3: "FAS" },
+    { code: "ms", flag: "🇲🇾", native: "Bahasa Melayu", en: "Malay", iso3: "MSA" },
+    { code: "hi", flag: "🇮🇳", native: "हिन्दी", en: "Hindi", iso3: "HIN" },
+    { code: "tl", flag: "🇵🇭", native: "Filipino", en: "Filipino", iso3: "FIL" },
+    { code: "be", flag: "🇧🇾", native: "Беларуская", en: "Belarusian", iso3: "BEL" },
+    { code: "sk", flag: "🇸🇰", native: "Slovenčina", en: "Slovak", iso3: "SLK" },
+    { code: "sl", flag: "🇸🇮", native: "Slovenščina", en: "Slovenian", iso3: "SLV" },
+    { code: "hr", flag: "🇭🇷", native: "Hrvatski", en: "Croatian", iso3: "HRV" },
+    { code: "sr", flag: "🇷🇸", native: "Српски", en: "Serbian", iso3: "SRP" },
+    { code: "bs", flag: "🇧🇦", native: "Bosanski", en: "Bosnian", iso3: "BOS" },
+    { code: "mk", flag: "🇲🇰", native: "Македонски", en: "Macedonian", iso3: "MKD" },
+    { code: "lt", flag: "🇱🇹", native: "Lietuvių", en: "Lithuanian", iso3: "LIT" },
+    { code: "lv", flag: "🇱🇻", native: "Latviešu", en: "Latvian", iso3: "LAV" },
+    { code: "et", flag: "🇪🇪", native: "Eesti", en: "Estonian", iso3: "EST" },
+    { code: "ca", flag: "🇪🇸", native: "Català", en: "Catalan", iso3: "CAT" },
+    { code: "gl", flag: "🇪🇸", native: "Galego", en: "Galician", iso3: "GLG" },
+    { code: "eu", flag: "🇪🇸", native: "Euskara", en: "Basque", iso3: "EUS" },
+    { code: "kk", flag: "🇰🇿", native: "Қазақша", en: "Kazakh", iso3: "KAZ" },
+    { code: "az", flag: "🇦🇿", native: "Azərbaycanca", en: "Azerbaijani", iso3: "AZE" },
+    { code: "ka", flag: "🇬🇪", native: "ქართული", en: "Georgian", iso3: "KAT" },
+    { code: "hy", flag: "🇦🇲", native: "Հայերեն", en: "Armenian", iso3: "HYE" },
+    { code: "sq", flag: "🇦🇱", native: "Shqip", en: "Albanian", iso3: "SQI" },
+    { code: "is", flag: "🇮🇸", native: "Íslenska", en: "Icelandic", iso3: "ISL" },
+    { code: "af", flag: "🇿🇦", native: "Afrikaans", en: "Afrikaans", iso3: "AFR" },
+    { code: "bn", flag: "🇧🇩", native: "বাংলা", en: "Bengali", iso3: "BEN" },
+    { code: "ur", flag: "🇵🇰", native: "اردو", en: "Urdu", iso3: "URD" },
+    { code: "ta", flag: "🇮🇳", native: "தமிழ்", en: "Tamil", iso3: "TAM" },
+    { code: "mr", flag: "🇮🇳", native: "मराठी", en: "Marathi", iso3: "MAR" },
+    { code: "uz", flag: "🇺🇿", native: "Oʻzbekcha", en: "Uzbek", iso3: "UZB" },
+    { code: "ky", flag: "🇰🇬", native: "Кыргызча", en: "Kyrgyz", iso3: "KIR" },
+    { code: "mn", flag: "🇲🇳", native: "Монгол", en: "Mongolian", iso3: "MON" },
+    { code: "ne", flag: "🇳🇵", native: "नेपाली", en: "Nepali", iso3: "NEP" },
+    { code: "lo", flag: "🇱🇦", native: "ລາວ", en: "Lao", iso3: "LAO" },
+    { code: "sw", flag: "🇰🇪", native: "Kiswahili", en: "Swahili", iso3: "SWA" },
+    { code: "cy", flag: "🏴", native: "Cymraeg", en: "Welsh", iso3: "CYM" },
+    { code: "ga", flag: "🇮🇪", native: "Gaeilge", en: "Irish", iso3: "GLE" },
+    { code: "mt", flag: "🇲🇹", native: "Malti", en: "Maltese", iso3: "MLT" }
+  ],
+  translators: {
+    qwen: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa"],
+    groq: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa","ms","hi","tl","be","sk","sl","hr","sr","bs","mk","lt","lv","et","ca","gl","eu","kk","az","ka","hy","sq","is"],
+    gemini: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa","ms","hi","tl","be","sk","sl","hr","sr","bs","mk","lt","lv","et","ca","gl","eu","kk","az","ka","hy","sq","is","af","bn","ur","ta","mr","uz","ky","mn","ne","lo","sw","cy","ga","mt"]
+  },
+  asr_ui: {
+    rumble: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","el","hu","sv","fi","da","ar","vi","th","id","fa","ms","hi","tl","mk"],
+    groq: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa","ms","hi","tl","be","sk","sl","hr","sr","bs","mk","lt","lv","et","ca","gl","eu","kk","az","ka","hy","sq","is","af","bn","ur","ta","mr","uz","mn","ne","lo","sw","cy","mt"],
+    gemini: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa","ms","hi","tl","be","sk","sl","hr","sr","bs","mk","lt","lv","et","ca","gl","eu","kk","az","ka","hy","sq","is","af","bn","ur","ta","mr","uz","ky","mn","ne","lo","sw","cy","ga","mt"]
+  },
+  asr_native: {
+    rumble: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","el","hu","sv","fi","da","ar","vi","th","id","fa","ms","hi","tl","mk"],
+    groq: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa","ms","hi","tl","be","sk","sl","hr","sr","bs","mk","lt","lv","et","ca","gl","eu","kk","az","ka","hy","sq","is","af","bn","ur","ta","mr","uz","mn","ne","lo","sw","cy","mt"],
+    gemini: ["en","uk","de","fr","es","it","ru","pl","pt","nl","tr","ja","zh","ko","cs","ro","bg","el","hu","sv","no","fi","da","he","ar","vi","th","id","fa","ms","hi","tl","be","sk","sl","hr","sr","bs","mk","lt","lv","et","ca","gl","eu","kk","az","ka","hy","sq","is","af","bn","ur","ta","mr","uz","ky","mn","ne","lo","sw","cy","ga","mt"]
+  },
+  closest_chain: {
+    be: ["ru","uk","pl"], bg: ["mk","ru","uk"], mk: ["bg","sr","ru"], sr: ["mk","hr","ru","cs"],
+    hr: ["cs","pl","mk","sr"], bs: ["hr","cs","mk","sr"], sl: ["hr","cs","pl"], sk: ["cs","pl","ru"],
+    no: ["da","sv","de"], is: ["da","no","sv"], af: ["nl","de","en"], ca: ["es","fr","it"],
+    gl: ["pt","es","fr"], eu: ["es","fr"], et: ["fi","de","ru"], lt: ["pl","cs","de","ru"],
+    lv: ["cs","pl","de","ru"], sq: ["it","el","ro"], mt: ["it","ar","en"], cy: ["en","fr"],
+    ga: ["en","cy"], he: ["ar","en"], ka: ["ru","tr","el"], hy: ["ru","el","tr"],
+    az: ["tr","ru","fa"], uz: ["tr","ru","fa"], kk: ["ru","tr"], ky: ["kk","ru","tr"],
+    mn: ["ru","zh"], ur: ["hi","fa","ar"], mr: ["hi","en"], ne: ["hi","en"],
+    bn: ["hi","en"], ta: ["hi","en"], lo: ["th","vi"], sw: ["en","ar"]
+  },
+  aliases: { fil: "tl", iw: "he", nb: "no", nn: "no" }
+};
+
+let liveLanguageCapabilities = DEFAULT_LANGUAGE_CAPABILITIES;
+
+function setLiveLanguageCapabilities(caps) {
+  if (!caps || !Array.isArray(caps.catalog) || !caps.translators) return;
+  liveLanguageCapabilities = caps;
+  caps.catalog.forEach(item => {
+    if (item && item.code && item.iso3) {
+      LANG_3LETTER_MAP[item.code] = item.iso3;
+    }
+  });
+}
+
+function getLangMetaMap() {
+  const map = {};
+  const list = (liveLanguageCapabilities && liveLanguageCapabilities.catalog) || DEFAULT_LANGUAGE_CAPABILITIES.catalog;
+  list.forEach(item => {
+    if (item && item.code) map[item.code] = item;
+  });
+  return map;
+}
+
+function normalizeClientLangCode(code) {
+  const raw = String(code || "").trim().toLowerCase();
+  if (!raw || raw === "auto" || raw === "none") return "";
+  const aliases = (liveLanguageCapabilities && liveLanguageCapabilities.aliases) || DEFAULT_LANGUAGE_CAPABILITIES.aliases || {};
+  if (aliases[raw]) return aliases[raw];
+  return raw.slice(0, 2);
+}
+
+function resolveAsrFallbackClient(sourceIso2, asrEngine) {
+  const canonical = normalizeClientLangCode(sourceIso2);
+  if (!canonical) return { code: null, isFallback: false };
+  const eng = String(asrEngine || "groq").trim().toLowerCase();
+  const nativeMap = (liveLanguageCapabilities && liveLanguageCapabilities.asr_native) || DEFAULT_LANGUAGE_CAPABILITIES.asr_native;
+  const nativeArr = nativeMap && nativeMap[eng];
+  if (!Array.isArray(nativeArr) || nativeArr.length === 0) {
+    return { code: canonical, isFallback: false };
+  }
+  const nativeSet = new Set(nativeArr);
+  if (nativeSet.has(canonical)) {
+    return { code: canonical, isFallback: false };
+  }
+  const chainMap = (liveLanguageCapabilities && liveLanguageCapabilities.closest_chain) || DEFAULT_LANGUAGE_CAPABILITIES.closest_chain || {};
+  const visited = new Set([canonical]);
+  const queue = [...(chainMap[canonical] || [])];
+  while (queue.length > 0) {
+    const cand = queue.shift();
+    if (!cand || visited.has(cand)) continue;
+    visited.add(cand);
+    if (nativeSet.has(cand)) {
+      return { code: cand, isFallback: true };
+    }
+    const nextList = chainMap[cand] || [];
+    for (const nxt of nextList) {
+      if (nxt && !visited.has(nxt)) queue.push(nxt);
+    }
+  }
+  return { code: null, isFallback: true };
+}
+
+function getSourceLanguagesForContext(transEngine, recEngine, isNoTranslate) {
+  const caps = liveLanguageCapabilities || DEFAULT_LANGUAGE_CAPABILITIES;
+  const metaMap = getLangMetaMap();
+  let codes = null;
+  if (isNoTranslate) {
+    const rEng = String(recEngine || "groq").trim().toLowerCase();
+    codes = (caps.asr_ui && caps.asr_ui[rEng]) || (caps.asr_ui && caps.asr_ui.groq);
+  } else {
+    const tEng = String(transEngine || "groq").trim().toLowerCase();
+    codes = (caps.translators && caps.translators[tEng]) || (caps.translators && caps.translators.groq);
+  }
+  if (!Array.isArray(codes) || codes.length === 0) {
+    return SUPPORTED_TARGET_LANGUAGES;
+  }
+  return codes.map(c => metaMap[c]).filter(Boolean);
+}
+
+function formatLocalizedLangName(code) {
+  const curLang = (window.I18N && window.I18N.currentLanguage) || "ru";
+  const metaMap = getLangMetaMap();
+  const meta = metaMap[code];
+  try {
+    const dn = new Intl.DisplayNames([curLang], { type: "language" });
+    const tr = dn.of(code);
+    if (tr) return tr.charAt(0).toUpperCase() + tr.slice(1);
+  } catch (_) {}
+  return (meta && (meta.native || meta.en)) || String(code || "").toUpperCase();
+}
+
+function getAsrEngineShortLabel(recEngine) {
+  const eng = String(recEngine || "groq").trim().toLowerCase();
+  if (eng === "rumble") return "Rumble-2-Flash";
+  if (eng === "groq") return "Groq Whisper";
+  if (eng === "gemini") return "Gemini ASR";
+  return eng.toUpperCase();
+}
+
+function updateSourceLangFallbackHint(hintEl, sourceCode, recEngine) {
+  if (!hintEl) return;
+  const canonical = normalizeClientLangCode(sourceCode);
+  if (!canonical) {
+    hintEl.style.display = "none";
+    hintEl.textContent = "";
+    return;
+  }
+  const res = resolveAsrFallbackClient(canonical, recEngine);
+  if (!res.isFallback || !res.code || res.code === canonical) {
+    hintEl.style.display = "none";
+    hintEl.textContent = "";
+    return;
+  }
+  const engLabel = getAsrEngineShortLabel(recEngine);
+  const srcName = formatLocalizedLangName(canonical);
+  const fbName = `${formatLocalizedLangName(res.code)} (${get3LetterLangCode(res.code)})`;
+  const msg = window.t
+    ? window.t(
+        "transcriber.source_lang_asr_fallback",
+        { engine: engLabel, source: srcName, fallback: fbName },
+        `⚡ ${engLabel} не поддерживает «${srcName}» напрямую — для распознавания речи будет использован ближайший язык: ${fbName}.`
+      )
+    : `⚡ ${engLabel} не поддерживает «${srcName}» напрямую — для распознавания речи будет использован ближайший язык: ${fbName}.`;
+  hintEl.textContent = msg;
+  hintEl.style.display = "block";
+}
 
 const LANG_3LETTER_MAP = {
   "ru": "RUS",
@@ -703,6 +937,46 @@ const LANG_3LETTER_MAP = {
   "da": "DAN",
   "he": "HEB",
   "ar": "ARA",
+  "vi": "VIE",
+  "th": "THA",
+  "id": "IND",
+  "fa": "FAS",
+  "ms": "MSA",
+  "hi": "HIN",
+  "tl": "FIL",
+  "be": "BEL",
+  "sk": "SLK",
+  "sl": "SLV",
+  "hr": "HRV",
+  "sr": "SRP",
+  "bs": "BOS",
+  "mk": "MKD",
+  "lt": "LIT",
+  "lv": "LAV",
+  "et": "EST",
+  "ca": "CAT",
+  "gl": "GLG",
+  "eu": "EUS",
+  "kk": "KAZ",
+  "az": "AZE",
+  "ka": "KAT",
+  "hy": "HYE",
+  "sq": "SQI",
+  "is": "ISL",
+  "af": "AFR",
+  "bn": "BEN",
+  "ur": "URD",
+  "ta": "TAM",
+  "mr": "MAR",
+  "uz": "UZB",
+  "ky": "KIR",
+  "mn": "MON",
+  "ne": "NEP",
+  "lo": "LAO",
+  "sw": "SWA",
+  "cy": "CYM",
+  "ga": "GLE",
+  "mt": "MLT",
   "none": "RAW"
 };
 
@@ -718,27 +992,98 @@ function get3LetterLangCode(code) {
 window.get3LetterLangCode = get3LetterLangCode;
 window.LANG_3LETTER_MAP = LANG_3LETTER_MAP;
 
-function renderSourceLangSelect(selectEl) {
+const PROXDMR_SEARCH_LOCALES = ["en", "ru", "uk", "de", "es", "fr", "it", "nl"];
+const _langDisplayNamesCache = {};
+
+function _getCachedLangDisplayNames(locale) {
+  if (Object.prototype.hasOwnProperty.call(_langDisplayNamesCache, locale)) {
+    return _langDisplayNamesCache[locale];
+  }
+  let dn = null;
+  try {
+    if (typeof Intl !== "undefined" && typeof Intl.DisplayNames === "function") {
+      dn = new Intl.DisplayNames([locale], { type: "language" });
+    }
+  } catch (_) {}
+  _langDisplayNamesCache[locale] = dn;
+  return dn;
+}
+
+function buildLangSearchKeywords(langObj, curLang) {
+  if (!langObj || !langObj.code) return "";
+  const parts = new Set();
+  const code = String(langObj.code).toLowerCase();
+  parts.add(code);
+  const iso3 = get3LetterLangCode(code);
+  if (iso3) parts.add(iso3.toLowerCase());
+  if (langObj.native) parts.add(String(langObj.native));
+  if (langObj.en) parts.add(String(langObj.en));
+
+  const locales = PROXDMR_SEARCH_LOCALES.includes(curLang)
+    ? PROXDMR_SEARCH_LOCALES
+    : [curLang, ...PROXDMR_SEARCH_LOCALES];
+  for (let i = 0; i < locales.length; i++) {
+    const dn = _getCachedLangDisplayNames(locales[i]);
+    if (!dn) continue;
+    try {
+      const name = dn.of(code);
+      if (name) parts.add(name);
+    } catch (_) {}
+  }
+  return Array.from(parts).join(" ");
+}
+
+function renderSourceLangSelect(selectEl, opts = {}) {
   const el = selectEl || document.getElementById("optTranscriberSourceLang");
   if (!el) return;
-  const curVal = el.value || (window.transcriberSettings && window.transcriberSettings.source_lang) || "auto";
+
+  el.dataset.pxiSearchable = "true";
+  el.dataset.pxiSearchPlaceholder = window.t
+    ? window.t("transcriber.source_lang_search_placeholder", {}, "Поиск языка / Search language...")
+    : "Поиск языка / Search language...";
+
+  const optTransEngEl = document.getElementById("optTranslationEngine");
+  const optRecEngEl = document.getElementById("optTranscriberEngine");
+  const optNoTransEl = document.getElementById("optTranscriberNoTranslate");
+  const s = window.transcriberSettings || {};
+
+  const transEngine = (
+    opts.translationEngine ||
+    (optTransEngEl && optTransEngEl.value) ||
+    s.translation_engine ||
+    "groq"
+  ).toLowerCase();
+  const recEngine = (
+    opts.recEngine ||
+    (optRecEngEl && optRecEngEl.value) ||
+    s.transcriber_engine ||
+    "groq"
+  ).toLowerCase();
+  const isNoTranslate = (opts.isNoTranslate !== undefined)
+    ? Boolean(opts.isNoTranslate)
+    : Boolean((optNoTransEl && optNoTransEl.checked) || s.target_lang === "none");
+
+  const rawDesired = (opts.desiredValue !== undefined && opts.desiredValue !== null)
+    ? opts.desiredValue
+    : (el.value || s.source_lang || "auto");
+  const desiredVal = (String(rawDesired).trim().toLowerCase() === "auto" || !rawDesired)
+    ? "auto"
+    : (normalizeClientLangCode(rawDesired) || "auto");
+
+  const langs = getSourceLanguagesForContext(transEngine, recEngine, isNoTranslate);
   const curLang = (window.I18N && window.I18N.currentLanguage) || "ru";
-  let langDisplay = null;
-  try {
-    langDisplay = new Intl.DisplayNames([curLang], { type: 'language' });
-  } catch (_) {}
+  const langDisplay = _getCachedLangDisplayNames(curLang);
 
   el.innerHTML = "";
   const autoOpt = document.createElement("option");
   autoOpt.value = "auto";
   autoOpt.textContent = "AUTO mode";
-  if (curVal === "auto") {
-    autoOpt.selected = true;
-  }
+  autoOpt.dataset.search = "auto авто автоматический автоматичний automatisch automatico automatique automaticamente automatisch";
   el.appendChild(autoOpt);
 
-  SUPPORTED_TARGET_LANGUAGES.forEach(l => {
-    if (l.code === "none") return;
+  let matched = (desiredVal === "auto");
+  langs.forEach(l => {
+    if (!l || !l.code || l.code === "none") return;
     const opt = document.createElement("option");
     opt.value = l.code;
     let localizedName = "";
@@ -755,18 +1100,23 @@ function renderSourceLangSelect(selectEl) {
     } else {
       opt.textContent = `${l.flag} ${l.native}`;
     }
-    if (l.code === curVal) {
+    opt.dataset.search = buildLangSearchKeywords(l, curLang);
+    if (l.code === desiredVal) {
       opt.selected = true;
+      matched = true;
     }
     el.appendChild(opt);
   });
-  if (curVal && curVal !== "auto" && curVal !== "none" && !Array.from(el.options).some(o => o.value === curVal)) {
-    const opt = document.createElement("option");
-    opt.value = curVal;
-    opt.textContent = curVal.toUpperCase();
-    opt.selected = true;
-    el.appendChild(opt);
+
+  if (!matched) {
+    autoOpt.selected = true;
+    el.value = "auto";
+  } else {
+    el.value = desiredVal;
   }
+
+  const hintEl = opts.hintEl || (el.id === "optTranscriberSourceLang" ? document.getElementById("hintTranscriberSourceAsrFallback") : null);
+  updateSourceLangFallbackHint(hintEl, el.value, recEngine);
 }
 window.renderSourceLangSelect = renderSourceLangSelect;
 
@@ -1500,6 +1850,63 @@ function getGeminiTtsVoices() {
 }
 
 const GEMINI_TTS_VOICES = getGeminiTtsVoices();
+const _sileroVoicesCache = {};
+const LS_TTS_VOICES_MAP = "proxdmr_tts_voices_by_engine";
+
+function _normTtsVoiceLang(lang) {
+  const raw = String(lang || "ru").toLowerCase().trim().split(/[-_]/)[0];
+  if (!raw || raw === "none") return "ru";
+  return raw === "ua" ? "uk" : raw;
+}
+
+function _loadRememberedTtsVoicesMap() {
+  const merged = {};
+  try {
+    const raw = localStorage.getItem(LS_TTS_VOICES_MAP);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") Object.assign(merged, parsed);
+    }
+  } catch (_) {}
+  const srvMap = window.transcriberSettings && window.transcriberSettings.tts_voices_by_engine;
+  if (srvMap && typeof srvMap === "object") {
+    Object.assign(merged, srvMap);
+  }
+  return merged;
+}
+
+function mergeRememberedTtsVoices(serverMap) {
+  if (!serverMap || typeof serverMap !== "object") return;
+  const merged = _loadRememberedTtsVoicesMap();
+  Object.assign(merged, serverMap);
+  if (window.transcriberSettings) {
+    window.transcriberSettings.tts_voices_by_engine = merged;
+  }
+  try { localStorage.setItem(LS_TTS_VOICES_MAP, JSON.stringify(merged)); } catch (_) {}
+}
+
+function rememberTtsVoice(engine, lang, voiceId) {
+  const eng = String(engine || "").toLowerCase().trim();
+  const v = String(voiceId || "").trim();
+  if (!eng || !v || v.startsWith("__download__")) return;
+  if ((eng === "silero" || eng === "piper") && v === "auto") return;
+  const cleanL = _normTtsVoiceLang(lang);
+  const key = `${eng}:${cleanL}`;
+  const map = _loadRememberedTtsVoicesMap();
+  map[key] = v;
+  if (window.transcriberSettings) {
+    window.transcriberSettings.tts_voices_by_engine = map;
+  }
+  try { localStorage.setItem(LS_TTS_VOICES_MAP, JSON.stringify(map)); } catch (_) {}
+}
+
+function getRememberedTtsVoice(engine, lang) {
+  const eng = String(engine || "").toLowerCase().trim();
+  if (!eng) return null;
+  const cleanL = _normTtsVoiceLang(lang);
+  const map = _loadRememberedTtsVoicesMap();
+  return map[`${eng}:${cleanL}`] || null;
+}
 
 /**
  * Dynamically populates a voice select dropdown based on TTS engine and target language.
@@ -1509,6 +1916,8 @@ const GEMINI_TTS_VOICES = getGeminiTtsVoices();
  */
 async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceValue, hintEl) {
   if (!selectEl) return;
+  const reqSeq = (selectEl._voicePopSeq || 0) + 1;
+  selectEl._voicePopSeq = reqSeq;
   const eng = engine || "gemini";
   const lang = (targetLang || resolveCurrentTargetLang() || "ru").toLowerCase();
 
@@ -1576,11 +1985,11 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
 
 
   if (eng === "silero") {
-    selectEl.innerHTML = "";
-    const cleanLang = (lang || "ru").toLowerCase().trim();
+    const cleanLang = _normTtsVoiceLang(lang);
     const isSupported = SILERO_SUPPORTED_LANGUAGES.includes(cleanLang);
 
     if (!isSupported) {
+      selectEl.innerHTML = "";
       selectEl.disabled = true;
       const opt = document.createElement("option");
       opt.value = "";
@@ -1598,36 +2007,49 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
       return;
     }
 
-    selectEl.disabled = false;
-    let sileroVoices = [];
-    try {
-      const resp = await fetch(`/api/transcriber/silero/voices?lang=${encodeURIComponent(cleanLang)}`);
-      const data = await resp.json();
-      if (data && data.voices) sileroVoices = data.voices;
-    } catch (_) {}
+    const uiLangNow = (window.I18N && window.I18N.currentLanguage) || "ru";
+    const cacheKey = `${cleanLang}:${uiLangNow}`;
+    let sileroVoices = Array.isArray(_sileroVoicesCache[cacheKey]) ? _sileroVoicesCache[cacheKey] : [];
+    if (sileroVoices.length === 0) {
+      try {
+        const resp = await fetch(`/api/transcriber/silero/voices?lang=${encodeURIComponent(cleanLang)}`);
+        const data = await resp.json();
+        if (data && Array.isArray(data.voices) && data.voices.length > 0) {
+          sileroVoices = data.voices;
+          _sileroVoicesCache[cacheKey] = sileroVoices;
+        }
+      } catch (_) {}
+    }
+    if (selectEl._voicePopSeq !== reqSeq) return;
     if (!sileroVoices || sileroVoices.length === 0) {
       sileroVoices = (cleanLang === "ru") ? [
-        { id: "kseniya", name: "Kseniya (Female, v5)" },
-        { id: "aidar", name: "Aidar (Male, v5)" },
-        { id: "baya", name: "Baya (Female, v5)" },
-        { id: "eugene", name: "Eugene (Male, v5)" },
-        { id: "xenia", name: "Kseniya 2 (Female, v5)" }
+        { id: "kseniya", name: "Kseniya (Female, v5.6)" },
+        { id: "aidar", name: "Aidar (Male, v5.6)" },
+        { id: "baya", name: "Baya (Female, v5.6)" },
+        { id: "eugene", name: "Eugene (Male, v5.6)" },
+        { id: "xenia", name: "Kseniya 2 (Female, v5.6)" }
       ] : (cleanLang === "uk" ? [
         { id: "mykyta", name: "Mykyta (Male, v4)" }
       ] : (cleanLang === "en" ? [
         { id: "en_0", name: "Voice 0 (Female)" },
-        { id: "en_1", name: "Voice 1 (Male)" }
+        { id: "en_1", name: "Voice 1 (Male)" },
+        { id: "en_2", name: "Voice 2 (Female)" },
+        { id: "en_3", name: "Voice 3 (Male)" }
       ] : (cleanLang === "de" ? [
         { id: "eva_k", name: "Eva (Female)" },
         { id: "karlsson", name: "Karlsson (Male)" },
         { id: "bernd_ungerer", name: "Bernd (Male)" },
         { id: "friedrich", name: "Friedrich (Male)" }
       ] : (cleanLang === "es" ? [
-        { id: "es_0", name: "Voz 0 (Female)" }
+        { id: "es_0", name: "Voz 0 (Female)" },
+        { id: "es_1", name: "Voz 1 (Male)" }
       ] : (cleanLang === "fr" ? [
-        { id: "fr_0", name: "Voix 0 (Female)" }
+        { id: "fr_0", name: "Voix 0 (Female)" },
+        { id: "fr_1", name: "Voix 1 (Male)" }
       ] : [])))));
     }
+    selectEl.innerHTML = "";
+    selectEl.disabled = false;
     const gFemale = window.t ? window.t("transcriber.gender_female", {}, "Female") : "Female";
     const gMale = window.t ? window.t("transcriber.gender_male", {}, "Male") : "Male";
     sileroVoices.forEach(v => {
@@ -1642,8 +2064,13 @@ async function populateVoiceSelect(selectEl, engine, targetLang, currentVoiceVal
       opt.textContent = label;
       selectEl.appendChild(opt);
     });
-    if (currentVoiceValue && Array.from(selectEl.options).some(o => o.value === currentVoiceValue)) {
-      selectEl.value = currentVoiceValue;
+    const desiredVoice = currentVoiceValue || getRememberedTtsVoice("silero", cleanLang);
+    const rememberedVoice = getRememberedTtsVoice("silero", cleanLang);
+    const hasOpt = (val) => Boolean(val && Array.from(selectEl.options).some(o => o.value === val));
+    if (hasOpt(desiredVoice)) {
+      selectEl.value = desiredVoice;
+    } else if (hasOpt(rememberedVoice)) {
+      selectEl.value = rememberedVoice;
     } else {
       selectEl.value = sileroVoices.length > 0 ? sileroVoices[0].id : "";
     }
@@ -2522,20 +2949,6 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   rowVoice.innerHTML = `
     <label class="tts-quick-label">${window.t ? window.t("transcriber.tts_voice_lbl", {}, "🗣️ Голос озвучки:") : "🗣️ Голос озвучки:"}</label>
     <select class="tts-quick-select" id="ttsQuickVoice"></select>
-    <div id="ttsQuickVoiceHint" style="font-size: 0.72rem; color: #8b949e; margin-top: 3px; display: none;"></div>
-  `;
-
-  // 3b. Speed range slider (1.0x - 2.0x)
-  const curSpeed = (s.tts_speed !== undefined) ? Math.max(1.0, Math.min(2.0, parseFloat(s.tts_speed) || 1.1)) : 1.1;
-  const speedText = `${curSpeed.toFixed(2).replace(/\.?0+$/, "")}x`;
-  const rowSpeed = document.createElement("div");
-  rowSpeed.className = "tts-quick-row";
-  rowSpeed.innerHTML = `
-    <div class="tts-quick-row-header">
-      <label class="tts-quick-label" for="ttsQuickSpeed">${window.t ? window.t("transcriber.tts_speed_lbl", {}, "⚡ Скорость воспроизведения:") : "⚡ Скорость воспроизведения:"}</label>
-      <span class="tts-quick-val" id="ttsQuickSpeedVal">${speedText}</span>
-    </div>
-    <input type="range" class="tts-quick-range" id="ttsQuickSpeed" min="1.0" max="2.0" step="0.05" value="${curSpeed.toFixed(2)}">
   `;
 
   // 4. Ducking range slider (during speech)
@@ -2595,7 +3008,6 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   body.appendChild(rowModel);
   body.appendChild(rowStyle);
   body.appendChild(rowVoice);
-  body.appendChild(rowSpeed);
   body.appendChild(rowDucking);
   body.appendChild(rowPauseDucking);
   body.appendChild(rowSolo);
@@ -2641,7 +3053,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
   const selEngine = popup.querySelector("#ttsQuickEngine");
   const selQuickModel = popup.querySelector("#ttsQuickModel");
   const selVoice = popup.querySelector("#ttsQuickVoice");
-  const hintVoice = popup.querySelector("#ttsQuickVoiceHint");
+  const hintVoice = null;
   const getActiveLang = () => (selTargetLang && selTargetLang.value && selTargetLang.value !== "none") ? selTargetLang.value : (resolveCurrentTargetLang() || "ru");
 
   if (selQuickModel && !selQuickModel._ttsModelWired) {
@@ -2724,7 +3136,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           populateVoiceSelect(selVoice, "supertonic", chosenLang, null, hintVoice);
         }
       } else {
-        populateVoiceSelect(selVoice, eng, chosenLang, (eng === "gemini" ? (selVoice ? selVoice.value : curVoice) : null), hintVoice);
+        const keepVoi = getRememberedTtsVoice(eng, chosenLang) || (selVoice && selVoice.value) || curVoice;
+        populateVoiceSelect(selVoice, eng, chosenLang, keepVoi, hintVoice);
       }
       positionTtsQuickSettingsPopover(popup, targetBadge);
     });
@@ -2794,7 +3207,8 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
           populateVoiceSelect(selVoice, "supertonic", chosenLang, null, hintVoice);
         }
       } else {
-        populateVoiceSelect(selVoice, eng, chosenLang, (eng === "gemini" ? curVoice : null), hintVoice);
+        const keepVoi = getRememberedTtsVoice(eng, chosenLang) || curVoice;
+        populateVoiceSelect(selVoice, eng, chosenLang, keepVoi, hintVoice);
       }
       positionTtsQuickSettingsPopover(popup, targetBadge);
     });
@@ -2853,23 +3267,6 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
       if (window.ttsAudioQueueManager) {
         window.ttsAudioQueueManager.syncIdleDucking(0.08);
       }
-    });
-  }
-
-  // Wire Speed range input display
-  const rngSpeed = popup.querySelector("#ttsQuickSpeed");
-  const valSpeed = popup.querySelector("#ttsQuickSpeedVal");
-  if (rngSpeed && valSpeed) {
-    rngSpeed.addEventListener("input", () => {
-      const v = Math.max(1.0, Math.min(2.0, parseFloat(rngSpeed.value) || 1.1));
-      valSpeed.textContent = `${v.toFixed(2).replace(/\.?0+$/, "")}x`;
-      if (window.transcriberSettings) {
-        window.transcriberSettings.tts_speed = v;
-      }
-      const optTtsSpeed = document.getElementById("optTtsSpeed");
-      const optTtsSpeedVal = document.getElementById("optTtsSpeedVal");
-      if (optTtsSpeed) optTtsSpeed.value = v.toFixed(2);
-      if (optTtsSpeedVal) optTtsSpeedVal.textContent = valSpeed.textContent;
     });
   }
 
@@ -2945,7 +3342,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
         : ((quickModEl && quickModEl._prevValidModel) || (eng === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview"));
       const sty = popup.querySelector("#ttsQuickStyle") ? popup.querySelector("#ttsQuickStyle").value : "radio";
       const voi = selVoice ? selVoice.value : "auto";
-      const spd = rngSpeed ? (parseFloat(rngSpeed.value) || 1.1) : (s.tts_speed || 1.1);
+      const spd = 1.0;
       const duckVal = rngDucking ? (Math.max(0, Math.min(100, parseFloat(rngDucking.value) || 20)) / 100.0) : 0.20;
       const solo = popup.querySelector("#ttsQuickSolo") ? popup.querySelector("#ttsQuickSolo").checked : true;
       const announce = popup.querySelector("#ttsQuickAnnounceCallsign") ? popup.querySelector("#ttsQuickAnnounceCallsign").checked : false;
@@ -3252,8 +3649,10 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
         ? rawQuickMod
         : ((quickModEl && quickModEl._prevValidModel) || (eng === "groq" ? "canopylabs/orpheus-v1-english" : "gemini-3.1-flash-tts-preview"));
       const sty = popup.querySelector("#ttsQuickStyle") ? popup.querySelector("#ttsQuickStyle").value : "radio";
-      const voi = (selVoice && selVoice.value && !selVoice.value.startsWith("__download__")) ? selVoice.value : "auto";
-      const spd = rngSpeed ? (parseFloat(rngSpeed.value) || 1.1) : (s.tts_speed || 1.1);
+      const rawQuickVoi = (selVoice && selVoice.value && !selVoice.value.startsWith("__download__")) ? selVoice.value : "";
+      const voi = rawQuickVoi || getRememberedTtsVoice(eng, chosenTargetLang) || curVoice || "auto";
+      rememberTtsVoice(eng, chosenTargetLang, voi);
+      const spd = 1.0;
       const dVal = rngDucking ? (Math.max(0, Math.min(100, parseFloat(rngDucking.value) || 80)) / 100.0) : 0.80;
       const pVal = rngPauseDucking ? (Math.max(0, Math.min(100, parseFloat(rngPauseDucking.value) || 100)) / 100.0) : 1.0;
       const solo = popup.querySelector("#ttsQuickSolo") ? popup.querySelector("#ttsQuickSolo").checked : true;
@@ -3288,6 +3687,7 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
         tts_engine: eng,
         tts_model: mod,
         tts_voice: voi,
+        tts_voices_by_engine: _loadRememberedTtsVoicesMap(),
         tts_speed: spd,
         tts_ducking_level: dVal,
         tts_pause_ducking_level: pVal,
@@ -3310,7 +3710,6 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
             window.transcriberSettings = Object.assign({}, window.transcriberSettings, resJson.settings);
             if (resJson.settings.api_key) setTranscriberKey("gemini", resJson.settings.api_key);
             if (resJson.settings.groq_api_key) setTranscriberKey("groq", resJson.settings.groq_api_key);
-            if (resJson.settings.deepgram_api_key) setTranscriberKey("deepgram", resJson.settings.deepgram_api_key);
           } else {
             if (!window.transcriberSettings) window.transcriberSettings = {};
             window.transcriberSettings.target_lang = chosenTargetLang;
@@ -3370,12 +3769,6 @@ function openTtsQuickSettingsPopover(targetBadge, row, slot) {
                 ? (window.t ? window.t("transcriber.duck_silence", {}, "0% (silence)") : "0% (silence)")
                 : (pPct === 100 ? (window.t ? window.t("transcriber.duck_none", {}, "100% (no ducking)") : "100% (no ducking)") : `${pPct}%`);
             }
-          }
-          const optSpd = document.getElementById("optTtsSpeed");
-          if (optSpd) {
-            optSpd.value = spd.toFixed(2);
-            const spdValEl = document.getElementById("optTtsSpeedVal");
-            if (spdValEl) spdValEl.textContent = `${spd.toFixed(2).replace(/\.?0+$/, "")}x`;
           }
           const optMute = document.getElementById("optTtsMuteOthers");
           if (optMute) optMute.checked = solo;
@@ -3860,18 +4253,42 @@ class TtsAudioQueueManager {
     this.activeHotspotId = null;
     this.activeSlot = null;
     this._lastPlayedCallId = null;
+    this._turnPauseTimer = null;
   }
 
   enqueue(item) {
     if (!item) return;
     if (window._isHistoryTtsPaused) return;
     this.queue.push(item);
+
+    // Stale queue overflow safeguard when adaptive tempo catch-up is active
+    const autoOn = Boolean(window.transcriberSettings && window.transcriberSettings.tts_auto_speed);
+    if (autoOn && !item.is_test && !item.bypassMute && this.queue.length > 2) {
+      let queuedSec = 0;
+      for (let i = 0; i < this.queue.length; i++) {
+        const d = Number(this.queue[i] && this.queue[i].audio_duration_sec);
+        queuedSec += (Number.isFinite(d) && d > 0) ? d : 3.2;
+      }
+      while (this.queue.length > 2 && (queuedSec > 16.0 || this.queue.length > 6)) {
+        const dropIdx = this.queue.findIndex(it => it && !it.is_test && !it.bypassMute);
+        if (dropIdx < 0) break;
+        const dropped = this.queue.splice(dropIdx, 1)[0];
+        const dd = Number(dropped && dropped.audio_duration_sec);
+        queuedSec -= (Number.isFinite(dd) && dd > 0) ? dd : 3.2;
+        console.debug("[TTS] Auto-catchup dropped stale queued utterance to stay live:", dropped && dropped.text ? dropped.text.slice(0, 40) : "");
+      }
+    }
+
     if (!this.isPlaying) {
       this.playNext();
     }
   }
 
   playNext() {
+    if (this._turnPauseTimer) {
+      clearTimeout(this._turnPauseTimer);
+      this._turnPauseTimer = null;
+    }
     if (this.queue.length === 0) {
       this.isPlaying = false;
       this.finishPlayback();
@@ -3910,14 +4327,14 @@ class TtsAudioQueueManager {
             : true);
       this.applyDucking(hid, slot, duckLevel, muteOthers);
 
-      // Playback speed: configurable 1.0x - 2.0x (default 1.1x), or 0.9x-1.0x for standalone callsign announcements
+      // Playback speed: configurable 1.0x - 2.0x (default 1.0x), or 0.85x-1.0x for standalone callsign announcements
       const effectiveSpeed = (item.speed !== undefined && item.speed !== null)
         ? Number(item.speed)
         : ((window.transcriberSettings && window.transcriberSettings.tts_speed !== undefined)
             ? Number(window.transcriberSettings.tts_speed)
-            : 1.1);
-      const minSpd = item.is_callsign_announcement ? 0.85 : 1.0;
-      const speed = Math.max(minSpd, Math.min(2.0, effectiveSpeed || 1.1));
+            : 1.0);
+      const minSpd = (item.is_callsign_announcement || item.speed_applied_on_server) ? 0.85 : 1.0;
+      const speed = Math.max(minSpd, Math.min(2.0, effectiveSpeed || 1.0));
 
       if (item.engine === "browser" || (!item.audio_base64 && item.text)) {
         this.playBrowserSpeech(item, speed);
@@ -3929,7 +4346,19 @@ class TtsAudioQueueManager {
     };
 
     if (isNewDialogueTurn) {
-      setTimeout(startPlayback, 280);
+      const autoOn = Boolean(window.transcriberSettings && window.transcriberSettings.tts_auto_speed);
+      const pauseMs = (typeof item.turn_pause_ms === "number" && Number.isFinite(item.turn_pause_ms))
+        ? Math.max(0, Math.min(500, item.turn_pause_ms))
+        : ((autoOn && this.queue.length > 0) ? 80 : 280);
+      if (pauseMs > 0) {
+        this._turnPauseTimer = setTimeout(() => {
+          this._turnPauseTimer = null;
+          if (!this.isPlaying || this.currentItem !== item) return;
+          startPlayback();
+        }, pauseMs);
+      } else {
+        startPlayback();
+      }
     } else {
       startPlayback();
     }
@@ -3947,12 +4376,21 @@ class TtsAudioQueueManager {
       }
 
       const player = window.dmrAudioPlayer || window.audioPlayer;
-      // Piper already synthesizes speech at fixed 1.1x natively on backend (via length_scale).
-      // Web Audio playbackRate for Piper: micro-variation 0.97x (turn 1) / 1.04x (turn 2) for dialogue separation.
-      // For other engines (Gemini/fallback), effectiveRate is fixed at 1.1x.
-      const effectiveRate = (item.engine === "piper")
-        ? (item.speaker_turn === 2 ? 1.04 : 0.97)
-        : (parseFloat(speed) || 1.1);
+      // When backend already applied speed natively (Piper/Supertonic) or via pitch-preserving WSOLA,
+      // avoid re-accelerating in Web Audio AudioBufferSourceNode (which would shift pitch).
+      let effectiveRate;
+      if (item.speed_applied_on_server === true) {
+        const srvClientRate = Number(item.speed);
+        effectiveRate = (Number.isFinite(srvClientRate) && srvClientRate >= 0.85 && srvClientRate <= 1.25)
+          ? srvClientRate
+          : 1.0;
+      } else if (item.engine === "piper") {
+        effectiveRate = (item.speaker_turn === 2 ? 1.04 : 0.97);
+      } else if (item.engine === "supertonic") {
+        effectiveRate = 1.0;
+      } else {
+        effectiveRate = parseFloat(speed) || 1.0;
+      }
 
       if (player && typeof player.playTtsAudio === "function") {
         let endedCalled = false;
@@ -4259,6 +4697,11 @@ class TtsAudioQueueManager {
   }
 
   finishPlayback() {
+    if (this._turnPauseTimer) {
+      clearTimeout(this._turnPauseTimer);
+      this._turnPauseTimer = null;
+    }
+    this.currentItem = null;
     this.setBadgeSpeaking(this.activeHotspotId, this.activeSlot, false);
     this.isPlaying = false;
     this.activeHotspotId = null;
@@ -4284,6 +4727,11 @@ class TtsAudioQueueManager {
     );
 
     if (this.isPlaying && isCurrentActive) {
+      if (this._turnPauseTimer) {
+        clearTimeout(this._turnPauseTimer);
+        this._turnPauseTimer = null;
+      }
+      this.currentItem = null;
       if (typeof window !== "undefined" && window.speechSynthesis) {
         try { window.speechSynthesis.cancel(); } catch (_) {}
       }
@@ -4310,6 +4758,11 @@ class TtsAudioQueueManager {
   }
 
   stopAll() {
+    if (this._turnPauseTimer) {
+      clearTimeout(this._turnPauseTimer);
+      this._turnPauseTimer = null;
+    }
+    this.currentItem = null;
     this.queue = [];
     if (typeof window !== "undefined" && window.speechSynthesis) {
       try { window.speechSynthesis.cancel(); } catch (_) {}
@@ -5409,11 +5862,15 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
 
   const s = window.transcriberSettings || {};
   let curRecEngine = (s.transcriber_engine || s.engine || localStorage.getItem("proxdmr_rec_engine") || "groq").toLowerCase();
-  if (curRecEngine === "deepgram") curRecEngine = "groq";
+  if (!["groq", "gemini", "rumble"].includes(curRecEngine)) curRecEngine = "groq";
   let curTransEngine = (s.translation_engine || localStorage.getItem("proxdmr_trans_engine") || "groq").toLowerCase();
   const curModel = s.model || getCurrentTranscriberModel() || "gemini-3.5-flash";
   const optNoTrEl = document.getElementById("optTranscriberNoTranslate");
   const isNoTranslate = (s.target_lang === "none") || Boolean(optNoTrEl && optNoTrEl.checked);
+  const optSemEl = document.getElementById("optSemanticOptimization");
+  const isSemanticOpt = (s.semantic_optimization !== undefined)
+    ? Boolean(s.semantic_optimization)
+    : Boolean(optSemEl && optSemEl.checked);
   let curTargetLang = (s.target_lang && s.target_lang !== "none") ? s.target_lang : null;
   if (!curTargetLang) {
     const optTl = document.getElementById("optTranscriberTargetLang");
@@ -5494,11 +5951,16 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
     selModel.appendChild(opt);
   }
 
+  let refreshPopSourceLang = null;
+
   // Update recognition engine UI
   const updatePopRecEngineUI = (eng) => {
     curRecEngine = eng;
     if (rowModel) {
       rowModel.style.display = (eng === "gemini") ? "flex" : "none";
+    }
+    if (typeof refreshPopSourceLang === "function") {
+      refreshPopSourceLang();
     }
   };
   selRecEngine.addEventListener("change", () => {
@@ -5520,6 +5982,22 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   `;
   const cbNoTranslate = rowNoTrans.querySelector("#popTxtNoTranslate");
 
+  // 3b. Semantic Optimization checkbox
+  const semHintTxt = window.t
+    ? window.t("transcriber.semantic_optimization_hint", {}, "Сглаживает искажения распознавания и формы речи с учётом контекста последних фраз QSO, не выдумывая фактов.")
+    : "Сглаживает искажения распознавания и формы речи с учётом контекста последних фраз QSO, не выдумывая фактов.";
+  const rowSemanticOpt = document.createElement("div");
+  rowSemanticOpt.className = "tts-quick-row";
+  rowSemanticOpt.style.marginTop = "2px";
+  rowSemanticOpt.style.marginBottom = "2px";
+  rowSemanticOpt.innerHTML = `
+    <label class="tts-quick-cb-label" title="${safeEscapeHtml(semHintTxt)}">
+      <input type="checkbox" id="popTxtSemanticOptimization" ${isSemanticOpt ? "checked" : ""}>
+      <span>${window.t ? window.t("transcriber.semantic_optimization_lbl", {}, "✨ Смысловая оптимизация (сглаживание речи)") : "✨ Смысловая оптимизация (сглаживание речи)"}</span>
+    </label>
+  `;
+  const cbSemanticOpt = rowSemanticOpt.querySelector("#popTxtSemanticOptimization");
+
   // 4. Translation Engine Row
   const rowTransEngine = document.createElement("div");
   rowTransEngine.className = "tts-quick-row";
@@ -5536,6 +6014,9 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
 
   const updatePopTransEngineUI = (eng) => {
     curTransEngine = eng;
+    if (typeof refreshPopSourceLang === "function") {
+      refreshPopSourceLang();
+    }
   };
   selTransEngine.addEventListener("change", () => {
     updatePopTransEngineUI(selTransEngine.value);
@@ -5543,7 +6024,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   });
   updatePopTransEngineUI(curTransEngine);
 
-  // 5. Source Language select
+  // 5. Source Language select (dynamic per translator / ASR when no-translate)
   let curSourceLang = (s.source_lang) ? s.source_lang : null;
   if (!curSourceLang) {
     const optSl = document.getElementById("optTranscriberSourceLang");
@@ -5556,12 +6037,28 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   rowSourceLang.innerHTML = `
     <label class="tts-quick-label" for="popTxtSourceLang">${window.t ? window.t("transcriber.source_lang", {}, "🌐 Язык, с которого перевод / Source language:") : "🌐 Язык, с которого перевод / Source language:"}</label>
     <select class="tts-quick-select" id="popTxtSourceLang"></select>
+    <small id="popTxtSourceAsrFallback" style="display: none; font-size: 0.72rem; line-height: 1.25; color: #f59e0b; margin-top: 2px;"></small>
   `;
   const selSourceLang = rowSourceLang.querySelector("#popTxtSourceLang");
-  renderSourceLangSelect(selSourceLang);
-  if (curSourceLang) {
-    selSourceLang.value = curSourceLang;
-  }
+  const popSourceFallbackHint = rowSourceLang.querySelector("#popTxtSourceAsrFallback");
+
+  refreshPopSourceLang = (explicitVal) => {
+    const targetVal = explicitVal !== undefined ? explicitVal : (selSourceLang.value || curSourceLang || "auto");
+    renderSourceLangSelect(selSourceLang, {
+      translationEngine: selTransEngine ? selTransEngine.value : curTransEngine,
+      recEngine: selRecEngine ? selRecEngine.value : curRecEngine,
+      isNoTranslate: cbNoTranslate ? cbNoTranslate.checked : isNoTranslate,
+      desiredValue: targetVal,
+      hintEl: popSourceFallbackHint
+    });
+    curSourceLang = selSourceLang.value || "auto";
+  };
+
+  selSourceLang.addEventListener("change", () => {
+    curSourceLang = selSourceLang.value || "auto";
+    updateSourceLangFallbackHint(popSourceFallbackHint, curSourceLang, selRecEngine ? selRecEngine.value : curRecEngine);
+  });
+  refreshPopSourceLang(curSourceLang);
 
   // 6. Target Language select
   const rowTargetLang = document.createElement("div");
@@ -5583,6 +6080,9 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
     const disp = noTrans ? "none" : "flex";
     rowTransEngine.style.display = disp;
     rowTargetLang.style.display = disp;
+    if (typeof refreshPopSourceLang === "function") {
+      refreshPopSourceLang();
+    }
   };
   cbNoTranslate.addEventListener("change", syncTranslationRows);
   syncTranslationRows();
@@ -5591,6 +6091,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
   body.appendChild(rowRecEngine);
   body.appendChild(rowModel);
   body.appendChild(rowNoTrans);
+  body.appendChild(rowSemanticOpt);
   body.appendChild(rowTransEngine);
   body.appendChild(rowSourceLang);
   body.appendChild(rowTargetLang);
@@ -5641,6 +6142,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
       const newTransEng = selTransEngine ? selTransEngine.value : curTransEngine;
       const newModel = selModel ? selModel.value : curModel;
       const newNoTrans = cbNoTranslate ? cbNoTranslate.checked : false;
+      const newSemanticOpt = cbSemanticOpt ? cbSemanticOpt.checked : false;
       const newSourceLang = selSourceLang ? selSourceLang.value : (curSourceLang || "auto");
       const newTargetLang = newNoTrans ? "none" : (selTargetLang ? selTargetLang.value : "ru");
 
@@ -5652,6 +6154,7 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
       const payload = {
         transcriber_engine: newRecEng,
         translation_engine: newTransEng,
+        semantic_optimization: newSemanticOpt,
         model: newModel,
         source_lang: newSourceLang,
         target_lang: newTargetLang
@@ -5669,16 +6172,15 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
             window.transcriberSettings = Object.assign({}, window.transcriberSettings, resJson.settings);
             if (resJson.settings.api_key) setTranscriberKey("gemini", resJson.settings.api_key);
             if (resJson.settings.groq_api_key) setTranscriberKey("groq", resJson.settings.groq_api_key);
-            if (resJson.settings.deepgram_api_key) setTranscriberKey("deepgram", resJson.settings.deepgram_api_key);
           } else {
             if (!window.transcriberSettings) window.transcriberSettings = {};
             window.transcriberSettings.transcriber_engine = newRecEng;
             window.transcriberSettings.translation_engine = newTransEng;
+            window.transcriberSettings.semantic_optimization = newSemanticOpt;
             window.transcriberSettings.model = newModel;
             window.transcriberSettings.target_lang = newTargetLang;
             window.transcriberSettings.api_key = getCachedTranscriberKey("gemini");
             window.transcriberSettings.groq_api_key = getCachedTranscriberKey("groq");
-            window.transcriberSettings.deepgram_api_key = getCachedTranscriberKey("deepgram");
           }
           refreshAllSlotTtsBadges(newTargetLang);
 
@@ -5701,8 +6203,21 @@ function openTxtQuickSettingsPopover(targetBadge, row, slot) {
             updateNoTranslateUI(newNoTrans);
           }
 
+          const optSemOpt = document.getElementById("optSemanticOptimization");
+          if (optSemOpt) {
+            optSemOpt.checked = newSemanticOpt;
+          }
+
           const optSl = document.getElementById("optTranscriberSourceLang");
-          if (optSl) optSl.value = newSourceLang;
+          if (optSl) {
+            renderSourceLangSelect(optSl, {
+              translationEngine: newTransEng,
+              recEngine: newRecEng,
+              isNoTranslate: newNoTrans,
+              desiredValue: newSourceLang,
+              hintEl: document.getElementById("hintTranscriberSourceAsrFallback")
+            });
+          }
 
           const optTl = document.getElementById("optTranscriberTargetLang");
           if (optTl && !newNoTrans) {
@@ -7759,11 +8274,23 @@ function initSpeechRecognitionFrame() {
     });
   }
 
+  const refreshSettingsSourceLang = () => {
+    const optSl = document.getElementById('optTranscriberSourceLang');
+    if (!optSl) return;
+    renderSourceLangSelect(optSl, {
+      translationEngine: optTransEng ? optTransEng.value : undefined,
+      recEngine: optRecEng ? optRecEng.value : undefined,
+      isNoTranslate: optNoTrans ? optNoTrans.checked : false,
+      hintEl: document.getElementById('hintTranscriberSourceAsrFallback')
+    });
+  };
+
   if (optRecEng && !optRecEng._wired) {
     optRecEng._wired = true;
     optRecEng.addEventListener('change', () => {
       try { localStorage.setItem("proxdmr_rec_engine", optRecEng.value); } catch (_) {}
       updateRecApiKeyUI(optRecEng.value);
+      refreshSettingsSourceLang();
     });
   }
 
@@ -7772,6 +8299,7 @@ function initSpeechRecognitionFrame() {
     optTransEng.addEventListener('change', () => {
       try { localStorage.setItem("proxdmr_trans_engine", optTransEng.value); } catch (_) {}
       updateTransApiKeyUI(optTransEng.value);
+      refreshSettingsSourceLang();
     });
   }
 
@@ -7779,6 +8307,19 @@ function initSpeechRecognitionFrame() {
     optNoTrans._wired = true;
     optNoTrans.addEventListener('change', () => {
       updateNoTranslateUI(optNoTrans.checked);
+      refreshSettingsSourceLang();
+    });
+  }
+
+  const optSourceLangMain = document.getElementById('optTranscriberSourceLang');
+  if (optSourceLangMain && !optSourceLangMain._fallbackWired) {
+    optSourceLangMain._fallbackWired = true;
+    optSourceLangMain.addEventListener('change', () => {
+      updateSourceLangFallbackHint(
+        document.getElementById('hintTranscriberSourceAsrFallback'),
+        optSourceLangMain.value,
+        optRecEng ? optRecEng.value : ((window.transcriberSettings && window.transcriberSettings.transcriber_engine) || 'groq')
+      );
     });
   }
 }
@@ -7876,7 +8417,8 @@ function initGeminiTtsFrame() {
           }
         });
         if (checkSilero.ok) {
-          populateVoiceSelect(optVoi, "silero", effLang, (window.transcriberSettings && window.transcriberSettings.tts_voice), hint);
+          const remSilero = getRememberedTtsVoice("silero", effLang) || (window.transcriberSettings && window.transcriberSettings.tts_voice);
+          populateVoiceSelect(optVoi, "silero", effLang, remSilero, hint);
         }
       } else if (optEngine.value === "supertonic") {
         const checkSt = await checkAndPromptSupertonicModel(effLang, (newVoiceId) => {
@@ -7994,7 +8536,7 @@ function initGeminiTtsFrame() {
           }
         });
         if (checkSilero.ok) {
-          populateVoiceSelect(optVoi, "silero", newLang, null, hint);
+          populateVoiceSelect(optVoi, "silero", newLang, getRememberedTtsVoice("silero", newLang), hint);
         }
       } else if (curEng === "supertonic") {
         const checkSt = await checkAndPromptSupertonicModel(newLang, (newVoiceId) => {
@@ -8038,7 +8580,6 @@ function initGeminiTtsFrame() {
     const optTtsMuteOthers = document.getElementById('optTtsMuteOthers');
     const optTtsAnnounceCallsign = document.getElementById('optTtsAnnounceCallsign');
     const optTtsStyle = document.getElementById('optTtsStyle');
-    const optTtsSpeed = document.getElementById('optTtsSpeed');
 
     const engine = optTtsEngine ? optTtsEngine.value : 'gemini';
     const curTargetL = resolveCurrentTargetLang();
@@ -8068,7 +8609,7 @@ function initGeminiTtsFrame() {
       : ((optTtsModel && optTtsModel._prevValidModel) || (engine === 'groq' ? 'canopylabs/orpheus-v1-english' : 'gemini-3.1-flash-tts-preview'));
     const style = optTtsStyle ? optTtsStyle.value : 'radio';
     const voice = (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith('__download__')) ? optTtsVoice.value : (engine === 'groq' ? 'troy' : 'auto');
-    const speed = optTtsSpeed ? (parseFloat(optTtsSpeed.value) || 1.1) : ((window.transcriberSettings && window.transcriberSettings.tts_speed) || 1.1);
+    const speed = 1.0;
     const duckVal = optTtsDucking ? (Math.max(0, Math.min(100, parseFloat(optTtsDucking.value) || 20)) / 100.0) : 0.20;
     const solo = optTtsMuteOthers ? optTtsMuteOthers.checked : true;
     const announce = optTtsAnnounceCallsign ? optTtsAnnounceCallsign.checked : false;
@@ -8537,19 +9078,26 @@ function initTranscriberSettings() {
     });
   }
 
-  const optTtsSpeed = document.getElementById("optTtsSpeed");
-  const optTtsSpeedVal = document.getElementById("optTtsSpeedVal");
-  if (optTtsSpeed && optTtsSpeedVal) {
-    optTtsSpeed.addEventListener("input", () => {
-      const v = Math.max(1.0, Math.min(2.0, parseFloat(optTtsSpeed.value) || 1.1));
-      optTtsSpeedVal.textContent = `${v.toFixed(2).replace(/\.?0+$/, "")}x`;
+  const optTtsAutoSpeed = document.getElementById("optTtsAutoSpeed");
+  const groupTtsAutoSpeedMax = document.getElementById("groupTtsAutoSpeedMax");
+  const optTtsAutoSpeedMax = document.getElementById("optTtsAutoSpeedMax");
+  const optTtsAutoSpeedMaxVal = document.getElementById("optTtsAutoSpeedMaxVal");
+  if (optTtsAutoSpeed) {
+    optTtsAutoSpeed.addEventListener("change", () => {
+      const enabled = optTtsAutoSpeed.checked;
+      if (groupTtsAutoSpeedMax) groupTtsAutoSpeedMax.style.display = enabled ? "block" : "none";
       if (window.transcriberSettings) {
-        window.transcriberSettings.tts_speed = v;
+        window.transcriberSettings.tts_auto_speed = enabled;
       }
-      const qSpeed = document.getElementById("ttsQuickSpeed");
-      const qSpeedVal = document.getElementById("ttsQuickSpeedVal");
-      if (qSpeed) qSpeed.value = v.toFixed(2);
-      if (qSpeedVal) qSpeedVal.textContent = optTtsSpeedVal.textContent;
+    });
+  }
+  if (optTtsAutoSpeedMax && optTtsAutoSpeedMaxVal) {
+    optTtsAutoSpeedMax.addEventListener("input", () => {
+      const mv = Math.max(1.10, Math.min(1.70, parseFloat(optTtsAutoSpeedMax.value) || 1.40));
+      optTtsAutoSpeedMaxVal.textContent = `${mv.toFixed(2).replace(/\.?0+$/, "")}x`;
+      if (window.transcriberSettings) {
+        window.transcriberSettings.tts_auto_speed_max = mv;
+      }
     });
   }
 
@@ -8624,12 +9172,32 @@ function initTranscriberSettings() {
       if (qPiperStress) qPiperStress.checked = useStress;
     });
   }
+  const optSemanticOptimization = document.getElementById("optSemanticOptimization");
+  if (optSemanticOptimization) {
+    optSemanticOptimization.addEventListener("change", () => {
+      const useSemOpt = optSemanticOptimization.checked;
+      if (window.transcriberSettings) {
+        window.transcriberSettings.semantic_optimization = useSemOpt;
+      }
+      const popSemOpt = document.getElementById("popTxtSemanticOptimization");
+      if (popSemOpt) popSemOpt.checked = useSemOpt;
+    });
+  }
 
   fetch("/api/transcriber/settings")
     .then(r => r.json())
     .then(data => {
+      if (data && data.language_capabilities) {
+        setLiveLanguageCapabilities(data.language_capabilities);
+      }
       if (data && data.settings) {
         window.transcriberSettings = Object.assign({}, window.transcriberSettings, data.settings);
+        if (data.settings.tts_voices_by_engine && typeof data.settings.tts_voices_by_engine === "object") {
+          mergeRememberedTtsVoices(data.settings.tts_voices_by_engine);
+        }
+        if (data.settings.tts_engine && data.settings.tts_voice) {
+          rememberTtsVoice(data.settings.tts_engine, data.settings.target_lang || "ru", data.settings.tts_voice);
+        }
         if (data.settings.api_key) setTranscriberKey("gemini", data.settings.api_key);
         if (data.settings.groq_api_key) setTranscriberKey("groq", data.settings.groq_api_key);
         if (optModel && data.settings.model) {
@@ -8640,13 +9208,13 @@ function initTranscriberSettings() {
         if (!curRecEng) {
           try { curRecEng = localStorage.getItem("proxdmr_rec_engine"); } catch (_) {}
         }
-        if (!curRecEng || curRecEng === "deepgram") curRecEng = "groq";
+        if (!curRecEng || !["groq", "gemini", "rumble"].includes(curRecEng)) curRecEng = "groq";
 
         let curTransEng = data.settings.translation_engine;
         if (!curTransEng) {
           try { curTransEng = localStorage.getItem("proxdmr_trans_engine"); } catch (_) {}
         }
-        if (!curTransEng || curTransEng === "deepgram") curTransEng = "groq";
+        if (!curTransEng || !["groq", "gemini", "qwen"].includes(curTransEng)) curTransEng = "groq";
 
         const optTrEng = document.getElementById('optTranscriberEngine');
         if (optTrEng) optTrEng.value = curRecEng;
@@ -8660,7 +9228,6 @@ function initTranscriberSettings() {
         updateTransApiKeyUI(curTransEng);
         updateNoTranslateUI(isNoTrans);
         let effEngine = (data.settings.tts_engine && ["gemini", "groq", "piper", "browser", "silero", "supertonic"].includes(data.settings.tts_engine)) ? data.settings.tts_engine : "piper";
-        if (effEngine === "deepgram" || effEngine === "edge") effEngine = "piper";
         const effVoice = data.settings.tts_voice || "ru_RU-terra5871-medium";
         if (optTtsEngine) {
           optTtsEngine.value = effEngine;
@@ -8705,13 +9272,17 @@ function initTranscriberSettings() {
         if (data.settings.tts_announce_callsign !== undefined && optTtsAnnounceCallsign) optTtsAnnounceCallsign.checked = Boolean(data.settings.tts_announce_callsign);
         if (data.settings.tts_skip_short_callsign !== undefined && optTtsSkipShortCallsign) optTtsSkipShortCallsign.checked = Boolean(data.settings.tts_skip_short_callsign);
         if (data.settings.tts_piper_use_stress !== undefined && optTtsPiperUseStress) optTtsPiperUseStress.checked = Boolean(data.settings.tts_piper_use_stress);
-        const optTtsSpeed = document.getElementById("optTtsSpeed");
-        const speedValEl = document.getElementById("optTtsSpeedVal");
-        if (data.settings.tts_speed !== undefined && optTtsSpeed) {
-          const sVal = Math.max(1.0, Math.min(2.0, parseFloat(data.settings.tts_speed) || 1.1));
-          optTtsSpeed.value = sVal.toFixed(2);
-          if (speedValEl) {
-            speedValEl.textContent = `${sVal.toFixed(2).replace(/\.?0+$/, "")}x`;
+        if (data.settings.semantic_optimization !== undefined && optSemanticOptimization) optSemanticOptimization.checked = Boolean(data.settings.semantic_optimization);
+        if (optTtsAutoSpeed) {
+          const autoEn = Boolean(data.settings.tts_auto_speed);
+          optTtsAutoSpeed.checked = autoEn;
+          if (groupTtsAutoSpeedMax) groupTtsAutoSpeedMax.style.display = autoEn ? "block" : "none";
+        }
+        if (optTtsAutoSpeedMax) {
+          const mVal = Math.max(1.10, Math.min(1.70, parseFloat(data.settings.tts_auto_speed_max) || 1.40));
+          optTtsAutoSpeedMax.value = mVal.toFixed(2);
+          if (optTtsAutoSpeedMaxVal) {
+            optTtsAutoSpeedMaxVal.textContent = `${mVal.toFixed(2).replace(/\.?0+$/, "")}x`;
           }
         }
 
@@ -8722,11 +9293,13 @@ function initTranscriberSettings() {
         const isNoTranslate = (data.settings.target_lang === "none");
         if (optNoTranslate) optNoTranslate.checked = isNoTranslate;
         if (optSourceLang) {
-          if (data.settings.source_lang) {
-            optSourceLang.value = data.settings.source_lang;
-          } else if (!optSourceLang.value) {
-            optSourceLang.value = "auto";
-          }
+          renderSourceLangSelect(optSourceLang, {
+            translationEngine: curTransEng,
+            recEngine: curRecEng,
+            isNoTranslate: isNoTranslate,
+            desiredValue: data.settings.source_lang || optSourceLang.value || "auto",
+            hintEl: document.getElementById("hintTranscriberSourceAsrFallback")
+          });
         }
         if (optTargetLang) {
           if (!isNoTranslate && data.settings.target_lang) {
@@ -8948,18 +9521,27 @@ function initTranscriberSettings() {
         groq_use_first_key: groqFlags.useFirst,
         groq_use_other_keys: groqFlags.useOther,
         groq_use_first_key_only: Boolean(groqFlags.useFirst && !groqFlags.useOther),
-        deepgram_api_key: getCachedTranscriberKey("deepgram"),
         model: optModel ? optModel.value : "gemini-3.5-flash",
         transcriber_engine: recEng,
         translation_engine: transEng,
+        semantic_optimization: (optSemanticOptimization ? optSemanticOptimization.checked : false),
         source_lang: sourceLangVal,
         target_lang: targetLangVal,
         tts_engine: optTtsEngine ? optTtsEngine.value : "gemini",
         tts_model: (optTtsModel && optTtsModel.value && optTtsModel.value !== REFRESH_TTS_MODELS_VALUE)
           ? optTtsModel.value
           : ((optTtsModel && optTtsModel._prevValidModel) || "gemini-3.1-flash-tts-preview"),
-        tts_voice: (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith("__download__")) ? optTtsVoice.value : "auto",
-        tts_speed: optTtsSpeed ? (parseFloat(optTtsSpeed.value) || 1.1) : 1.1,
+        tts_voice: (() => {
+          const chosenEng = optTtsEngine ? optTtsEngine.value : "gemini";
+          const rawV = (optTtsVoice && optTtsVoice.value && !optTtsVoice.value.startsWith("__download__")) ? optTtsVoice.value : "";
+          const finalV = rawV || getRememberedTtsVoice(chosenEng, targetLangVal) || (sKeys && sKeys.tts_voice) || "auto";
+          rememberTtsVoice(chosenEng, targetLangVal, finalV);
+          return finalV;
+        })(),
+        tts_voices_by_engine: _loadRememberedTtsVoicesMap(),
+        tts_speed: 1.0,
+        tts_auto_speed: (optTtsAutoSpeed ? optTtsAutoSpeed.checked : false),
+        tts_auto_speed_max: optTtsAutoSpeedMax ? Math.max(1.10, Math.min(1.70, parseFloat(optTtsAutoSpeedMax.value) || 1.40)) : 1.40,
         tts_ducking_level: optTtsDucking ? (Math.max(0, Math.min(100, parseFloat(optTtsDucking.value) || 80)) / 100.0) : 0.80,
         tts_pause_ducking_level: optTtsPauseDucking ? (Math.max(0, Math.min(100, parseFloat(optTtsPauseDucking.value) || 100)) / 100.0) : 1.0,
         tts_mute_others: optTtsMuteOthers ? optTtsMuteOthers.checked : true,
@@ -8981,7 +9563,6 @@ function initTranscriberSettings() {
           if (resJson.settings) {
             if (resJson.settings.api_key) setTranscriberKey("gemini", resJson.settings.api_key);
             if (resJson.settings.groq_api_key) setTranscriberKey("groq", resJson.settings.groq_api_key);
-            if (resJson.settings.deepgram_api_key) setTranscriberKey("deepgram", resJson.settings.deepgram_api_key);
           }
           const qAnnounce = document.getElementById("ttsQuickAnnounceCallsign");
           if (qAnnounce) qAnnounce.checked = Boolean(resJson.settings && resJson.settings.tts_announce_callsign);
@@ -8993,15 +9574,14 @@ function initTranscriberSettings() {
           if (qPiperStress && resJson.settings && resJson.settings.tts_piper_use_stress !== undefined) {
             qPiperStress.checked = Boolean(resJson.settings.tts_piper_use_stress);
           }
+          const popSemOpt = document.getElementById("popTxtSemanticOptimization");
+          if (popSemOpt && resJson.settings && resJson.settings.semantic_optimization !== undefined) {
+            popSemOpt.checked = Boolean(resJson.settings.semantic_optimization);
+          }
           const qSolo = document.getElementById("ttsQuickSolo");
           if (qSolo) qSolo.checked = Boolean(resJson.settings && resJson.settings.tts_mute_others);
           const qStyle = document.getElementById("ttsQuickStyle");
           if (qStyle) qStyle.value = (resJson.settings && resJson.settings.tts_style) || "radio";
-          const qSpeed = document.getElementById("ttsQuickSpeed");
-          const qSpeedVal = document.getElementById("ttsQuickSpeedVal");
-          const curSpd = Number((resJson.settings && resJson.settings.tts_speed) || 1.1);
-          if (qSpeed) qSpeed.value = curSpd.toFixed(2);
-          if (qSpeedVal) qSpeedVal.textContent = `${curSpd.toFixed(2).replace(/\.?0+$/, "")}x`;
           refreshAllSlotTtsBadges();
           if (window.ttsAudioQueueManager) {
             window.ttsAudioQueueManager.syncIdleDucking(0.15);
@@ -9222,7 +9802,15 @@ if (typeof window !== "undefined") {
     try { renderTargetLangSelect(); } catch (_) {}
     try { renderTranscriberModelOptions(); } catch (_) {}
     try { renderTtsModelOptions(); } catch (_) {}
-    try { populateVoiceSelect(); } catch (_) {}
+    try {
+      const optVoiLc = document.getElementById("optTtsVoice");
+      const optEngLc = document.getElementById("optTtsEngine");
+      const sLc = window.transcriberSettings || {};
+      const engLc = (optEngLc && optEngLc.value) || sLc.tts_engine || "piper";
+      const langLc = resolveCurrentTargetLang();
+      const voiLc = (optVoiLc && optVoiLc.value) || sLc.tts_voice || getRememberedTtsVoice(engLc, langLc);
+      if (optVoiLc) populateVoiceSelect(optVoiLc, engLc, langLc, voiLc, document.getElementById("ttsVoiceHint"));
+    } catch (_) {}
     try { refreshAllSlotTtsBadges(); } catch (_) {}
     try {
       document.querySelectorAll(".radio-card").forEach((c) => {

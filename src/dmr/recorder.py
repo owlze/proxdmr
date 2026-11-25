@@ -208,7 +208,7 @@ class CallAudioBuffer:
         # 8000 Hz, 16-bit mono = 16000 bytes per second
         return len(self.buffer) / 16000.0
 
-    def finalize(self, min_duration_sec: float = 0.5) -> Optional[dict]:
+    def finalize(self, min_duration_sec: float = 2.0) -> Optional[dict]:
         duration = self.get_duration()
         if duration < min_duration_sec or len(self.buffer) == 0:
             return None
@@ -335,7 +335,7 @@ class SessionAudioRecorder:
             "current_talker": self.current_talker,
         }
 
-    def finalize(self, min_duration_sec: float = 0.5) -> Optional[dict]:
+    def finalize(self, min_duration_sec: float = 2.0) -> Optional[dict]:
         duration = self.get_duration()
         if duration < min_duration_sec or len(self.buffer) == 0:
             logger.info(f"[RECORDER-SESSION] Session {self.session_id} too short ({duration:.1f}s), discarded")
@@ -404,8 +404,8 @@ class ServerAudioRecorder:
         self._agc_rec_by_user: Dict[int, bool] = {}
         self.seam_beep_enabled: bool = True
         self.seam_beep_pattern: str = "600-110-33, 840-50-15"
-        self.min_duration_sec: float = 0.5
-        self.max_storage_mb: int = 1024  # Default 1 GB quota
+        self.min_duration_sec: float = 2.0
+        self.max_storage_mb: int = 500  # Default 500 MB quota
         self.auto_cleanup_enabled: bool = True
         self.gap_threshold_sec: float = 1.2
 
@@ -618,11 +618,27 @@ class ServerAudioRecorder:
         if "seam_beep_pattern" in rec_cfg:
             self.seam_beep_pattern = str(rec_cfg["seam_beep_pattern"]).strip() or "600-110-33, 840-50-15"
         if "min_duration_sec" in rec_cfg:
-            self.min_duration_sec = float(rec_cfg["min_duration_sec"])
-        if "max_storage_mb" in rec_cfg and rec_cfg["max_storage_mb"] is not None:
-            self.max_storage_mb = max(10, int(round(float(rec_cfg["max_storage_mb"]))))
-        elif "max_storage_gb" in rec_cfg and rec_cfg["max_storage_gb"] is not None:
-            self.max_storage_mb = max(10, int(round(float(rec_cfg["max_storage_gb"]) * 1024)))
+            raw_min_dur = rec_cfg.get("min_duration_sec")
+            try:
+                parsed_dur = float(raw_min_dur) if raw_min_dur not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                parsed_dur = 0.0
+            self.min_duration_sec = parsed_dur if parsed_dur > 0 else 2.0
+        if "max_storage_mb" in rec_cfg or "max_storage_gb" in rec_cfg:
+            raw_mb = rec_cfg.get("max_storage_mb")
+            raw_gb = rec_cfg.get("max_storage_gb")
+            parsed_mb = 0.0
+            if raw_mb not in (None, ""):
+                try:
+                    parsed_mb = float(raw_mb)
+                except (TypeError, ValueError):
+                    parsed_mb = 0.0
+            elif raw_gb not in (None, ""):
+                try:
+                    parsed_mb = float(raw_gb) * 1024.0
+                except (TypeError, ValueError):
+                    parsed_mb = 0.0
+            self.max_storage_mb = max(10, int(round(parsed_mb))) if parsed_mb > 0 else 500
         if "auto_cleanup" in rec_cfg:
             self.auto_cleanup_enabled = bool(rec_cfg["auto_cleanup"])
         if "gap_threshold_sec" in rec_cfg:
@@ -950,14 +966,15 @@ class ServerAudioRecorder:
         try:
             stats = await get_recordings_stats(user_id)
             total_bytes = stats.get("total_size_bytes", 0)
-            max_bytes = self.max_storage_mb * 1024 * 1024
+            effective_quota_mb = self.max_storage_mb if (self.max_storage_mb and self.max_storage_mb > 0) else 500
+            max_bytes = effective_quota_mb * 1024 * 1024
 
             if total_bytes <= max_bytes:
                 return
 
             excess_bytes = total_bytes - max_bytes
             logger.info(
-                f"[RECORDER-QUOTA] Storage exceeded ({total_bytes / (1024*1024):.1f} MB > {self.max_storage_mb} MB). "
+                f"[RECORDER-QUOTA] Storage exceeded ({total_bytes / (1024*1024):.1f} MB > {effective_quota_mb} MB). "
                 f"Pruning ~{excess_bytes / (1024*1024):.1f} MB..."
             )
 

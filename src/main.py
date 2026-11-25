@@ -11,6 +11,7 @@ import threading
 import time
 import socket
 import wave
+from collections import deque
 from datetime import datetime, timezone
 import uuid
 from contextlib import asynccontextmanager
@@ -421,7 +422,9 @@ transcriber_service.configure(
     tts_engine=getattr(app_settings, "tts_engine", "gemini"),
     tts_model=getattr(app_settings, "tts_model", "gemini-3.1-flash-tts-preview"),
     tts_voice=getattr(app_settings, "tts_voice", "Puck"),
-    tts_speed=getattr(app_settings, "tts_speed", 1.1),
+    tts_speed=getattr(app_settings, "tts_speed", 1.0),
+    tts_auto_speed=getattr(app_settings, "tts_auto_speed", False),
+    tts_auto_speed_max=getattr(app_settings, "tts_auto_speed_max", 1.40),
     tts_ducking_level=getattr(app_settings, "tts_ducking_level", 0.80),
     tts_pause_ducking_level=getattr(app_settings, "tts_pause_ducking_level", 1.0),
     tts_mute_others=getattr(app_settings, "tts_mute_others", True),
@@ -431,9 +434,9 @@ transcriber_service.configure(
     tts_style=getattr(app_settings, "tts_style", "radio"),
     transcriber_engine=getattr(app_settings, "transcriber_engine", "gemini"),
     translation_engine=getattr(app_settings, "translation_engine", "gemini"),
+    semantic_optimization=getattr(app_settings, "semantic_optimization", False),
     groq_api_key=getattr(app_settings, "groq_api_key", ""),
     groq_api_keys=getattr(app_settings, "groq_api_keys", []),
-    deepgram_api_key=getattr(app_settings, "deepgram_api_key", ""),
     gemini_use_first_key_only=getattr(app_settings, "gemini_use_first_key_only", False),
     groq_use_first_key_only=getattr(app_settings, "groq_use_first_key_only", False),
     gemini_use_first_key=getattr(app_settings, "gemini_use_first_key", True),
@@ -499,6 +502,22 @@ _cpu_cached_metrics: Dict[str, Any] = {
     "ram_percent": 0.0,
     "ts": 0.0,
 }
+_CPU_HISTORY_WINDOW_SEC = 3600
+_cpu_metrics_history: deque = deque(maxlen=3660)
+
+
+def _norm_chart_hex(val: Any, default: str) -> str:
+    s = str(val or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", s):
+        return s.lower()
+    return default
+
+
+def _norm_chart_scale_int(val: Any, default: int = 1) -> int:
+    try:
+        return max(1, min(60, int(round(float(val)))))
+    except Exception:
+        return default
 
 
 def _read_proc_stat_totals() -> Optional[Tuple[int, int]]:
@@ -591,11 +610,41 @@ def _get_server_cpu_metrics(force: bool = False) -> Dict[str, Any]:
         _cpu_cached_metrics["cpu_cores"] = int(cores)
         _cpu_cached_metrics["ram_percent"] = float(ram_pct if ram_pct is not None else 0.0)
         _cpu_cached_metrics["ts"] = now
+        wall_now = round(time.time(), 1)
+        if not _cpu_metrics_history or (wall_now - _cpu_metrics_history[-1][0]) >= 0.9:
+            _cpu_metrics_history.append([
+                wall_now,
+                _cpu_cached_metrics["cpu_percent"],
+                _cpu_cached_metrics["ram_percent"],
+            ])
+            cutoff = wall_now - (_CPU_HISTORY_WINDOW_SEC + 15)
+            while _cpu_metrics_history and _cpu_metrics_history[0][0] < cutoff:
+                _cpu_metrics_history.popleft()
         return {
             "cpu_percent": _cpu_cached_metrics["cpu_percent"],
             "cpu_cores": _cpu_cached_metrics["cpu_cores"],
             "ram_percent": _cpu_cached_metrics["ram_percent"],
+            "ts": wall_now,
         }
+
+
+def _get_server_cpu_history(window_sec: int = _CPU_HISTORY_WINDOW_SEC) -> List[List[float]]:
+    cutoff = time.time() - float(window_sec + 5)
+    with _cpu_metrics_lock:
+        return [list(pt) for pt in _cpu_metrics_history if pt[0] >= cutoff]
+
+
+async def _periodic_system_metrics_sampler():
+    """Samples server CPU & RAM every 1 second to keep a continuous 15-minute 1s/px history."""
+    while True:
+        try:
+            _get_server_cpu_metrics(force=True)
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"[METRICS] Periodic sampler error: {e}")
+            await asyncio.sleep(1.0)
 
 async def periodic_directory_sync():
     """Checks and updates BrandMeister and RadioID databases every 3 hours."""
@@ -704,6 +753,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(tg_resolver.check_and_update(interval_seconds=10800))
     asyncio.create_task(user_db.check_and_update(interval_seconds=10800))
     sync_task = asyncio.create_task(periodic_directory_sync())
+    metrics_sampler_task = asyncio.create_task(_periodic_system_metrics_sampler())
     try:
         from dmr.xlx_hosts import xlx_hosts_mgr
         asyncio.create_task(xlx_hosts_mgr.periodic_update_loop())
@@ -723,6 +773,7 @@ async def lifespan(app: FastAPI):
     bm_ping_service.stop()
     memguard.stop()
     sync_task.cancel()
+    metrics_sampler_task.cancel()
     stats_task.cancel()
     logger.info("[MAIN] Shutting down ProxDMR Gateway...")
     if transcriber_service and hasattr(transcriber_service, "disable_all_slots"):
@@ -822,13 +873,16 @@ async def _revert_demo_runtime_state():
                     "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
                     "tts_model": getattr(transcriber_service, "tts_model", "gemini-3.1-flash-tts-preview"),
                     "tts_voice": getattr(transcriber_service, "tts_voice", "auto"),
-                    "tts_speed": getattr(transcriber_service, "tts_speed", 1.1),
+                    "tts_speed": getattr(transcriber_service, "tts_speed", 1.0),
+                    "tts_auto_speed": getattr(transcriber_service, "tts_auto_speed", False),
+                    "tts_auto_speed_max": getattr(transcriber_service, "tts_auto_speed_max", 1.40),
                     "tts_ducking_level": getattr(transcriber_service, "tts_ducking_level", 0.80),
                     "tts_pause_ducking_level": getattr(transcriber_service, "tts_pause_ducking_level", 1.0),
                     "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
                     "tts_announce_callsign": getattr(transcriber_service, "tts_announce_callsign", False),
                     "tts_skip_short_callsign": getattr(transcriber_service, "tts_skip_short_callsign", True),
                     "tts_piper_use_stress": getattr(transcriber_service, "tts_piper_use_stress", True),
+                    "semantic_optimization": getattr(transcriber_service, "semantic_optimization", False),
                 })
             except Exception as e:
                 logger.warning(f"[DEMO] Failed to broadcast restored transcriber settings: {e}")
@@ -1000,7 +1054,9 @@ def _configure_transcriber_from_settings(user_app_settings: AppSettings):
         tts_engine=getattr(user_app_settings, "tts_engine", "piper"),
         tts_model=getattr(user_app_settings, "tts_model", "gemini-3.1-flash-tts-preview"),
         tts_voice=getattr(user_app_settings, "tts_voice", "ru_RU-terra5871-medium"),
-        tts_speed=getattr(user_app_settings, "tts_speed", 1.1),
+        tts_speed=getattr(user_app_settings, "tts_speed", 1.0),
+        tts_auto_speed=getattr(user_app_settings, "tts_auto_speed", False),
+        tts_auto_speed_max=getattr(user_app_settings, "tts_auto_speed_max", 1.40),
         tts_ducking_level=getattr(user_app_settings, "tts_ducking_level", 0.80),
         tts_pause_ducking_level=getattr(user_app_settings, "tts_pause_ducking_level", 1.0),
         tts_mute_others=getattr(user_app_settings, "tts_mute_others", True),
@@ -1010,9 +1066,9 @@ def _configure_transcriber_from_settings(user_app_settings: AppSettings):
         tts_style=getattr(user_app_settings, "tts_style", "radio"),
         transcriber_engine=getattr(user_app_settings, "transcriber_engine", "groq"),
         translation_engine=getattr(user_app_settings, "translation_engine", "groq"),
+        semantic_optimization=getattr(user_app_settings, "semantic_optimization", False),
         groq_api_key=getattr(user_app_settings, "groq_api_key", ""),
         groq_api_keys=getattr(user_app_settings, "groq_api_keys", []),
-        deepgram_api_key=getattr(user_app_settings, "deepgram_api_key", ""),
         gemini_use_first_key_only=getattr(user_app_settings, "gemini_use_first_key_only", False),
         groq_use_first_key_only=getattr(user_app_settings, "groq_use_first_key_only", False),
         gemini_use_first_key=getattr(user_app_settings, "gemini_use_first_key", True),
@@ -2575,6 +2631,13 @@ async def get_index(request: Request):
             mute_fade_duration = round(max(0.1, min(2.0, float(getattr(s, "mute_fade_duration", 0.3)))), 1)
         except Exception:
             mute_fade_duration = 0.3
+        show_server_load_indicator = bool(getattr(s, "show_server_load_indicator", True))
+        server_load_ram_color = _norm_chart_hex(getattr(s, "server_load_ram_color", "#3399cc"), "#3399cc")
+        server_load_cpu_color = _norm_chart_hex(getattr(s, "server_load_cpu_color", "#99cc00"), "#99cc00")
+        server_load_scale_px = _norm_chart_scale_int(getattr(s, "server_load_scale_px", 1), 1)
+        server_load_scale_sec = _norm_chart_scale_int(getattr(s, "server_load_scale_sec", 1), 1)
+        ping_client_color = _norm_chart_hex(getattr(s, "ping_client_color", "#22c55e"), "#22c55e")
+        ping_server_color = _norm_chart_hex(getattr(s, "ping_server_color", "#22c55e"), "#22c55e")
         qrz_com_username = getattr(s, "qrz_com_username", "") or ""
         qrz_com_password = getattr(s, "qrz_com_password", "") or ""
         hamqth_username = getattr(s, "hamqth_username", "") or ""
@@ -2654,6 +2717,13 @@ async def get_index(request: Request):
         single_hotspot_audio = False
         mute_fade_enabled = True
         mute_fade_duration = 0.3
+        show_server_load_indicator = True
+        server_load_ram_color = "#3399cc"
+        server_load_cpu_color = "#99cc00"
+        server_load_scale_px = 1
+        server_load_scale_sec = 1
+        ping_client_color = "#22c55e"
+        ping_server_color = "#22c55e"
         qrz_com_username = ""
         qrz_com_password = ""
         hamqth_username = ""
@@ -2702,6 +2772,13 @@ async def get_index(request: Request):
             "single_hotspot_audio": single_hotspot_audio,
             "mute_fade_enabled": mute_fade_enabled,
             "mute_fade_duration": mute_fade_duration,
+            "show_server_load_indicator": show_server_load_indicator,
+            "server_load_ram_color": server_load_ram_color,
+            "server_load_cpu_color": server_load_cpu_color,
+            "server_load_scale_px": server_load_scale_px,
+            "server_load_scale_sec": server_load_scale_sec,
+            "ping_client_color": ping_client_color,
+            "ping_server_color": ping_server_color,
             "qrz_com_username": qrz_com_username,
             "qrz_com_password": qrz_com_password,
             "hamqth_username": hamqth_username,
@@ -2971,6 +3048,13 @@ class GeneralSettingsUpdate(BaseModel):
     single_hotspot_audio: Optional[bool] = None
     mute_fade_enabled: Optional[bool] = None
     mute_fade_duration: Optional[float] = None
+    show_server_load_indicator: Optional[bool] = None
+    server_load_ram_color: Optional[str] = None
+    server_load_cpu_color: Optional[str] = None
+    server_load_scale_px: Optional[int] = None
+    server_load_scale_sec: Optional[int] = None
+    ping_client_color: Optional[str] = None
+    ping_server_color: Optional[str] = None
     mute_on_ptt: Optional[bool] = None
     volume_down_ptt: Optional[bool] = None
     volume_up_ptt: Optional[bool] = None
@@ -3011,6 +3095,13 @@ async def get_general_settings(request: Request):
             "single_hotspot_audio": getattr(s, "single_hotspot_audio", False),
             "mute_fade_enabled": bool(getattr(s, "mute_fade_enabled", True)),
             "mute_fade_duration": round(max(0.1, min(2.0, float(getattr(s, "mute_fade_duration", 0.3)))), 1),
+            "show_server_load_indicator": bool(getattr(s, "show_server_load_indicator", True)),
+            "server_load_ram_color": _norm_chart_hex(getattr(s, "server_load_ram_color", "#3399cc"), "#3399cc"),
+            "server_load_cpu_color": _norm_chart_hex(getattr(s, "server_load_cpu_color", "#99cc00"), "#99cc00"),
+            "server_load_scale_px": _norm_chart_scale_int(getattr(s, "server_load_scale_px", 1), 1),
+            "server_load_scale_sec": _norm_chart_scale_int(getattr(s, "server_load_scale_sec", 1), 1),
+            "ping_client_color": _norm_chart_hex(getattr(s, "ping_client_color", "#22c55e"), "#22c55e"),
+            "ping_server_color": _norm_chart_hex(getattr(s, "ping_server_color", "#22c55e"), "#22c55e"),
             "mute_on_ptt": s.mute_on_ptt,
             "volume_down_ptt": v_ptt,
             "volume_up_ptt": v_ptt,
@@ -3116,6 +3207,57 @@ async def update_general_settings(update: GeneralSettingsUpdate, request: Reques
             s.mute_fade_duration = clamped_fade
             changed = True
             await broadcast_user_json(uid, {"type": "mute_fade_duration_change", "duration": s.mute_fade_duration})
+    if update.show_server_load_indicator is not None and bool(update.show_server_load_indicator) != bool(getattr(s, "show_server_load_indicator", True)):
+        s.show_server_load_indicator = bool(update.show_server_load_indicator)
+        changed = True
+        await broadcast_user_json(uid, {"type": "show_server_load_indicator_change", "enabled": s.show_server_load_indicator})
+    chart_cfg_changed = False
+    if update.server_load_ram_color is not None:
+        norm_rc = _norm_chart_hex(update.server_load_ram_color, "#3399cc")
+        if norm_rc != _norm_chart_hex(getattr(s, "server_load_ram_color", "#3399cc"), "#3399cc"):
+            s.server_load_ram_color = norm_rc
+            changed = True
+            chart_cfg_changed = True
+    if update.server_load_cpu_color is not None:
+        norm_cc = _norm_chart_hex(update.server_load_cpu_color, "#99cc00")
+        if norm_cc != _norm_chart_hex(getattr(s, "server_load_cpu_color", "#99cc00"), "#99cc00"):
+            s.server_load_cpu_color = norm_cc
+            changed = True
+            chart_cfg_changed = True
+    if update.server_load_scale_px is not None:
+        norm_px = _norm_chart_scale_int(update.server_load_scale_px, 1)
+        if norm_px != _norm_chart_scale_int(getattr(s, "server_load_scale_px", 1), 1):
+            s.server_load_scale_px = norm_px
+            changed = True
+            chart_cfg_changed = True
+    if update.server_load_scale_sec is not None:
+        norm_sec = _norm_chart_scale_int(update.server_load_scale_sec, 1)
+        if norm_sec != _norm_chart_scale_int(getattr(s, "server_load_scale_sec", 1), 1):
+            s.server_load_scale_sec = norm_sec
+            changed = True
+            chart_cfg_changed = True
+    if update.ping_client_color is not None:
+        norm_pcc = _norm_chart_hex(update.ping_client_color, "#22c55e")
+        if norm_pcc != _norm_chart_hex(getattr(s, "ping_client_color", "#22c55e"), "#22c55e"):
+            s.ping_client_color = norm_pcc
+            changed = True
+            chart_cfg_changed = True
+    if update.ping_server_color is not None:
+        norm_psc = _norm_chart_hex(update.ping_server_color, "#22c55e")
+        if norm_psc != _norm_chart_hex(getattr(s, "ping_server_color", "#22c55e"), "#22c55e"):
+            s.ping_server_color = norm_psc
+            changed = True
+            chart_cfg_changed = True
+    if chart_cfg_changed:
+        await broadcast_user_json(uid, {
+            "type": "server_load_chart_settings_change",
+            "ram_color": _norm_chart_hex(getattr(s, "server_load_ram_color", "#3399cc"), "#3399cc"),
+            "cpu_color": _norm_chart_hex(getattr(s, "server_load_cpu_color", "#99cc00"), "#99cc00"),
+            "scale_px": _norm_chart_scale_int(getattr(s, "server_load_scale_px", 1), 1),
+            "scale_sec": _norm_chart_scale_int(getattr(s, "server_load_scale_sec", 1), 1),
+            "ping_client_color": _norm_chart_hex(getattr(s, "ping_client_color", "#22c55e"), "#22c55e"),
+            "ping_server_color": _norm_chart_hex(getattr(s, "ping_server_color", "#22c55e"), "#22c55e"),
+        })
     if update.mute_on_ptt is not None and update.mute_on_ptt != s.mute_on_ptt:
         s.mute_on_ptt = update.mute_on_ptt
         changed = True
@@ -3676,11 +3818,11 @@ class TranscriberSettingsUpdate(BaseModel):
     transcriber_engine: Optional[str] = None
     model: Optional[str] = None
     translation_engine: Optional[str] = None
+    semantic_optimization: Optional[bool] = None
     source_lang: Optional[str] = None
     target_lang: Optional[str] = None
     groq_api_key: Optional[str] = None
     groq_api_keys: Optional[List[str]] = None
-    deepgram_api_key: Optional[str] = None
     gemini_use_first_key_only: Optional[bool] = None
     groq_use_first_key_only: Optional[bool] = None
     gemini_use_first_key: Optional[bool] = None
@@ -3691,7 +3833,10 @@ class TranscriberSettingsUpdate(BaseModel):
     tts_engine: Optional[str] = None
     tts_model: Optional[str] = None
     tts_voice: Optional[str] = None
+    tts_voices_by_engine: Optional[Dict[str, str]] = None
     tts_speed: Optional[float] = None
+    tts_auto_speed: Optional[bool] = None
+    tts_auto_speed_max: Optional[float] = None
     tts_ducking_level: Optional[float] = None
     tts_pause_ducking_level: Optional[float] = None
     tts_mute_others: Optional[bool] = None
@@ -3735,8 +3880,18 @@ async def get_transcriber_settings(request: Request):
     login = user.get("login", "") if user else ""
     s = await ensure_active_user(uid, login)
     live_ts = transcriber_service
+    lang_caps = None
+    try:
+        try:
+            from language_capabilities import get_language_capabilities_payload
+        except ImportError:
+            from src.language_capabilities import get_language_capabilities_payload
+        lang_caps = get_language_capabilities_payload()
+    except Exception:
+        lang_caps = None
     return {
         "status": "ok",
+        "language_capabilities": lang_caps,
         "settings": {
             "enabled": getattr(s, "transcriber_enabled", False),
             "api_key": ("••••••••••••" if (is_demo and getattr(s, "transcriber_api_key", "")) else getattr(s, "transcriber_api_key", "")),
@@ -3744,6 +3899,7 @@ async def get_transcriber_settings(request: Request):
             "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
             "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
             "translation_engine": getattr(s, "translation_engine", "groq"),
+            "semantic_optimization": getattr(live_ts, "semantic_optimization", getattr(s, "semantic_optimization", False)),
             "target_lang": getattr(live_ts, "target_lang", None) or getattr(s, "transcriber_target_lang", "ru"),
             "source_lang": getattr(live_ts, "source_lang", None) or getattr(s, "transcriber_source_lang", "auto"),
             "groq_api_key": ("••••••••••••" if (is_demo and getattr(s, "groq_api_key", "")) else getattr(s, "groq_api_key", "")),
@@ -3754,12 +3910,14 @@ async def get_transcriber_settings(request: Request):
             "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
             "groq_use_first_key": getattr(s, "groq_use_first_key", True),
             "groq_use_other_keys": getattr(s, "groq_use_other_keys", True),
-            "deepgram_api_key": ("••••••••••••" if (is_demo and getattr(s, "deepgram_api_key", "")) else getattr(s, "deepgram_api_key", "")),
             "tts_enabled": getattr(live_ts, "tts_enabled", getattr(s, "tts_enabled", False)),
             "tts_engine": getattr(live_ts, "tts_engine", None) or getattr(s, "tts_engine", "piper"),
             "tts_model": getattr(live_ts, "tts_model", None) or getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
             "tts_voice": getattr(live_ts, "tts_voice", None) or getattr(s, "tts_voice", "ru_RU-terra5871-medium"),
-            "tts_speed": getattr(live_ts, "tts_speed", None) or getattr(s, "tts_speed", 1.1),
+            "tts_voices_by_engine": dict(getattr(s, "tts_voices_by_engine", None) or {}),
+            "tts_speed": getattr(live_ts, "tts_speed", None) or getattr(s, "tts_speed", 1.0),
+            "tts_auto_speed": getattr(live_ts, "tts_auto_speed", getattr(s, "tts_auto_speed", False)),
+            "tts_auto_speed_max": getattr(live_ts, "tts_auto_speed_max", getattr(s, "tts_auto_speed_max", 1.40)),
             "tts_ducking_level": getattr(live_ts, "tts_ducking_level", getattr(s, "tts_ducking_level", 0.80)),
             "tts_pause_ducking_level": getattr(live_ts, "tts_pause_ducking_level", getattr(s, "tts_pause_ducking_level", 1.0)),
             "tts_mute_others": getattr(live_ts, "tts_mute_others", getattr(s, "tts_mute_others", True)),
@@ -3791,6 +3949,10 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             transcriber_service.tts_model = update.tts_model
         if update.tts_speed is not None:
             transcriber_service.tts_speed = float(update.tts_speed)
+        if update.tts_auto_speed is not None:
+            transcriber_service.tts_auto_speed = bool(update.tts_auto_speed)
+        if update.tts_auto_speed_max is not None:
+            transcriber_service.tts_auto_speed_max = max(1.10, min(1.75, float(update.tts_auto_speed_max)))
         if update.tts_ducking_level is not None:
             transcriber_service.tts_ducking_level = float(update.tts_ducking_level)
         if update.tts_pause_ducking_level is not None:
@@ -3803,6 +3965,8 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             transcriber_service.tts_skip_short_callsign = bool(update.tts_skip_short_callsign)
         if update.tts_piper_use_stress is not None:
             transcriber_service.tts_piper_use_stress = bool(update.tts_piper_use_stress)
+        if update.semantic_optimization is not None:
+            transcriber_service.semantic_optimization = bool(update.semantic_optimization)
         if update.tts_style is not None:
             transcriber_service.tts_style = update.tts_style
 
@@ -3842,7 +4006,9 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
             "tts_model": getattr(transcriber_service, "tts_model", "gemini-3.1-flash-tts-preview"),
             "tts_voice": getattr(transcriber_service, "tts_voice", "auto"),
-            "tts_speed": getattr(transcriber_service, "tts_speed", 1.1),
+            "tts_speed": getattr(transcriber_service, "tts_speed", 1.0),
+            "tts_auto_speed": getattr(transcriber_service, "tts_auto_speed", False),
+            "tts_auto_speed_max": getattr(transcriber_service, "tts_auto_speed_max", 1.40),
             "tts_ducking_level": getattr(transcriber_service, "tts_ducking_level", 0.80),
             "tts_pause_ducking_level": getattr(transcriber_service, "tts_pause_ducking_level", 1.0),
             "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
@@ -3852,8 +4018,8 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_style": getattr(transcriber_service, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
             "translation_engine": getattr(s, "translation_engine", "groq"),
+            "semantic_optimization": getattr(transcriber_service, "semantic_optimization", False),
             "has_groq_key": bool(getattr(s, "groq_api_key", "") or getattr(s, "groq_api_keys", [])),
-            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", "")),
             "gemini_use_first_key": getattr(s, "gemini_use_first_key", True),
             "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
             "groq_use_first_key": getattr(s, "groq_use_first_key", True),
@@ -3869,18 +4035,20 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
                 "transcriber_engine": getattr(s, "transcriber_engine", "groq"),
                 "model": getattr(s, "transcriber_model", "gemini-3.5-flash"),
                 "translation_engine": getattr(s, "translation_engine", "groq"),
+                "semantic_optimization": getattr(transcriber_service, "semantic_optimization", False),
                 "target_lang": getattr(transcriber_service, "target_lang", "ru"),
                 "source_lang": getattr(transcriber_service, "source_lang", "auto"),
                 "groq_api_key": ("••••••••••••" if getattr(s, "groq_api_key", "") else ""),
                 "groq_api_keys": (["••••••••••••"] if getattr(s, "groq_api_keys", []) else []),
                 "gemini_use_first_key_only": getattr(s, "gemini_use_first_key_only", False),
                 "groq_use_first_key_only": getattr(s, "groq_use_first_key_only", False),
-                "deepgram_api_key": ("••••••••••••" if getattr(s, "deepgram_api_key", "") else ""),
                 "tts_enabled": getattr(transcriber_service, "tts_enabled", False),
                 "tts_engine": getattr(transcriber_service, "tts_engine", "piper"),
                 "tts_model": getattr(transcriber_service, "tts_model", "gemini-3.1-flash-tts-preview"),
                 "tts_voice": getattr(transcriber_service, "tts_voice", "auto"),
-                "tts_speed": getattr(transcriber_service, "tts_speed", 1.1),
+                "tts_speed": getattr(transcriber_service, "tts_speed", 1.0),
+                "tts_auto_speed": getattr(transcriber_service, "tts_auto_speed", False),
+                "tts_auto_speed_max": getattr(transcriber_service, "tts_auto_speed_max", 1.40),
                 "tts_ducking_level": getattr(transcriber_service, "tts_ducking_level", 0.80),
                 "tts_pause_ducking_level": getattr(transcriber_service, "tts_pause_ducking_level", 1.0),
                 "tts_mute_others": getattr(transcriber_service, "tts_mute_others", True),
@@ -3931,6 +4099,9 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
     if update.translation_engine is not None and update.translation_engine != getattr(s, "translation_engine", "gemini"):
         s.translation_engine = update.translation_engine
         changed = True
+    if update.semantic_optimization is not None and bool(update.semantic_optimization) != getattr(s, "semantic_optimization", False):
+        s.semantic_optimization = bool(update.semantic_optimization)
+        changed = True
     if update.groq_api_key is not None and update.groq_api_key.strip() != getattr(s, "groq_api_key", ""):
         s.groq_api_key = update.groq_api_key.strip()
         changed = True
@@ -3960,9 +4131,6 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             s.groq_use_other_keys = new_other
             s.groq_use_first_key_only = bool(new_first and not new_other)
             changed = True
-    if update.deepgram_api_key is not None and update.deepgram_api_key.strip() != getattr(s, "deepgram_api_key", ""):
-        s.deepgram_api_key = update.deepgram_api_key.strip()
-        changed = True
     if update.model is not None:
         target_model = update.model.strip()
         if any(dep in target_model.lower() for dep in ["gemini-2.5-", "gemini-2.0-", "gemini-1.5-"]):
@@ -4007,9 +4175,34 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
         if effective_engine != "piper" or update.tts_voice != "auto":
             s.tts_voice = update.tts_voice
             changed = True
-    if update.tts_speed is not None and update.tts_speed != getattr(s, "tts_speed", 1.1):
+    cur_vmap = dict(getattr(s, "tts_voices_by_engine", None) or {})
+    if isinstance(update.tts_voices_by_engine, dict):
+        for _vk, _vv in update.tts_voices_by_engine.items():
+            if isinstance(_vk, str) and isinstance(_vv, str) and _vv and not _vv.startswith("__download__"):
+                cur_vmap[_vk] = _vv
+    saved_voice_now = getattr(s, "tts_voice", None)
+    if (
+        saved_voice_now
+        and not str(saved_voice_now).startswith("__download__")
+        and effective_engine in ("silero", "piper", "supertonic", "gemini", "groq")
+        and (effective_engine not in ("silero", "piper") or saved_voice_now != "auto")
+    ):
+        v_lang_key = eff_l if eff_l and eff_l != "none" else "ru"
+        cur_vmap[f"{effective_engine}:{v_lang_key}"] = str(saved_voice_now)
+    if cur_vmap != (getattr(s, "tts_voices_by_engine", None) or {}):
+        s.tts_voices_by_engine = cur_vmap
+        changed = True
+    if update.tts_speed is not None and update.tts_speed != getattr(s, "tts_speed", 1.0):
         s.tts_speed = update.tts_speed
         changed = True
+    if update.tts_auto_speed is not None and bool(update.tts_auto_speed) != getattr(s, "tts_auto_speed", False):
+        s.tts_auto_speed = bool(update.tts_auto_speed)
+        changed = True
+    if update.tts_auto_speed_max is not None:
+        clamped_auto_max = round(max(1.10, min(1.75, float(update.tts_auto_speed_max))), 2)
+        if clamped_auto_max != getattr(s, "tts_auto_speed_max", 1.40):
+            s.tts_auto_speed_max = clamped_auto_max
+            changed = True
     if update.tts_ducking_level is not None and update.tts_ducking_level != getattr(s, "tts_ducking_level", 0.80):
         s.tts_ducking_level = update.tts_ducking_level
         changed = True
@@ -4064,7 +4257,10 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_engine": getattr(s, "tts_engine", "gemini"),
             "tts_model": getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
             "tts_voice": getattr(s, "tts_voice", "auto"),
-            "tts_speed": getattr(s, "tts_speed", 1.1),
+            "tts_voices_by_engine": dict(getattr(s, "tts_voices_by_engine", None) or {}),
+            "tts_speed": getattr(s, "tts_speed", 1.0),
+            "tts_auto_speed": getattr(s, "tts_auto_speed", False),
+            "tts_auto_speed_max": getattr(s, "tts_auto_speed_max", 1.40),
             "tts_ducking_level": getattr(s, "tts_ducking_level", 0.80),
             "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
             "tts_mute_others": getattr(s, "tts_mute_others", True),
@@ -4074,8 +4270,8 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "tts_style": getattr(s, "tts_style", "radio"),
             "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
             "translation_engine": getattr(s, "translation_engine", "gemini"),
+            "semantic_optimization": getattr(s, "semantic_optimization", False),
             "has_groq_key": bool(getattr(s, "groq_api_key", "") or getattr(s, "groq_api_keys", [])),
-            "has_deepgram_key": bool(getattr(s, "deepgram_api_key", "")),
             "gemini_use_first_key": getattr(s, "gemini_use_first_key", True),
             "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
             "groq_use_first_key": getattr(s, "groq_use_first_key", True),
@@ -4091,6 +4287,7 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "transcriber_engine": getattr(s, "transcriber_engine", "gemini"),
             "model": s.transcriber_model,
             "translation_engine": getattr(s, "translation_engine", "gemini"),
+            "semantic_optimization": getattr(s, "semantic_optimization", False),
             "target_lang": s.transcriber_target_lang,
             "source_lang": getattr(s, "transcriber_source_lang", "auto"),
             "groq_api_key": getattr(s, "groq_api_key", ""),
@@ -4101,12 +4298,14 @@ async def update_transcriber_settings(update: TranscriberSettingsUpdate, request
             "gemini_use_other_keys": getattr(s, "gemini_use_other_keys", True),
             "groq_use_first_key": getattr(s, "groq_use_first_key", True),
             "groq_use_other_keys": getattr(s, "groq_use_other_keys", True),
-            "deepgram_api_key": getattr(s, "deepgram_api_key", ""),
             "tts_enabled": getattr(s, "tts_enabled", False),
             "tts_engine": getattr(s, "tts_engine", "gemini"),
             "tts_model": getattr(s, "tts_model", "gemini-3.1-flash-tts-preview"),
             "tts_voice": getattr(s, "tts_voice", "auto"),
-            "tts_speed": getattr(s, "tts_speed", 1.1),
+            "tts_voices_by_engine": dict(getattr(s, "tts_voices_by_engine", None) or {}),
+            "tts_speed": getattr(s, "tts_speed", 1.0),
+            "tts_auto_speed": getattr(s, "tts_auto_speed", False),
+            "tts_auto_speed_max": getattr(s, "tts_auto_speed_max", 1.40),
             "tts_ducking_level": getattr(s, "tts_ducking_level", 0.80),
             "tts_pause_ducking_level": getattr(s, "tts_pause_ducking_level", 1.0),
             "tts_mute_others": getattr(s, "tts_mute_others", True),
@@ -7214,7 +7413,7 @@ async def _execute_asl_disconnect_flow(
         )
 
         asl = getattr(target_hs, "allstar_client", None)
-        if asl and asl.is_connected:
+        if asl and asl.is_connected and not asl_container_mgr.docker.is_available():
             if disc_target in ("all", "*73", "*76", "0", ""):
                 asl.send_dtmf("*73")
             else:
@@ -7494,7 +7693,18 @@ async def _execute_asl_connect_flow(
 
             await asyncio.to_thread(asl_container_mgr._invalidate_xnode_cache, str(uid), own_node)
             remaining_links = await asyncio.to_thread(asl_container_mgr.get_connected_links, str(uid), own_node)
-            if not disc_res.get("success") or remaining_links:
+            if remaining_links:
+                await asyncio.to_thread(
+                    asl_container_mgr._emergency_unlink_all,
+                    str(uid),
+                    own_node,
+                    f"Force clearing lingering links before connect to #{node}",
+                    [str(l.get("node", "")) for l in remaining_links if l.get("node")],
+                )
+                await asyncio.sleep(0.25)
+                await asyncio.to_thread(asl_container_mgr._invalidate_xnode_cache, str(uid), own_node)
+                remaining_links = await asyncio.to_thread(asl_container_mgr.get_connected_links, str(uid), own_node)
+            if remaining_links:
                 logger.error(f"[ASL-ANTI-BRIDGE] Previous link failed to disconnect cleanly before #{node} (remaining={remaining_links}); aborting connect!")
                 emit_step({
                     "proc": "connect",
@@ -9858,7 +10068,7 @@ async def get_bm_info(
 @app.get("/api/system/cpu")
 async def get_system_cpu():
     metrics = _get_server_cpu_metrics(force=True)
-    return {"status": "ok", **metrics}
+    return {"status": "ok", **metrics, "history": _get_server_cpu_history()}
 
 @app.get("/api/health")
 async def get_health():
@@ -10275,7 +10485,8 @@ async def api_get_recordings_stats(request: Request):
     user = _get_user_from_request(request)
     uid = user["user_id"] if user else 1
     stats = await get_recordings_stats(user_id=uid)
-    max_mb = hotspot_manager.recorder.max_storage_mb if hasattr(hotspot_manager, "recorder") else 1024
+    raw_rec_mb = getattr(getattr(hotspot_manager, "recorder", None), "max_storage_mb", None)
+    max_mb = raw_rec_mb if (raw_rec_mb and raw_rec_mb > 0) else 500
     max_bytes = max_mb * 1024 * 1024
     total_bytes = stats.get("total_size_bytes", 0)
     stats["max_storage_mb"] = max_mb
@@ -10434,8 +10645,7 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
     rec = await get_recording_by_id(rec_id)
     if not rec:
         rec = await get_recording_by_call_id(rec_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Recording not found")
+    _require_recording_access(rec, request)
 
     target_lang = req.target_lang or getattr(transcriber_service, "target_lang", "ru")
     if target_lang == "none" or not target_lang:
@@ -10465,6 +10675,7 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
         text = transcribed_text
         detected_lang = det_lang or "---"
 
+        rec_uid = int(rec.get("user_id") or (user["user_id"] if user else 1) or 1)
         await update_recording_transcription(rec["id"], text)
         hotspot_manager.attach_transcription(
             hotspot_id=rec.get("hotspot_id") or "default",
@@ -10474,15 +10685,17 @@ async def api_recording_tts_translate(rec_id: str, req: RecordingTtsTranslateReq
             lang=detected_lang,
             is_final=True,
             call_id=rec.get("call_id") or None,
-            created_at=rec.get("created_at")
+            created_at=rec.get("created_at"),
+            user_id=rec_uid,
         )
         try:
-            await broadcast_json({
+            await broadcast_user_json(rec_uid, {
                 "type": "recording_transcribed",
                 "recording_id": rec["id"],
                 "call_id": rec.get("call_id"),
                 "text": text,
-                "lang": detected_lang
+                "lang": detected_lang,
+                "user_id": rec_uid,
             })
         except Exception:
             pass
@@ -10570,8 +10783,7 @@ async def api_recording_tx_start(rec_id: str, payload: dict = None, request: Req
     rec = await get_recording_by_id(rec_id)
     if not rec:
         rec = await get_recording_by_call_id(rec_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Recording not found")
+    _require_recording_access(rec, request)
 
     file_path = Path(rec.get("file_path", ""))
     if not file_path.exists() or file_path.stat().st_size <= 44:
@@ -10723,7 +10935,11 @@ async def api_recording_tx_stop(request: Request = None):
 @app.post("/api/recordings/clear")
 async def api_clear_recordings(payload: dict = None, request: Request = None):
     user = _get_user_from_request(request) if request else None
-    uid = user["user_id"] if user else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if user.get("is_swl") or user.get("is_demo"):
+        raise HTTPException(status_code=403, detail="Clearing recordings is not permitted in SWL/Demo mode")
+    uid = int(user["user_id"])
     files = await delete_all_recordings(user_id=uid)
     deleted_files = 0
     for f in files:
@@ -10738,7 +10954,7 @@ async def api_clear_recordings(payload: dict = None, request: Request = None):
         except Exception as e:
             logger.warning(f"[RECORDER] Failed to delete file {f}: {e}")
     try:
-        await broadcast_json({"type": "recordings_cleared"})
+        await broadcast_user_json(uid, {"type": "recordings_cleared", "user_id": uid})
     except Exception as e:
         logger.warning(f"[RECORDER] Failed to broadcast recordings_cleared: {e}")
     return {"status": "ok", "deleted_count": len(files), "deleted_files": deleted_files}
@@ -11087,7 +11303,8 @@ async def api_get_recording_settings(request: Request):
         rec.apply_settings(saved_rec, user_id=uid)
 
     free_mb, max_allowed_mb = _get_recordings_disk_quota_limits()
-    cur_mb = rec.max_storage_mb if rec else 1024
+    cur_mb = rec.max_storage_mb if (rec and rec.max_storage_mb and rec.max_storage_mb > 0) else 500
+    cur_min_dur = rec.min_duration_sec if (rec and rec.min_duration_sec and rec.min_duration_sec > 0) else 2.0
 
     return {
         "status": "ok",
@@ -11098,7 +11315,7 @@ async def api_get_recording_settings(request: Request):
             "agc_rec": rec.is_agc_rec_enabled(uid) if rec else True,
             "seam_beep": rec.seam_beep_enabled if rec else True,
             "seam_beep_pattern": getattr(rec, "seam_beep_pattern", "600-110-33, 840-50-15") if rec else "600-110-33, 840-50-15",
-            "min_duration_sec": rec.min_duration_sec if rec else 0.5,
+            "min_duration_sec": cur_min_dur,
             "max_storage_mb": cur_mb,
             "max_storage_gb": round(cur_mb / 1024.0, 2),
             "auto_cleanup": rec.auto_cleanup_enabled if rec else True,
@@ -11121,7 +11338,7 @@ def _get_recordings_disk_quota_limits() -> tuple[int, int]:
         return free_mb, max_allowed_mb
     except Exception as e:
         logger.warning(f"[RECORDER-QUOTA] Failed to query free disk space: {e}")
-        return 0, 1024
+        return 0, 500
 
 
 @app.post("/api/recordings/settings")
@@ -11131,21 +11348,38 @@ async def api_update_recording_settings(payload: dict, request: Request):
     rec = hotspot_manager.recorder if hasattr(hotspot_manager, "recorder") else None
 
     effective_payload = dict(payload or {})
-    prev_mb = rec.max_storage_mb if rec else 1024
+    prev_mb = rec.max_storage_mb if (rec and rec.max_storage_mb and rec.max_storage_mb > 0) else 500
     free_mb, max_allowed_mb = _get_recordings_disk_quota_limits()
     quota_clamped = False
     requested_mb = None
 
-    if "max_storage_mb" in effective_payload and effective_payload["max_storage_mb"] is not None:
+    if "min_duration_sec" in effective_payload:
+        raw_dur = effective_payload.get("min_duration_sec")
         try:
-            requested_mb = int(round(float(effective_payload["max_storage_mb"])))
+            parsed_dur = float(raw_dur) if raw_dur not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            parsed_dur = 0.0
+        if parsed_dur <= 0:
+            effective_payload["min_duration_sec"] = 2.0
+
+    if "max_storage_mb" in effective_payload and effective_payload["max_storage_mb"] not in (None, ""):
+        try:
+            v_mb = int(round(float(effective_payload["max_storage_mb"])))
+            requested_mb = v_mb if v_mb > 0 else None
         except (TypeError, ValueError):
             requested_mb = None
-    elif "max_storage_gb" in effective_payload and effective_payload["max_storage_gb"] is not None:
+    elif "max_storage_gb" in effective_payload and effective_payload["max_storage_gb"] not in (None, ""):
         try:
-            requested_mb = int(round(float(effective_payload["max_storage_gb"]) * 1024))
+            v_mb = int(round(float(effective_payload["max_storage_gb"]) * 1024))
+            requested_mb = v_mb if v_mb > 0 else None
         except (TypeError, ValueError):
             requested_mb = None
+
+    # If quota was omitted / cleared / <= 0, enforce default 500 MB cap
+    if ("max_storage_mb" in effective_payload or "max_storage_gb" in effective_payload) and requested_mb is None:
+        effective_payload.pop("max_storage_gb", None)
+        effective_payload["max_storage_mb"] = 500
+        requested_mb = 500
 
     # Enforce 4/5 free disk space cap (floored to 100 MB) when increasing quota
     if requested_mb is not None and free_mb > 0 and requested_mb > prev_mb and requested_mb > max_allowed_mb:
@@ -11196,7 +11430,7 @@ async def api_update_recording_settings(payload: dict, request: Request):
         "settings": rec_dict,
         "quota_clamped": quota_clamped,
         "requested_mb": requested_mb,
-        "applied_mb": rec.max_storage_mb if rec else 1024,
+        "applied_mb": rec.max_storage_mb if (rec and rec.max_storage_mb and rec.max_storage_mb > 0) else 500,
         "max_allowed_mb": max_allowed_mb,
         "free_disk_mb": free_mb,
     }
@@ -11890,6 +12124,7 @@ async def websocket_radio_endpoint(websocket: WebSocket):
             "client_rtt": client_ping_service.current_rtt,
             "client_packet_loss": client_ping_service.get_packet_loss(),
             "system_metrics": _get_server_cpu_metrics(),
+            "system_metrics_history": _get_server_cpu_history(),
             "calls": [mask_call_entry_for_demo(e.to_dict()) if ws_is_demo else e.to_dict() for e in hotspot_manager.get_calls_history(user_id=ws_user_id)],
             "active_call_ids": [
                 str(c.id)
@@ -11927,6 +12162,13 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 "single_hotspot_audio": getattr(user_settings, "single_hotspot_audio", False),
                 "mute_fade_enabled": bool(getattr(user_settings, "mute_fade_enabled", True)),
                 "mute_fade_duration": round(max(0.1, min(2.0, float(getattr(user_settings, "mute_fade_duration", 0.3)))), 1),
+                "show_server_load_indicator": bool(getattr(user_settings, "show_server_load_indicator", True)),
+                "server_load_ram_color": _norm_chart_hex(getattr(user_settings, "server_load_ram_color", "#3399cc"), "#3399cc"),
+                "server_load_cpu_color": _norm_chart_hex(getattr(user_settings, "server_load_cpu_color", "#99cc00"), "#99cc00"),
+                "server_load_scale_px": _norm_chart_scale_int(getattr(user_settings, "server_load_scale_px", 1), 1),
+                "server_load_scale_sec": _norm_chart_scale_int(getattr(user_settings, "server_load_scale_sec", 1), 1),
+                "ping_client_color": _norm_chart_hex(getattr(user_settings, "ping_client_color", "#22c55e"), "#22c55e"),
+                "ping_server_color": _norm_chart_hex(getattr(user_settings, "ping_server_color", "#22c55e"), "#22c55e"),
                 "mute_on_ptt": user_settings.mute_on_ptt,
                 "volume_down_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
                 "volume_up_ptt": getattr(user_settings, "volume_up_ptt", getattr(user_settings, "volume_down_ptt", True)),
@@ -11964,6 +12206,8 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                 "m17_scan_cfg": all_ws_cols.get("m17_scan_cfg", {}),
                 "m17_dice_cfg": all_ws_cols.get("m17_dice_cfg", {}),
                 "m17_dash_auto": all_ws_cols.get("m17_dash_auto", {}),
+                "dstar_dash_auto": all_ws_cols.get("dstar_dash_auto", {}),
+                "svx_dash_auto": all_ws_cols.get("svx_dash_auto", {}),
                 "m17_favorites": (getattr(user_settings, "m17_favorites", None) or []),
                 "dstar_favorites": (getattr(user_settings, "dstar_favorites", None) or []),
                 "svx_favorites": (getattr(user_settings, "svx_favorites", None) or []),
@@ -12520,6 +12764,45 @@ async def websocket_radio_endpoint(websocket: WebSocket):
                     await broadcast_user_json(ws_user_id, {
                         "type": "mute_fade_enabled_change",
                         "enabled": enabled
+                    }, exclude=websocket)
+
+                elif msg_type == "set_show_server_load_indicator":
+                    enabled = bool(data.get("enabled", True))
+                    user_settings.show_server_load_indicator = enabled
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    logger.info(f"[SETTINGS] Show server load indicator set to {enabled}")
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "show_server_load_indicator_change",
+                        "enabled": enabled
+                    }, exclude=websocket)
+
+                elif msg_type == "set_server_load_chart_settings":
+                    ram_c = _norm_chart_hex(data.get("ram_color", getattr(user_settings, "server_load_ram_color", "#3399cc")), "#3399cc")
+                    cpu_c = _norm_chart_hex(data.get("cpu_color", getattr(user_settings, "server_load_cpu_color", "#99cc00")), "#99cc00")
+                    s_px = _norm_chart_scale_int(data.get("scale_px", getattr(user_settings, "server_load_scale_px", 1)), 1)
+                    s_sec = _norm_chart_scale_int(data.get("scale_sec", getattr(user_settings, "server_load_scale_sec", 1)), 1)
+                    p_cli_c = _norm_chart_hex(data.get("ping_client_color", getattr(user_settings, "ping_client_color", "#22c55e")), "#22c55e")
+                    p_srv_c = _norm_chart_hex(data.get("ping_server_color", getattr(user_settings, "ping_server_color", "#22c55e")), "#22c55e")
+                    user_settings.server_load_ram_color = ram_c
+                    user_settings.server_load_cpu_color = cpu_c
+                    user_settings.server_load_scale_px = s_px
+                    user_settings.server_load_scale_sec = s_sec
+                    user_settings.ping_client_color = p_cli_c
+                    user_settings.ping_server_color = p_srv_c
+                    await save_user_settings(ws_user_id, user_settings.model_dump())
+                    if ws_user_id == 1:
+                        save_app_settings(user_settings)
+                    logger.info(f"[SETTINGS] Chart settings set: RAM={ram_c}, CPU={cpu_c}, scale={s_px}px/{s_sec}s, PingCli={p_cli_c}, PingSrv={p_srv_c}")
+                    await broadcast_user_json(ws_user_id, {
+                        "type": "server_load_chart_settings_change",
+                        "ram_color": ram_c,
+                        "cpu_color": cpu_c,
+                        "scale_px": s_px,
+                        "scale_sec": s_sec,
+                        "ping_client_color": p_cli_c,
+                        "ping_server_color": p_srv_c,
                     }, exclude=websocket)
 
                 elif msg_type == "set_mute_fade_duration":

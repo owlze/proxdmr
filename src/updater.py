@@ -87,6 +87,7 @@ def parse_multilingual_notes(raw_body: str) -> Dict[str, str]:
             "es": [r"##\s*\[?es\]?", r"##.*🇪🇸.*", r"##.*español.*"],
             "fr": [r"##\s*\[?fr\]?", r"##.*🇫🇷.*", r"##.*français.*"],
             "it": [r"##\s*\[?it\]?", r"##.*🇮🇹.*", r"##.*italiano.*"],
+            "nl": [r"##\s*\[?nl\]?", r"##.*🇳🇱.*", r"##.*nederlands.*"],
         }
         header_pattern = r'(?m)^##\s+([^\n]+)'
         sections = re.split(header_pattern, clean_body)
@@ -96,7 +97,7 @@ def parse_multilingual_notes(raw_body: str) -> Dict[str, str]:
                 text = sections[i + 1].strip() if i + 1 < len(sections) else ""
                 matched_lang = None
                 for l_code, patterns in lang_headers.items():
-                    if any(re.search(p, hdr, re.IGNORECASE) for p in patterns):
+                    if any(re.search(p, f"## {hdr}", re.IGNORECASE) for p in patterns):
                         matched_lang = l_code
                         break
                 if matched_lang:
@@ -231,21 +232,20 @@ def check_for_updates(force: bool = False) -> Dict[str, Any]:
     latest_tuple = parse_version_tuple(latest_tag)
     has_update = latest_tuple > current_tuple
 
-    raw_body = release_data.get("body", "") or ""
+    raw_body = (release_data.get("body", "") or "").strip()
     notes_by_lang = parse_multilingual_notes(raw_body)
 
-    # Fallback to local multilingual release notes if remote body has no multilingual tags
-    if not any(notes_by_lang.values()) or not raw_body or "<!-- lang:" not in raw_body:
+    # Fallback to local multilingual release notes ONLY when GitHub release body is completely empty
+    if not raw_body or not any(notes_by_lang.values()):
         local_notes_file = Path(__file__).resolve().parent / "data" / "latest_release_notes.md"
         if local_notes_file.exists():
             try:
                 local_raw = local_notes_file.read_text(encoding="utf-8")
                 local_notes = parse_multilingual_notes(local_raw)
                 for l, txt in local_notes.items():
-                    if txt:
-                        if not notes_by_lang.get(l) or "<!-- lang:" not in raw_body:
-                            notes_by_lang[l] = txt
-                if not raw_body or "<!-- lang:" not in raw_body:
+                    if txt and not notes_by_lang.get(l):
+                        notes_by_lang[l] = txt
+                if not raw_body:
                     raw_body = local_raw
             except Exception as le:
                 logger.warning(f"[UPDATER] Could not read local release notes: {le}")
@@ -310,12 +310,32 @@ def apply_update(tarball_url: Optional[str] = None) -> Tuple[bool, str]:
     backups_dir = config_dir / "backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Create backup of current src
+    # 1. Create lightweight backup of current src (excluding runtime DBs, logs, __pycache__, and CMake build artifacts)
     backup_file = backups_dir / f"src_backup_{APP_VERSION}_{int(time.time())}.tar.gz"
+
+    def _backup_tar_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
+        norm_name = tarinfo.name.replace("\\", "/")
+        parts = norm_name.split("/")
+        if "__pycache__" in parts or "build" in parts:
+            return None
+        if norm_name.endswith((".pyc", ".pyo", ".log", ".db", ".db-wal", ".db-shm", ".tmp")):
+            return None
+        return tarinfo
+
     try:
         with tarfile.open(backup_file, "w:gz") as tar:
-            tar.add(src_dir, arcname="src")
+            tar.add(src_dir, arcname="src", filter=_backup_tar_filter)
         logger.info(f"[UPDATER] Backup created: {backup_file}")
+        old_backups = sorted(
+            backups_dir.glob("src_backup_*.tar.gz"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for stale_backup in old_backups[5:]:
+            try:
+                stale_backup.unlink(missing_ok=True)
+            except Exception:
+                pass
     except Exception as e:
         logger.warning(f"[UPDATER] Failed to create backup: {e}")
 

@@ -219,6 +219,13 @@ def get_default_settings(login: str = "") -> dict:
         "single_hotspot_audio": False,
         "mute_fade_enabled": True,
         "mute_fade_duration": 0.3,
+        "show_server_load_indicator": True,
+        "server_load_ram_color": "#3399cc",
+        "server_load_cpu_color": "#99cc00",
+        "server_load_scale_px": 1,
+        "server_load_scale_sec": 1,
+        "ping_client_color": "#22c55e",
+        "ping_server_color": "#22c55e",
         "theme": "dark",
         "bg_type": "color",
         "bg_color": "#04170c",
@@ -233,10 +240,11 @@ def get_default_settings(login: str = "") -> dict:
         "transcriber_model": "gemini-3.5-flash",
         "transcriber_engine": "groq",
         "translation_engine": "groq",
+        "semantic_optimization": False,
         "transcriber_target_lang": "ru",
+        "transcriber_source_lang": "auto",
         "groq_api_key": "",
         "groq_api_keys": [],
-        "deepgram_api_key": "",
         "gemini_use_first_key_only": False,
         "groq_use_first_key_only": False,
         "gemini_use_first_key": True,
@@ -247,8 +255,11 @@ def get_default_settings(login: str = "") -> dict:
         "tts_engine": "piper",
         "tts_model": "gemini-3.1-flash-tts-preview",
         "tts_voice": "ru_RU-terra5871-medium",
-        "tts_speed": 1.1,
+        "tts_speed": 1.0,
+        "tts_auto_speed": False,
+        "tts_auto_speed_max": 1.40,
         "tts_ducking_level": 0.03,
+        "tts_pause_ducking_level": 0.13,
         "tts_mute_others": True,
         "tts_announce_callsign": False,
         "tts_skip_short_callsign": True,
@@ -257,14 +268,23 @@ def get_default_settings(login: str = "") -> dict:
         "quick_mem": {},
         "contacts": [],
         "contacts_gateway": {"hotspot_id": "default", "slot": 2},
+        "qrz_com_username": "",
+        "qrz_com_password": "",
         "hamqth_username": "",
         "hamqth_password": "",
+        "disable_update_notifications": False,
+        "enable_network_colors": True,
+        "network_brand_colors": {},
+        "ysf_favorites": [],
+        "m17_favorites": [],
+        "dstar_favorites": [],
+        "svx_favorites": [],
         "recordings_settings": {
             "auto_record_rx": True,
             "auto_record_tx": True,
             "agc_rec": True,
-            "min_duration_sec": 1.0,
-            "max_storage_mb": 1024,
+            "min_duration_sec": 2.0,
+            "max_storage_mb": 500,
             "beep_marker_enabled": True,
             "beep_frequency_hz": 600
         },
@@ -1098,17 +1118,18 @@ async def delete_recording(rec_id: str) -> Optional[dict]:
 
 
 async def delete_all_recordings(user_id: Optional[int] = None) -> list[str]:
-    """Delete all recordings for the user (or all if user_id is None). Returns list of file paths to remove from disk."""
-    if not aiosqlite:
+    """Delete all recordings belonging to the specified user_id. Refuses bulk wipe if user_id is missing."""
+    if not aiosqlite or user_id is None or int(user_id) <= 0:
         return []
+    uid = int(user_id)
     files_to_remove = []
     async with aiosqlite.connect(str(DB_FILE)) as db:
         db.row_factory = aiosqlite.Row
-        query = "SELECT id, file_path FROM recordings WHERE 1=1"
-        params = []
-        if user_id is not None and user_id > 0:
-            query += " AND (user_id = ? OR user_id = 0)"
-            params.append(user_id)
+        if uid == 1:
+            query = "SELECT id, file_path FROM recordings WHERE (user_id = ? OR user_id = 0)"
+        else:
+            query = "SELECT id, file_path FROM recordings WHERE user_id = ?"
+        params = [uid]
 
         cursor = await db.execute(query, params)
         rows = await cursor.fetchall()

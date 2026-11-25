@@ -27,6 +27,35 @@ function getActiveLanguage() {
   return SUPPORTED_LANGS.includes(current) ? current : "ru";
 }
 
+const FIXED_NON_RU_LANG_ORDER = ["en", "uk", "de", "es", "fr", "it", "nl"];
+
+function getChangelogLangOrder(uiLang) {
+  const active = SUPPORTED_LANGS.includes(uiLang) ? uiLang : "ru";
+  if (active === "ru") {
+    return ["ru", ...FIXED_NON_RU_LANG_ORDER];
+  }
+  return [active, ...FIXED_NON_RU_LANG_ORDER.filter(l => l !== active), "ru"];
+}
+
+function reorderChangelogLangPills(uiLang) {
+  const langBar = document.querySelector("#systemChangelogModal .system-changelog-lang-bar");
+  if (!langBar) return;
+
+  const pillsByLang = new Map();
+  langBar.querySelectorAll(".changelog-lang-pill").forEach(pill => {
+    const code = (pill.getAttribute("data-lang") || "").toLowerCase();
+    if (code) pillsByLang.set(code, pill);
+  });
+
+  const order = getChangelogLangOrder(uiLang);
+  order.forEach(code => {
+    const pill = pillsByLang.get(code);
+    if (pill) langBar.appendChild(pill);
+  });
+
+  langBar.scrollLeft = 0;
+}
+
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -35,6 +64,31 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function injectVersionIntoChangelogText(text, version) {
+  const raw = (text || "").trim();
+  const cleanVer = String(version || "").trim().replace(/^v+/i, "");
+  if (!raw || !cleanVer) return raw;
+
+  const verTag = `v${cleanVer}`;
+  const escapedVer = cleanVer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hasVerRe = new RegExp(`(?:^|[^0-9.])v?${escapedVer}(?:$|[^0-9.])`, "i");
+
+  const lines = raw.split(/\r?\n/);
+  const firstIdx = lines.findIndex(l => l.trim().length > 0);
+  if (firstIdx < 0) return raw;
+
+  const firstLine = lines[firstIdx].trim();
+  const hdrMatch = firstLine.match(/^(#{1,3})\s+(.+)$/);
+  if (hdrMatch) {
+    if (!hasVerRe.test(hdrMatch[2])) {
+      lines[firstIdx] = `${hdrMatch[1]} ${hdrMatch[2].trim()} — ${verTag}`;
+    }
+    return lines.join("\n");
+  }
+
+  return `## ProxDMR ${verTag}\n\n${raw}`;
 }
 
 function formatMarkdown(text) {
@@ -243,6 +297,7 @@ export function initSystemUpdater() {
   }
 
   // 8. Language pills in modal
+  reorderChangelogLangPills(getActiveLanguage());
   document.querySelectorAll(".changelog-lang-pill").forEach(pill => {
     pill.addEventListener("click", () => {
       const lang = pill.getAttribute("data-lang");
@@ -405,22 +460,58 @@ function renderUpdateStatus(data, manual = false) {
   }
 }
 
-export function openChangelogModal() {
+export async function openChangelogModal() {
   const modal = document.getElementById("systemChangelogModal");
   if (!modal) return;
 
-  _selectedLang = getActiveLanguage();
+  const uiLang = getActiveLanguage();
+  _selectedLang = uiLang;
+  reorderChangelogLangPills(uiLang);
   updateChangelogContent();
   modal.style.display = "flex";
+
+  const hasNotes = Boolean(
+    _latestUpdateInfo &&
+    ((_latestUpdateInfo.notes_by_lang && Object.values(_latestUpdateInfo.notes_by_lang).some(Boolean)) ||
+      _latestUpdateInfo.raw_notes)
+  );
+  if (!hasNotes) {
+    try {
+      const resp = await fetch(`/api/system/check-update?_t=${Date.now()}`, { cache: "no-store" });
+      const data = await resp.json();
+      if (data && data.status === "ok") {
+        _latestUpdateInfo = data;
+        renderUpdateStatus(data, false);
+        updateChangelogContent();
+      } else {
+        const contentEl = document.getElementById("systemChangelogContent");
+        if (contentEl) {
+          contentEl.innerHTML = `<p style="color:#f85149;text-align:center;padding:20px;">${escapeHtml((data && data.message) || (window.t ? window.t("updates.check_error", {}, "Ошибка загрузки описания изменений") : "Ошибка загрузки описания изменений"))}</p>`;
+        }
+      }
+    } catch (err) {
+      console.warn("[UPDATER] Failed to fetch GitHub changelog on modal open:", err);
+      const contentEl = document.getElementById("systemChangelogContent");
+      if (contentEl) {
+        contentEl.innerHTML = `<p style="color:#f85149;text-align:center;padding:20px;">${escapeHtml(window.t ? window.t("updates.check_error", {}, "Ошибка загрузки описания изменений") : "Ошибка загрузки описания изменений")}</p>`;
+      }
+    }
+  }
 }
 
 function updateChangelogContent() {
   const title = document.getElementById("systemChangelogModalTitle");
   const contentEl = document.getElementById("systemChangelogContent");
+  const btnApplyModal = document.getElementById("btnApplyUpdateFromModal");
 
-  const ver = _latestUpdateInfo ? _latestUpdateInfo.latest_version : (window.APP_VERSION || "");
+  const ver = (_latestUpdateInfo && _latestUpdateInfo.latest_version) || window.APP_VERSION || "";
   if (title) {
     title.textContent = window.t ? window.t("updates.modal_title", { ver }, `Что нового в ProxDMR v${ver}`) : `Что нового в ProxDMR v${ver}`;
+  }
+
+  if (btnApplyModal) {
+    const canApply = Boolean(_latestUpdateInfo && _latestUpdateInfo.has_update && _latestUpdateInfo.is_admin !== false);
+    btnApplyModal.style.display = canApply ? "flex" : "none";
   }
 
   // Update active pill
@@ -440,9 +531,10 @@ function updateChangelogContent() {
   }
 
   const notesByLang = _latestUpdateInfo.notes_by_lang || {};
-  let text = notesByLang[_selectedLang] || notesByLang["ru"] || notesByLang["en"] || _latestUpdateInfo.raw_notes || "";
+  const rawText = notesByLang[_selectedLang] || notesByLang["ru"] || notesByLang["en"] || _latestUpdateInfo.raw_notes || "";
+  const textWithVersion = injectVersionIntoChangelogText(rawText, ver);
 
-  contentEl.innerHTML = formatMarkdown(text);
+  contentEl.innerHTML = formatMarkdown(textWithVersion);
 }
 
 export async function confirmAndApplyUpdate() {

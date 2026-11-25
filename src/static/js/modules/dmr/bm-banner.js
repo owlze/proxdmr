@@ -14,9 +14,9 @@ import {
   calculateClientPacketLoss,
   calculateCardPacketLoss,
   updatePingElement
-} from "../network/ping-sparklines.js?v=2.9.712";
-import { openBmBenchmarkModal } from "./bm-benchmark.js?v=2.9.809";
-import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.809";
+} from "../network/ping-sparklines.js?v=2.9.826";
+import { openBmBenchmarkModal } from "./bm-benchmark.js?v=2.9.826";
+import { isHotspotCollapsed, isHotspotLiveCollapsed } from "../audio/volume-mute.js?v=2.9.826";
 import { isoToEmoji, getLocalizedCountryName } from "../core/formatters.js?v=2.9.787";
 
 // ── Server-backed pinned-servers & sort-prefs cache ────────────────────

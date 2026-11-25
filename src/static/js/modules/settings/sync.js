@@ -4,8 +4,8 @@
  * local storage dumps) and syncs them bi-directionally with the backend.
  */
 
-import { resolveHotspotId } from "../network/ping-sparklines.js?v=2.9.712";
-import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.807";
+import { resolveHotspotId } from "../network/ping-sparklines.js?v=2.9.826";
+import { updateSlotLangBadge } from "../dmr/transcriber.js?v=2.9.821";
 
 let clientSettingsSyncTimer = null;
 let lastClientSettingsPushAt = 0;
@@ -85,8 +85,14 @@ function isPersistentUserStorageKey(k) {
   ) return false;
   if (k === "proxdmr_my_contacts_tree" || k === "proxdmr_contacts_gw" || k === "proxdmr_ysf_bookmarks" || k === "proxdmr_m17_bookmarks" || k.startsWith("proxdmr_ysf_favorites") || k.startsWith("proxdmr_m17_favorites") || k.startsWith("proxdmr_dstar_favorites") || k.startsWith("proxdmr_svx_favorites")) return false;
 
-  // Аппаратный кеш драйвера микрофона/BT-промпта сессии и устаревший скрытый pre-gain не синхронизируем
-  if (k === "proxdmr_audio_input_device" || k.startsWith("proxdmr_bt_mic_") || k === "proxdmr_pre_gain_db") return false;
+  // Аппаратный кеш драйвера микрофона/BT-промпта сессии, устаревший pre-gain и APK-only sync_system_volume не синхронизируем через storage_dump
+  if (
+    k === "proxdmr_audio_input_device" ||
+    k.startsWith("proxdmr_bt_mic_") ||
+    k === "proxdmr_pre_gain_db" ||
+    k === "proxdmr_sync_system_volume" ||
+    /^proxdmr_u\d+_sync_system_volume$/.test(k)
+  ) return false;
 
   return (
     k.startsWith("proxdmr_") ||
@@ -369,6 +375,8 @@ export function applyServerClientSettings(cs) {
           if (k && (k.startsWith("proxdmr_") || k.startsWith("dmr_")) && v !== null && v !== undefined &&
               !k.startsWith("proxdmr_gw_disconnected_") &&
               !isTransientTranscribeOrTtsKey(k) &&
+              k !== "proxdmr_sync_system_volume" &&
+              !/^proxdmr_u\d+_sync_system_volume$/.test(k) &&
               k !== "proxdmr_pre_gain_db" &&
               k !== "proxdmr_demo_language" &&
               k !== "proxdmr_auth_token" &&

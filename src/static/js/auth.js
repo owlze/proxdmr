@@ -354,7 +354,6 @@
         'optTtsModel',
         'optTtsStyle',
         'optTtsVoice',
-        'optTtsSpeed',
         'optTtsDucking',
         'optTtsPauseDucking',
         'optTtsMuteOthers',

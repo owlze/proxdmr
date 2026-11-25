@@ -112,6 +112,20 @@ function _isServerSelect(sel) {
   return _isBannerServerSelect(sel);
 }
 
+function _isSearchableSelect(sel) {
+  if (!sel) return false;
+  if (_isServerSelect(sel)) return true;
+  return Boolean(sel.dataset && sel.dataset.pxiSearchable === "true");
+}
+
+function _normalizeSearchText(str) {
+  let s = String(str || "").toLowerCase().replace(/ё/g, "е");
+  try {
+    s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  } catch (_) {}
+  return s;
+}
+
 function _isCompactSelect(sel) {
   if (!sel || !sel.classList) return false;
   return Boolean(
@@ -379,10 +393,12 @@ function _openMenuForSelect(sel, initialSearchQuery = "", focusSearchInput = fal
   menu.innerHTML = "";
   menu.onscroll = null;
   const isServerSelect = _isServerSelect(sel);
+  const isSearchableSelect = _isSearchableSelect(sel);
   menu.classList.toggle("is-compact", _isCompactSelect(sel));
   menu.classList.toggle("is-server-list", isServerSelect);
+  menu.classList.toggle("is-searchable", isSearchableSelect);
 
-  if (isServerSelect) {
+  if (isSearchableSelect) {
     const actionEntries = [];
     const serverEntries = [];
     let flatIndex = 0;
@@ -400,9 +416,10 @@ function _openMenuForSelect(sel, initialSearchQuery = "", focusSearchInput = fal
       }
       const desig = (optEl.dataset && optEl.dataset.designator) ? String(optEl.dataset.designator) : "";
       const proto = (optEl.dataset && optEl.dataset.protocol) ? String(optEl.dataset.protocol) : "";
+      const extraSearch = (optEl.dataset && optEl.dataset.search) ? String(optEl.dataset.search) : "";
       const isPlaceholder = (val === "");
       const isCustomOpt = (val === "CUSTOM");
-      const haystack = isPlaceholder ? "" : `${val} ${text} ${desig} ${proto}`.toLowerCase();
+      const haystack = isPlaceholder ? "" : _normalizeSearchText(`${val} ${text} ${desig} ${proto} ${extraSearch}`);
       serverEntries.push({
         optEl,
         flatIndex: idx,
@@ -451,9 +468,12 @@ function _openMenuForSelect(sel, initialSearchQuery = "", focusSearchInput = fal
     searchInput.className = "pxi-select-search-input";
     searchInput.autocomplete = "off";
     searchInput.spellcheck = false;
-    searchInput.placeholder = (typeof window !== "undefined" && typeof window.t === "function")
-      ? window.t("servers.search_addr_desc_placeholder", {}, "Поиск по адресу или описанию сервера...")
-      : "Поиск по адресу или описанию сервера...";
+    const customPlaceholder = (sel.dataset && sel.dataset.pxiSearchPlaceholder) ? String(sel.dataset.pxiSearchPlaceholder) : "";
+    searchInput.placeholder = customPlaceholder || (
+      (typeof window !== "undefined" && typeof window.t === "function")
+        ? window.t("servers.search_addr_desc_placeholder", {}, "Поиск по адресу или описанию сервера...")
+        : "Поиск по адресу или описанию сервера..."
+    );
 
     const clearBtn = document.createElement("button");
     clearBtn.type = "button";
@@ -520,8 +540,9 @@ function _openMenuForSelect(sel, initialSearchQuery = "", focusSearchInput = fal
     };
 
     const renderFilteredServerOptions = (rawQuery) => {
-      const q = String(rawQuery || "").trim().toLowerCase();
-      clearBtn.hidden = !q;
+      const rawTrim = String(rawQuery || "").trim();
+      const q = _normalizeSearchText(rawTrim);
+      clearBtn.hidden = !rawTrim;
       listContainer.innerHTML = "";
       renderedUpTo = 0;
       moreHintEl = null;
@@ -788,6 +809,22 @@ function _wireGlobalListeners() {
       e.preventDefault();
       const all = _portalMenu.querySelectorAll(".pxi-select-option:not(:disabled)");
       if (all.length) all[all.length - 1].focus();
+    } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key && e.key.length === 1) {
+      const searchEl = _portalMenu.querySelector(".pxi-select-search-input");
+      if (searchEl) {
+        e.preventDefault();
+        searchEl.focus();
+        searchEl.value = (searchEl.value || "") + e.key;
+        searchEl.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    } else if (e.key === "Backspace") {
+      const searchEl = _portalMenu.querySelector(".pxi-select-search-input");
+      if (searchEl && searchEl.value) {
+        e.preventDefault();
+        searchEl.focus();
+        searchEl.value = searchEl.value.slice(0, -1);
+        searchEl.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     }
   }, true);
 

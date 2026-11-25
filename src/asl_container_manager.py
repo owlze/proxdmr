@@ -1541,7 +1541,21 @@ class ASLContainerManager:
                             return {"success": False, "reason": "rejected", "node": target_node, "mode": mode_label}
 
         logger.warning(f"[ASL-PROC] Connect timed out for #{target_node} after 6.5s")
+        self.execute_asterisk_cmd(user_id, node_number, f"rpt cmd {node_number} ilink 1 {target_node}")
+        self.execute_asterisk_cmd(user_id, node_number, f"rpt cmd {node_number} ilink 11 {target_node}")
         self.execute_asterisk_cmd(user_id, node_number, f"rpt cmd {node_number} ilink 6")
+        self.execute_asterisk_cmd(user_id, node_number, f"rpt fun {node_number} *76")
+        try:
+            chan_out = self.execute_asterisk_cmd(user_id, node_number, "iax2 show channels")
+            for line in (chan_out or "").splitlines():
+                if "172.18." in line or "IAX2/proxdmr" in line or "proxdmr" in line:
+                    continue
+                parts = line.split()
+                if parts and parts[0].startswith("IAX2/"):
+                    self.execute_asterisk_cmd(user_id, node_number, f"channel request hangup {parts[0]}")
+        except Exception:
+            pass
+        self._invalidate_xnode_cache(user_id, node_number)
         code_fail = "conn_rejected" if saw_accept_or_connecting else "conn_timeout"
         if step_cb:
             try:
@@ -1580,10 +1594,20 @@ class ASLContainerManager:
         try:
             output = self._get_xnode_output(user_id, node_number, ttl=0.35)
             alinks_line = ""
-            for line in output.splitlines():
+            live_peer_nodes: set = set()
+            has_peer_rows = False
+            own_clean = str(node_number or "").strip()
+            for raw_line in (output or "").splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
                 if line.startswith("RPT_ALINKS="):
                     alinks_line = line.split("=", 1)[1].strip()
-                    break
+                elif ("ESTABLISHED" in line or "CONNECTING" in line) and not line.startswith("Peer"):
+                    has_peer_rows = True
+                    p_parts = line.split()
+                    if p_parts and p_parts[0].isdigit() and p_parts[0] != own_clean:
+                        live_peer_nodes.add(p_parts[0])
 
             if alinks_line:
                 # Пример: 3,51010RU,2143RU,<CALLSIGN>TU
@@ -1606,7 +1630,11 @@ class ASLContainerManager:
                         is_keyed = (keyed_char == "K")
                         direction = "IN" if keyed_char == "D" else "OUT"
 
-                        if node_clean != str(node_number):
+                        if node_clean != own_clean:
+                            # В ASL3 переменная канала RPT_ALINKS не обновляется при тихом таймауте CONNECTING-линка,
+                            # оставляя фантом вида 45417CU. Если узла уже нет в живой таблице пиров rpt xnode — игнорируем.
+                            if (is_connecting or has_peer_rows) and node_clean not in live_peer_nodes:
+                                continue
                             from allstar_directory import allstar_dir_mgr as allstar_dir
                             info = allstar_dir.get_node_info(node_clean)
                             flag = info.get("flag") or "🌐"
@@ -1680,6 +1708,7 @@ class ASLContainerManager:
             alinks_line = ""
             links_line = ""
 
+            has_peer_rows = False
             for raw_line in (output or "").splitlines():
                 line = raw_line.strip()
                 if not line:
@@ -1689,14 +1718,15 @@ class ASLContainerManager:
                 elif line.startswith("RPT_LINKS="):
                     links_line = line.split("=", 1)[1].strip()
                 elif ("ESTABLISHED" in line or "CONNECTING" in line) and not line.startswith("Peer"):
+                    has_peer_rows = True
                     parts = line.split()
-                    if len(parts) >= 6 and parts[0].isdigit() and parts[0] != own_clean:
+                    if len(parts) >= 5 and parts[0].isdigit() and parts[0] != own_clean:
                         p_node = parts[0]
                         uptime_map[p_node] = {
                             "ip": parts[1] if parts[1] != "(null)" else "",
-                            "direction": parts[3],
-                            "uptime": parts[4],
-                            "state": parts[5],
+                            "direction": parts[-3] if len(parts) >= 6 else "OUT",
+                            "uptime": parts[-2],
+                            "state": parts[-1],
                         }
 
             if alinks_line:
@@ -1715,6 +1745,8 @@ class ASLContainerManager:
                         mode_char = (m.group(2) or "R").upper()
                         keyed_char = (m.group(3) or "U").upper()
                         is_connecting = (mode_char == "C")
+                        if (is_connecting or has_peer_rows) and node_clean not in uptime_map:
+                            continue
                         mode_flag = "*3" if mode_char == "T" else "*2"
                         is_keyed = (keyed_char == "K")
                         up_meta = uptime_map.get(node_clean, {})

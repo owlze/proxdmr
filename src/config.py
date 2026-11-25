@@ -32,6 +32,9 @@ class HotspotConfig(BaseModel):
     bm_password: str = ""
     bm_api_key: str = ""
     network_type: str = "bm"
+    rpto_options: str = ""
+    xlx_module: str = "D"
+    dmrplus_reflector: str = "4530"
     ysf_host: str = ""
     ysf_port: int = 42000
     ysf_room_id: str = ""
@@ -286,6 +289,13 @@ class AppSettings(BaseModel):
     single_hotspot_audio: bool = False
     mute_fade_enabled: bool = True
     mute_fade_duration: float = 0.3
+    show_server_load_indicator: bool = True
+    server_load_ram_color: str = "#3399cc"
+    server_load_cpu_color: str = "#99cc00"
+    server_load_scale_px: int = 1
+    server_load_scale_sec: int = 1
+    ping_client_color: str = "#22c55e"
+    ping_server_color: str = "#22c55e"
     theme: str = "dark"
     bg_type: str = "color"
     bg_color: str = "#04170c"
@@ -300,11 +310,11 @@ class AppSettings(BaseModel):
     transcriber_engine: str = "groq"
     transcriber_model: str = "gemini-3.5-flash"
     translation_engine: str = "groq"
+    semantic_optimization: bool = False
     transcriber_target_lang: str = "ru"
     transcriber_source_lang: str = "auto"
     groq_api_key: str = ""
     groq_api_keys: List[str] = Field(default_factory=list)
-    deepgram_api_key: str = ""
     gemini_use_first_key_only: bool = False
     groq_use_first_key_only: bool = False
     gemini_use_first_key: Optional[bool] = None
@@ -315,7 +325,10 @@ class AppSettings(BaseModel):
     tts_engine: str = "piper"
     tts_model: str = "gemini-3.1-flash-tts-preview"
     tts_voice: str = "ru_RU-terra5871-medium"
-    tts_speed: float = 1.1
+    tts_voices_by_engine: Dict[str, str] = Field(default_factory=dict)
+    tts_speed: float = 1.0
+    tts_auto_speed: bool = False
+    tts_auto_speed_max: float = 1.40
     tts_ducking_level: float = 0.80
     tts_pause_ducking_level: float = 1.0
     tts_mute_others: bool = True

@@ -861,7 +861,7 @@ ORDINALS_UK_DICT = {
 }
 
 
-def verbalize_symbols_and_numbers_ru(text: str) -> str:
+def verbalize_symbols_and_numbers_ru(text: str, expand_radio_abbreviations: bool = True) -> str:
     """
     Verbalizes all unpronounceable characters, time notations,
     currencies, percentages, units and numbers into natural spoken Russian words.
@@ -935,12 +935,13 @@ def verbalize_symbols_and_numbers_ru(text: str) -> str:
     # 8. Units of measurement
     text = re.sub(r"\b(\d+)\s*(?:км/ч|км/час|km/h)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} километров в час", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(\d+)\s*(?:м/с|м/сек|m/s)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} метров в секунду", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(\d+)\s*(?:кВт|квт|kW)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} киловатт", text)
-    text = re.sub(r"\b(\d+)\s*(?:Вт|вт|W)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} ватт", text)
-    text = re.sub(r"\b(\d+)\s*(?:В|вольт|V)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} вольт", text)
-    text = re.sub(r"\b(\d+)\s*(?:А|ампер|A)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} ампер", text)
-    text = re.sub(r"\b(\d+)\s*(?:Ом|ом)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} ом", text)
-    text = re.sub(r"\b(\d+)\s*(?:дБ|dB|дб)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} децибел", text)
+    if expand_radio_abbreviations:
+        text = re.sub(r"\b(\d+)\s*(?:кВт|квт|kW)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} киловатт", text)
+        text = re.sub(r"\b(\d+)\s*(?:Вт|вт|W)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} ватт", text)
+        text = re.sub(r"\b(\d+)\s*(?:В|вольт|V)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} вольт", text)
+        text = re.sub(r"\b(\d+)\s*(?:А|ампер|A)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} ампер", text)
+        text = re.sub(r"\b(\d+)\s*(?:Ом|ом)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} ом", text)
+        text = re.sub(r"\b(\d+)\s*(?:дБ|dB|дб)\b", lambda m: f"{int_to_words_ru(int(m.group(1)))} децибел", text)
 
     # 9. Number symbols № and #
     text = re.sub(r"[№#]\s*(\d+)", lambda m: f"номер {int_to_words_ru(int(m.group(1)))}", text)
@@ -983,7 +984,7 @@ def verbalize_symbols_and_numbers_ru(text: str) -> str:
     return text
 
 
-def verbalize_symbols_and_numbers_uk(text: str) -> str:
+def verbalize_symbols_and_numbers_uk(text: str, expand_radio_abbreviations: bool = True) -> str:
     """
     Verbalizes all unpronounceable characters, time notations,
     currencies, percentages, units and numbers into natural spoken Ukrainian words.
@@ -1041,11 +1042,12 @@ def verbalize_symbols_and_numbers_uk(text: str) -> str:
     # 8. Units
     text = re.sub(r"\b(\d+)\s*(?:км/год|km/h)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} кілометрів на годину", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(\d+)\s*(?:м/с|m/s)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} метрів на секунду", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(\d+)\s*(?:кВт|kW)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} кіловат", text)
-    text = re.sub(r"\b(\d+)\s*(?:Вт|W)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} ват", text)
-    text = re.sub(r"\b(\d+)\s*(?:В|V)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} вольт", text)
-    text = re.sub(r"\b(\d+)\s*(?:А|A)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} ампер", text)
-    text = re.sub(r"\b(\d+)\s*(?:дБ|dB)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} децибел", text)
+    if expand_radio_abbreviations:
+        text = re.sub(r"\b(\d+)\s*(?:кВт|kW)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} кіловат", text)
+        text = re.sub(r"\b(\d+)\s*(?:Вт|W)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} ват", text)
+        text = re.sub(r"\b(\d+)\s*(?:В|V)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} вольт", text)
+        text = re.sub(r"\b(\d+)\s*(?:А|A)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} ампер", text)
+        text = re.sub(r"\b(\d+)\s*(?:дБ|dB)\b", lambda m: f"{int_to_words_uk(int(m.group(1)))} децибел", text)
 
     # 9. Number symbols
     text = re.sub(r"[№#]\s*(\d+)", lambda m: f"номер {int_to_words_uk(int(m.group(1)))}", text)
@@ -1086,14 +1088,17 @@ def verbalize_symbols_and_numbers_uk(text: str) -> str:
     return text
 
 
-def normalize_for_russian_tts(text: str, strip_callsigns: bool = False, callsign: str = "") -> str:
+def normalize_for_russian_tts(
+    text: str,
+    strip_callsigns: bool = False,
+    callsign: str = "",
+    expand_radio_abbreviations: bool = True,
+) -> str:
     """
     Full text normalization for Russian speech synthesis:
     1. Filters hesitation fillers ('э', 'э-э').
     2. Strips callsigns if strip_callsigns=True, otherwise transcribes them phonetically.
-    3. Replaces amateur radio abbreviations and Q-codes.
-    4. Converts radio etiquette numbers (73 -> 'Семьдесят три', 88 -> 'Восемьдесят восемь').
-    5. Expands frequency units (MHz -> мегагерц, kHz -> килогерц).
+    3. Optionally replaces amateur radio abbreviations, Q-codes, frequency units, and Latin script.
     """
     if not text:
         return ""
@@ -1109,31 +1114,32 @@ def normalize_for_russian_tts(text: str, strip_callsigns: bool = False, callsign
         # but if <call>TAG</call> is present, unpack to TAG
         text = re.sub(r"<call>([^<]*)</call>", r"\1", text, flags=re.IGNORECASE)
 
-    # Normalize frequency notations (e.g. 14.150 MHz, 433.500 МГц, 145 MHz)
-    def repl_freq(m):
-        val = m.group(1).replace(".", " точка ").replace(",", " точка ")
-        unit = m.group(2).lower()
-        unit_str = "мегагерц" if "m" in unit or "м" in unit else "килогерц"
-        return f"{val} {unit_str}"
+    if expand_radio_abbreviations:
+        # Normalize frequency notations (e.g. 14.150 MHz, 433.500 МГц, 145 MHz)
+        def repl_freq(m):
+            val = m.group(1).replace(".", " точка ").replace(",", " точка ")
+            unit = m.group(2).lower()
+            unit_str = "мегагерц" if "m" in unit or "м" in unit else "килогерц"
+            return f"{val} {unit_str}"
 
-    text = re.sub(
-        r"\b(\d+(?:[.,]\d+)?)\s*(MHz|МГц|kHz|кГц)\b",
-        repl_freq,
-        text,
-        flags=re.IGNORECASE
-    )
+        text = re.sub(
+            r"\b(\d+(?:[.,]\d+)?)\s*(MHz|МГц|kHz|кГц)\b",
+            repl_freq,
+            text,
+            flags=re.IGNORECASE
+        )
 
-    # Replace standalone radio etiquette greetings: 73 and 88
-    # Match 73 or 88 with word boundaries or punctuation
-    text = re.sub(r"(?<!\d)73(?!\d)", "Семьдесят три", text)
-    text = re.sub(r"(?<!\d)88(?!\d)", "Восемьдесят восемь", text)
+        # Replace standalone radio etiquette greetings: 73 and 88
+        # Match 73 or 88 with word boundaries or punctuation
+        text = re.sub(r"(?<!\d)73(?!\d)", "Семьдесят три", text)
+        text = re.sub(r"(?<!\d)88(?!\d)", "Восемьдесят восемь", text)
 
-    # Replace signal report RST 59 / 599
-    text = re.sub(r"\b(?:RST\s*)?599\b", "пять девять девять", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(?:RST\s*)?59\b", "пять девять", text, flags=re.IGNORECASE)
+        # Replace signal report RST 59 / 599
+        text = re.sub(r"\b(?:RST\s*)?599\b", "пять девять девять", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:RST\s*)?59\b", "пять девять", text, flags=re.IGNORECASE)
 
-    # Replace Q-codes and radio abbreviations using unified 515-entry multilingual dictionary (Piper / Silero)
-    text = replace_radio_abbreviations(text, lang="ru")
+        # Replace Q-codes and radio abbreviations using unified 515-entry multilingual dictionary (Piper / Silero)
+        text = replace_radio_abbreviations(text, lang="ru")
 
     # Detect and replace callsigns with ICAO/ITU phonetic letters if not stripped
     if not strip_callsigns:
@@ -1147,17 +1153,23 @@ def normalize_for_russian_tts(text: str, strip_callsigns: bool = False, callsign
         text = CALLSIGN_REGEX.sub(repl_callsign, text)
 
     # Verbalize numbers, time expressions, currencies, percentages, symbols, and units in Russian
-    text = verbalize_symbols_and_numbers_ru(text)
+    text = verbalize_symbols_and_numbers_ru(text, expand_radio_abbreviations=expand_radio_abbreviations)
 
-    # Transliterate any remaining Latin script words into Cyrillic phonetics
-    text = transliterate_latin_to_cyrillic(text)
+    # Transliterate any remaining Latin script words into Cyrillic phonetics (only for monolingual engines)
+    if expand_radio_abbreviations:
+        text = transliterate_latin_to_cyrillic(text)
 
     # Clean up excess spaces
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def normalize_for_ukrainian_tts(text: str, strip_callsigns: bool = False, callsign: str = "") -> str:
+def normalize_for_ukrainian_tts(
+    text: str,
+    strip_callsigns: bool = False,
+    callsign: str = "",
+    expand_radio_abbreviations: bool = True,
+) -> str:
     """
     Full text normalization for Ukrainian speech synthesis.
     """
@@ -1173,39 +1185,45 @@ def normalize_for_ukrainian_tts(text: str, strip_callsigns: bool = False, callsi
     else:
         text = re.sub(r"<call>([^<]*)</call>", r"\1", text, flags=re.IGNORECASE)
 
-    # Normalize frequency notations
-    text = re.sub(
-        r"\b(\d+(?:[.,]\d+)?)\s*(MHz|МГц)\b",
-        lambda m: f"{m.group(1).replace('.', ' крапка ')} мегагерц",
-        text,
-        flags=re.IGNORECASE
-    )
-    text = re.sub(
-        r"\b(\d+(?:[.,]\d+)?)\s*(kHz|кГц)\b",
-        lambda m: f"{m.group(1).replace('.', ' крапка ')} кілогерц",
-        text,
-        flags=re.IGNORECASE
-    )
+    if expand_radio_abbreviations:
+        # Normalize frequency notations
+        text = re.sub(
+            r"\b(\d+(?:[.,]\d+)?)\s*(MHz|МГц)\b",
+            lambda m: f"{m.group(1).replace('.', ' крапка ')} мегагерц",
+            text,
+            flags=re.IGNORECASE
+        )
+        text = re.sub(
+            r"\b(\d+(?:[.,]\d+)?)\s*(kHz|кГц)\b",
+            lambda m: f"{m.group(1).replace('.', ' крапка ')} кілогерц",
+            text,
+            flags=re.IGNORECASE
+        )
 
-    # Replace Q-codes, radio etiquette (73/88) and abbreviations in Ukrainian (Piper / Silero)
-    text = replace_radio_abbreviations(text, lang="uk")
+        # Replace Q-codes, radio etiquette (73/88) and abbreviations in Ukrainian (Piper / Silero)
+        text = replace_radio_abbreviations(text, lang="uk")
 
-    # Signal report RST 59 / 599
-    text = re.sub(r"\b(?:RST\s*)?599\b", "п'ять дев'ять дев'ять", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(?:RST\s*)?59\b", "п'ять дев'ять", text, flags=re.IGNORECASE)
+        # Signal report RST 59 / 599
+        text = re.sub(r"\b(?:RST\s*)?599\b", "п'ять дев'ять дев'ять", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:RST\s*)?59\b", "п'ять дев'ять", text, flags=re.IGNORECASE)
 
     # Verbalize numbers, time, currencies, percentages, symbols in Ukrainian
-    text = verbalize_symbols_and_numbers_uk(text)
+    text = verbalize_symbols_and_numbers_uk(text, expand_radio_abbreviations=expand_radio_abbreviations)
 
-    # Transliterate any remaining Latin script words into Cyrillic phonetics
-    text = transliterate_latin_to_cyrillic(text)
+    # Transliterate any remaining Latin script words into Cyrillic phonetics (only for monolingual engines)
+    if expand_radio_abbreviations:
+        text = transliterate_latin_to_cyrillic(text)
 
     # Clean up excess spaces
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def verbalize_symbols_and_numbers_multilang(text: str, target_lang: str = "ru") -> str:
+def verbalize_symbols_and_numbers_multilang(
+    text: str,
+    target_lang: str = "ru",
+    expand_radio_abbreviations: bool = True,
+) -> str:
     """
     Verbalizes numbers, time, currencies, percentages and symbols into written words
     for speech synthesis in the specified target language (RU, UK, EN, DE, ES, FR, IT, etc.).
@@ -1220,9 +1238,9 @@ def verbalize_symbols_and_numbers_multilang(text: str, target_lang: str = "ru") 
         clean_lang = clean_lang[:2]
 
     if clean_lang in ("ru", "rus"):
-        return verbalize_symbols_and_numbers_ru(text)
+        return verbalize_symbols_and_numbers_ru(text, expand_radio_abbreviations=expand_radio_abbreviations)
     if clean_lang in ("uk", "ukr", "ua"):
-        return verbalize_symbols_and_numbers_uk(text)
+        return verbalize_symbols_and_numbers_uk(text, expand_radio_abbreviations=expand_radio_abbreviations)
 
     # Helper function to convert integer using num2words
     def _n2w(val: int) -> str:
@@ -1321,10 +1339,11 @@ def verbalize_symbols_and_numbers_multilang(text: str, target_lang: str = "ru") 
     text = re.sub(r"\b(\d+)\s*(?:RUB|руб\.?|рублей|рубля)\b", lambda m: f"{_n2w(int(m.group(1)))} {r_w}", text, flags=re.IGNORECASE)
 
     # 6. Units: dB, kW, W
-    db_w = "decibels" if clean_lang == "en" else "Dezibel" if clean_lang == "de" else "decibelios" if clean_lang == "es" else "décibels" if clean_lang == "fr" else "decibel"
-    text = re.sub(r"\b(\d+)\s*(?:дБ|dB)\b", lambda m: f"{_n2w(int(m.group(1)))} {db_w}", text)
-    text = re.sub(r"\b(\d+)\s*(?:Вт|W|watts?)\b", lambda m: f"{_n2w(int(m.group(1)))} watts", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(\d+)\s*(?:кВт|kW)\b", lambda m: f"{_n2w(int(m.group(1)))} kilowatts", text, flags=re.IGNORECASE)
+    if expand_radio_abbreviations:
+        db_w = "decibels" if clean_lang == "en" else "Dezibel" if clean_lang == "de" else "decibelios" if clean_lang == "es" else "décibels" if clean_lang == "fr" else "decibel"
+        text = re.sub(r"\b(\d+)\s*(?:дБ|dB)\b", lambda m: f"{_n2w(int(m.group(1)))} {db_w}", text)
+        text = re.sub(r"\b(\d+)\s*(?:Вт|W|watts?)\b", lambda m: f"{_n2w(int(m.group(1)))} watts", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(\d+)\s*(?:кВт|kW)\b", lambda m: f"{_n2w(int(m.group(1)))} kilowatts", text, flags=re.IGNORECASE)
 
     # 7. Math & special symbols
     and_w = "and"
@@ -1369,10 +1388,18 @@ def verbalize_symbols_and_numbers_multilang(text: str, target_lang: str = "ru") 
     return text
 
 
-def normalize_text_for_tts(text: str, target_lang: str = "ru", strip_callsigns: bool = False, callsign: str = "") -> str:
+def normalize_text_for_tts(
+    text: str,
+    target_lang: str = "ru",
+    strip_callsigns: bool = False,
+    callsign: str = "",
+    expand_radio_abbreviations: bool = True,
+) -> str:
     """
     Unified text verbalizer and phonetic normalizer for TTS speech synthesis.
     Converts numbers, time, currencies, percentages, symbols into words in target_lang.
+    When expand_radio_abbreviations=False (e.g. for Supertonic 3), skips amateur radio
+    abbreviation expansion (both Cyrillic and Latin) and Latin-to-Cyrillic transliteration.
     """
     if not text or not text.strip():
         return ""
@@ -1384,9 +1411,19 @@ def normalize_text_for_tts(text: str, target_lang: str = "ru", strip_callsigns: 
         l_code = l_code[:2]
 
     if l_code in ("ru", "rus"):
-        return normalize_for_russian_tts(text, strip_callsigns=strip_callsigns, callsign=callsign)
+        return normalize_for_russian_tts(
+            text,
+            strip_callsigns=strip_callsigns,
+            callsign=callsign,
+            expand_radio_abbreviations=expand_radio_abbreviations,
+        )
     if l_code in ("uk", "ukr", "ua"):
-        return normalize_for_ukrainian_tts(text, strip_callsigns=strip_callsigns, callsign=callsign)
+        return normalize_for_ukrainian_tts(
+            text,
+            strip_callsigns=strip_callsigns,
+            callsign=callsign,
+            expand_radio_abbreviations=expand_radio_abbreviations,
+        )
 
     # For other languages:
     text = filter_hesitation_fillers(text)
@@ -1398,34 +1435,39 @@ def normalize_text_for_tts(text: str, target_lang: str = "ru", strip_callsigns: 
     else:
         text = re.sub(r"<call>([^<]*)</call>", r"\1", text, flags=re.IGNORECASE)
 
-    w_73_map = {
-        "en": "seventy-three", "de": "dreiundsiebzig", "es": "setenta y tres",
-        "fr": "soixante-treize", "it": "settantatré", "pl": "siedemdziesiąt trzy"
-    }
-    w_88_map = {
-        "en": "eighty-eight", "de": "achtundachtzig", "es": "ochenta y ocho",
-        "fr": "quatre-vingt-huit", "it": "ottantotto", "pl": "osiemdziesiąt osiem"
-    }
-    w_73 = w_73_map.get(l_code, "73")
-    w_88 = w_88_map.get(l_code, "88")
-    text = re.sub(r"(?<!\d)73(?!\d)", w_73, text)
-    text = re.sub(r"(?<!\d)88(?!\d)", w_88, text)
+    if expand_radio_abbreviations:
+        w_73_map = {
+            "en": "seventy-three", "de": "dreiundsiebzig", "es": "setenta y tres",
+            "fr": "soixante-treize", "it": "settantatré", "pl": "siedemdziesiąt trzy"
+        }
+        w_88_map = {
+            "en": "eighty-eight", "de": "achtundachtzig", "es": "ochenta y ocho",
+            "fr": "quatre-vingt-huit", "it": "ottantotto", "pl": "osiemdziesiąt osiem"
+        }
+        w_73 = w_73_map.get(l_code, "73")
+        w_88 = w_88_map.get(l_code, "88")
+        text = re.sub(r"(?<!\d)73(?!\d)", w_73, text)
+        text = re.sub(r"(?<!\d)88(?!\d)", w_88, text)
 
-    # Signal reports in target language
-    d_map_by_lang = {
-        "en": {"5": "five", "9": "nine", "4": "four", "3": "three", "2": "two", "1": "one", "6": "six", "7": "seven", "8": "eight"},
-        "de": {"5": "fünf", "9": "neun", "4": "vier", "3": "drei", "2": "zwei", "1": "eins", "6": "sechs", "7": "sieben", "8": "acht"},
-        "es": {"5": "cinco", "9": "nueve", "4": "cuatro", "3": "tres", "2": "dos", "1": "uno", "6": "seis", "7": "siete", "8": "ocho"},
-        "fr": {"5": "cinq", "9": "neuf", "4": "quatre", "3": "trois", "2": "deux", "1": "un", "6": "six", "7": "sept", "8": "huit"},
-        "it": {"5": "cinque", "9": "nove", "4": "quattro", "3": "tre", "2": "due", "1": "uno", "6": "sei", "7": "sette", "8": "otto"}
-    }
-    cur_d_map = d_map_by_lang.get(l_code, d_map_by_lang["en"])
-    for r in ["599", "59", "58", "57", "56", "55", "54", "53", "52", "51", "44", "33"]:
-        rep_words = "-".join([cur_d_map.get(c, c) for c in r])
-        text = re.sub(rf"\b(?:RST\s*)?{r}\b", rep_words, text, flags=re.IGNORECASE)
+        # Signal reports in target language
+        d_map_by_lang = {
+            "en": {"5": "five", "9": "nine", "4": "four", "3": "three", "2": "two", "1": "one", "6": "six", "7": "seven", "8": "eight"},
+            "de": {"5": "fünf", "9": "neun", "4": "vier", "3": "drei", "2": "zwei", "1": "eins", "6": "sechs", "7": "sieben", "8": "acht"},
+            "es": {"5": "cinco", "9": "nueve", "4": "cuatro", "3": "tres", "2": "dos", "1": "uno", "6": "seis", "7": "siete", "8": "ocho"},
+            "fr": {"5": "cinq", "9": "neuf", "4": "quatre", "3": "trois", "2": "deux", "1": "un", "6": "six", "7": "sept", "8": "huit"},
+            "it": {"5": "cinque", "9": "nove", "4": "quattro", "3": "tre", "2": "due", "1": "uno", "6": "sei", "7": "sette", "8": "otto"}
+        }
+        cur_d_map = d_map_by_lang.get(l_code, d_map_by_lang["en"])
+        for r in ["599", "59", "58", "57", "56", "55", "54", "53", "52", "51", "44", "33"]:
+            rep_words = "-".join([cur_d_map.get(c, c) for c in r])
+            text = re.sub(rf"\b(?:RST\s*)?{r}\b", rep_words, text, flags=re.IGNORECASE)
 
     # Verbalize numbers, currencies, time, percentages, symbols
-    text = verbalize_symbols_and_numbers_multilang(text, target_lang=l_code)
+    text = verbalize_symbols_and_numbers_multilang(
+        text,
+        target_lang=l_code,
+        expand_radio_abbreviations=expand_radio_abbreviations,
+    )
 
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([,.:;!?])", r"\1", text)

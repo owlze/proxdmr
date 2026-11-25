@@ -62,6 +62,16 @@ LANG_DISPLAY_NAMES: Dict[str, str] = {
 }
 
 try:
+    try:
+        from language_capabilities import LANG_DISPLAY_NAMES_ALL as _CAP_DISPLAY_NAMES
+    except ImportError:
+        from src.language_capabilities import LANG_DISPLAY_NAMES_ALL as _CAP_DISPLAY_NAMES
+    for _k, _v in _CAP_DISPLAY_NAMES.items():
+        LANG_DISPLAY_NAMES.setdefault(_k, _v)
+except Exception:
+    pass
+
+try:
     import llama_cpp
     from llama_cpp import Llama
     HAVE_LLAMA_CPP = True
@@ -217,7 +227,8 @@ class TranslationService:
         self,
         text: str,
         target_lang: str = "ru",
-        source_lang: Optional[str] = None
+        source_lang: Optional[str] = None,
+        asr_hint_lang: Optional[str] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """Synchronous translation via Qwen 2.5 1.5B."""
         clean_text = (text or "").strip()
@@ -236,13 +247,22 @@ class TranslationService:
 
         tgt_name = LANG_DISPLAY_NAMES.get(tgt, tgt)
         src_name = LANG_DISPLAY_NAMES.get(src, src)
+        asr_note = ""
+        if asr_hint_lang:
+            asr_code = asr_hint_lang.lower().strip()[:2]
+            if asr_code and asr_code != src:
+                asr_name = LANG_DISPLAY_NAMES.get(asr_code, asr_code)
+                asr_note = (
+                    f" Note: the input was transcribed using a closely related {asr_name} ASR phonetic model "
+                    f"for spoken {src_name}; infer the intended {src_name} meaning faithfully."
+                )
 
         try:
             with self._qwen_lock:
                 llm = self._get_or_load_qwen()
                 system_prompt = (
                     f"You are a professional radio operator and live interpreter. "
-                    f"Translate the following speech transmission faithfully from {src_name} into {tgt_name}. "
+                    f"Translate the following speech transmission faithfully from {src_name} into {tgt_name}.{asr_note} "
                     "Keep callsigns, RST signal reports (e.g. 59, 599), Q-codes, and etiquette numbers (73, 88) intact. "
                     "Output ONLY the translated text without explanations, quotes, or conversational notes."
                 )
@@ -269,9 +289,14 @@ class TranslationService:
         text: str,
         engine: str = "qwen",
         target_lang: str = "ru",
-        source_lang: Optional[str] = None
+        source_lang: Optional[str] = None,
+        asr_hint_lang: Optional[str] = None
     ) -> Tuple[str, Optional[str]]:
         """Asynchronous unified translation entry point."""
         return await asyncio.to_thread(
-            self.translate_qwen_sync, text, target_lang=target_lang, source_lang=source_lang
+            self.translate_qwen_sync,
+            text,
+            target_lang=target_lang,
+            source_lang=source_lang,
+            asr_hint_lang=asr_hint_lang,
         )

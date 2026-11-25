@@ -11,6 +11,7 @@ import inspect
 import io
 import logging
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -47,6 +48,25 @@ CORE_TOTAL_SIZE_MB = 380
 VOICE_STYLE_SIZE_MB = 0.3
 VOICE_STYLE_APPROX_BYTES = 295_000
 VOICE_STYLE_MIN_BYTES = 10_000
+
+# Supertonic 3 synthesis quality & experimental prosody boost
+SUPERTONIC_TOTAL_STEPS = 8
+SUPERTONIC_BOOST_PUNCTUATION = True
+# Set True to restore amateur radio abbreviation expansion & Latin transliteration for Supertonic 3
+SUPERTONIC_EXPAND_RADIO_ABBREVIATIONS = False
+_SINGLE_EMPHATIC_PUNCT_RE = re.compile(r"(?<![?!])([?!])(?![?!])")
+
+
+def boost_punctuation_for_supertonic(text: str) -> str:
+    """
+    Experimental prosody boost for Supertonic 3:
+    doubles standalone '?' -> '??' and '!' -> '!!' while preserving
+    already repeated/mixed sequences ('??', '!!!', '?!', '!?').
+    """
+    if not text:
+        return text
+    return _SINGLE_EMPHATIC_PUNCT_RE.sub(r"\1\1", text)
+
 
 SUPERTONIC_VOICES: List[Dict[str, Any]] = [
     {"id": "M1", "name": "M1 — Male 1", "gender": "male", "size_mb": VOICE_STYLE_SIZE_MB, "style_rel": "voice_styles/M1.json"},
@@ -600,9 +620,13 @@ class SupertonicService:
                     "speed": clamped_speed,
                 }
                 if "total_steps" in synth_sig.parameters:
-                    synth_kwargs["total_steps"] = 5
+                    synth_kwargs["total_steps"] = SUPERTONIC_TOTAL_STEPS
 
-                result = tts.synthesize(text.strip(), **synth_kwargs)
+                synth_text = text.strip()
+                if SUPERTONIC_BOOST_PUNCTUATION:
+                    synth_text = boost_punctuation_for_supertonic(synth_text)
+
+                result = tts.synthesize(synth_text, **synth_kwargs)
                 if isinstance(result, tuple):
                     wav_arr = result[0]
                 else:

@@ -2,8 +2,11 @@ import asyncio
 import collections
 import json
 import logging
+import os
 import random
+import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Coroutine, Dict, List, Optional, Any, Set
 
@@ -364,6 +367,8 @@ class HotspotManager:
         self._last_prune_time: float = 0.0
         self._bg_tasks: Set[asyncio.Task] = set()
         self._history_dirty: Set[int] = set()
+        self._history_write_locks: Dict[int, threading.Lock] = {}
+        self._history_write_locks_guard = threading.Lock()
 
         # DMR TX Framing & Pipeline
         self.tx_framer = DMRTxFramer()
@@ -616,24 +621,43 @@ class HotspotManager:
         except RuntimeError:
             coro.close()
 
+    def _get_history_write_lock(self, uid: int) -> threading.Lock:
+        with self._history_write_locks_guard:
+            lock = self._history_write_locks.get(uid)
+            if lock is None:
+                lock = threading.Lock()
+                self._history_write_locks[uid] = lock
+            return lock
+
     def _save_calls_history(self, user_id: Optional[int] = None):
         uid = user_id if user_id is not None else self.active_user_id
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             target_file = self._get_calls_history_file(uid)
             cutoff = (time.time() - CALL_HISTORY_RETENTION_SEC) if CALL_HISTORY_RETENTION_SEC > 0 else 0.0
-            history = self.user_call_history.get(uid, [])
+            history = list(self.user_call_history.get(uid, []))
             records = [
                 e.to_dict() for e in history
                 if (cutoff <= 0.0 or e.timestamp >= cutoff) and (e.active or e.duration >= 0.5 or bool(e.transcription))
             ][:CALL_HISTORY_MAX_ENTRIES]
             self._history_dirty.discard(uid)
+            write_lock = self._get_history_write_lock(uid)
 
             def _write():
-                tmp_file = target_file.with_suffix(".tmp")
-                with open(tmp_file, "w", encoding="utf-8") as f:
-                    json.dump(records, f, ensure_ascii=False)
-                tmp_file.replace(target_file)
+                with write_lock:
+                    tmp_file = target_file.with_name(f"{target_file.stem}.{uuid.uuid4().hex[:8]}.tmp")
+                    try:
+                        with open(tmp_file, "w", encoding="utf-8") as f:
+                            json.dump(records, f, ensure_ascii=False)
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.replace(tmp_file, target_file)
+                    except Exception as write_err:
+                        logger.warning(f"[MANAGER] Failed atomic history write for user {uid}: {write_err}")
+                        try:
+                            tmp_file.unlink(missing_ok=True)
+                        except Exception:
+                            pass
 
             try:
                 self._spawn_task(asyncio.to_thread(_write))
@@ -995,7 +1019,7 @@ class HotspotManager:
                     src_cs = (target_call.src_callsign or "").upper().strip()
                     rt_owner = self.get_runtime(uid, target_call.hotspot_id)
                     own_cs = (getattr(rt_owner.config, "callsign", "") if rt_owner else "").upper().strip()
-                    if spoken_cs != src_cs and (target_call.is_local_tx or spoken_cs != own_cs):
+                    if spoken_cs != src_cs and (getattr(target_call, "is_tx", False) or spoken_cs != own_cs):
                         old_alias = target_call.talker_alias or ""
                         if f"🎙️ {spoken_cs}" not in old_alias:
                             target_call.talker_alias = f"🎙️ {spoken_cs} · {src_cs}" if src_cs else f"🎙️ {spoken_cs}"

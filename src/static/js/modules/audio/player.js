@@ -3273,11 +3273,16 @@ export   class RecordingsManager {
         this.inputSeamBeepPattern.style.opacity = this.optSeamBeep.checked ? "1" : "0.55";
       }
       if (this.optAutoCleanup && s.auto_cleanup !== undefined) this.optAutoCleanup.checked = Boolean(s.auto_cleanup);
-      if (this.inputMinDuration && s.min_duration_sec !== undefined) this.inputMinDuration.value = s.min_duration_sec;
-      if (s.max_storage_mb !== undefined && s.max_storage_mb !== null) {
-        this._savedQuotaMb = Number(s.max_storage_mb) || 1024;
-      } else if (s.max_storage_gb !== undefined && s.max_storage_gb !== null) {
-        this._savedQuotaMb = Math.round(Number(s.max_storage_gb) * 1024) || 1024;
+      if (this.inputMinDuration) {
+        const parsedMinDur = Number(s.min_duration_sec);
+        this.inputMinDuration.value = (Number.isFinite(parsedMinDur) && parsedMinDur > 0) ? parsedMinDur : 2.0;
+      }
+      if (s.max_storage_mb !== undefined && s.max_storage_mb !== null && Number(s.max_storage_mb) > 0) {
+        this._savedQuotaMb = Number(s.max_storage_mb);
+      } else if (s.max_storage_gb !== undefined && s.max_storage_gb !== null && Number(s.max_storage_gb) > 0) {
+        this._savedQuotaMb = Math.round(Number(s.max_storage_gb) * 1024);
+      } else {
+        this._savedQuotaMb = 500;
       }
       if (s.disk_free_mb !== undefined && s.disk_free_mb !== null) {
         this._diskFreeMb = Number(s.disk_free_mb) || 0;
@@ -3286,7 +3291,11 @@ export   class RecordingsManager {
         this._maxAllowedQuotaMb = Number(s.max_allowed_quota_mb) || 0;
       }
       if (this.inputQuotaGb) {
-        const gbVal = (s.max_storage_gb !== undefined) ? s.max_storage_gb : (s.max_storage_mb ? Number((s.max_storage_mb / 1024).toFixed(2)) : 1.0);
+        const hasGb = (s.max_storage_gb !== undefined && s.max_storage_gb !== null && Number(s.max_storage_gb) > 0);
+        const hasMb = (s.max_storage_mb !== undefined && s.max_storage_mb !== null && Number(s.max_storage_mb) > 0);
+        const gbVal = hasGb
+          ? Number(s.max_storage_gb)
+          : (hasMb ? Number((Number(s.max_storage_mb) / 1024).toFixed(2)) : Number((500 / 1024).toFixed(2)));
         this.inputQuotaGb.value = gbVal;
       }
     }
@@ -3304,7 +3313,7 @@ export   class RecordingsManager {
       const rawGb = parseFloat(this.inputQuotaGb.value);
       if (isNaN(rawGb) || rawGb <= 0) return null;
       const reqMb = Math.round(rawGb * 1024);
-      const prevMb = Number(this._savedQuotaMb) || 1024;
+      const prevMb = (Number(this._savedQuotaMb) > 0) ? Number(this._savedQuotaMb) : 500;
       const maxAllowedMb = Number(this._maxAllowedQuotaMb) || 0;
       const freeMb = Number(this._diskFreeMb) || 0;
       if (maxAllowedMb > 0 && freeMb > 0 && reqMb > prevMb && reqMb > maxAllowedMb) {
@@ -3357,18 +3366,31 @@ export   class RecordingsManager {
 
     async saveSettings() {
       const clampedNowMb = this._validateQuotaInputOnIncrease();
-      const rawGb = this.inputQuotaGb ? (parseFloat(this.inputQuotaGb.value) || 1.0) : 1.0;
+      const parsedGb = this.inputQuotaGb ? parseFloat(this.inputQuotaGb.value) : NaN;
+      const isQuotaUnset = !Number.isFinite(parsedGb) || parsedGb <= 0;
+      const defaultGb500 = Number((500 / 1024).toFixed(2));
+      const rawGb = isQuotaUnset ? defaultGb500 : parsedGb;
+      if (isQuotaUnset && this.inputQuotaGb) {
+        this.inputQuotaGb.value = defaultGb500;
+      }
+      const parsedMinDur = this.inputMinDuration ? parseFloat(this.inputMinDuration.value) : NaN;
+      const minDurSec = (Number.isFinite(parsedMinDur) && parsedMinDur > 0) ? parsedMinDur : 2.0;
+      if ((!Number.isFinite(parsedMinDur) || parsedMinDur <= 0) && this.inputMinDuration) {
+        this.inputMinDuration.value = 2.0;
+      }
       const payload = {
         auto_record: this.optAutoRecord ? this.optAutoRecord.checked : true,
         agc_rec: this.optAgcRec ? this.optAgcRec.checked : true,
         seam_beep: this.optSeamBeep ? this.optSeamBeep.checked : true,
         seam_beep_pattern: this.inputSeamBeepPattern ? this.inputSeamBeepPattern.value.trim() : DEFAULT_ROGER_BEEP_PATTERN,
         auto_cleanup: this.optAutoCleanup ? this.optAutoCleanup.checked : true,
-        min_duration_sec: this.inputMinDuration ? (parseFloat(this.inputMinDuration.value) || 0.5) : 0.5,
+        min_duration_sec: minDurSec,
         max_storage_gb: rawGb,
       };
       if (clampedNowMb !== null) {
         payload.max_storage_mb = clampedNowMb;
+      } else if (isQuotaUnset || (this._savedQuotaMb === 500 && Math.abs(rawGb - defaultGb500) < 0.005)) {
+        payload.max_storage_mb = 500;
       } else if (this._lastClientClampedMb && Math.abs(rawGb - Number((this._lastClientClampedMb / 1024).toFixed(2))) < 0.005) {
         payload.max_storage_mb = this._lastClientClampedMb;
       }

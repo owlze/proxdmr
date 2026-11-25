@@ -74,6 +74,15 @@ ISO3_TO_ISO2: Dict[str, str] = {
     "lit": "lt", "lav": "lv", "est": "et", "fas": "fa", "per": "fa",
 }
 
+try:
+    try:
+        from language_capabilities import ISO3_TO_ISO2_ALL as _CAP_ISO3_TO_ISO2
+    except ImportError:
+        from src.language_capabilities import ISO3_TO_ISO2_ALL as _CAP_ISO3_TO_ISO2
+    ISO3_TO_ISO2.update(_CAP_ISO3_TO_ISO2)
+except Exception:
+    pass
+
 SUPPORTED_ISO2: Set[str] = set(ISO3_TO_ISO2.values())
 
 # DMR Mobile Country Code (first 3 digits of 7-digit RadioID) -> primary spoken languages
@@ -849,7 +858,7 @@ class FastLidService:
         target_lang: str = "ru",
     ) -> Tuple[Optional[str], Dict[str, Any]]:
         """
-        Determine spoken language BEFORE running ASR (Rumble / Groq / Deepgram / Gemini).
+        Determine spoken language BEFORE running ASR (Rumble / Groq / Gemini).
         Returns (iso2_or_None, meta_dict).
         """
         t0 = time.monotonic()

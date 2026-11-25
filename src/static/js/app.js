@@ -1,9 +1,9 @@
 import './modules/ui/icons.js?v=2.9.770';
-import './modules/ui/pxi-select.js?v=2.9.806';
+import './modules/ui/pxi-select.js?v=2.9.821';
 import './modules/ui/marquee.js?v=2.9.800';
 import { safeEscapeHtml } from './modules/core/formatters.js?v=2.9.787';
-import { RecordingsManager } from './modules/audio/player.js?v=2.9.805';
-import './modules/ui/theme.js?v=2.9.799';
+import { RecordingsManager } from './modules/audio/player.js?v=2.9.827';
+import './modules/ui/theme.js?v=2.9.825';
 import './modules/ui/color-picker.js?v=2.9.786';
 import './modules/dmr/bm-monitor.js?v=2.9.805';
 import './modules/dmr/log-selection.js?v=2.9.805';
@@ -31,17 +31,17 @@ import {
   updateSlotLangBadge,
   getCurrentTranscriberModel,
   selectTranscriberModel
-} from './modules/dmr/transcriber.js?v=2.9.807';
+} from './modules/dmr/transcriber.js?v=2.9.821';
 import { blePtt } from './modules/ptt/ble.js?v=2.9.699';
 import { initApkUpdater } from './modules/core/updater.js?v=2.9.711';
-import { initAndroidBridge } from './modules/core/android.js?v=2.9.807';
+import { initAndroidBridge } from './modules/core/android.js?v=2.9.821';
 import { initAuth, initAccountManager } from './modules/settings/account.js?v=2.9.699';
-import { initLanguageManager } from './modules/settings/language.js?v=2.9.809';
+import { initLanguageManager } from './modules/settings/language.js?v=2.9.826';
 import { initHamQthSettings } from './modules/settings/hamqth.js?v=2.9.734';
-import { initGeneralSettings } from './modules/settings/general.js?v=2.9.809';
+import { initGeneralSettings } from './modules/settings/general.js?v=2.9.826';
 import { initAlertsSettings } from './modules/settings/alerts.js?v=2.9.711';
-import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.773';
-import { initOrientationLock } from './modules/ui/orientation.js?v=2.9.809';
+import { initSystemUpdater } from './modules/settings/system-updater.js?v=2.9.813';
+import { initOrientationLock } from './modules/ui/orientation.js?v=2.9.826';
 import {
   initQuickAssign,
   renderQuickMemButtons
@@ -63,7 +63,7 @@ import {
   renderContactsTree,
   findNodeInTree,
   findParentNodeInTree
-} from './modules/dmr/contacts.js?v=2.9.807';
+} from './modules/dmr/contacts.js?v=2.9.826';
 import {
   initWatchdog,
   startSystemLinkWatchdog,
@@ -80,7 +80,7 @@ import {
   openEditHotspotForm,
   applyActiveHotspotToUI,
   switchActiveHotspot
-} from './modules/dmr/hotspots.js?v=2.9.809';
+} from './modules/dmr/hotspots.js?v=2.9.826';
 import {
   initBmTgStaticManager
 } from './modules/dmr/bm-static-manager.js?v=2.9.798';
@@ -114,7 +114,7 @@ import {
   handleBmBenchmarkComplete,
   handleBmBenchmarkProgress,
   setBenchmarkRunningUI
-} from './modules/dmr/bm-benchmark.js?v=2.9.809';
+} from './modules/dmr/bm-benchmark.js?v=2.9.826';
 import {
   getHotspotSlot,
   setCardSlot,
@@ -152,12 +152,12 @@ import {
   updatePingElement,
   calculateCardPacketLoss,
   calculateClientPacketLoss
-} from './modules/network/ping-sparklines.js?v=2.9.712';
+} from './modules/network/ping-sparklines.js?v=2.9.826';
 import {
   getClientSettingsSnapshot,
   scheduleSyncClientSettings,
   applyServerClientSettings
-} from './modules/settings/sync.js?v=2.9.807';
+} from './modules/settings/sync.js?v=2.9.826';
 import {
   initVolumeMute,
   isMuteOnPttEnabled,
@@ -200,7 +200,7 @@ import {
   isSystemVolumeSyncEnabled,
   setSystemVolumeSyncEnabled,
   onSystemVolumeChanged
-} from './modules/audio/volume-mute.js?v=2.9.809';
+} from './modules/audio/volume-mute.js?v=2.9.826';
 import {
   KNOWN_BM_MASTERS,
   getBmFlagBadgeHtml,
@@ -212,13 +212,13 @@ import {
   updateRxBannerFreshness,
   updateCardRxLiveBanner,
   updateRxLiveBanner
-} from './modules/dmr/bm-banner.js?v=2.9.809';
+} from './modules/dmr/bm-banner.js?v=2.9.826';
 import {
   currentBmStatus,
   isTogglingConnection,
   updateBmStatus,
   toggleHotspotConnection
-} from './modules/dmr/bm-status.js?v=2.9.809';
+} from './modules/dmr/bm-status.js?v=2.9.826';
 import {
   connectWebSocket,
   handleServerMessage,
@@ -227,7 +227,7 @@ import {
   lastReportedClientRtt,
   serverClockOffsetSec,
   pingTimer
-} from './modules/network/ws.js?v=2.9.809';
+} from './modules/network/ws.js?v=2.9.826';
 
 /**
  * ProxDMR Duplex & Multi-Instance Web Application

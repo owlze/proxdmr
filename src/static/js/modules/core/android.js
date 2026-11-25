@@ -1,4 +1,4 @@
-import { disableAllTranscribe } from '../dmr/transcriber.js?v=2.9.807';
+import { disableAllTranscribe } from '../dmr/transcriber.js?v=2.9.821';
 import { initHapticSettingsUI } from './haptic.js?v=2.9.711';
 import { showToast } from './toast.js?v=2.9.699';
 
@@ -89,10 +89,24 @@ export function initAndroidBridge() {
     const optSyncSystemVolume = document.getElementById("optSyncSystemVolume");
     const hintSyncSystemVolumeWeb = document.getElementById("hintSyncSystemVolumeWeb");
     if (hintSyncSystemVolumeWeb) hintSyncSystemVolumeWeb.style.display = "none";
+    const syncVolEnabled = (typeof window.isSystemVolumeSyncEnabled === "function")
+      ? window.isSystemVolumeSyncEnabled()
+      : (() => {
+          const saved = localStorage.getItem("proxdmr_sync_system_volume");
+          if (saved !== null) return saved === "true";
+          if (window.AndroidBridge && typeof window.AndroidBridge.isSystemVolumeSyncEnabled === "function") {
+            try { return Boolean(window.AndroidBridge.isSystemVolumeSyncEnabled()); } catch (_) {}
+          }
+          return true;
+        })();
     if (optSyncSystemVolume) {
       optSyncSystemVolume.disabled = false;
-      const saved = localStorage.getItem("proxdmr_sync_system_volume");
-      optSyncSystemVolume.checked = saved !== null ? saved === "true" : true;
+      optSyncSystemVolume.checked = syncVolEnabled;
+    }
+    if (window.AndroidBridge && typeof window.AndroidBridge.setSystemVolumeSyncEnabled === "function") {
+      try {
+        window.AndroidBridge.setSystemVolumeSyncEnabled(syncVolEnabled);
+      } catch (_) {}
     }
 
     // Load saved Tailscale prefs from Android SharedPreferences

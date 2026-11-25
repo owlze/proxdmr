@@ -295,16 +295,37 @@ export function cyclePingScale() {
   cycleHotspotPingScale(activeHotspotId, activeCard);
 }
 
+function _getConfiguredPingBaseColor(isClientMode) {
+  try {
+    if (typeof window !== "undefined") {
+      const cfg = (typeof window.getServerLoadChartSettings === "function")
+        ? window.getServerLoadChartSettings()
+        : window.__serverLoadChartSettings;
+      if (cfg && typeof cfg === "object") {
+        const raw = isClientMode ? cfg.ping_client_color : cfg.ping_server_color;
+        if (typeof raw === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.trim())) {
+          return raw.trim().toLowerCase();
+        }
+      }
+    }
+  } catch (_) {}
+  return "#22c55e";
+}
+
 export function getPingColor(ping) {
   if (ping === null || ping === undefined || isNaN(ping) || ping < 0) return "#ff1744";
-  if (ping < 100) return "#22c55e";   // Green (< 100ms)
+  if (ping < 100) return _getConfiguredPingBaseColor(false); // Custom ProxDMR <-> Hub/Node color (< 100ms)
   if (ping < 170) return "#eab308";   // Yellow (100 - 170ms)
   if (ping < 250) return "#ef4444";   // Medium saturated red (170 - 250ms)
   return "#ff1744";                  // Bright red, scarlet (>= 250ms)
 }
 
 export function getClientPingColor(ping) {
-  return getPingColor(ping);
+  if (ping === null || ping === undefined || isNaN(ping) || ping < 0) return "#ff1744";
+  if (ping < 100) return _getConfiguredPingBaseColor(true);  // Custom Client <-> ProxDMR color (< 100ms)
+  if (ping < 170) return "#eab308";   // Yellow (100 - 170ms)
+  if (ping < 250) return "#ef4444";   // Medium saturated red (170 - 250ms)
+  return "#ff1744";                  // Bright red, scarlet (>= 250ms)
 }
 
 export function generateSparklineGradientStops(coords, W, forArea = false, isClientMode = false) {
@@ -890,7 +911,9 @@ export function renderCardPingSparkline(card, hostVal) {
   linePath.setAttribute("mask", `url(#${maskId})`);
   areaPath.setAttribute("mask", `url(#${maskId})`);
 
-  // Subpixel pulse dot at current ping position
+  // Subpixel pulse dot at current ping position + dynamic glow color
+  const baseGlowCol = _getConfiguredPingBaseColor(isClientMode);
+  linePath.style.filter = `drop-shadow(0 0 1.5px ${baseGlowCol})`;
   if (!isLinkActive) {
     dot.setAttribute("display", "none");
   } else {
@@ -899,6 +922,7 @@ export function renderCardPingSparkline(card, hostVal) {
     dot.setAttribute("cx", last.x);
     dot.setAttribute("cy", last.y);
     dot.setAttribute("fill", dotColor);
+    dot.style.filter = `drop-shadow(0 0 3px ${dotColor})`;
     dot.removeAttribute("display");
   }
 
@@ -1172,11 +1196,11 @@ export function updatePingElement(pingEl, latencyMs, lossInfo, mode = "bm", netw
     } else if (ms !== null) {
       msEl.textContent = `${ms} ${((typeof window !== "undefined" && window.t) ? window.t("ping.unit_ms") : "ms")}`;
       const col = (mode === "client") ? getClientPingColor(ms) : getPingColor(ms);
-      if (col === "#22c55e") {
+      if (ms < 100) {
         pingRow.classList.add("ping-good");
-      } else if (col === "#eab308") {
+      } else if (ms < 170) {
         pingRow.classList.add("ping-warn");
-      } else if (col === "#ef4444") {
+      } else if (ms < 250) {
         pingRow.classList.add("ping-poor");
       } else {
         pingRow.classList.add("ping-bad");
